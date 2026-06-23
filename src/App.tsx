@@ -49,6 +49,8 @@ const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
 
 const weekdays = Object.keys(weekdayLabels) as Weekday[];
 type ThemeMode = "dark" | "light";
+const onboardingDoneKey = "katosync.onboarding.done";
+const splashSeenKey = "katosync.onboarding.splashSeen";
 
 const sectionByStep: Record<StepId, string> = {
   welcome: "section-status",
@@ -61,6 +63,50 @@ const sectionByStep: Record<StepId, string> = {
   logs: "section-activities"
 };
 
+const onboardingSteps: Array<{
+  title: string;
+  text: string;
+  sectionId: string;
+  step: StepId;
+}> = [
+  {
+    title: "Mistral-Zugang speichern",
+    text: "Füge zuerst deinen Mistral API-Key ein, speichere ihn im Schlüsselbund und trage die Library ID ein.",
+    sectionId: "section-api",
+    step: "api"
+  },
+  {
+    title: "Verbindung prüfen",
+    text: "Teste API und Library einmal. Wenn beide grün sind, kann KatoSync sicher mit deiner Mistral Library sprechen.",
+    sectionId: "section-api",
+    step: "api"
+  },
+  {
+    title: "Projektordner auswählen",
+    text: "Wähle einen oder mehrere Hauptordner. KatoSync scannt auch Unterordner, damit keine Projektstände fehlen.",
+    sectionId: "section-folders",
+    step: "folders"
+  },
+  {
+    title: "Regeln und Schutz prüfen",
+    text: "Der Secret-Scanner bleibt aktiv. Status-, Memory-, Roadmap- und Task-Dateien werden gebündelt, Secret-Dateien übersprungen.",
+    sectionId: "section-rules",
+    step: "rules"
+  },
+  {
+    title: "Uploadplan aktivieren",
+    text: "Lege Uhrzeit und Wochentage fest. Der Mac muss eingeschaltet und angemeldet sein; nach dem Aufwachen startet macOS geplante Jobs normalerweise zum nächstmöglichen Zeitpunkt.",
+    sectionId: "section-schedule",
+    step: "schedule"
+  },
+  {
+    title: "Einmal synchronisieren",
+    text: "Starte zum Abschluss einen Sofortlauf. Danach arbeitet KatoSync automatisch nach deinem Uploadplan; manuell klickst du nur noch für Extra-Läufe.",
+    sectionId: "section-sync",
+    step: "dashboard"
+  }
+];
+
 export default function App() {
   const vm = useKatoSyncViewModel();
   const [theme, setTheme] = useState<ThemeMode>(() => {
@@ -68,6 +114,9 @@ export default function App() {
     return stored === "light" ? "light" : "dark";
   });
   const [hintsOpen, setHintsOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingIndex, setOnboardingIndex] = useState(0);
+  const [showSplash, setShowSplash] = useState(() => !localStorage.getItem(splashSeenKey));
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const { config } = vm;
   const workState = getWorkState(vm.busy);
@@ -81,6 +130,18 @@ export default function App() {
     localStorage.setItem("katosync.theme", theme);
   }, [theme]);
 
+  useEffect(() => {
+    if (!config) return;
+    if (localStorage.getItem(onboardingDoneKey)) return;
+    const timer = window.setTimeout(() => {
+      localStorage.setItem(splashSeenKey, "true");
+      setShowSplash(false);
+      setOnboardingOpen(true);
+      focusOnboardingStep(0);
+    }, showSplash ? 1150 : 250);
+    return () => window.clearTimeout(timer);
+  }, [config, showSplash]);
+
   const handleStepSelect = (step: StepId) => {
     vm.setActiveStep(step);
     document.getElementById(sectionByStep[step])?.scrollIntoView({
@@ -91,6 +152,7 @@ export default function App() {
 
   const jumpToSection = (step: StepId, sectionId: string) => {
     setHintsOpen(false);
+    setOnboardingOpen(false);
     vm.setActiveStep(step);
     document.getElementById(sectionId)?.scrollIntoView({
       behavior: "smooth",
@@ -98,6 +160,24 @@ export default function App() {
     });
     setSpotlightId(sectionId);
     window.setTimeout(() => setSpotlightId(null), 1800);
+  };
+
+  const focusOnboardingStep = (index: number) => {
+    const step = onboardingSteps[index];
+    if (!step) return;
+    setOnboardingIndex(index);
+    vm.setActiveStep(step.step);
+    document.getElementById(step.sectionId)?.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+    setSpotlightId(step.sectionId);
+  };
+
+  const closeOnboarding = (done = false) => {
+    setOnboardingOpen(false);
+    setSpotlightId(null);
+    if (done) localStorage.setItem(onboardingDoneKey, "true");
   };
 
   if (!config) {
@@ -111,6 +191,12 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {showSplash && !localStorage.getItem(onboardingDoneKey) ? (
+        <div className="startup-splash" aria-label="KatoSync startet">
+          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <strong>KatoSync</strong>
+        </div>
+      ) : null}
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -523,7 +609,7 @@ export default function App() {
             <FindingsTable scan={vm.scan ?? vm.report?.scan ?? null} />
           </Panel>
 
-          <Panel className="run-panel" title="Sync ausführen" icon={<UploadCloud size={18} />}>
+          <Panel className="run-panel" id="section-sync" title="Sync ausführen" icon={<UploadCloud size={18} />}>
             <p className="field-hint">
               {config.schedule.enabled
                 ? "Automatischer Upload ist aktiv. Dieser Button startet nur einen zusätzlichen Sofortlauf."
@@ -584,6 +670,74 @@ export default function App() {
           </Panel>
         </section>
       </main>
+
+      {onboardingOpen ? (
+        <OnboardingDialog
+          currentIndex={onboardingIndex}
+          onBack={() => focusOnboardingStep(Math.max(0, onboardingIndex - 1))}
+          onClose={() => closeOnboarding(false)}
+          onDone={() => closeOnboarding(true)}
+          onNext={() => {
+            const next = onboardingIndex + 1;
+            if (next >= onboardingSteps.length) {
+              closeOnboarding(true);
+              return;
+            }
+            focusOnboardingStep(next);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function OnboardingDialog({
+  currentIndex,
+  onBack,
+  onClose,
+  onDone,
+  onNext
+}: {
+  currentIndex: number;
+  onBack: () => void;
+  onClose: () => void;
+  onDone: () => void;
+  onNext: () => void;
+}) {
+  const step = onboardingSteps[currentIndex];
+  const isLast = currentIndex === onboardingSteps.length - 1;
+
+  return (
+    <div className="onboarding-layer" role="presentation">
+      <section aria-labelledby="onboarding-title" aria-modal="true" className="onboarding-card" role="dialog">
+        <button aria-label="Onboarding schließen" className="icon-button onboarding-close" onClick={onClose} type="button">
+          <X size={17} />
+        </button>
+        <div className="onboarding-brand">
+          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <span>Erster Start</span>
+        </div>
+        <div className="onboarding-progress" aria-label={`Schritt ${currentIndex + 1} von ${onboardingSteps.length}`}>
+          {onboardingSteps.map((item, index) => (
+            <span className={index <= currentIndex ? "active" : ""} key={item.title} />
+          ))}
+        </div>
+        <h2 id="onboarding-title">{step.title}</h2>
+        <p>{step.text}</p>
+        <footer>
+          <button className="ghost" onClick={onDone} type="button">
+            Später
+          </button>
+          <div>
+            <button className="secondary" disabled={currentIndex === 0} onClick={onBack} type="button">
+              Zurück
+            </button>
+            <button className="primary" onClick={onNext} type="button">
+              {isLast ? "Fertig" : "Weiter"}
+            </button>
+          </div>
+        </footer>
+      </section>
     </div>
   );
 }
