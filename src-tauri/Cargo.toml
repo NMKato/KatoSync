@@ -1,0 +1,33 @@
+[package]
+name = "katosync"
+version = "1.0.0"
+description = "Project Memory Uploader for Agent Libraries"
+authors = ["NMK Solutions"]
+edition = "2021"
+
+[lib]
+name = "katosync_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+keyring = { version = "3.6", features = ["apple-native"] }
+plist = "1.7"
+regex = "1.11"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tokio = { version = "1.41", features = ["macros", "rt-multi-thread", "time"] }
+walkdir = "2.5"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

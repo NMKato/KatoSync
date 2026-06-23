@@ -1,0 +1,12 @@
+node_modules/
+dist/
+target/
+.npm-cache/
+.DS_Store
+src-tauri/gen/
+src-tauri/target/
+*.log
+*.local
+.env
+.env.*
+!tests/fixtures/sample-project/.env
