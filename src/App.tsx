@@ -1,5 +1,6 @@
 import {
   Activity,
+  AlertTriangle,
   CalendarClock,
   CheckCircle2,
   Clock3,
@@ -19,7 +20,8 @@ import {
   Sun,
   TerminalSquare,
   Trash2,
-  UploadCloud
+  UploadCloud,
+  X
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -33,7 +35,7 @@ import {
 } from "./components/Primitives";
 import { weekdayLabels } from "./lib/defaults";
 import { useKatoSyncViewModel, type StepId } from "./viewmodels/useKatoSyncViewModel";
-import type { Weekday } from "./types";
+import type { FileFinding, Weekday } from "./types";
 
 const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
   { id: "dashboard", label: "Dashboard", icon: Database },
@@ -65,11 +67,14 @@ export default function App() {
     const stored = localStorage.getItem("katosync.theme");
     return stored === "light" ? "light" : "dark";
   });
+  const [hintsOpen, setHintsOpen] = useState(false);
+  const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const { config } = vm;
   const workState = getWorkState(vm.busy);
   const WorkIcon = workState?.icon;
   const activities = buildActivities(vm);
   const issueCount = getIssueCount(vm);
+  const hints = buildHints(vm);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -82,6 +87,17 @@ export default function App() {
       behavior: "smooth",
       block: "start"
     });
+  };
+
+  const jumpToSection = (step: StepId, sectionId: string) => {
+    setHintsOpen(false);
+    vm.setActiveStep(step);
+    document.getElementById(sectionId)?.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+    setSpotlightId(sectionId);
+    window.setTimeout(() => setSpotlightId(null), 1800);
   };
 
   if (!config) {
@@ -144,17 +160,24 @@ export default function App() {
               Key {vm.keyStatus.exists ? "gespeichert" : "fehlt"} ·{" "}
               {vm.launchStatus?.installed ? "Uploadplan aktiv" : "Uploadplan offen"}
             </p>
-            {issueCount ? <span className="issue-badge">{issueCount} Hinweise</span> : null}
+            {issueCount ? (
+              <button className="issue-badge" onClick={() => setHintsOpen(true)} type="button">
+                {issueCount} Sicherheitshinweise
+              </button>
+            ) : null}
           </div>
           <div className="top-actions">
             <button
               aria-label={theme === "dark" ? "Light-Mode aktivieren" : "Dark-Mode aktivieren"}
-              className="secondary theme-toggle"
+              aria-pressed={theme === "light"}
+              className={`theme-switch ${theme}`}
               onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
               title={theme === "dark" ? "Light-Mode aktivieren" : "Dark-Mode aktivieren"}
               type="button"
             >
-              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+              <Sun size={15} />
+              <Moon size={15} />
+              <span className="theme-knob" />
             </button>
             <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.persist} type="button">
               {vm.busy === "save" ? <Loader2 className="spin" size={16} /> : <CheckCircle2 size={16} />}
@@ -174,6 +197,51 @@ export default function App() {
         ) : null}
 
         {vm.notice ? <NoticeBar notice={vm.notice} onClose={() => vm.setNotice(null)} /> : null}
+
+        {hintsOpen ? (
+          <div
+            className="modal-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setHintsOpen(false);
+            }}
+            role="presentation"
+          >
+            <section aria-labelledby="hint-title" aria-modal="true" className="hint-dialog" role="dialog">
+              <header>
+                <div>
+                  <span className="section-label">Diagnose</span>
+                  <h2 id="hint-title">Sicherheitshinweise</h2>
+                  <p>Diese Hinweise bedeuten nicht, dass das Setup offen ist. KatoSync zeigt hier übersprungene Secret-Dateien oder Upload-Fehler.</p>
+                </div>
+                <button aria-label="Hinweise schließen" className="icon-button" onClick={() => setHintsOpen(false)} type="button">
+                  <X size={18} />
+                </button>
+              </header>
+              <div className="hint-list">
+                {hints.map((hint) => (
+                  <article className={`hint-row ${hint.kind}`} key={`${hint.title}-${hint.text}`}>
+                    <AlertTriangle size={16} />
+                    <div>
+                      <strong>{hint.title}</strong>
+                      <span>{hint.text}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <footer>
+                <button className="secondary" onClick={() => jumpToSection("folders", "section-findings")} type="button">
+                  Gefundene Dateien anzeigen
+                </button>
+                <button className="secondary" onClick={() => jumpToSection("rules", "section-rules")} type="button">
+                  Sync-Regeln prüfen
+                </button>
+                <button className="ghost" onClick={() => setHintsOpen(false)} type="button">
+                  Schließen
+                </button>
+              </footer>
+            </section>
+          </div>
+        ) : null}
 
         <section className="dashboard-grid overview-grid">
           <Panel className="hero-panel" id="section-status">
@@ -311,7 +379,12 @@ export default function App() {
             </div>
           </Panel>
 
-          <Panel id="section-rules" title="Sync-Regeln" icon={<ListChecks size={18} />}>
+          <Panel
+            className={spotlightId === "section-rules" ? "spotlight-target" : ""}
+            id="section-rules"
+            title="Sync-Regeln"
+            icon={<ListChecks size={18} />}
+          >
             <div className="switch-grid">
               <Toggle
                 checked={config.scanRules.includeMemory}
@@ -425,7 +498,12 @@ export default function App() {
             />
           </Panel>
 
-          <Panel className="table-panel" title="Gefundene Dateien" icon={<Database size={18} />}>
+          <Panel
+            className={`table-panel ${spotlightId === "section-findings" ? "spotlight-target" : ""}`}
+            id="section-findings"
+            title="Gefundene Dateien"
+            icon={<Database size={18} />}
+          >
             <FindingsTable scan={vm.scan ?? vm.report?.scan ?? null} />
           </Panel>
 
@@ -590,4 +668,49 @@ function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>) {
 
 function getIssueCount(vm: ReturnType<typeof useKatoSyncViewModel>) {
   return (vm.scan?.secretWarnings ?? vm.report?.scan.secretWarnings ?? 0) + (vm.report?.errors.length ?? 0);
+}
+
+function buildHints(vm: ReturnType<typeof useKatoSyncViewModel>) {
+  const scan = vm.scan ?? vm.report?.scan ?? null;
+  const hints: Array<{ kind: "warn" | "error" | "info"; title: string; text: string }> = [];
+  const secretFiles = scan?.findings.filter(isSecretHint) ?? [];
+
+  secretFiles.slice(0, 8).forEach((finding) => {
+    hints.push({
+      kind: "warn",
+      title: "Secret-Datei übersprungen",
+      text: `${finding.relativePath}: ${finding.reason || "vom Secret-Scanner geschützt"}`
+    });
+  });
+
+  if (scan && scan.secretWarnings > secretFiles.length) {
+    hints.push({
+      kind: "warn",
+      title: "Weitere Secret-Hinweise",
+      text: `${scan.secretWarnings - secretFiles.length} weitere Datei(en) wurden geschützt übersprungen.`
+    });
+  }
+
+  vm.report?.errors.forEach((error) => {
+    hints.push({
+      kind: "error",
+      title: "Upload-Fehler",
+      text: error
+    });
+  });
+
+  if (!hints.length) {
+    hints.push({
+      kind: "info",
+      title: "Alles sauber",
+      text: "Es gibt aktuell keine offenen Sicherheits- oder Upload-Hinweise."
+    });
+  }
+
+  return hints;
+}
+
+function isSecretHint(finding: FileFinding) {
+  const reason = finding.reason?.toLowerCase() ?? "";
+  return finding.skipped && (finding.category === "secret" || reason.includes("secret"));
 }
