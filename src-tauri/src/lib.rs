@@ -11,14 +11,16 @@ use std::{
     env,
     ffi::OsStr,
     fs,
-    io::Write,
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     process::Command,
+    sync::{Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tokio::time::sleep;
+use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
 const APP_VERSION: &str = "1.0.0";
@@ -26,17 +28,27 @@ const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const USER_AGENT: &str = "KatoSync/1.0.0";
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
+static API_KEY_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     app_version: String,
+    #[serde(default = "default_device_config")]
+    device: DeviceConfig,
     library_id: String,
     source_roots: Vec<String>,
     output_dir: String,
     schedule: ScheduleConfig,
     scan_rules: ScanRules,
     safety: SafetyConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceConfig {
+    device_id: String,
+    device_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,34 +231,42 @@ fn save_config(config: AppConfig) -> Result<AppConfig, String> {
 
 #[tauri::command]
 async fn save_api_key(api_key: String) -> Result<KeyStatus, String> {
-    if api_key.trim().is_empty() {
+    let key = api_key.trim();
+    if key.is_empty() {
         return Err("API-Key darf nicht leer sein.".to_string());
     }
     keychain_entry()
         .map_err(error_to_string)?
-        .set_password(api_key.trim())
+        .set_password(key)
         .map_err(error_to_string)?;
-    api_key_status()
+    cache_api_key(Some(key.to_string()));
+    write_api_key_marker().map_err(error_to_string)?;
+    Ok(KeyStatus {
+        exists: true,
+        masked: Some(mask_key(key)),
+    })
 }
 
 #[tauri::command]
 fn api_key_status() -> Result<KeyStatus, String> {
-    match keychain_entry().map_err(error_to_string)?.get_password() {
-        Ok(key) => Ok(KeyStatus {
+    if let Some(key) = cached_api_key() {
+        return Ok(KeyStatus {
             exists: true,
             masked: Some(mask_key(&key)),
-        }),
-        Err(_) => Ok(KeyStatus {
-            exists: false,
-            masked: None,
-        }),
+        });
     }
+    Ok(KeyStatus {
+        exists: api_key_marker_exists().map_err(error_to_string)?,
+        masked: None,
+    })
 }
 
 #[tauri::command]
 fn delete_api_key() -> Result<KeyStatus, String> {
     let entry = keychain_entry().map_err(error_to_string)?;
     let _ = entry.delete_credential();
+    cache_api_key(None);
+    let _ = remove_api_key_marker();
     Ok(KeyStatus {
         exists: false,
         masked: None,
@@ -408,11 +428,11 @@ fn read_logs() -> Result<String, String> {
     let mut content = String::new();
     if sync.exists() {
         content.push_str("== sync.log ==\n");
-        content.push_str(&fs::read_to_string(sync).map_err(error_to_string)?);
+        content.push_str(&read_log_tail(&sync, 80_000).map_err(error_to_string)?);
     }
     if errors.exists() {
         content.push_str("\n== error.log ==\n");
-        content.push_str(&fs::read_to_string(errors).map_err(error_to_string)?);
+        content.push_str(&read_log_tail(&errors, 80_000).map_err(error_to_string)?);
     }
     Ok(content)
 }
@@ -469,6 +489,27 @@ async fn sync_once(config: &AppConfig, dry_run: bool) -> Result<SyncReport> {
             errors.push("Library ID fehlt.".to_string());
         } else {
             for file_path in upload_order(&output_dir, config, &scan) {
+                if let Some(file_name) = file_path.file_name().and_then(OsStr::to_str) {
+                    match prune_existing_document_versions(&key, &config.library_id, file_name)
+                        .await
+                    {
+                        Ok(deleted) if deleted > 0 => {
+                            let message = format!(
+                                "{deleted} alte Mistral-Dokumentversion(en) für {file_name} entfernt."
+                            );
+                            write_log("sync", &message)?;
+                            warnings.push(message);
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            let message = format!(
+                                "Vorhandene Versionen für {file_name} konnten nicht bereinigt werden: {error:#}"
+                            );
+                            write_log("warn", &message)?;
+                            warnings.push(message);
+                        }
+                    }
+                }
                 match upload_with_backoff(&key, &config.library_id, &file_path).await {
                     Ok(result) => uploaded.push(result),
                     Err(error) => {
@@ -497,10 +538,7 @@ async fn sync_once(config: &AppConfig, dry_run: bool) -> Result<SyncReport> {
         warnings,
         errors,
     };
-    write_log(
-        "sync",
-        &format!("Sync beendet: {}", serde_json::to_string(&report)?),
-    )?;
+    write_log("sync", &sync_report_summary(&report))?;
     write_last_report(&report)?;
     Ok(report)
 }
@@ -634,24 +672,36 @@ fn write_current_files(
         }
     }
 
-    let manifest = output_dir.join("CURRENT_MANIFEST.md");
-    let index = output_dir.join("CURRENT_SNAPSHOT_INDEX.md");
-    let status_all = output_dir.join("CURRENT_PROJECT_STATUS_ALL.md");
-    let memory_all = output_dir.join("CURRENT_MEMORY_ALL.md");
-    let brief_md = output_dir.join("CURRENT_MISTRAL_BRIEFING_SOURCE.md");
-    let brief_txt = output_dir.join("CURRENT_MISTRAL_BRIEFING_SOURCE.txt");
+    let manifest = output_dir.join(current_file_name(config, "CURRENT_MANIFEST", "md"));
+    let index = output_dir.join(current_file_name(config, "CURRENT_SNAPSHOT_INDEX", "md"));
+    let status_all = output_dir.join(current_file_name(
+        config,
+        "CURRENT_PROJECT_STATUS_ALL",
+        "md",
+    ));
+    let memory_all = output_dir.join(current_file_name(config, "CURRENT_MEMORY_ALL", "md"));
+    let brief_md = output_dir.join(current_file_name(
+        config,
+        "CURRENT_MISTRAL_BRIEFING_SOURCE",
+        "md",
+    ));
+    let brief_txt = output_dir.join(current_file_name(
+        config,
+        "CURRENT_MISTRAL_BRIEFING_SOURCE",
+        "txt",
+    ));
 
     fs::write(&manifest, render_manifest(config, scan, &date, warnings))?;
-    fs::write(&index, render_index(scan, &date, &areas))?;
+    fs::write(&index, render_index(config, scan, &date, &areas))?;
     fs::write(
         &status_all,
-        render_aggregate(&relevant, &["status", "roadmap"], &date)?,
+        render_aggregate(config, &relevant, &["status", "roadmap"], &date)?,
     )?;
     fs::write(
         &memory_all,
-        render_aggregate(&relevant, &["memory"], &date)?,
+        render_aggregate(config, &relevant, &["memory"], &date)?,
     )?;
-    let briefing = render_briefing(scan, &date, &areas, &status_all, &memory_all)?;
+    let briefing = render_briefing(config, scan, &date, &areas, &status_all, &memory_all)?;
     fs::write(&brief_md, &briefing)?;
     fs::write(&brief_txt, &briefing)?;
 
@@ -672,6 +722,10 @@ fn render_manifest(
     text.push_str(&format!("# CURRENT MANIFEST - KatoSync {date}\n\n"));
     text.push_str("_Created by NMK Solutions_\n\n");
     text.push_str(&format!("- App-Version: `{}`\n", APP_VERSION));
+    text.push_str(&format!(
+        "- Gerät: `{}` (`{}`)\n",
+        config.device.device_name, config.device.device_id
+    ));
     text.push_str(&format!("- Library ID: `{}`\n", config.library_id));
     text.push_str(&format!("- Output: `{}`\n", config.output_dir));
     text.push_str(&format!("- Gescannt: {}\n", scan.scanned_files));
@@ -693,10 +747,14 @@ fn render_manifest(
     text
 }
 
-fn render_index(scan: &ScanSummary, date: &str, areas: &[String]) -> String {
+fn render_index(config: &AppConfig, scan: &ScanSummary, date: &str, areas: &[String]) -> String {
     let mut text = String::new();
     text.push_str(&format!("# CURRENT SNAPSHOT INDEX - {date}\n\n"));
     text.push_str("_Kompakte Agenten-Übersicht. Created by NMK Solutions._\n\n");
+    text.push_str(&format!(
+        "- Gerät: `{}` (`{}`)\n",
+        config.device.device_name, config.device.device_id
+    ));
     text.push_str(&format!("- Dateien gesamt: {}\n", scan.scanned_files));
     text.push_str(&format!("- Relevante Dateien: {}\n", scan.relevant_files));
     text.push_str(&format!("- Übersprungen: {}\n\n", scan.skipped_files));
@@ -721,7 +779,12 @@ fn render_index(scan: &ScanSummary, date: &str, areas: &[String]) -> String {
     text
 }
 
-fn render_aggregate(files: &[&FileFinding], categories: &[&str], date: &str) -> Result<String> {
+fn render_aggregate(
+    config: &AppConfig,
+    files: &[&FileFinding],
+    categories: &[&str],
+    date: &str,
+) -> Result<String> {
     let title = if categories.contains(&"memory") {
         "GESAMMELTE MEMORY"
     } else {
@@ -730,6 +793,10 @@ fn render_aggregate(files: &[&FileFinding], categories: &[&str], date: &str) -> 
     let mut text = String::new();
     text.push_str(&format!("# {title} - {date}\n\n"));
     text.push_str("_Automatisch gebündelt. Created by NMK Solutions._\n\n");
+    text.push_str(&format!(
+        "- Gerät: `{}` (`{}`)\n\n",
+        config.device.device_name, config.device.device_id
+    ));
     for finding in files {
         if !categories
             .iter()
@@ -751,6 +818,7 @@ fn render_aggregate(files: &[&FileFinding], categories: &[&str], date: &str) -> 
 }
 
 fn render_briefing(
+    config: &AppConfig,
     scan: &ScanSummary,
     date: &str,
     areas: &[String],
@@ -761,6 +829,10 @@ fn render_briefing(
     text.push_str("# AKTUELLE PROJEKTGRUNDLAGE FÜR MISTRAL-AGENTEN\n\n");
     text.push_str("**Diese Datei ist die aktuelle Projektgrundlage für Mistral-Agenten.**\n");
     text.push_str(&format!("_Created by NMK Solutions - Stand: {date}_\n\n"));
+    text.push_str(&format!(
+        "- Gerät: `{}` (`{}`)\n",
+        config.device.device_name, config.device.device_id
+    ));
     text.push_str(&format!(
         "- Gesammelte Dateien: {} relevant, {} übersprungen\n",
         scan.relevant_files, scan.skipped_files
@@ -789,12 +861,12 @@ fn render_briefing(
 
 fn upload_order(output_dir: &Path, config: &AppConfig, scan: &ScanSummary) -> Vec<PathBuf> {
     let mut files = vec![
-        "CURRENT_MISTRAL_BRIEFING_SOURCE.md",
-        "CURRENT_MISTRAL_BRIEFING_SOURCE.txt",
-        "CURRENT_PROJECT_STATUS_ALL.md",
-        "CURRENT_MEMORY_ALL.md",
-        "CURRENT_SNAPSHOT_INDEX.md",
-        "CURRENT_MANIFEST.md",
+        current_file_name(config, "CURRENT_MISTRAL_BRIEFING_SOURCE", "md"),
+        current_file_name(config, "CURRENT_MISTRAL_BRIEFING_SOURCE", "txt"),
+        current_file_name(config, "CURRENT_PROJECT_STATUS_ALL", "md"),
+        current_file_name(config, "CURRENT_MEMORY_ALL", "md"),
+        current_file_name(config, "CURRENT_SNAPSHOT_INDEX", "md"),
+        current_file_name(config, "CURRENT_MANIFEST", "md"),
     ]
     .into_iter()
     .map(|name| output_dir.join(name))
@@ -813,6 +885,131 @@ fn upload_order(output_dir: &Path, config: &AppConfig, scan: &ScanSummary) -> Ve
         files.append(&mut individual);
     }
     files
+}
+
+fn current_file_name(config: &AppConfig, stem: &str, extension: &str) -> String {
+    let device = device_slug(config);
+    format!("{stem}__{device}.{extension}")
+}
+
+fn device_slug(config: &AppConfig) -> String {
+    let name = slugify(&config.device.device_name);
+    let id = slugify(&config.device.device_id);
+    let short_id = id
+        .chars()
+        .rev()
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    match (name.is_empty(), short_id.is_empty()) {
+        (false, false) => format!("{name}_{short_id}"),
+        (false, true) => name,
+        (true, false) => short_id,
+        (true, true) => "device".to_string(),
+    }
+}
+
+fn slugify(value: &str) -> String {
+    let mut output = String::new();
+    let mut previous_dash = false;
+    for ch in value.to_lowercase().chars() {
+        let normalized = match ch {
+            'ä' => 'a',
+            'ö' => 'o',
+            'ü' => 'u',
+            'ß' => 's',
+            'a'..='z' | '0'..='9' => ch,
+            _ => '-',
+        };
+        if normalized == '-' {
+            if !previous_dash && !output.is_empty() {
+                output.push('-');
+                previous_dash = true;
+            }
+        } else {
+            output.push(normalized);
+            previous_dash = false;
+        }
+    }
+    output.trim_matches('-').to_string()
+}
+
+async fn prune_existing_document_versions(
+    api_key: &str,
+    library_id: &str,
+    file_name: &str,
+) -> Result<usize> {
+    let client = reqwest::Client::new();
+    let mut deleted = 0;
+    for page in 0..20 {
+        let url = format!("https://api.mistral.ai/v1/libraries/{library_id}/documents");
+        let response = client
+            .get(&url)
+            .bearer_auth(api_key.trim())
+            .header("User-Agent", USER_AGENT)
+            .query(&[
+                ("search", file_name),
+                ("page_size", "100"),
+                ("page", &page.to_string()),
+                ("sort_by", "created_at"),
+                ("sort_order", "desc"),
+            ])
+            .send()
+            .await?;
+        let status = response.status();
+        let value: serde_json::Value = response.json().await.unwrap_or_else(|_| json!({}));
+        if !status.is_success() {
+            return Err(anyhow!("HTTP {status}: {}", sanitize_json(&value)));
+        }
+        let Some(documents) = value.get("data").and_then(|data| data.as_array()) else {
+            break;
+        };
+        if documents.is_empty() {
+            break;
+        }
+        for document in documents {
+            let name_matches = document
+                .get("name")
+                .and_then(|name| name.as_str())
+                .is_some_and(|name| name == file_name);
+            if !name_matches {
+                continue;
+            }
+            let Some(document_id) = document.get("id").and_then(|id| id.as_str()) else {
+                continue;
+            };
+            delete_library_document(&client, api_key, library_id, document_id).await?;
+            deleted += 1;
+        }
+        if documents.len() < 100 {
+            break;
+        }
+    }
+    Ok(deleted)
+}
+
+async fn delete_library_document(
+    client: &reqwest::Client,
+    api_key: &str,
+    library_id: &str,
+    document_id: &str,
+) -> Result<()> {
+    let url = format!("https://api.mistral.ai/v1/libraries/{library_id}/documents/{document_id}");
+    let response = client
+        .delete(url)
+        .bearer_auth(api_key.trim())
+        .header("User-Agent", USER_AGENT)
+        .send()
+        .await?;
+    let status = response.status();
+    if status == StatusCode::NO_CONTENT || status.is_success() {
+        Ok(())
+    } else {
+        let value: serde_json::Value = response.json().await.unwrap_or_else(|_| json!({}));
+        Err(anyhow!("HTTP {status}: {}", sanitize_json(&value)))
+    }
 }
 
 async fn upload_with_backoff(
@@ -1122,7 +1319,9 @@ fn load_config_inner() -> Result<AppConfig> {
         return Ok(config);
     }
     let content = fs::read_to_string(path)?;
-    let config: AppConfig = serde_json::from_str(&content)?;
+    let mut config: AppConfig = serde_json::from_str(&content)?;
+    normalize_config(&mut config);
+    save_config_inner(&config)?;
     Ok(config)
 }
 
@@ -1132,17 +1331,28 @@ fn save_config_inner(config: &AppConfig) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
     let mut normalized = config.clone();
-    normalized.app_version = APP_VERSION.to_string();
-    normalized.safety.cleanup_enabled = false;
+    normalize_config(&mut normalized);
     let json = serde_json::to_string_pretty(&normalized)?;
     fs::write(path, json)?;
     Ok(())
+}
+
+fn normalize_config(config: &mut AppConfig) {
+    config.app_version = APP_VERSION.to_string();
+    config.safety.cleanup_enabled = false;
+    if config.device.device_id.trim().is_empty() {
+        config.device.device_id = generate_device_id();
+    }
+    if config.device.device_name.trim().is_empty() {
+        config.device.device_name = default_device_name();
+    }
 }
 
 fn default_config() -> Result<AppConfig> {
     let support = app_support_dir()?;
     Ok(AppConfig {
         app_version: APP_VERSION.to_string(),
+        device: default_device_config(),
         library_id: String::new(),
         source_roots: Vec::new(),
         output_dir: support.join("current").to_string_lossy().to_string(),
@@ -1173,6 +1383,33 @@ fn default_config() -> Result<AppConfig> {
             secret_scan_enabled: true,
         },
     })
+}
+
+fn default_device_config() -> DeviceConfig {
+    DeviceConfig {
+        device_id: generate_device_id(),
+        device_name: default_device_name(),
+    }
+}
+
+fn generate_device_id() -> String {
+    format!("ks-{}", Uuid::new_v4())
+}
+
+fn default_device_name() -> String {
+    if let Ok(output) = Command::new("scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+    {
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !value.is_empty() {
+            return value;
+        }
+    }
+    env::var("COMPUTERNAME")
+        .or_else(|_| env::var("HOSTNAME"))
+        .or_else(|_| env::var("USER"))
+        .unwrap_or_else(|_| "Dieser Rechner".to_string())
 }
 
 fn app_support_dir() -> Result<PathBuf> {
@@ -1219,14 +1456,90 @@ fn write_log(kind: &str, message: &str) -> Result<()> {
     Ok(())
 }
 
+fn read_log_tail(path: &Path, max_bytes: u64) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    let start = len.saturating_sub(max_bytes);
+    if start > 0 {
+        file.seek(SeekFrom::Start(start))?;
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    let mut text = String::from_utf8_lossy(&bytes).to_string();
+    if start > 0 {
+        if let Some(index) = text.find('\n') {
+            text = text[index + 1..].to_string();
+        }
+        text.insert_str(
+            0,
+            "[Log gekürzt: nur die letzten Einträge werden angezeigt]\n",
+        );
+    }
+    Ok(text)
+}
+
+fn sync_report_summary(report: &SyncReport) -> String {
+    format!(
+        "Sync beendet: dry_run={}, relevant={}, secrets={}, uploads={}, warnings={}, errors={}, output={}",
+        report.dry_run,
+        report.scan.relevant_files,
+        report.scan.secret_warnings,
+        report.uploaded.len(),
+        report.warnings.len(),
+        report.errors.len(),
+        report.output_dir
+    )
+}
+
 fn keychain_entry() -> Result<Entry> {
     Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).map_err(Into::into)
 }
 
 fn load_api_key() -> Result<String> {
-    keychain_entry()?
+    if let Some(key) = cached_api_key() {
+        return Ok(key);
+    }
+    let key = keychain_entry()?
         .get_password()
-        .context("Kein Mistral API-Key in der Keychain gespeichert")
+        .context("Kein Mistral API-Key in der Keychain gespeichert")?;
+    cache_api_key(Some(key.clone()));
+    let _ = write_api_key_marker();
+    Ok(key)
+}
+
+fn api_key_cache() -> &'static Mutex<Option<String>> {
+    API_KEY_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn cached_api_key() -> Option<String> {
+    api_key_cache().lock().ok().and_then(|guard| guard.clone())
+}
+
+fn cache_api_key(value: Option<String>) {
+    if let Ok(mut guard) = api_key_cache().lock() {
+        *guard = value;
+    }
+}
+
+fn api_key_marker_path() -> Result<PathBuf> {
+    Ok(app_support_dir()?.join("api-key.saved"))
+}
+
+fn api_key_marker_exists() -> Result<bool> {
+    Ok(api_key_marker_path()?.exists())
+}
+
+fn write_api_key_marker() -> Result<()> {
+    fs::write(api_key_marker_path()?, "saved")?;
+    Ok(())
+}
+
+fn remove_api_key_marker() -> Result<()> {
+    let path = api_key_marker_path()?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
 }
 
 fn mask_key(key: &str) -> String {

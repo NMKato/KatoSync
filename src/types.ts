@@ -25,12 +25,18 @@ export interface SafetyConfig {
 
 export interface AppConfig {
   appVersion: string;
+  device: DeviceConfig;
   libraryId: string;
   sourceRoots: string[];
   outputDir: string;
   schedule: ScheduleConfig;
   scanRules: ScanRules;
   safety: SafetyConfig;
+}
+
+export interface DeviceConfig {
+  deviceId: string;
+  deviceName: string;
 }
 
 export interface KeyStatus {

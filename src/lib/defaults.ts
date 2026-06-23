@@ -2,6 +2,10 @@ import type { AppConfig } from "../types";
 
 export const defaultConfig: AppConfig = {
   appVersion: "1.0.0",
+  device: {
+    deviceId: "demo-device",
+    deviceName: "Dieser Rechner"
+  },
   libraryId: "",
   sourceRoots: [],
   outputDir: "~/Library/Application Support/KatoSync/current",

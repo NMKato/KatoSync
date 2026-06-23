@@ -1904,6 +1904,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tokio",
+ "uuid",
  "walkdir",
 ]
 

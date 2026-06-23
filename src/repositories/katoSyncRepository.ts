@@ -18,15 +18,16 @@ export async function loadConfig(): Promise<AppConfig> {
     return invoke<AppConfig>("load_config");
   }
   const stored = localStorage.getItem(mockConfigKey);
-  return stored ? JSON.parse(stored) : defaultConfig;
+  return normalizeConfig(stored ? JSON.parse(stored) : defaultConfig);
 }
 
 export async function saveConfig(config: AppConfig): Promise<AppConfig> {
   if (isTauri()) {
     return invoke<AppConfig>("save_config", { config });
   }
-  localStorage.setItem(mockConfigKey, JSON.stringify(config));
-  return config;
+  const normalized = normalizeConfig(config);
+  localStorage.setItem(mockConfigKey, JSON.stringify(normalized));
+  return normalized;
 }
 
 export async function chooseFolders(): Promise<string[]> {
@@ -116,6 +117,7 @@ export async function runSync(config: AppConfig, dryRun: boolean): Promise<SyncR
   }
   await delay(850);
   const scan = mockScan(config);
+  const currentFiles = currentFileNames(config);
   return {
     startedAt: new Date().toLocaleString("de-DE"),
     finishedAt: new Date().toLocaleString("de-DE"),
@@ -123,19 +125,12 @@ export async function runSync(config: AppConfig, dryRun: boolean): Promise<SyncR
     snapshotDir: `${config.outputDir}/snapshots/2026-06-23`,
     dryRun,
     scan,
-    currentFiles: [
-      "CURRENT_MISTRAL_BRIEFING_SOURCE.md",
-      "CURRENT_MISTRAL_BRIEFING_SOURCE.txt",
-      "CURRENT_PROJECT_STATUS_ALL.md",
-      "CURRENT_MEMORY_ALL.md",
-      "CURRENT_SNAPSHOT_INDEX.md",
-      "CURRENT_MANIFEST.md"
-    ],
+    currentFiles,
     uploaded: dryRun
       ? []
       : [
           {
-            fileName: "CURRENT_MISTRAL_BRIEFING_SOURCE.md",
+            fileName: currentFiles[0],
             documentId: "demo-doc-019e",
             processingStatus: "queued",
             success: true
@@ -249,6 +244,49 @@ function file(
 
 function maskKey(key: string) {
   return key.length > 8 ? `${key.slice(0, 7)}****${key.slice(-4)}` : "****";
+}
+
+function currentFileNames(config: AppConfig) {
+  return [
+    currentFileName(config, "CURRENT_MISTRAL_BRIEFING_SOURCE", "md"),
+    currentFileName(config, "CURRENT_MISTRAL_BRIEFING_SOURCE", "txt"),
+    currentFileName(config, "CURRENT_PROJECT_STATUS_ALL", "md"),
+    currentFileName(config, "CURRENT_MEMORY_ALL", "md"),
+    currentFileName(config, "CURRENT_SNAPSHOT_INDEX", "md"),
+    currentFileName(config, "CURRENT_MANIFEST", "md")
+  ];
+}
+
+function currentFileName(config: AppConfig, stem: string, extension: string) {
+  return `${stem}__${deviceSlug(config)}.${extension}`;
+}
+
+function deviceSlug(config: AppConfig) {
+  const name = slugify(config.device.deviceName);
+  const id = slugify(config.device.deviceId).slice(-8);
+  if (name && id) return `${name}_${id}`;
+  return name || id || "device";
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/ä/g, "a")
+    .replace(/ö/g, "o")
+    .replace(/ü/g, "u")
+    .replace(/ß/g, "s")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function normalizeConfig(config: AppConfig): AppConfig {
+  return {
+    ...config,
+    device: {
+      deviceId: config.device?.deviceId || "demo-device",
+      deviceName: config.device?.deviceName || "Dieser Rechner"
+    }
+  };
 }
 
 function delay(ms: number) {

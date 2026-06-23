@@ -284,6 +284,22 @@ export default function App() {
                   value={config.libraryId}
                 />
               </label>
+              <label>
+                Gerätename
+                <input
+                  onChange={(event) =>
+                    vm.updateConfig("device", {
+                      ...config.device,
+                      deviceName: event.target.value
+                    })
+                  }
+                  placeholder="Arbeitslaptop"
+                  value={config.device.deviceName}
+                />
+                <span className="field-hint">
+                  Geräte-ID: {config.device.deviceId || "wird automatisch erstellt"}
+                </span>
+              </label>
             </div>
             <div className="button-row">
               <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleTestConnection} type="button">
@@ -508,6 +524,11 @@ export default function App() {
           </Panel>
 
           <Panel className="run-panel" title="Sync ausführen" icon={<UploadCloud size={18} />}>
+            <p className="field-hint">
+              {config.schedule.enabled
+                ? "Automatischer Upload ist aktiv. Dieser Button startet nur einen zusätzlichen Sofortlauf."
+                : "Ohne Uploadplan startest du den Sync manuell. Mit aktivem Uploadplan läuft KatoSync zur gewählten Zeit automatisch."}
+            </p>
             <div className="button-stack">
               <button
                 className={vm.busy === "sync" ? "primary busy-action" : "primary"}
@@ -516,7 +537,11 @@ export default function App() {
                 type="button"
               >
                 {vm.busy === "sync" ? <Loader2 className="spin" size={16} /> : <UploadCloud size={16} />}
-                {vm.busy === "sync" ? "Sync läuft" : "Jetzt synchronisieren"}
+                {vm.busy === "sync"
+                  ? "Sync läuft"
+                  : config.schedule.enabled
+                    ? "Jetzt zusätzlich synchronisieren"
+                    : "Jetzt synchronisieren"}
               </button>
               <button
                 className={vm.busy === "dry-run" ? "secondary busy-action" : "secondary"}
