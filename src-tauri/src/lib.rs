@@ -23,10 +23,10 @@ use tokio::time::sleep;
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
-const APP_VERSION: &str = "1.0.0";
+const APP_VERSION: &str = "1.0.1";
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
-const USER_AGENT: &str = "KatoSync/1.0.0";
+const USER_AGENT: &str = "KatoSync/1.0.1";
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
 static API_KEY_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 

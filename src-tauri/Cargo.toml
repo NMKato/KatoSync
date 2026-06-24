@@ -1,6 +1,6 @@
 [package]
 name = "katosync"
-version = "1.0.0"
+version = "1.0.1"
 description = "Project Memory Uploader for Agent Libraries"
 authors = ["NMK Solutions"]
 edition = "2021"

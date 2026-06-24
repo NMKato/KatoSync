@@ -113,29 +113,36 @@ button:disabled {
 
 .brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  min-height: 60px;
+  gap: 6px;
+  min-height: 126px;
+  text-align: center;
 }
 
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 58px;
-  height: 58px;
-  border-radius: 10px;
-  background: rgba(255, 107, 53, 0.06);
+  width: 82px;
+  height: 82px;
+  border-radius: 18px;
+  background: rgba(255, 107, 53, 0.04);
 }
 
 .brand-mark img {
-  width: 72px;
-  height: 72px;
+  width: 96px;
+  height: 96px;
   object-fit: contain;
+}
+
+.brand-copy {
+  display: grid;
+  justify-items: center;
 }
 
 .brand strong {
   display: block;
-  font-size: 18px;
+  font-size: 19px;
   letter-spacing: 0;
 }
 
@@ -1577,6 +1584,20 @@ pre {
 
   .app-shell {
     grid-template-columns: 80px 1fr;
+  }
+
+  .brand {
+    min-height: 72px;
+  }
+
+  .brand-mark {
+    width: 56px;
+    height: 56px;
+  }
+
+  .brand-mark img {
+    width: 68px;
+    height: 68px;
   }
 
   .brand div:last-child,

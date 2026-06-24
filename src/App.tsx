@@ -202,7 +202,7 @@ export default function App() {
           <div className="brand-mark">
             <img alt="" src="/katoos_icon_logo_trans.png" />
           </div>
-          <div>
+          <div className="brand-copy">
             <strong>KatoSync</strong>
             <span>Project Memory Uploader</span>
           </div>

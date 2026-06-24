@@ -1,7 +1,7 @@
 import type { AppConfig } from "../types";
 
 export const defaultConfig: AppConfig = {
-  appVersion: "1.0.0",
+  appVersion: "1.0.1",
   device: {
     deviceId: "demo-device",
     deviceName: "Dieser Rechner"
