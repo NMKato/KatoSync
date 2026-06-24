@@ -23,7 +23,7 @@ import {
   UploadCloud,
   X
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   FindingsTable,
   Metric,
@@ -51,6 +51,7 @@ const weekdays = Object.keys(weekdayLabels) as Weekday[];
 type ThemeMode = "dark" | "light";
 const onboardingDoneKey = "katosync.onboarding.done";
 const splashSeenKey = "katosync.onboarding.splashSeen";
+const acknowledgedHintsKey = "katosync.acknowledgedHints";
 
 const sectionByStep: Record<StepId, string> = {
   welcome: "section-status",
@@ -72,13 +73,13 @@ const onboardingSteps: Array<{
   {
     title: "Mistral-Zugang speichern",
     text: "Füge zuerst deinen Mistral API-Key ein, speichere ihn im Schlüsselbund und trage die Library ID ein.",
-    sectionId: "section-api",
+    sectionId: "section-api-fields",
     step: "api"
   },
   {
     title: "Verbindung prüfen",
     text: "Teste API und Library einmal. Wenn beide grün sind, kann KatoSync sicher mit deiner Mistral Library sprechen.",
-    sectionId: "section-api",
+    sectionId: "section-api-tests",
     step: "api"
   },
   {
@@ -102,10 +103,18 @@ const onboardingSteps: Array<{
   {
     title: "Einmal synchronisieren",
     text: "Starte zum Abschluss einen Sofortlauf. Danach arbeitet KatoSync automatisch nach deinem Uploadplan; manuell klickst du nur noch für Extra-Läufe.",
-    sectionId: "section-sync",
+    sectionId: "section-sync-actions",
     step: "dashboard"
   }
 ];
+
+type OnboardingPlacement = "left" | "right" | "top" | "bottom";
+
+interface OnboardingPosition {
+  left: number;
+  top: number;
+  placement: OnboardingPlacement;
+}
 
 export default function App() {
   const vm = useKatoSyncViewModel();
@@ -114,16 +123,22 @@ export default function App() {
     return stored === "light" ? "light" : "dark";
   });
   const [hintsOpen, setHintsOpen] = useState(false);
+  const [acknowledgedHintSignature, setAcknowledgedHintSignature] = useState(
+    () => localStorage.getItem(acknowledgedHintsKey) ?? ""
+  );
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingIndex, setOnboardingIndex] = useState(0);
   const [showSplash, setShowSplash] = useState(() => !localStorage.getItem(splashSeenKey));
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
+  const [onboardingPosition, setOnboardingPosition] = useState<OnboardingPosition | null>(null);
   const { config } = vm;
   const workState = getWorkState(vm.busy);
   const WorkIcon = workState?.icon;
   const activities = buildActivities(vm);
   const issueCount = getIssueCount(vm);
   const hints = buildHints(vm);
+  const hintSignature = useMemo(() => buildHintSignature(hints), [hints]);
+  const hasNewHints = issueCount > 0 && hintSignature !== acknowledgedHintSignature;
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -150,6 +165,13 @@ export default function App() {
     });
   };
 
+  const acknowledgeHints = useCallback(() => {
+    if (!hintSignature) return;
+    localStorage.setItem(acknowledgedHintsKey, hintSignature);
+    setAcknowledgedHintSignature(hintSignature);
+    setHintsOpen(false);
+  }, [hintSignature]);
+
   const jumpToSection = (step: StepId, sectionId: string) => {
     setHintsOpen(false);
     setOnboardingOpen(false);
@@ -162,6 +184,77 @@ export default function App() {
     window.setTimeout(() => setSpotlightId(null), 1800);
   };
 
+  const updateOnboardingPosition = useCallback(() => {
+    if (!onboardingOpen) return;
+    const step = onboardingSteps[onboardingIndex];
+    if (!step) return;
+    const target = document.getElementById(spotlightId ?? step.sectionId);
+    const card = document.querySelector<HTMLElement>(".onboarding-card");
+    if (!target || !card) return;
+
+    const rect = target.getBoundingClientRect();
+    const cardWidth = card.offsetWidth || Math.min(430, window.innerWidth - 56);
+    const cardHeight = card.offsetHeight || 330;
+    const margin = 18;
+    const gap = 18;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), Math.max(min, max));
+    const centeredTop = rect.top + rect.height / 2 - cardHeight / 2;
+    const centeredLeft = rect.left + rect.width / 2 - cardWidth / 2;
+    const leftSpace = rect.left - margin;
+    const rightSpace = viewportWidth - rect.right - margin;
+    const topSpace = rect.top - margin;
+    const bottomSpace = viewportHeight - rect.bottom - margin;
+
+    let placement: OnboardingPlacement = "right";
+    let left = rect.right + gap;
+    let top = centeredTop;
+
+    if (rightSpace >= cardWidth + gap) {
+      placement = "right";
+      left = rect.right + gap;
+      top = centeredTop;
+    } else if (leftSpace >= cardWidth + gap) {
+      placement = "left";
+      left = rect.left - cardWidth - gap;
+      top = centeredTop;
+    } else if (bottomSpace >= cardHeight + gap) {
+      placement = "bottom";
+      left = centeredLeft;
+      top = rect.bottom + gap;
+    } else if (topSpace >= cardHeight + gap) {
+      placement = "top";
+      left = centeredLeft;
+      top = rect.top - cardHeight - gap;
+    } else {
+      const bestSide = [
+        { placement: "right" as const, space: rightSpace },
+        { placement: "left" as const, space: leftSpace },
+        { placement: "bottom" as const, space: bottomSpace },
+        { placement: "top" as const, space: topSpace }
+      ].sort((a, b) => b.space - a.space)[0].placement;
+      placement = bestSide;
+      if (bestSide === "left") {
+        left = rect.left - cardWidth - gap;
+        top = centeredTop;
+      } else if (bestSide === "bottom") {
+        left = centeredLeft;
+        top = rect.bottom + gap;
+      } else if (bestSide === "top") {
+        left = centeredLeft;
+        top = rect.top - cardHeight - gap;
+      }
+    }
+
+    setOnboardingPosition({
+      placement,
+      left: clamp(left, margin, viewportWidth - cardWidth - margin),
+      top: clamp(top, margin, viewportHeight - cardHeight - margin)
+    });
+  }, [onboardingIndex, onboardingOpen, spotlightId]);
+
   const focusOnboardingStep = (index: number) => {
     const step = onboardingSteps[index];
     if (!step) return;
@@ -172,13 +265,29 @@ export default function App() {
       block: "center"
     });
     setSpotlightId(step.sectionId);
+    window.setTimeout(updateOnboardingPosition, 120);
+    window.setTimeout(updateOnboardingPosition, 420);
   };
 
   const closeOnboarding = (done = false) => {
     setOnboardingOpen(false);
     setSpotlightId(null);
+    setOnboardingPosition(null);
     if (done) localStorage.setItem(onboardingDoneKey, "true");
   };
+
+  useEffect(() => {
+    if (!onboardingOpen) return undefined;
+    const workspace = document.querySelector(".workspace");
+    const update = () => window.requestAnimationFrame(updateOnboardingPosition);
+    update();
+    window.addEventListener("resize", update);
+    workspace?.addEventListener("scroll", update, { passive: true });
+    return () => {
+      window.removeEventListener("resize", update);
+      workspace?.removeEventListener("scroll", update);
+    };
+  }, [onboardingOpen, updateOnboardingPosition]);
 
   if (!config) {
     return (
@@ -246,9 +355,10 @@ export default function App() {
               Key {vm.keyStatus.exists ? "gespeichert" : "fehlt"} ·{" "}
               {vm.launchStatus?.installed ? "Uploadplan aktiv" : "Uploadplan offen"}
             </p>
-            {issueCount ? (
+            {hasNewHints ? (
               <button className="issue-badge" onClick={() => setHintsOpen(true)} type="button">
-                {issueCount} Sicherheitshinweise
+                <span className="issue-count">{issueCount}</span>
+                <span className="issue-label">Sicherheitshinweise</span>
               </button>
             ) : null}
           </div>
@@ -288,7 +398,7 @@ export default function App() {
           <div
             className="modal-backdrop"
             onMouseDown={(event) => {
-              if (event.target === event.currentTarget) setHintsOpen(false);
+              if (event.target === event.currentTarget) acknowledgeHints();
             }}
             role="presentation"
           >
@@ -299,7 +409,7 @@ export default function App() {
                   <h2 id="hint-title">Sicherheitshinweise</h2>
                   <p>Diese Hinweise bedeuten nicht, dass das Setup offen ist. KatoSync zeigt hier übersprungene Secret-Dateien oder Upload-Fehler.</p>
                 </div>
-                <button aria-label="Hinweise schließen" className="icon-button" onClick={() => setHintsOpen(false)} type="button">
+                <button aria-label="Hinweise schließen" className="icon-button" onClick={acknowledgeHints} type="button">
                   <X size={18} />
                 </button>
               </header>
@@ -315,13 +425,27 @@ export default function App() {
                 ))}
               </div>
               <footer>
-                <button className="secondary" onClick={() => jumpToSection("folders", "section-findings")} type="button">
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    acknowledgeHints();
+                    jumpToSection("folders", "section-findings");
+                  }}
+                  type="button"
+                >
                   Gefundene Dateien anzeigen
                 </button>
-                <button className="secondary" onClick={() => jumpToSection("rules", "section-rules")} type="button">
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    acknowledgeHints();
+                    jumpToSection("rules", "section-rules");
+                  }}
+                  type="button"
+                >
                   Sync-Regeln prüfen
                 </button>
-                <button className="ghost" onClick={() => setHintsOpen(false)} type="button">
+                <button className="ghost" onClick={acknowledgeHints} type="button">
                   Schließen
                 </button>
               </footer>
@@ -347,7 +471,10 @@ export default function App() {
           </Panel>
 
           <Panel id="section-api" title="Mistral Zugang" icon={<KeyRound size={18} />}>
-            <div className="form-grid">
+            <div
+              className={`form-grid ${spotlightId === "section-api-fields" ? "spotlight-target spotlight-pad" : ""}`}
+              id="section-api-fields"
+            >
               <label>
                 API-Key
                 <div className="inline-input">
@@ -387,7 +514,10 @@ export default function App() {
                 </span>
               </label>
             </div>
-            <div className="button-row">
+            <div
+              className={`button-row ${spotlightId === "section-api-tests" ? "spotlight-target spotlight-pad" : ""}`}
+              id="section-api-tests"
+            >
               <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleTestConnection} type="button">
                 {vm.busy === "connection" ? <Loader2 className="spin" size={15} /> : null}
                 {vm.busy === "connection" ? "Test läuft" : "Verbindung testen"}
@@ -435,7 +565,12 @@ export default function App() {
             </p>
           </Panel>
 
-          <Panel id="section-folders" title="Projektordner" icon={<FolderOpen size={18} />}>
+          <Panel
+            className={spotlightId === "section-folders" ? "spotlight-target" : ""}
+            id="section-folders"
+            title="Projektordner"
+            icon={<FolderOpen size={18} />}
+          >
             <div className="folder-list">
               {config.sourceRoots.length ? (
                 config.sourceRoots.map((root) => (
@@ -543,7 +678,12 @@ export default function App() {
           </div>
         </Panel>
 
-          <Panel id="section-schedule" title="Lokaler Uploadplan" icon={<Clock3 size={18} />}>
+          <Panel
+            className={spotlightId === "section-schedule" ? "spotlight-target" : ""}
+            id="section-schedule"
+            title="Lokaler Uploadplan"
+            icon={<Clock3 size={18} />}
+          >
             <div className="schedule-row">
               <Toggle
                 checked={config.schedule.enabled}
@@ -615,7 +755,10 @@ export default function App() {
                 ? "Automatischer Upload ist aktiv. Dieser Button startet nur einen zusätzlichen Sofortlauf."
                 : "Ohne Uploadplan startest du den Sync manuell. Mit aktivem Uploadplan läuft KatoSync zur gewählten Zeit automatisch."}
             </p>
-            <div className="button-stack">
+            <div
+              className={`button-stack ${spotlightId === "section-sync-actions" ? "spotlight-target spotlight-pad" : ""}`}
+              id="section-sync-actions"
+            >
               <button
                 className={vm.busy === "sync" ? "primary busy-action" : "primary"}
                 disabled={Boolean(vm.busy)}
@@ -685,6 +828,7 @@ export default function App() {
             }
             focusOnboardingStep(next);
           }}
+          position={onboardingPosition}
         />
       ) : null}
     </div>
@@ -696,20 +840,34 @@ function OnboardingDialog({
   onBack,
   onClose,
   onDone,
-  onNext
+  onNext,
+  position
 }: {
   currentIndex: number;
   onBack: () => void;
   onClose: () => void;
   onDone: () => void;
   onNext: () => void;
+  position: OnboardingPosition | null;
 }) {
   const step = onboardingSteps[currentIndex];
   const isLast = currentIndex === onboardingSteps.length - 1;
+  const style = position
+    ? ({
+        left: `${position.left}px`,
+        top: `${position.top}px`
+      } satisfies CSSProperties)
+    : undefined;
 
   return (
     <div className="onboarding-layer" role="presentation">
-      <section aria-labelledby="onboarding-title" aria-modal="true" className="onboarding-card" role="dialog">
+      <section
+        aria-labelledby="onboarding-title"
+        aria-modal="true"
+        className={`onboarding-card ${position ? `placement-${position.placement}` : ""}`}
+        role="dialog"
+        style={style}
+      >
         <button aria-label="Onboarding schließen" className="icon-button onboarding-close" onClick={onClose} type="button">
           <X size={17} />
         </button>
@@ -847,6 +1005,14 @@ function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>) {
 
 function getIssueCount(vm: ReturnType<typeof useKatoSyncViewModel>) {
   return (vm.scan?.secretWarnings ?? vm.report?.scan.secretWarnings ?? 0) + (vm.report?.errors.length ?? 0);
+}
+
+function buildHintSignature(hints: Array<{ kind: "warn" | "error" | "info"; title: string; text: string }>) {
+  return hints
+    .filter((hint) => hint.kind !== "info")
+    .map((hint) => `${hint.kind}:${hint.title}:${hint.text}`)
+    .sort()
+    .join("|");
 }
 
 function buildHints(vm: ReturnType<typeof useKatoSyncViewModel>) {

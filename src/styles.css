@@ -203,8 +203,8 @@ button:disabled {
 }
 
 .setup-strip {
-  width: min(310px, 25vw);
-  min-width: 245px;
+  width: clamp(150px, 22vw, 310px);
+  min-width: 0;
   padding: 12px 13px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
@@ -247,7 +247,10 @@ button:disabled {
 .issue-badge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  gap: 5px;
   width: fit-content;
+  max-width: 100%;
   min-height: 24px;
   margin-top: 10px;
   padding: 0 9px;
@@ -256,6 +259,7 @@ button:disabled {
   background: rgba(255, 200, 87, 0.13);
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
   transition:
     background 140ms ease,
     box-shadow 140ms ease,
@@ -270,6 +274,10 @@ button:disabled {
 
 .issue-badge:active {
   transform: translateY(1px) scale(0.98);
+}
+
+.issue-count {
+  min-width: 1ch;
 }
 
 .workspace {
@@ -1173,7 +1181,15 @@ input[type="range"] {
 .spotlight-target {
   position: relative;
   z-index: 41;
+  border-radius: 16px;
+  outline: 1px solid rgba(255, 107, 53, 0.46);
+  outline-offset: 3px;
   animation: spotlightPulse 1800ms ease;
+}
+
+.spotlight-pad {
+  padding: 8px;
+  margin: -8px;
 }
 
 .onboarding-layer {
@@ -1204,6 +1220,32 @@ input[type="range"] {
   box-shadow:
     0 30px 86px rgba(0, 0, 0, 0.48),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition:
+    top 260ms cubic-bezier(0.2, 0.82, 0.2, 1),
+    left 260ms cubic-bezier(0.2, 0.82, 0.2, 1),
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+.onboarding-card[class*="placement-"] {
+  right: auto;
+  bottom: auto;
+}
+
+.onboarding-card.placement-left {
+  transform-origin: right center;
+}
+
+.onboarding-card.placement-right {
+  transform-origin: left center;
+}
+
+.onboarding-card.placement-top {
+  transform-origin: center bottom;
+}
+
+.onboarding-card.placement-bottom {
+  transform-origin: center top;
 }
 
 .onboarding-close {
@@ -1628,6 +1670,15 @@ pre {
     min-width: 130px;
   }
 
+  .issue-badge {
+    width: 42px;
+    padding: 0;
+  }
+
+  .issue-label {
+    display: none;
+  }
+
   .top-actions button {
     width: 178px;
   }
@@ -1653,8 +1704,20 @@ pre {
   }
 
   .onboarding-card {
-    right: 18px;
-    bottom: 18px;
     width: min(390px, calc(100vw - 116px));
+  }
+}
+
+@media (max-width: 1260px) {
+  .topbar {
+    gap: 12px;
+  }
+
+  .topbar > div:first-child p {
+    max-width: 520px;
+  }
+
+  .top-actions button {
+    width: 184px;
   }
 }
