@@ -131,6 +131,7 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(() => !localStorage.getItem(splashSeenKey));
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [onboardingPosition, setOnboardingPosition] = useState<OnboardingPosition | null>(null);
+  const [quitConfirmOpen, setQuitConfirmOpen] = useState(false);
   const { config } = vm;
   const workState = getWorkState(vm.busy);
   const WorkIcon = workState?.icon;
@@ -378,7 +379,7 @@ export default function App() {
         </nav>
 
         <div className="sidebar-footer">
-          <button className="ghost danger compact-danger" onClick={vm.handleQuitApp} title="Programm beenden" type="button">
+          <button className="ghost danger compact-danger" onClick={() => setQuitConfirmOpen(true)} title="Programm beenden" type="button">
             <Power size={16} />
             <span>Programm beenden</span>
           </button>
@@ -878,6 +879,49 @@ export default function App() {
           }}
           position={onboardingPosition}
         />
+      ) : null}
+
+      {quitConfirmOpen ? (
+        <div
+          className="modal-backdrop quit-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setQuitConfirmOpen(false);
+          }}
+          role="presentation"
+        >
+          <section aria-labelledby="quit-title" aria-modal="true" className="quit-dialog" role="dialog">
+            <button
+              aria-label="Dialog schließen"
+              className="icon-button quit-close"
+              onClick={() => setQuitConfirmOpen(false)}
+              type="button"
+            >
+              <X size={18} />
+            </button>
+            <div className="quit-icon">
+              <Power size={22} />
+            </div>
+            <span className="section-label">Programm beenden</span>
+            <h2 id="quit-title">KatoSync wirklich komplett beenden?</h2>
+            <p>
+              Wenn du hier beendest, läuft KatoSync nicht mehr im Hintergrund und es werden keine
+              automatischen Uploads aus dieser App gestartet.
+            </p>
+            <p>
+              Wenn KatoSync weiter automatisch synchronisieren soll, schließe lieber das Fenster mit
+              dem X oben. Dann wird die App nur ausgeblendet und bleibt im Hintergrund aktiv.
+            </p>
+            <footer>
+              <button className="secondary" onClick={() => setQuitConfirmOpen(false)} type="button">
+                Abbrechen
+              </button>
+              <button className="ghost danger quit-confirm" onClick={vm.handleQuitApp} type="button">
+                <Power size={16} />
+                Trotzdem beenden
+              </button>
+            </footer>
+          </section>
+        </div>
       ) : null}
     </div>
   );

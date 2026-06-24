@@ -253,10 +253,6 @@ export function useKatoSyncViewModel() {
   }, [show]);
 
   const handleQuitApp = useCallback(async () => {
-    const confirmed = window.confirm(
-      "KatoSync wirklich beenden?\n\nDanach läuft die App nicht mehr im Hintergrund und es werden keine automatischen Uploads mehr aus dieser App gestartet."
-    );
-    if (!confirmed) return;
     await quitApp();
   }, []);
 
