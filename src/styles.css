@@ -217,6 +217,13 @@ button:disabled {
   gap: 8px;
 }
 
+.license-link {
+  min-height: 42px;
+  justify-content: flex-start;
+  color: #c4ccd6;
+  background: rgba(255, 255, 255, 0.045);
+}
+
 .completion-head {
   display: flex;
   justify-content: space-between;
@@ -1218,6 +1225,126 @@ input[type="range"] {
   min-width: 180px;
 }
 
+.license-backdrop {
+  z-index: 1100;
+}
+
+.license-dialog {
+  width: min(840px, 100%);
+  max-height: min(780px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 88% 6%, rgba(255, 107, 53, 0.14), transparent 26%),
+    linear-gradient(145deg, rgba(22, 25, 31, 0.96), rgba(12, 14, 18, 0.92));
+  box-shadow:
+    0 36px 100px rgba(0, 0, 0, 0.52),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.license-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.license-dialog header {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.license-dialog header img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 24px rgba(255, 107, 53, 0.18));
+}
+
+.license-dialog h2 {
+  margin: 4px 44px 0 0;
+  font-size: 28px;
+  line-height: 1.12;
+  letter-spacing: 0;
+}
+
+.license-dialog header p,
+.license-body p,
+.license-accept span {
+  color: #b5bec9;
+  line-height: 1.5;
+}
+
+.license-body {
+  display: grid;
+  gap: 14px;
+  overflow: auto;
+  padding: 20px 24px;
+}
+
+.license-intro {
+  margin: 0;
+  font-weight: 650;
+}
+
+.license-body article {
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.license-body h3 {
+  margin: 0 0 7px;
+  font-size: 15px;
+}
+
+.license-body article p,
+.license-contact {
+  margin: 0;
+}
+
+.license-contact {
+  font-size: 13px;
+}
+
+.license-dialog footer {
+  display: grid;
+  gap: 16px;
+  padding: 18px 24px 22px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 10, 13, 0.42);
+}
+
+.license-accept {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 10px;
+  align-items: start;
+  font-weight: 600;
+}
+
+.license-accept input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: #ff6b35;
+}
+
+.license-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .icon-button {
   display: grid;
   place-items: center;
@@ -1514,6 +1641,41 @@ input[type="range"] {
   background: rgba(42, 92, 138, 0.1);
 }
 
+:root[data-theme="light"] .license-link {
+  color: #506074;
+  background: rgba(42, 92, 138, 0.08);
+}
+
+:root[data-theme="light"] .license-dialog {
+  border-color: rgba(23, 32, 43, 0.12);
+  background:
+    radial-gradient(circle at 88% 6%, rgba(255, 107, 53, 0.12), transparent 26%),
+    linear-gradient(145deg, rgba(249, 252, 255, 0.95), rgba(226, 235, 242, 0.88));
+  box-shadow:
+    0 32px 90px rgba(42, 59, 78, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+:root[data-theme="light"] .license-dialog header,
+:root[data-theme="light"] .license-dialog footer,
+:root[data-theme="light"] .license-body article {
+  border-color: rgba(23, 32, 43, 0.1);
+}
+
+:root[data-theme="light"] .license-dialog footer {
+  background: rgba(238, 244, 249, 0.52);
+}
+
+:root[data-theme="light"] .license-dialog header p,
+:root[data-theme="light"] .license-body p,
+:root[data-theme="light"] .license-accept span {
+  color: #667386;
+}
+
+:root[data-theme="light"] .license-body article {
+  background: rgba(255, 255, 255, 0.56);
+}
+
 :root[data-theme="light"] .setup-strip,
 :root[data-theme="light"] .panel,
 :root[data-theme="light"] .metric,
@@ -1737,6 +1899,7 @@ pre {
 
   .brand div:last-child,
   .step span,
+  .license-link span,
   .compact-danger span,
   .setup-strip p,
   .completion-head span {

@@ -6,6 +6,7 @@ import {
   Clock3,
   Database,
   FileCheck2,
+  FileText,
   FolderOpen,
   HardDriveUpload,
   KeyRound,
@@ -33,6 +34,7 @@ import {
   StepButton,
   Toggle
 } from "./components/Primitives";
+import { licenseAgreement } from "./lib/license";
 import { weekdayLabels } from "./lib/defaults";
 import { useKatoSyncViewModel, type StepId } from "./viewmodels/useKatoSyncViewModel";
 import type { FileFinding, Weekday } from "./types";
@@ -52,6 +54,7 @@ type ThemeMode = "dark" | "light";
 const onboardingDoneKey = "katosync.onboarding.done";
 const splashSeenKey = "katosync.onboarding.splashSeen";
 const acknowledgedHintsKey = "katosync.acknowledgedHints";
+const acceptedLicenseKey = "katosync.license.acceptedVersion";
 
 const sectionByStep: Record<StepId, string> = {
   welcome: "section-status",
@@ -132,6 +135,10 @@ export default function App() {
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [onboardingPosition, setOnboardingPosition] = useState<OnboardingPosition | null>(null);
   const [quitConfirmOpen, setQuitConfirmOpen] = useState(false);
+  const [licenseOpen, setLicenseOpen] = useState(
+    () => localStorage.getItem(acceptedLicenseKey) !== licenseAgreement.version
+  );
+  const [licenseChecked, setLicenseChecked] = useState(false);
   const { config } = vm;
   const workState = getWorkState(vm.busy);
   const WorkIcon = workState?.icon;
@@ -175,7 +182,21 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    if (!showSplash) return undefined;
+    if (localStorage.getItem(splashSeenKey)) {
+      setShowSplash(false);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      localStorage.setItem(splashSeenKey, "true");
+      setShowSplash(false);
+    }, 1150);
+    return () => window.clearTimeout(timer);
+  }, [showSplash]);
+
+  useEffect(() => {
     if (!config) return;
+    if (licenseOpen) return;
     if (localStorage.getItem(onboardingDoneKey)) return;
     const firstOpenStep = getNextOnboardingIndex(0);
     if (firstOpenStep === -1) {
@@ -188,9 +209,15 @@ export default function App() {
       setShowSplash(false);
       setOnboardingOpen(true);
       focusOnboardingStep(firstOpenStep);
-    }, showSplash ? 1150 : 250);
+    }, showSplash ? 1250 : 250);
     return () => window.clearTimeout(timer);
-  }, [config, getNextOnboardingIndex, showSplash]);
+  }, [config, getNextOnboardingIndex, licenseOpen, showSplash]);
+
+  const acceptLicense = () => {
+    localStorage.setItem(acceptedLicenseKey, licenseAgreement.version);
+    setLicenseChecked(false);
+    setLicenseOpen(false);
+  };
 
   const handleStepSelect = (step: StepId) => {
     vm.setActiveStep(step);
@@ -379,6 +406,10 @@ export default function App() {
         </nav>
 
         <div className="sidebar-footer">
+          <button className="ghost license-link" onClick={() => setLicenseOpen(true)} title="Nutzungsvereinbarung anzeigen" type="button">
+            <FileText size={16} />
+            <span>Nutzungsvereinbarung</span>
+          </button>
           <button className="ghost danger compact-danger" onClick={() => setQuitConfirmOpen(true)} title="Programm beenden" type="button">
             <Power size={16} />
             <span>Programm beenden</span>
@@ -881,6 +912,22 @@ export default function App() {
         />
       ) : null}
 
+      {licenseOpen ? (
+        <LicenseDialog
+          accepted={localStorage.getItem(acceptedLicenseKey) === licenseAgreement.version}
+          checked={licenseChecked}
+          onAccept={acceptLicense}
+          onCheckedChange={setLicenseChecked}
+          onClose={() => {
+            if (localStorage.getItem(acceptedLicenseKey) === licenseAgreement.version) {
+              setLicenseChecked(false);
+              setLicenseOpen(false);
+            }
+          }}
+          onQuit={vm.handleQuitApp}
+        />
+      ) : null}
+
       {quitConfirmOpen ? (
         <div
           className="modal-backdrop quit-backdrop"
@@ -923,6 +970,76 @@ export default function App() {
           </section>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function LicenseDialog({
+  accepted,
+  checked,
+  onAccept,
+  onCheckedChange,
+  onClose,
+  onQuit
+}: {
+  accepted: boolean;
+  checked: boolean;
+  onAccept: () => void;
+  onCheckedChange: (checked: boolean) => void;
+  onClose: () => void;
+  onQuit: () => void;
+}) {
+  return (
+    <div className="modal-backdrop license-backdrop" role="presentation">
+      <section aria-labelledby="license-title" aria-modal="true" className="license-dialog" role="dialog">
+        {accepted ? (
+          <button aria-label="Nutzungsvereinbarung schließen" className="icon-button license-close" onClick={onClose} type="button">
+            <X size={18} />
+          </button>
+        ) : null}
+        <header>
+          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <div>
+            <span className="section-label">KatoSync</span>
+            <h2 id="license-title">{licenseAgreement.title}</h2>
+            <p>
+              {licenseAgreement.provider} · Version {licenseAgreement.version} · Stand {licenseAgreement.updatedAt}
+            </p>
+          </div>
+        </header>
+        <div className="license-body">
+          <p className="license-intro">{licenseAgreement.intro}</p>
+          {licenseAgreement.sections.map((section) => (
+            <article key={section.title}>
+              <h3>{section.title}</h3>
+              <p>{section.body}</p>
+            </article>
+          ))}
+          <p className="license-contact">Kontakt: {licenseAgreement.contact}</p>
+        </div>
+        <footer>
+          {accepted ? (
+            <button className="secondary" onClick={onClose} type="button">
+              Schließen
+            </button>
+          ) : (
+            <>
+              <label className="license-accept">
+                <input checked={checked} onChange={(event) => onCheckedChange(event.target.checked)} type="checkbox" />
+                <span>{licenseAgreement.acceptance}</span>
+              </label>
+              <div className="license-actions">
+                <button className="ghost danger" onClick={onQuit} type="button">
+                  App beenden
+                </button>
+                <button className="primary" disabled={!checked} onClick={onAccept} type="button">
+                  Akzeptieren und starten
+                </button>
+              </div>
+            </>
+          )}
+        </footer>
+      </section>
     </div>
   );
 }
