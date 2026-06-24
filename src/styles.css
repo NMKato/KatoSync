@@ -1180,10 +1180,16 @@ input[type="range"] {
 
 .spotlight-target {
   position: relative;
-  z-index: 41;
+  z-index: 901;
   border-radius: 16px;
   outline: 1px solid rgba(255, 107, 53, 0.46);
   outline-offset: 3px;
+  background:
+    linear-gradient(145deg, rgba(255, 107, 53, 0.08), rgba(42, 92, 138, 0.08)),
+    rgba(18, 22, 28, 0.88);
+  box-shadow:
+    0 0 0 1px rgba(255, 107, 53, 0.18),
+    0 24px 70px rgba(0, 0, 0, 0.42);
   animation: spotlightPulse 1800ms ease;
 }
 
@@ -1195,18 +1201,18 @@ input[type="range"] {
 .onboarding-layer {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 900;
   pointer-events: none;
   background:
-    radial-gradient(circle at 78% 18%, rgba(255, 107, 53, 0.14), transparent 24%),
-    rgba(3, 5, 8, 0.28);
+    radial-gradient(circle at 78% 18%, rgba(255, 107, 53, 0.16), transparent 24%),
+    rgba(3, 5, 8, 0.56);
 }
 
 .onboarding-card {
   position: fixed;
   right: 28px;
   bottom: 28px;
-  z-index: 45;
+  z-index: 902;
   width: min(430px, calc(100vw - 56px));
   padding: 18px;
   pointer-events: auto;
@@ -1376,8 +1382,8 @@ input[type="range"] {
 
 :root[data-theme="light"] .onboarding-layer {
   background:
-    radial-gradient(circle at 78% 18%, rgba(255, 107, 53, 0.12), transparent 25%),
-    rgba(215, 226, 235, 0.22);
+    radial-gradient(circle at 78% 18%, rgba(255, 107, 53, 0.14), transparent 25%),
+    rgba(215, 226, 235, 0.48);
 }
 
 :root[data-theme="light"] .onboarding-card {
@@ -1396,6 +1402,15 @@ input[type="range"] {
 
 :root[data-theme="light"] .onboarding-card p {
   color: #667386;
+}
+
+:root[data-theme="light"] .spotlight-target {
+  background:
+    linear-gradient(145deg, rgba(255, 107, 53, 0.11), rgba(42, 92, 138, 0.08)),
+    rgba(247, 251, 255, 0.92);
+  box-shadow:
+    0 0 0 1px rgba(255, 107, 53, 0.2),
+    0 26px 70px rgba(42, 59, 78, 0.2);
 }
 
 :root[data-theme="light"] .brand span,

@@ -46,6 +46,8 @@ export function useKatoSyncViewModel() {
   const [report, setReport] = useState<SyncReport | null>(null);
   const [launchStatus, setLaunchStatus] = useState<LaunchAgentStatus | null>(null);
   const [rateLimits, setRateLimits] = useState<RateLimitMetric[]>([]);
+  const [connectionOk, setConnectionOk] = useState(false);
+  const [libraryOk, setLibraryOk] = useState(false);
   const [logs, setLogs] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -128,6 +130,8 @@ export function useKatoSyncViewModel() {
 
   const handleDeleteKey = useCallback(async () => {
     setKeyStatus(await deleteApiKey());
+    setConnectionOk(false);
+    setLibraryOk(false);
     show("info", "API-Key gelöscht.");
   }, [show]);
 
@@ -137,8 +141,10 @@ export function useKatoSyncViewModel() {
       await saveDraftKeyIfNeeded();
       const result = await testConnection(keyInput || undefined);
       setRateLimits(result.rateLimits);
+      setConnectionOk(true);
       show("ok", result.message);
     } catch (error) {
+      setConnectionOk(false);
       show("error", getMessage(error));
     } finally {
       setBusy(null);
@@ -152,8 +158,10 @@ export function useKatoSyncViewModel() {
       await saveDraftKeyIfNeeded();
       const result = await testLibrary(config.libraryId, keyInput || undefined);
       setRateLimits(result.rateLimits);
+      setLibraryOk(true);
       show("ok", result.message);
     } catch (error) {
+      setLibraryOk(false);
       show("error", getMessage(error));
     } finally {
       setBusy(null);
@@ -270,8 +278,10 @@ export function useKatoSyncViewModel() {
     busy,
     completion,
     config,
+    connectionOk,
     keyInput,
     keyStatus,
+    libraryOk,
     launchStatus,
     logs,
     notice,

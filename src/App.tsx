@@ -139,6 +139,34 @@ export default function App() {
   const hints = buildHints(vm);
   const hintSignature = useMemo(() => buildHintSignature(hints), [hints]);
   const hasNewHints = issueCount > 0 && hintSignature !== acknowledgedHintSignature;
+  const onboardingCompletion = useMemo(
+    () => [
+      Boolean(vm.keyStatus.exists && config?.libraryId.trim()),
+      Boolean(vm.connectionOk && vm.libraryOk),
+      Boolean(config?.sourceRoots.length),
+      Boolean(config?.safety.secretScanEnabled),
+      Boolean(vm.launchStatus?.installed && vm.launchStatus.loaded),
+      Boolean(vm.report)
+    ],
+    [
+      config?.libraryId,
+      config?.safety.secretScanEnabled,
+      config?.sourceRoots.length,
+      vm.connectionOk,
+      vm.keyStatus.exists,
+      vm.launchStatus?.installed,
+      vm.launchStatus?.loaded,
+      vm.libraryOk,
+      vm.report
+    ]
+  );
+  const getNextOnboardingIndex = useCallback(
+    (startIndex: number) => {
+      const next = onboardingCompletion.findIndex((complete, index) => index >= startIndex && !complete);
+      return next === -1 ? -1 : next;
+    },
+    [onboardingCompletion]
+  );
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -148,14 +176,20 @@ export default function App() {
   useEffect(() => {
     if (!config) return;
     if (localStorage.getItem(onboardingDoneKey)) return;
+    const firstOpenStep = getNextOnboardingIndex(0);
+    if (firstOpenStep === -1) {
+      localStorage.setItem(onboardingDoneKey, "true");
+      setShowSplash(false);
+      return;
+    }
     const timer = window.setTimeout(() => {
       localStorage.setItem(splashSeenKey, "true");
       setShowSplash(false);
       setOnboardingOpen(true);
-      focusOnboardingStep(0);
+      focusOnboardingStep(firstOpenStep);
     }, showSplash ? 1150 : 250);
     return () => window.clearTimeout(timer);
-  }, [config, showSplash]);
+  }, [config, getNextOnboardingIndex, showSplash]);
 
   const handleStepSelect = (step: StepId) => {
     vm.setActiveStep(step);
@@ -201,58 +235,59 @@ export default function App() {
     const viewportHeight = window.innerHeight;
 
     const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), Math.max(min, max));
+    const clampLeft = (value: number) => clamp(value, margin, viewportWidth - cardWidth - margin);
+    const clampTop = (value: number) => clamp(value, margin, viewportHeight - cardHeight - margin);
     const centeredTop = rect.top + rect.height / 2 - cardHeight / 2;
     const centeredLeft = rect.left + rect.width / 2 - cardWidth / 2;
-    const leftSpace = rect.left - margin;
-    const rightSpace = viewportWidth - rect.right - margin;
-    const topSpace = rect.top - margin;
-    const bottomSpace = viewportHeight - rect.bottom - margin;
 
-    let placement: OnboardingPlacement = "right";
-    let left = rect.right + gap;
-    let top = centeredTop;
-
-    if (rightSpace >= cardWidth + gap) {
-      placement = "right";
-      left = rect.right + gap;
-      top = centeredTop;
-    } else if (leftSpace >= cardWidth + gap) {
-      placement = "left";
-      left = rect.left - cardWidth - gap;
-      top = centeredTop;
-    } else if (bottomSpace >= cardHeight + gap) {
-      placement = "bottom";
-      left = centeredLeft;
-      top = rect.bottom + gap;
-    } else if (topSpace >= cardHeight + gap) {
-      placement = "top";
-      left = centeredLeft;
-      top = rect.top - cardHeight - gap;
-    } else {
-      const bestSide = [
-        { placement: "right" as const, space: rightSpace },
-        { placement: "left" as const, space: leftSpace },
-        { placement: "bottom" as const, space: bottomSpace },
-        { placement: "top" as const, space: topSpace }
-      ].sort((a, b) => b.space - a.space)[0].placement;
-      placement = bestSide;
-      if (bestSide === "left") {
-        left = rect.left - cardWidth - gap;
-        top = centeredTop;
-      } else if (bestSide === "bottom") {
-        left = centeredLeft;
-        top = rect.bottom + gap;
-      } else if (bestSide === "top") {
-        left = centeredLeft;
-        top = rect.top - cardHeight - gap;
+    const candidates = [
+      {
+        placement: "right" as const,
+        left: rect.right + gap,
+        top: centeredTop,
+        preference: 0
+      },
+      {
+        placement: "left" as const,
+        left: rect.left - cardWidth - gap,
+        top: centeredTop,
+        preference: 1
+      },
+      {
+        placement: "bottom" as const,
+        left: centeredLeft,
+        top: rect.bottom + gap,
+        preference: 2
+      },
+      {
+        placement: "top" as const,
+        left: centeredLeft,
+        top: rect.top - cardHeight - gap,
+        preference: 3
       }
-    }
-
-    setOnboardingPosition({
-      placement,
-      left: clamp(left, margin, viewportWidth - cardWidth - margin),
-      top: clamp(top, margin, viewportHeight - cardHeight - margin)
+    ].map((candidate) => {
+      const left = clampLeft(candidate.left);
+      const top = clampTop(candidate.top);
+      const overlap = getOverlapArea(
+        { left, top, right: left + cardWidth, bottom: top + cardHeight },
+        {
+          left: rect.left - gap,
+          top: rect.top - gap,
+          right: rect.right + gap,
+          bottom: rect.bottom + gap
+        }
+      );
+      const movementPenalty = Math.abs(left - candidate.left) + Math.abs(top - candidate.top);
+      return {
+        ...candidate,
+        left,
+        top,
+        score: overlap * 1000 + movementPenalty + candidate.preference
+      };
     });
+
+    const best = candidates.sort((a, b) => a.score - b.score)[0];
+    setOnboardingPosition(best);
   }, [onboardingIndex, onboardingOpen, spotlightId]);
 
   const focusOnboardingStep = (index: number) => {
@@ -288,6 +323,19 @@ export default function App() {
       workspace?.removeEventListener("scroll", update);
     };
   }, [onboardingOpen, updateOnboardingPosition]);
+
+  useEffect(() => {
+    if (!onboardingOpen || vm.busy || !onboardingCompletion[onboardingIndex]) return undefined;
+    const timer = window.setTimeout(() => {
+      const next = getNextOnboardingIndex(onboardingIndex + 1);
+      if (next === -1) {
+        closeOnboarding(true);
+        return;
+      }
+      focusOnboardingStep(next);
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [getNextOnboardingIndex, onboardingCompletion, onboardingIndex, onboardingOpen, vm.busy]);
 
   if (!config) {
     return (
@@ -821,8 +869,8 @@ export default function App() {
           onClose={() => closeOnboarding(false)}
           onDone={() => closeOnboarding(true)}
           onNext={() => {
-            const next = onboardingIndex + 1;
-            if (next >= onboardingSteps.length) {
+            const next = getNextOnboardingIndex(onboardingIndex + 1);
+            if (next === -1) {
               closeOnboarding(true);
               return;
             }
@@ -860,7 +908,8 @@ function OnboardingDialog({
     : undefined;
 
   return (
-    <div className="onboarding-layer" role="presentation">
+    <>
+      <div className="onboarding-layer" role="presentation" />
       <section
         aria-labelledby="onboarding-title"
         aria-modal="true"
@@ -896,8 +945,17 @@ function OnboardingDialog({
           </div>
         </footer>
       </section>
-    </div>
+    </>
   );
+}
+
+function getOverlapArea(
+  first: { left: number; top: number; right: number; bottom: number },
+  second: { left: number; top: number; right: number; bottom: number }
+) {
+  const horizontal = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
+  const vertical = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
+  return horizontal * vertical;
 }
 
 function quotaWidth(remaining?: string | null, limit?: string | null) {
