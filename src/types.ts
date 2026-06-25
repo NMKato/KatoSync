@@ -96,6 +96,62 @@ export interface SyncReport {
   errors: string[];
 }
 
+export type ActionPlanStatus =
+  | "pending_user_review"
+  | "in_review"
+  | "approved"
+  | "rejected"
+  | "blocked"
+  | "completed";
+
+export type ActionTaskType =
+  | "code_task"
+  | "desktop_task"
+  | "research_task"
+  | "document_task"
+  | "email_task"
+  | "form_task"
+  | "visual_task"
+  | "project_management_task"
+  | "katoos_task";
+
+export type ActionRunner =
+  | "codex_cli"
+  | "codex_desktop"
+  | "kai_desktop"
+  | "local_llm"
+  | "mistral_api"
+  | "openai_api"
+  | "anthropic_api"
+  | "manual_review";
+
+export type ActionRiskLevel = "low" | "medium" | "high" | "critical";
+
+export interface ActionTask {
+  taskId: string;
+  priority: number;
+  projectId: string;
+  title: string;
+  taskType: ActionTaskType;
+  targetRunner: ActionRunner;
+  riskLevel: ActionRiskLevel;
+  requiresApproval: boolean;
+  summary?: string | null;
+}
+
+export interface ActionPlan {
+  planId: string;
+  source: string;
+  agentName: string;
+  createdAt: string;
+  status: ActionPlanStatus;
+  executionMode: "sequential" | "manual";
+  dailyLimit: number;
+  riskLevel: ActionRiskLevel;
+  requiresUserReview: boolean;
+  tasks: ActionTask[];
+}
+
 export interface LaunchAgentStatus {
   installed: boolean;
   loaded: boolean;

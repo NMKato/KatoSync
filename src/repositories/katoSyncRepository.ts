@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { defaultConfig } from "../lib/defaults";
 import type {
+  ActionPlan,
+  ActionPlanStatus,
   AppConfig,
   ApiCheckResponse,
   KeyStatus,
@@ -11,6 +13,7 @@ import type {
 } from "../types";
 
 const mockConfigKey = "katosync.config";
+const mockActionPlansKey = "katosync.actionPlans";
 const isTauri = () => Boolean(window.__TAURI_INTERNALS__);
 
 export async function loadConfig(): Promise<AppConfig> {
@@ -198,6 +201,24 @@ export async function openOutputDir(): Promise<string> {
   return defaultConfig.outputDir;
 }
 
+export async function loadActionPlans(): Promise<ActionPlan[]> {
+  const stored = localStorage.getItem(mockActionPlansKey);
+  if (stored) return JSON.parse(stored) as ActionPlan[];
+  const plans = mockActionPlans();
+  localStorage.setItem(mockActionPlansKey, JSON.stringify(plans));
+  return plans;
+}
+
+export async function updateActionPlanStatus(
+  planId: string,
+  status: ActionPlanStatus
+): Promise<ActionPlan[]> {
+  const plans = await loadActionPlans();
+  const nextPlans = plans.map((plan) => (plan.planId === planId ? { ...plan, status } : plan));
+  localStorage.setItem(mockActionPlansKey, JSON.stringify(nextPlans));
+  return nextPlans;
+}
+
 export async function quitApp(): Promise<void> {
   if (isTauri()) {
     return invoke<void>("quit_app");
@@ -259,6 +280,70 @@ function currentFileNames(config: AppConfig) {
 
 function currentFileName(config: AppConfig, stem: string, extension: string) {
   return `${stem}__${deviceSlug(config)}.${extension}`;
+}
+
+function mockActionPlans(): ActionPlan[] {
+  return [
+    {
+      planId: "plan_2026_06_25_001",
+      source: "mistral_scheduler",
+      agentName: "Laura Mission Control",
+      createdAt: "2026-06-25 07:15",
+      status: "pending_user_review",
+      executionMode: "sequential",
+      dailyLimit: 3,
+      riskLevel: "medium",
+      requiresUserReview: true,
+      tasks: [
+        {
+          taskId: "task_001",
+          priority: 1,
+          projectId: "katosync",
+          title: "Codex Bridge Datenmodell prüfen",
+          taskType: "code_task",
+          targetRunner: "codex_cli",
+          riskLevel: "medium",
+          requiresApproval: true,
+          summary: "Lokale Action-Plan-Struktur vorbereiten, noch ohne automatische Ausführung."
+        },
+        {
+          taskId: "task_002",
+          priority: 2,
+          projectId: "katosync",
+          title: "Statusflow nach Task-Abschluss ergänzen",
+          taskType: "project_management_task",
+          targetRunner: "manual_review",
+          riskLevel: "low",
+          requiresApproval: true,
+          summary: "Ergebnisdateien und KATOSYNC_STATUSFLOW.md für spätere Runner vorbereiten."
+        }
+      ]
+    },
+    {
+      planId: "plan_2026_06_25_002",
+      source: "mcp_connector_test",
+      agentName: "Thomas Risk Check",
+      createdAt: "2026-06-25 07:05",
+      status: "pending_user_review",
+      executionMode: "manual",
+      dailyLimit: 1,
+      riskLevel: "high",
+      requiresUserReview: true,
+      tasks: [
+        {
+          taskId: "task_003",
+          priority: 1,
+          projectId: "katoos-mcp",
+          title: "MCP Connector-Sicherheitsregeln reviewen",
+          taskType: "research_task",
+          targetRunner: "manual_review",
+          riskLevel: "high",
+          requiresApproval: true,
+          summary: "Prüft Token-Scopes, Tenant-Trennung und keine Service-Keys im Desktop."
+        }
+      ]
+    }
+  ];
 }
 
 function deviceSlug(config: AppConfig) {

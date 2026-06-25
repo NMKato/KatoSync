@@ -469,7 +469,8 @@ button:disabled {
 }
 
 .overview-grid .table-panel,
-.overview-grid .logs-panel {
+.overview-grid .logs-panel,
+.overview-grid .queue-panel {
   grid-column: span 8;
 }
 
@@ -495,12 +496,17 @@ button:disabled {
 }
 
 .table-panel,
-.logs-panel {
+.logs-panel,
+.queue-panel {
   grid-column: span 8;
 }
 
 .run-panel {
   grid-column: span 4;
+}
+
+.queue-panel {
+  min-height: 320px;
 }
 
 .panel[id] {
@@ -953,6 +959,151 @@ input[type="range"] {
 .status-line.warn {
   color: #ffd887;
   background: rgba(255, 200, 87, 0.11);
+}
+
+.queue-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.queue-summary > div {
+  display: grid;
+  gap: 2px;
+}
+
+.queue-summary strong {
+  color: #f4f5f6;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.queue-summary span {
+  color: #aab3bf;
+  font-size: 12px;
+}
+
+.queue-summary .secondary {
+  width: 164px;
+}
+
+.action-plan-list {
+  display: grid;
+  gap: 10px;
+}
+
+.action-plan-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.action-plan-card header,
+.action-plan-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.action-plan-card header > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.agent-name {
+  color: #ff9b73;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.action-plan-card strong {
+  color: #f4f5f6;
+}
+
+.action-plan-card small {
+  color: #aab3bf;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.risk-pill {
+  flex: 0 0 auto;
+  min-width: 72px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.risk-pill.low {
+  color: #9df2b9;
+  background: rgba(81, 205, 123, 0.14);
+}
+
+.risk-pill.medium {
+  color: #ffd887;
+  background: rgba(255, 200, 87, 0.14);
+}
+
+.risk-pill.high,
+.risk-pill.critical {
+  color: #ffb3b3;
+  background: rgba(255, 116, 116, 0.14);
+}
+
+.action-plan-card ol {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.action-plan-card li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 9px;
+  align-items: start;
+  min-width: 0;
+}
+
+.action-plan-card li > span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: #190d07;
+  background: #ff6b35;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.action-plan-card li > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.action-plan-card footer {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.action-plan-card footer button {
+  width: auto;
+  min-width: 104px;
+  padding-inline: 13px;
 }
 
 .activity-list {
@@ -1951,6 +2102,7 @@ pre {
   .hero-panel,
   .table-panel,
   .logs-panel,
+  .queue-panel,
   .run-panel {
     grid-column: span 6;
   }

@@ -5,6 +5,7 @@ import {
   getApiKeyStatus,
   getLaunchAgentStatus,
   installLaunchAgent,
+  loadActionPlans,
   loadConfig,
   openOutputDir,
   quitApp,
@@ -15,10 +16,12 @@ import {
   saveConfig,
   scanProject,
   testConnection,
-  testLibrary
+  testLibrary,
+  updateActionPlanStatus
 } from "../repositories/katoSyncRepository";
 import type { Notice } from "../components/Primitives";
 import type {
+  ActionPlan,
   AppConfig,
   RateLimitMetric,
   KeyStatus,
@@ -35,6 +38,7 @@ export type StepId =
   | "rules"
   | "schedule"
   | "dashboard"
+  | "actionQueue"
   | "logs";
 
 export function useKatoSyncViewModel() {
@@ -49,6 +53,7 @@ export function useKatoSyncViewModel() {
   const [connectionOk, setConnectionOk] = useState(false);
   const [libraryOk, setLibraryOk] = useState(false);
   const [logs, setLogs] = useState("");
+  const [actionPlans, setActionPlans] = useState<ActionPlan[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -56,14 +61,16 @@ export function useKatoSyncViewModel() {
 
   const boot = useCallback(async () => {
     try {
-      const [loadedConfig, loadedKey, loadedLaunch] = await Promise.all([
+      const [loadedConfig, loadedKey, loadedLaunch, loadedPlans] = await Promise.all([
         loadConfig(),
         getApiKeyStatus(),
-        getLaunchAgentStatus()
+        getLaunchAgentStatus(),
+        loadActionPlans()
       ]);
       setConfig(loadedConfig);
       setKeyStatus(loadedKey);
       setLaunchStatus(loadedLaunch);
+      setActionPlans(loadedPlans);
     } catch (error) {
       show("error", getMessage(error));
     }
@@ -252,6 +259,45 @@ export function useKatoSyncViewModel() {
     }
   }, [show]);
 
+  const handleRefreshActionPlans = useCallback(async () => {
+    setBusy("action-plans");
+    try {
+      setActionPlans(await loadActionPlans());
+      show("ok", "Action Queue aktualisiert.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }, [show]);
+
+  const handleReviewActionPlan = useCallback(
+    async (planId: string) => {
+      setActionPlans(await updateActionPlanStatus(planId, "in_review"));
+      show("info", "Action Plan ist zur Prüfung markiert.");
+    },
+    [show]
+  );
+
+  const handleRejectActionPlan = useCallback(
+    async (planId: string) => {
+      setActionPlans(await updateActionPlanStatus(planId, "rejected"));
+      show("info", "Action Plan abgelehnt. Es wird lokal nichts ausgeführt.");
+    },
+    [show]
+  );
+
+  const handleStartActionPlan = useCallback(
+    async (planId: string) => {
+      setActionPlans(await updateActionPlanStatus(planId, "approved"));
+      show(
+        "warn",
+        "Action Plan freigegeben. Runner-Ausführung ist in diesem 2.0-Schnitt noch deaktiviert."
+      );
+    },
+    [show]
+  );
+
   const handleQuitApp = useCallback(async () => {
     await quitApp();
   }, []);
@@ -271,6 +317,7 @@ export function useKatoSyncViewModel() {
 
   return {
     activeStep,
+    actionPlans,
     busy,
     completion,
     config,
@@ -290,9 +337,13 @@ export function useKatoSyncViewModel() {
     handleLaunchRemove,
     handleLogs,
     handleQuitApp,
+    handleRefreshActionPlans,
+    handleRejectActionPlan,
+    handleReviewActionPlan,
     handleRun,
     handleSaveKey,
     handleScan,
+    handleStartActionPlan,
     handleTestConnection,
     handleTestLibrary,
     openOutputDir,

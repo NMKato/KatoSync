@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
+  ClipboardList,
   Clock3,
   Database,
   FileCheck2,
@@ -15,6 +16,7 @@ import {
   Loader2,
   Moon,
   Power,
+  PlayCircle,
   RefreshCcw,
   ShieldCheck,
   SlidersHorizontal,
@@ -37,10 +39,11 @@ import {
 import { licenseAgreement } from "./lib/license";
 import { weekdayLabels } from "./lib/defaults";
 import { useKatoSyncViewModel, type StepId } from "./viewmodels/useKatoSyncViewModel";
-import type { FileFinding, Weekday } from "./types";
+import type { ActionPlan, FileFinding, Weekday } from "./types";
 
 const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
   { id: "dashboard", label: "Dashboard", icon: Database },
+  { id: "actionQueue", label: "Action Queue", icon: ClipboardList },
   { id: "api", label: "API", icon: KeyRound },
   { id: "library", label: "Library", icon: Library },
   { id: "folders", label: "Ordner", icon: FolderOpen },
@@ -64,6 +67,7 @@ const sectionByStep: Record<StepId, string> = {
   rules: "section-rules",
   schedule: "section-schedule",
   dashboard: "section-status",
+  actionQueue: "section-action-queue",
   logs: "section-activities"
 };
 
@@ -613,6 +617,8 @@ export default function App() {
             </div>
           </Panel>
 
+          <ActionQueuePanel vm={vm} />
+
           <Panel id="section-library" title="API-Kontingent" icon={<Activity size={18} />}>
             {vm.rateLimits.length ? (
               <div className="quota-list">
@@ -974,6 +980,97 @@ export default function App() {
   );
 }
 
+function ActionQueuePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const visiblePlans = vm.actionPlans.filter((plan) => plan.status !== "completed");
+  const pendingCount = visiblePlans.filter(
+    (plan) => plan.status === "pending_user_review" || plan.status === "in_review"
+  ).length;
+
+  return (
+    <Panel className="queue-panel" id="section-action-queue" title="Action Queue" icon={<ClipboardList size={18} />}>
+      <div className="queue-summary">
+        <div>
+          <strong>{pendingCount}</strong>
+          <span>Pläne warten auf lokale Prüfung</span>
+        </div>
+        <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleRefreshActionPlans} type="button">
+          {vm.busy === "action-plans" ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
+          Aktualisieren
+        </button>
+      </div>
+
+      {visiblePlans.length ? (
+        <div className="action-plan-list">
+          {visiblePlans.slice(0, 3).map((plan) => (
+            <article className="action-plan-card" key={plan.planId}>
+              <header>
+                <div>
+                  <span className="agent-name">{plan.agentName}</span>
+                  <strong>{formatPlanTitle(plan)}</strong>
+                  <small>
+                    {plan.createdAt} · {plan.executionMode === "sequential" ? "sequenziell" : "manuell"}
+                  </small>
+                </div>
+                <span className={`risk-pill ${plan.riskLevel}`}>{riskLabel(plan.riskLevel)}</span>
+              </header>
+              <ol>
+                {plan.tasks
+                  .slice()
+                  .sort((a, b) => a.priority - b.priority)
+                  .slice(0, 3)
+                  .map((task) => (
+                    <li key={task.taskId}>
+                      <span>{task.priority}</span>
+                      <div>
+                        <strong>{task.title}</strong>
+                        <small>
+                          {runnerLabel(task.targetRunner)} · {task.projectId}
+                        </small>
+                      </div>
+                    </li>
+                  ))}
+              </ol>
+              <footer>
+                <button
+                  className="secondary"
+                  disabled={Boolean(vm.busy)}
+                  onClick={() => void vm.handleReviewActionPlan(plan.planId)}
+                  type="button"
+                >
+                  Prüfen
+                </button>
+                <button
+                  className="secondary"
+                  disabled={Boolean(vm.busy)}
+                  onClick={() => void vm.handleStartActionPlan(plan.planId)}
+                  type="button"
+                >
+                  <PlayCircle size={15} />
+                  Tagesplan freigeben
+                </button>
+                <button
+                  className="ghost danger"
+                  disabled={Boolean(vm.busy)}
+                  onClick={() => void vm.handleRejectActionPlan(plan.planId)}
+                  type="button"
+                >
+                  Ablehnen
+                </button>
+              </footer>
+              <StatusLine good={plan.status === "approved"} text={planStatusLabel(plan.status)} />
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state">
+          Noch keine Action Plans. Sobald Mistral über den MCP-Rückkanal Pläne erzeugt,
+          erscheinen sie hier zur lokalen Freigabe.
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function LicenseDialog({
   accepted,
   checked,
@@ -1042,6 +1139,60 @@ function LicenseDialog({
       </section>
     </div>
   );
+}
+
+function formatPlanTitle(plan: ActionPlan) {
+  if (plan.tasks.length === 1) return plan.tasks[0].title;
+  return `${plan.tasks.length} Aufgaben aus ${plan.source}`;
+}
+
+function planStatusLabel(status: ActionPlan["status"]) {
+  switch (status) {
+    case "pending_user_review":
+      return "Wartet auf lokale Freigabe. Es wird nichts automatisch ausgeführt.";
+    case "in_review":
+      return "Zur Prüfung markiert. Bitte Aufgaben und Risiko prüfen.";
+    case "approved":
+      return "Freigegeben. Runner-Anbindung folgt im nächsten 2.0-Schnitt.";
+    case "rejected":
+      return "Abgelehnt. Keine lokale Aktion gestartet.";
+    case "blocked":
+      return "Blockiert. Menschliche Prüfung erforderlich.";
+    case "completed":
+      return "Abgeschlossen.";
+    default:
+      return status;
+  }
+}
+
+function riskLabel(risk: ActionPlan["riskLevel"]) {
+  switch (risk) {
+    case "low":
+      return "Niedrig";
+    case "medium":
+      return "Mittel";
+    case "high":
+      return "Hoch";
+    case "critical":
+      return "Kritisch";
+    default:
+      return risk;
+  }
+}
+
+function runnerLabel(runner: ActionPlan["tasks"][number]["targetRunner"]) {
+  switch (runner) {
+    case "codex_cli":
+      return "Codex CLI";
+    case "codex_desktop":
+      return "Codex Desktop";
+    case "kai_desktop":
+      return "KAI Desktop";
+    case "manual_review":
+      return "Manuelle Prüfung";
+    default:
+      return runner;
+  }
 }
 
 function OnboardingDialog({
@@ -1178,6 +1329,12 @@ function getWorkState(busy: string | null) {
         title: "Uploadplan wird geändert",
         text: "Der lokale LaunchAgent wird aktualisiert."
       };
+    case "action-plans":
+      return {
+        icon: ClipboardList,
+        title: "Action Queue wird geladen",
+        text: "KatoSync prüft lokale und spätere MCP-Action-Pläne."
+      };
     default:
       return null;
   }
@@ -1185,6 +1342,16 @@ function getWorkState(busy: string | null) {
 
 function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>) {
   const items: Array<{ kind: "ok" | "warn" | "error" | "info"; title: string; text: string }> = [];
+  const pendingPlans = vm.actionPlans.filter(
+    (plan) => plan.status === "pending_user_review" || plan.status === "in_review"
+  ).length;
+  if (pendingPlans) {
+    items.push({
+      kind: "info",
+      title: "Action Queue",
+      text: `${pendingPlans} Plan/Pläne warten auf lokale Freigabe.`
+    });
+  }
   if (vm.report) {
     items.push({
       kind: vm.report.errors.length ? "error" : "ok",
