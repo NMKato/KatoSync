@@ -72,6 +72,17 @@ Validierung:
 - `npm run build` erfolgreich.
 - `cargo check` in `src-tauri` erfolgreich.
 
+## Bugfix 2026-06-26
+
+- macOS Dock-Reopen wurde repariert.
+- Ursache: Das Fenster wurde beim Schliessen nur versteckt, aber es gab keinen Handler fuer `RunEvent::Reopen`.
+- Loesung:
+  - Tauri-App wird mit `build(...).run(...)` gestartet.
+  - Bei macOS `RunEvent::Reopen` wird das `main`-Fenster wieder gezeigt, entminimiert und fokussiert.
+- Wichtig:
+  - Das Fenster-X beendet KatoSync weiterhin nicht.
+  - Der rote Button `Programm beenden` bleibt der echte Quit-Pfad.
+
 ## Sicherheitsnotizen
 
 - Kein Supabase Service-Role-Key in der Desktop-App.

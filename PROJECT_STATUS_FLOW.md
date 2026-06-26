@@ -92,3 +92,28 @@ Build:
 
 - `npm run build` erfolgreich.
 - `cargo check` in `src-tauri` erfolgreich.
+
+## 2026-06-26 - macOS Dock-Reopen Bug behoben
+
+Projekt: KatoSync Desktop App
+Status: Fenster-Lifecycle korrigiert
+
+Problem:
+
+- Wenn KatoSync ueber das Fenster-X ausgeblendet wurde, lief die App im Hintergrund weiter.
+- Ein Klick auf das Dock-Icon brachte das versteckte Fenster nicht wieder nach vorne.
+- Nutzer mussten die App komplett beenden und neu starten.
+
+Fix:
+
+- Tauri startet jetzt ueber `build(...).run(...)`, damit App-Lifecycle-Events abgefangen werden koennen.
+- `RunEvent::Reopen` auf macOS zeigt das Hauptfenster wieder an.
+- Das Fenster wird beim Dock-Klick:
+  - wieder sichtbar gemacht
+  - aus minimiertem Zustand geholt
+  - fokussiert
+- Der bestehende Hintergrundmodus beim Fenster-X bleibt erhalten.
+
+Validierung:
+
+- `cargo check` in `src-tauri` erfolgreich.

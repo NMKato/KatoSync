@@ -17,7 +17,7 @@ use std::{
     sync::{Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{Manager, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -229,8 +229,23 @@ pub fn run() {
             let _ = app.path().app_data_dir().map(fs::create_dir_all);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("Fehler beim Start von KatoSync");
+        .build(tauri::generate_context!())
+        .expect("Fehler beim Build von KatoSync")
+        .run(|app_handle, event| {
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Reopen { .. } = event {
+                reopen_main_window(app_handle);
+            }
+        });
+}
+
+fn reopen_main_window(app_handle: &AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        let _ = write_log("sync", "Fenster per Dock-Klick wieder geoeffnet.");
+    }
 }
 
 #[tauri::command]
