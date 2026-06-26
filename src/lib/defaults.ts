@@ -7,6 +7,9 @@ export const defaultConfig: AppConfig = {
     deviceName: "Dieser Rechner"
   },
   libraryId: "",
+  mcp: {
+    baseUrl: "https://mcp.katoos.de"
+  },
   sourceRoots: [],
   outputDir: "~/Library/Application Support/KatoSync/current",
   schedule: {

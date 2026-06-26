@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   chooseFolders,
   deleteApiKey,
+  deleteMcpConnectorToken,
   getApiKeyStatus,
   getLaunchAgentStatus,
+  getMcpConnectorTokenStatus,
   installLaunchAgent,
   loadActionPlans,
   loadConfig,
@@ -14,6 +16,7 @@ import {
   runSync,
   saveApiKey,
   saveConfig,
+  saveMcpConnectorToken,
   scanProject,
   testConnection,
   testLibrary,
@@ -45,7 +48,9 @@ export function useKatoSyncViewModel() {
   const [activeStep, setActiveStep] = useState<StepId>("dashboard");
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [keyInput, setKeyInput] = useState("");
+  const [mcpTokenInput, setMcpTokenInput] = useState("");
   const [keyStatus, setKeyStatus] = useState<KeyStatus>({ exists: false });
+  const [mcpTokenStatus, setMcpTokenStatus] = useState<KeyStatus>({ exists: false });
   const [scan, setScan] = useState<ScanSummary | null>(null);
   const [report, setReport] = useState<SyncReport | null>(null);
   const [launchStatus, setLaunchStatus] = useState<LaunchAgentStatus | null>(null);
@@ -61,14 +66,16 @@ export function useKatoSyncViewModel() {
 
   const boot = useCallback(async () => {
     try {
-      const [loadedConfig, loadedKey, loadedLaunch, loadedPlans] = await Promise.all([
+      const [loadedConfig, loadedKey, loadedMcpToken, loadedLaunch] = await Promise.all([
         loadConfig(),
         getApiKeyStatus(),
-        getLaunchAgentStatus(),
-        loadActionPlans()
+        getMcpConnectorTokenStatus(),
+        getLaunchAgentStatus()
       ]);
+      const loadedPlans = await loadActionPlans(loadedConfig);
       setConfig(loadedConfig);
       setKeyStatus(loadedKey);
+      setMcpTokenStatus(loadedMcpToken);
       setLaunchStatus(loadedLaunch);
       setActionPlans(loadedPlans);
     } catch (error) {
@@ -140,6 +147,26 @@ export function useKatoSyncViewModel() {
     setConnectionOk(false);
     setLibraryOk(false);
     show("info", "API-Key gelöscht.");
+  }, [show]);
+
+  const handleSaveMcpConnectorToken = useCallback(async () => {
+    setBusy("mcp-token");
+    try {
+      setMcpTokenStatus(await saveMcpConnectorToken(mcpTokenInput));
+      setMcpTokenInput("");
+      show("ok", "MCP Connector Token sicher gespeichert.");
+      if (config) setActionPlans(await loadActionPlans(config));
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }, [config, mcpTokenInput, show]);
+
+  const handleDeleteMcpConnectorToken = useCallback(async () => {
+    setMcpTokenStatus(await deleteMcpConnectorToken());
+    setActionPlans(await loadActionPlans());
+    show("info", "MCP Connector Token gelöscht.");
   }, [show]);
 
   const handleTestConnection = useCallback(async () => {
@@ -262,40 +289,40 @@ export function useKatoSyncViewModel() {
   const handleRefreshActionPlans = useCallback(async () => {
     setBusy("action-plans");
     try {
-      setActionPlans(await loadActionPlans());
+      setActionPlans(await loadActionPlans(config ?? undefined));
       show("ok", "Action Queue aktualisiert.");
     } catch (error) {
       show("error", getMessage(error));
     } finally {
       setBusy(null);
     }
-  }, [show]);
+  }, [config, show]);
 
   const handleReviewActionPlan = useCallback(
     async (planId: string) => {
-      setActionPlans(await updateActionPlanStatus(planId, "in_review"));
+      setActionPlans(await updateActionPlanStatus(config, planId, "in_review"));
       show("info", "Action Plan ist zur Prüfung markiert.");
     },
-    [show]
+    [config, show]
   );
 
   const handleRejectActionPlan = useCallback(
     async (planId: string) => {
-      setActionPlans(await updateActionPlanStatus(planId, "rejected"));
+      setActionPlans(await updateActionPlanStatus(config, planId, "rejected"));
       show("info", "Action Plan abgelehnt. Es wird lokal nichts ausgeführt.");
     },
-    [show]
+    [config, show]
   );
 
   const handleStartActionPlan = useCallback(
     async (planId: string) => {
-      setActionPlans(await updateActionPlanStatus(planId, "approved"));
+      setActionPlans(await updateActionPlanStatus(config, planId, "approved"));
       show(
         "warn",
         "Action Plan freigegeben. Runner-Ausführung ist in diesem 2.0-Schnitt noch deaktiviert."
       );
     },
-    [show]
+    [config, show]
   );
 
   const handleQuitApp = useCallback(async () => {
@@ -327,12 +354,15 @@ export function useKatoSyncViewModel() {
     libraryOk,
     launchStatus,
     logs,
+    mcpTokenInput,
+    mcpTokenStatus,
     notice,
     rateLimits,
     report,
     scan,
     handleChooseFolders,
     handleDeleteKey,
+    handleDeleteMcpConnectorToken,
     handleLaunchInstall,
     handleLaunchRemove,
     handleLogs,
@@ -342,6 +372,7 @@ export function useKatoSyncViewModel() {
     handleReviewActionPlan,
     handleRun,
     handleSaveKey,
+    handleSaveMcpConnectorToken,
     handleScan,
     handleStartActionPlan,
     handleTestConnection,
@@ -350,6 +381,7 @@ export function useKatoSyncViewModel() {
     persist,
     setActiveStep,
     setKeyInput,
+    setMcpTokenInput,
     setNotice,
     updateConfig,
     updateNested

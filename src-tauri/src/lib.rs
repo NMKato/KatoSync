@@ -26,9 +26,11 @@ use walkdir::{DirEntry, WalkDir};
 const APP_VERSION: &str = "1.0.1";
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
+const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";
 const USER_AGENT: &str = "KatoSync/1.0.1";
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
 static API_KEY_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static MCP_CONNECTOR_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +39,8 @@ pub struct AppConfig {
     #[serde(default = "default_device_config")]
     device: DeviceConfig,
     library_id: String,
+    #[serde(default = "default_mcp_config")]
+    mcp: McpConfig,
     source_roots: Vec<String>,
     output_dir: String,
     schedule: ScheduleConfig,
@@ -49,6 +53,12 @@ pub struct AppConfig {
 pub struct DeviceConfig {
     device_id: String,
     device_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfig {
+    base_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +209,11 @@ pub fn run() {
             save_api_key,
             api_key_status,
             delete_api_key,
+            save_mcp_connector_token,
+            mcp_connector_token_status,
+            delete_mcp_connector_token,
+            load_remote_action_plans,
+            update_remote_action_plan_status,
             test_mistral_connection,
             test_library,
             scan_project,
@@ -271,6 +286,104 @@ fn delete_api_key() -> Result<KeyStatus, String> {
         exists: false,
         masked: None,
     })
+}
+
+#[tauri::command]
+async fn save_mcp_connector_token(token: String) -> Result<KeyStatus, String> {
+    let connector_token = token.trim();
+    if connector_token.is_empty() {
+        return Err("MCP Connector Token darf nicht leer sein.".to_string());
+    }
+    mcp_connector_keychain_entry()
+        .map_err(error_to_string)?
+        .set_password(connector_token)
+        .map_err(error_to_string)?;
+    cache_mcp_connector_token(Some(connector_token.to_string()));
+    write_mcp_connector_token_marker().map_err(error_to_string)?;
+    Ok(KeyStatus {
+        exists: true,
+        masked: Some(mask_key(connector_token)),
+    })
+}
+
+#[tauri::command]
+fn mcp_connector_token_status() -> Result<KeyStatus, String> {
+    if let Some(token) = cached_mcp_connector_token() {
+        return Ok(KeyStatus {
+            exists: true,
+            masked: Some(mask_key(&token)),
+        });
+    }
+    Ok(KeyStatus {
+        exists: mcp_connector_token_marker_exists().map_err(error_to_string)?,
+        masked: None,
+    })
+}
+
+#[tauri::command]
+fn delete_mcp_connector_token() -> Result<KeyStatus, String> {
+    let entry = mcp_connector_keychain_entry().map_err(error_to_string)?;
+    let _ = entry.delete_credential();
+    cache_mcp_connector_token(None);
+    let _ = remove_mcp_connector_token_marker();
+    Ok(KeyStatus {
+        exists: false,
+        masked: None,
+    })
+}
+
+#[tauri::command]
+async fn load_remote_action_plans(base_url: String) -> Result<serde_json::Value, String> {
+    let token = load_mcp_connector_token().map_err(error_to_string)?;
+    let url = format!(
+        "{}/api/action-plans?status=pending_review&includeTasks=true",
+        normalize_base_url(&base_url)
+    );
+    let response = reqwest::Client::new()
+        .get(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(token.trim())
+        .send()
+        .await
+        .map_err(error_to_string)?;
+
+    let status = response.status();
+    let text = response.text().await.map_err(error_to_string)?;
+    if !status.is_success() {
+        return Err(format!("MCP Action Queue nicht erreichbar ({status}): {text}"));
+    }
+    serde_json::from_str(&text).map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn update_remote_action_plan_status(
+    base_url: String,
+    plan_id: String,
+    status: String,
+) -> Result<serde_json::Value, String> {
+    let token = load_mcp_connector_token().map_err(error_to_string)?;
+    let url = format!(
+        "{}/api/action-plans/{}/status",
+        normalize_base_url(&base_url),
+        plan_id
+    );
+    let response = reqwest::Client::new()
+        .patch(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(token.trim())
+        .json(&json!({ "status": status }))
+        .send()
+        .await
+        .map_err(error_to_string)?;
+
+    let response_status = response.status();
+    let text = response.text().await.map_err(error_to_string)?;
+    if !response_status.is_success() {
+        return Err(format!(
+            "MCP Action Plan konnte nicht aktualisiert werden ({response_status}): {text}"
+        ));
+    }
+    serde_json::from_str(&text).map_err(error_to_string)
 }
 
 #[tauri::command]
@@ -1346,6 +1459,9 @@ fn normalize_config(config: &mut AppConfig) {
     if config.device.device_name.trim().is_empty() {
         config.device.device_name = default_device_name();
     }
+    if config.mcp.base_url.trim().is_empty() {
+        config.mcp = default_mcp_config();
+    }
 }
 
 fn default_config() -> Result<AppConfig> {
@@ -1354,6 +1470,7 @@ fn default_config() -> Result<AppConfig> {
         app_version: APP_VERSION.to_string(),
         device: default_device_config(),
         library_id: String::new(),
+        mcp: default_mcp_config(),
         source_roots: Vec::new(),
         output_dir: support.join("current").to_string_lossy().to_string(),
         schedule: ScheduleConfig {
@@ -1389,6 +1506,12 @@ fn default_device_config() -> DeviceConfig {
     DeviceConfig {
         device_id: generate_device_id(),
         device_name: default_device_name(),
+    }
+}
+
+fn default_mcp_config() -> McpConfig {
+    McpConfig {
+        base_url: "https://mcp.katoos.de".to_string(),
     }
 }
 
@@ -1540,6 +1663,64 @@ fn remove_api_key_marker() -> Result<()> {
         fs::remove_file(path)?;
     }
     Ok(())
+}
+
+fn mcp_connector_keychain_entry() -> Result<Entry> {
+    Entry::new(KEYCHAIN_SERVICE, MCP_CONNECTOR_ACCOUNT).map_err(Into::into)
+}
+
+fn load_mcp_connector_token() -> Result<String> {
+    if let Some(token) = cached_mcp_connector_token() {
+        return Ok(token);
+    }
+    let token = mcp_connector_keychain_entry()?
+        .get_password()
+        .context("Kein MCP Connector Token im Schlüsselbund gespeichert")?;
+    cache_mcp_connector_token(Some(token.clone()));
+    let _ = write_mcp_connector_token_marker();
+    Ok(token)
+}
+
+fn mcp_connector_token_cache() -> &'static Mutex<Option<String>> {
+    MCP_CONNECTOR_TOKEN_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn cached_mcp_connector_token() -> Option<String> {
+    mcp_connector_token_cache()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+fn cache_mcp_connector_token(value: Option<String>) {
+    if let Ok(mut guard) = mcp_connector_token_cache().lock() {
+        *guard = value;
+    }
+}
+
+fn mcp_connector_token_marker_path() -> Result<PathBuf> {
+    Ok(app_support_dir()?.join("mcp-connector-token.saved"))
+}
+
+fn mcp_connector_token_marker_exists() -> Result<bool> {
+    Ok(mcp_connector_token_marker_path()?.exists())
+}
+
+fn write_mcp_connector_token_marker() -> Result<()> {
+    fs::write(mcp_connector_token_marker_path()?, "saved")?;
+    Ok(())
+}
+
+fn remove_mcp_connector_token_marker() -> Result<()> {
+    let path = mcp_connector_token_marker_path()?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn normalize_base_url(base_url: &str) -> String {
+    base_url.trim().trim_end_matches('/').to_string()
 }
 
 fn mask_key(key: &str) -> String {

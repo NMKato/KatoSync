@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { defaultConfig } from "../lib/defaults";
 import type {
   ActionPlan,
+  ActionRiskLevel,
   ActionPlanStatus,
   AppConfig,
   ApiCheckResponse,
@@ -14,6 +15,7 @@ import type {
 
 const mockConfigKey = "katosync.config";
 const mockActionPlansKey = "katosync.actionPlans";
+const mockMcpConnectorTokenKey = "katosync.mcpConnectorToken";
 const isTauri = () => Boolean(window.__TAURI_INTERNALS__);
 
 export async function loadConfig(): Promise<AppConfig> {
@@ -71,6 +73,30 @@ export async function deleteApiKey(): Promise<KeyStatus> {
     return invoke<KeyStatus>("delete_api_key");
   }
   sessionStorage.removeItem("katosync.mockKey");
+  return { exists: false, masked: null };
+}
+
+export async function saveMcpConnectorToken(token: string): Promise<KeyStatus> {
+  if (isTauri()) {
+    return invoke<KeyStatus>("save_mcp_connector_token", { token });
+  }
+  localStorage.setItem(mockMcpConnectorTokenKey, token.trim());
+  return { exists: true, masked: maskKey(token.trim()) };
+}
+
+export async function getMcpConnectorTokenStatus(): Promise<KeyStatus> {
+  if (isTauri()) {
+    return invoke<KeyStatus>("mcp_connector_token_status");
+  }
+  const token = localStorage.getItem(mockMcpConnectorTokenKey);
+  return { exists: Boolean(token), masked: token ? maskKey(token) : null };
+}
+
+export async function deleteMcpConnectorToken(): Promise<KeyStatus> {
+  if (isTauri()) {
+    return invoke<KeyStatus>("delete_mcp_connector_token");
+  }
+  localStorage.removeItem(mockMcpConnectorTokenKey);
   return { exists: false, masked: null };
 }
 
@@ -201,7 +227,11 @@ export async function openOutputDir(): Promise<string> {
   return defaultConfig.outputDir;
 }
 
-export async function loadActionPlans(): Promise<ActionPlan[]> {
+export async function loadActionPlans(config?: AppConfig): Promise<ActionPlan[]> {
+  if (config) {
+    const remotePlans = await tryLoadRemoteActionPlans(config);
+    if (remotePlans) return remotePlans;
+  }
   const stored = localStorage.getItem(mockActionPlansKey);
   if (stored) return JSON.parse(stored) as ActionPlan[];
   const plans = mockActionPlans();
@@ -210,10 +240,15 @@ export async function loadActionPlans(): Promise<ActionPlan[]> {
 }
 
 export async function updateActionPlanStatus(
+  config: AppConfig | null,
   planId: string,
   status: ActionPlanStatus
 ): Promise<ActionPlan[]> {
-  const plans = await loadActionPlans();
+  if (config) {
+    const remotePlans = await tryUpdateRemoteActionPlanStatus(config, planId, status);
+    if (remotePlans) return remotePlans;
+  }
+  const plans = await loadActionPlans(config ?? undefined);
   const nextPlans = plans.map((plan) => (plan.planId === planId ? { ...plan, status } : plan));
   localStorage.setItem(mockActionPlansKey, JSON.stringify(nextPlans));
   return nextPlans;
@@ -346,6 +381,160 @@ function mockActionPlans(): ActionPlan[] {
   ];
 }
 
+interface RemoteActionPlansResponse {
+  ok: boolean;
+  plans: RemoteActionPlanRow[];
+  tasksByPlanId?: Record<string, RemoteActionTaskRow[]>;
+}
+
+interface RemoteActionPlanRow {
+  id: string;
+  source: string;
+  agent_name: string | null;
+  created_at: string;
+  status: string;
+  risk_level: string;
+  execution_mode: string;
+  title: string;
+  summary: string | null;
+}
+
+interface RemoteActionTaskRow {
+  id: string;
+  action_plan_id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  priority: string;
+  assignee: string | null;
+  due_at: string | null;
+  sort_order: number;
+}
+
+async function tryLoadRemoteActionPlans(config: AppConfig): Promise<ActionPlan[] | null> {
+  try {
+    const tokenStatus = await getMcpConnectorTokenStatus();
+    if (!tokenStatus.exists) return null;
+    const response = isTauri()
+      ? await invoke<RemoteActionPlansResponse>("load_remote_action_plans", {
+          baseUrl: config.mcp.baseUrl
+        })
+      : await fetchRemoteActionPlans(config);
+    return mapRemoteActionPlans(response);
+  } catch (error) {
+    console.warn("MCP Action Queue nicht erreichbar, nutze lokale Demo-Pläne.", error);
+    return null;
+  }
+}
+
+async function tryUpdateRemoteActionPlanStatus(
+  config: AppConfig,
+  planId: string,
+  status: ActionPlanStatus
+): Promise<ActionPlan[] | null> {
+  const remoteStatus = toRemoteStatus(status);
+  if (!remoteStatus) return null;
+  try {
+    const tokenStatus = await getMcpConnectorTokenStatus();
+    if (!tokenStatus.exists) return null;
+    if (isTauri()) {
+      await invoke("update_remote_action_plan_status", {
+        baseUrl: config.mcp.baseUrl,
+        planId,
+        status: remoteStatus
+      });
+    } else {
+      await patchRemoteActionPlanStatus(config, planId, remoteStatus);
+    }
+    return tryLoadRemoteActionPlans(config);
+  } catch (error) {
+    console.warn("MCP Action Plan konnte nicht aktualisiert werden.", error);
+    return null;
+  }
+}
+
+async function fetchRemoteActionPlans(config: AppConfig): Promise<RemoteActionPlansResponse> {
+  const token = localStorage.getItem(mockMcpConnectorTokenKey);
+  if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
+  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/action-plans?status=pending_review&includeTasks=true`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new Error(`MCP Action Queue nicht erreichbar (${response.status}).`);
+  return response.json() as Promise<RemoteActionPlansResponse>;
+}
+
+async function patchRemoteActionPlanStatus(
+  config: AppConfig,
+  planId: string,
+  status: string
+): Promise<void> {
+  const token = localStorage.getItem(mockMcpConnectorTokenKey);
+  if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
+  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/action-plans/${planId}/status`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ status })
+  });
+  if (!response.ok) throw new Error(`MCP Action Plan konnte nicht aktualisiert werden (${response.status}).`);
+}
+
+function mapRemoteActionPlans(response: RemoteActionPlansResponse): ActionPlan[] {
+  return (response.plans ?? []).map((plan) => {
+    const tasks = response.tasksByPlanId?.[plan.id] ?? [];
+    return {
+      planId: plan.id,
+      source: plan.source,
+      agentName: plan.agent_name || "Mistral Work",
+      createdAt: formatRemoteDate(plan.created_at),
+      status: fromRemoteStatus(plan.status),
+      executionMode: plan.execution_mode === "auto_allowed" ? "sequential" : "manual",
+      dailyLimit: Math.max(1, tasks.length || 1),
+      riskLevel: fromRemoteRisk(plan.risk_level),
+      requiresUserReview: plan.execution_mode !== "auto_allowed",
+      tasks: tasks.map((task, index) => ({
+        taskId: task.id,
+        priority: index + 1,
+        projectId: task.assignee || "katosync",
+        title: task.title,
+        taskType: "project_management_task",
+        targetRunner: "manual_review",
+        riskLevel: fromRemoteRisk(plan.risk_level),
+        requiresApproval: true,
+        summary: task.description
+      }))
+    };
+  });
+}
+
+function fromRemoteStatus(status: string): ActionPlanStatus {
+  if (status === "pending_review") return "pending_user_review";
+  if (status === "approved" || status === "rejected" || status === "completed") return status;
+  if (status === "running" || status === "queued") return "approved";
+  if (status === "failed") return "blocked";
+  return "pending_user_review";
+}
+
+function toRemoteStatus(status: ActionPlanStatus): string | null {
+  if (status === "pending_user_review") return "pending_review";
+  if (status === "approved" || status === "rejected" || status === "completed") return status;
+  if (status === "blocked") return "failed";
+  return null;
+}
+
+function fromRemoteRisk(risk: string): ActionRiskLevel {
+  if (risk === "low" || risk === "medium" || risk === "high") return risk;
+  return "critical";
+}
+
+function formatRemoteDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("de-DE");
+}
+
 function deviceSlug(config: AppConfig) {
   const name = slugify(config.device.deviceName);
   const id = slugify(config.device.deviceId).slice(-8);
@@ -367,6 +556,9 @@ function slugify(value: string) {
 function normalizeConfig(config: AppConfig): AppConfig {
   return {
     ...config,
+    mcp: {
+      baseUrl: config.mcp?.baseUrl || defaultConfig.mcp.baseUrl
+    },
     device: {
       deviceId: config.device?.deviceId || "demo-device",
       deviceName: config.device?.deviceName || "Dieser Rechner"

@@ -45,6 +45,33 @@ Zuerst bauen:
 - `Action Queue` ist aktuell nur Anzeige/Freigabe-Vorbereitung, keine lokale Runner-Ausfuehrung.
 - `npm run build` war erfolgreich.
 
+## Umsetzung 2026-06-26
+
+- KatoSync Desktop ist an die KatoOS MCP Worker-REST-Bruecke angebunden.
+- Standard-MCP-Server in der Desktop-Konfiguration: `https://mcp.katoos.de`.
+- MCP Connector Token wird in der Desktop-App separat vom Mistral API-Key im macOS-Schluesselbund gespeichert.
+- Keychain-Account fuer den MCP Connector Token: `mcp-connector-token`.
+- Neue Tauri-Kommandos:
+  - `save_mcp_connector_token`
+  - `mcp_connector_token_status`
+  - `delete_mcp_connector_token`
+  - `load_remote_action_plans`
+  - `update_remote_action_plan_status`
+- Repository-Strategie:
+  - Wenn MCP Token vorhanden ist, laedt `loadActionPlans(config)` live vom Worker.
+  - Ohne Token oder bei Netzwerkfehlern nutzt KatoSync lokale Demo-Plaene, damit die UI stabil bleibt.
+  - `approved` und `rejected` werden an den Worker zurueckgeschrieben.
+  - `in_review` bleibt lokal, weil der Backend-Status dafuer noch nicht existiert.
+- Sicherheit:
+  - Kein Supabase Service-Role-Key in der Desktop-App.
+  - Kein automatischer Runner.
+  - Kein direkter Codex/KAI-Start ohne separate Freigabe.
+
+Validierung:
+
+- `npm run build` erfolgreich.
+- `cargo check` in `src-tauri` erfolgreich.
+
 ## Sicherheitsnotizen
 
 - Kein Supabase Service-Role-Key in der Desktop-App.

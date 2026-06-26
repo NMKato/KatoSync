@@ -2,7 +2,7 @@
 
 ## 2026-06-25 - KatoSync 2.0 Blueprint aufgenommen
 
-Projekt: KatoSync Desktop App  
+Projekt: KatoSync Desktop App
 Status: Planung fuer KatoSync 2.0 gestartet  
 
 Ergebnis:
@@ -32,7 +32,7 @@ Sicherheitsentscheidung:
 
 ## 2026-06-25 - KatoSync 2.0 Phase 1 begonnen
 
-Projekt: KatoSync Desktop App  
+Projekt: KatoSync Desktop App
 Status: Action Queue MVP-Schnitt in Arbeit  
 
 Ergebnis:
@@ -62,3 +62,33 @@ Build:
 - `npm run build` erfolgreich.
 - Frontend kompiliert mit neuer Action-Queue-Card.
 - Runner-Ausfuehrung bleibt deaktiviert, bis Codex/KAI Bridge separat freigegeben wird.
+
+## 2026-06-26 - KatoSync 2.0 REST-Bruecke angebunden
+
+Projekt: KatoSync Desktop App
+Status: Action Queue an KatoOS MCP Server angebunden
+
+Ergebnis:
+
+- KatoSync kann einen MCP Connector Token im macOS-Schluesselbund speichern.
+- Die App nutzt standardmaessig `https://mcp.katoos.de` als MCP-Server.
+- Die Action Queue fragt echte Pending Action Plans ueber die Worker-REST-Bruecke ab:
+  - `GET /api/action-plans?status=pending_review&includeTasks=true`
+  - `PATCH /api/action-plans/:id/status`
+- Wenn kein MCP Token vorhanden ist oder der Server nicht erreichbar ist, faellt die UI auf lokale Demo-Action-Plans zurueck.
+- Status-Aktionen bleiben Human-in-the-Loop:
+  - pruefen bleibt lokal
+  - ablehnen wird als `rejected` an den Server gemeldet
+  - freigeben wird als `approved` an den Server gemeldet
+- Keine lokale Runner-Ausfuehrung wurde aktiviert.
+
+Naechster Schritt:
+
+- In der App unter API den MCP Connector Token einmal speichern.
+- Danach Action Queue aktualisieren und echte Mistral/MCP Action Plans pruefen.
+- Danach Briefings als eigene Vollseite planen und nicht in eine kleine Dashboard-Card pressen.
+
+Build:
+
+- `npm run build` erfolgreich.
+- `cargo check` in `src-tauri` erfolgreich.

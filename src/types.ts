@@ -27,11 +27,16 @@ export interface AppConfig {
   appVersion: string;
   device: DeviceConfig;
   libraryId: string;
+  mcp: McpConfig;
   sourceRoots: string[];
   outputDir: string;
   schedule: ScheduleConfig;
   scanRules: ScanRules;
   safety: SafetyConfig;
+}
+
+export interface McpConfig {
+  baseUrl: string;
 }
 
 export interface DeviceConfig {

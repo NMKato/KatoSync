@@ -597,6 +597,41 @@ export default function App() {
                   Geräte-ID: {config.device.deviceId || "wird automatisch erstellt"}
                 </span>
               </label>
+              <label>
+                MCP Server
+                <input
+                  onChange={(event) =>
+                    vm.updateConfig("mcp", {
+                      ...config.mcp,
+                      baseUrl: event.target.value
+                    })
+                  }
+                  placeholder="https://mcp.katoos.de"
+                  value={config.mcp.baseUrl}
+                />
+                <span className="field-hint">
+                  Rückkanal für Action Plans aus Mistral Work.
+                </span>
+              </label>
+              <label>
+                MCP Connector Token
+                <div className="inline-input">
+                  <input
+                    onChange={(event) => vm.setMcpTokenInput(event.target.value)}
+                    placeholder={vm.mcpTokenStatus.masked || "Connector Token"}
+                    type="password"
+                    value={vm.mcpTokenInput}
+                  />
+                  <button
+                    disabled={Boolean(vm.busy)}
+                    onClick={vm.handleSaveMcpConnectorToken}
+                    title="MCP Token speichern"
+                    type="button"
+                  >
+                    {vm.busy === "mcp-token" ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+                  </button>
+                </div>
+              </label>
             </div>
             <div
               className={`button-row ${spotlightId === "section-api-tests" ? "spotlight-target spotlight-pad" : ""}`}
@@ -613,6 +648,15 @@ export default function App() {
               <button className="ghost danger" disabled={Boolean(vm.busy)} onClick={vm.handleDeleteKey} type="button">
                 <Trash2 size={15} />
                 Key löschen
+              </button>
+              <button
+                className="ghost danger"
+                disabled={Boolean(vm.busy)}
+                onClick={vm.handleDeleteMcpConnectorToken}
+                type="button"
+              >
+                <Trash2 size={15} />
+                MCP Token löschen
               </button>
             </div>
           </Panel>
@@ -1310,6 +1354,12 @@ function getWorkState(busy: string | null) {
         icon: Library,
         title: "Library-Test läuft",
         text: "KatoSync prüft, ob die Mistral Library erreichbar ist."
+      };
+    case "mcp-token":
+      return {
+        icon: ShieldCheck,
+        title: "MCP Token wird gespeichert",
+        text: "Der Connector Token wird im macOS-Schlüsselbund gesichert."
       };
     case "save":
       return {
