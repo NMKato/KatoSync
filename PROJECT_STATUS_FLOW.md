@@ -117,3 +117,26 @@ Fix:
 Validierung:
 
 - `cargo check` in `src-tauri` erfolgreich.
+
+## 2026-06-26 - Action Queue zeigt nur offene Pläne
+
+Projekt: KatoSync Desktop App
+Status: Queue-UX korrigiert
+
+Problem:
+
+- Nach `Tagesplan freigeben` oder `Ablehnen` waren die Action Plans technisch erledigt.
+- Der Queue-Zähler sprang auf `0`, aber die erledigten Karten blieben sichtbar.
+
+Fix:
+
+- Die Action Queue rendert nur noch offene Pläne:
+  - `pending_user_review`
+  - `in_review`
+- Freigegebene und abgelehnte Pläne erscheinen als Zusammenfassung in den Aktivitäten.
+- Bei leerer Queue zeigt KatoSync einen klaren erledigt-Hinweis.
+
+Nächster Schritt:
+
+- Build prüfen.
+- Danach App erneut bauen/installieren, damit der lokale Test dieselbe Version nutzt.

@@ -83,6 +83,13 @@ Validierung:
   - Das Fenster-X beendet KatoSync weiterhin nicht.
   - Der rote Button `Programm beenden` bleibt der echte Quit-Pfad.
 
+## Bugfix 2026-06-26 - Action Queue Anzeige
+
+- Action Plans mit Status `approved` oder `rejected` duerfen nicht weiter als offene Queue-Karten sichtbar bleiben.
+- Die Queue zeigt jetzt nur noch `pending_user_review` und `in_review`.
+- Freigegebene und abgelehnte Plaene werden als Aktivitaeten zusammengefasst.
+- Wenn keine offenen Action Plans vorhanden sind, zeigt die Queue einen klaren erledigt-Zustand.
+
 ## Sicherheitsnotizen
 
 - Kein Supabase Service-Role-Key in der Desktop-App.

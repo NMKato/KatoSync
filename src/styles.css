@@ -994,6 +994,38 @@ input[type="range"] {
   gap: 10px;
 }
 
+.queue-empty {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 10px;
+  align-items: start;
+  min-height: 92px;
+  padding: 14px;
+  border: 1px solid rgba(81, 205, 123, 0.18);
+  border-radius: 8px;
+  color: #9df2b9;
+  background: rgba(81, 205, 123, 0.08);
+}
+
+.queue-empty svg {
+  margin-top: 1px;
+}
+
+.queue-empty > div {
+  display: grid;
+  gap: 4px;
+}
+
+.queue-empty strong {
+  color: #dffbe8;
+}
+
+.queue-empty span {
+  color: #aab3bf;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .action-plan-card {
   display: grid;
   gap: 12px;
@@ -1776,6 +1808,7 @@ input[type="range"] {
 :root[data-theme="light"] .field-hint,
 :root[data-theme="light"] .quota-row span,
 :root[data-theme="light"] .quota-empty span,
+:root[data-theme="light"] .queue-empty span,
 :root[data-theme="light"] .metric span,
 :root[data-theme="light"] .activity-item small,
 :root[data-theme="light"] .empty-state {
@@ -1882,6 +1915,16 @@ input[type="range"] {
   background:
     linear-gradient(90deg, rgba(255, 193, 79, 0.22), rgba(255, 247, 224, 0.62)),
     rgba(255, 239, 196, 0.64);
+}
+
+:root[data-theme="light"] .queue-empty {
+  color: #207a43;
+  border-color: rgba(35, 142, 76, 0.18);
+  background: rgba(81, 205, 123, 0.12);
+}
+
+:root[data-theme="light"] .queue-empty strong {
+  color: #173522;
 }
 
 :root[data-theme="light"] .inline-input button,

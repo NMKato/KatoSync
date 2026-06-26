@@ -1025,10 +1025,8 @@ export default function App() {
 }
 
 function ActionQueuePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
-  const visiblePlans = vm.actionPlans.filter((plan) => plan.status !== "completed");
-  const pendingCount = visiblePlans.filter(
-    (plan) => plan.status === "pending_user_review" || plan.status === "in_review"
-  ).length;
+  const visiblePlans = vm.actionPlans.filter(isOpenActionPlan);
+  const pendingCount = visiblePlans.length;
 
   return (
     <Panel className="queue-panel" id="section-action-queue" title="Action Queue" icon={<ClipboardList size={18} />}>
@@ -1106,9 +1104,15 @@ function ActionQueuePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
           ))}
         </div>
       ) : (
-        <div className="empty-state">
-          Noch keine Action Plans. Sobald Mistral über den MCP-Rückkanal Pläne erzeugt,
-          erscheinen sie hier zur lokalen Freigabe.
+        <div className="queue-empty">
+          <CheckCircle2 size={18} />
+          <div>
+            <strong>Keine offenen Action Plans</strong>
+            <span>
+              Freigegebene oder abgelehnte Pläne findest du in den Aktivitäten. Neue Pläne
+              erscheinen hier nach dem nächsten Mistral-Run.
+            </span>
+          </div>
         </div>
       )}
     </Panel>
@@ -1392,14 +1396,28 @@ function getWorkState(busy: string | null) {
 
 function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>) {
   const items: Array<{ kind: "ok" | "warn" | "error" | "info"; title: string; text: string }> = [];
-  const pendingPlans = vm.actionPlans.filter(
-    (plan) => plan.status === "pending_user_review" || plan.status === "in_review"
-  ).length;
+  const pendingPlans = vm.actionPlans.filter(isOpenActionPlan).length;
+  const approvedPlans = vm.actionPlans.filter((plan) => plan.status === "approved").length;
+  const rejectedPlans = vm.actionPlans.filter((plan) => plan.status === "rejected").length;
   if (pendingPlans) {
     items.push({
       kind: "info",
       title: "Action Queue",
       text: `${pendingPlans} Plan/Pläne warten auf lokale Freigabe.`
+    });
+  }
+  if (approvedPlans) {
+    items.push({
+      kind: "ok",
+      title: "Freigegebene Pläne",
+      text: `${approvedPlans} Plan/Pläne freigegeben. Runner-Anbindung folgt im nächsten 2.0-Schnitt.`
+    });
+  }
+  if (rejectedPlans) {
+    items.push({
+      kind: "warn",
+      title: "Abgelehnte Pläne",
+      text: `${rejectedPlans} Plan/Pläne abgelehnt. Keine lokale Aktion gestartet.`
     });
   }
   if (vm.report) {
@@ -1437,6 +1455,10 @@ function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>) {
     });
   }
   return items.slice(0, 5);
+}
+
+function isOpenActionPlan(plan: ActionPlan) {
+  return plan.status === "pending_user_review" || plan.status === "in_review";
 }
 
 function getIssueCount(vm: ReturnType<typeof useKatoSyncViewModel>) {
