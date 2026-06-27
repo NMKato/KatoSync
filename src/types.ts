@@ -49,6 +49,16 @@ export interface KeyStatus {
   masked?: string | null;
 }
 
+export interface SupabaseSessionStatus {
+  loggedIn: boolean;
+  email?: string | null;
+}
+
+export interface GeneratedConnectorToken {
+  token: string;
+  status: KeyStatus;
+}
+
 export interface RateLimitMetric {
   label: string;
   limit?: string | null;
@@ -105,8 +115,10 @@ export type ActionPlanStatus =
   | "pending_user_review"
   | "in_review"
   | "approved"
+  | "running"
   | "rejected"
   | "blocked"
+  | "failed"
   | "completed";
 
 export type ActionTaskType =
@@ -155,6 +167,58 @@ export interface ActionPlan {
   riskLevel: ActionRiskLevel;
   requiresUserReview: boolean;
   tasks: ActionTask[];
+}
+
+export type BriefingStatus = "new" | "accepted" | "queued" | "rejected" | "archived";
+
+export type BriefingPriority = "low" | "medium" | "high" | "critical";
+
+export interface Briefing {
+  briefingId: string;
+  source: string;
+  agentName: string;
+  title: string;
+  createdAt: string;
+  status: BriefingStatus;
+  priority: BriefingPriority;
+  summary: string;
+  body: string;
+  suggestedAction?: string | null;
+}
+
+export interface CodexRunRequest {
+  baseUrl: string;
+  repoPath: string;
+  trigger: "action_task" | "briefing";
+  actionPlanId?: string | null;
+  actionTaskId?: string | null;
+  briefingId?: string | null;
+  projectId: string;
+  priority: number;
+  title: string;
+  riskLevel: string;
+  prompt: string;
+  inputPlan: unknown;
+  dryRun?: boolean;
+  timeoutSecs?: number;
+}
+
+export interface CodexRunResult {
+  status: string;
+  branch: string;
+  runDir: string;
+  changedFiles: string[];
+  commit?: string | null;
+  resultSummary: string;
+  exitCode?: number | null;
+  durationMs: number;
+  error?: string | null;
+}
+
+export interface CodexRunState {
+  status: "idle" | "running" | "completed" | "failed";
+  result?: CodexRunResult;
+  error?: string;
 }
 
 export interface LaunchAgentStatus {
