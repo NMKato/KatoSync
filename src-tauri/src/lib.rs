@@ -703,19 +703,9 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
         return Err(format!("Projektordner nicht gefunden: {repo_path}"));
     }
     let config = load_config_inner().map_err(error_to_string)?;
-    let canon_repo = repo.canonicalize().map_err(error_to_string)?;
-    let allowed = config.source_roots.iter().any(|root| {
-        Path::new(root)
-            .canonicalize()
-            .map(|r| canon_repo.starts_with(&r))
-            .unwrap_or(false)
-    });
-    if !allowed {
-        return Err(
-            "Dieser Ordner liegt nicht in deinen KatoSync-Projektordnern. Aus Sicherheit abgebrochen."
-                .to_string(),
-        );
-    }
+    // Keine sourceRoots-Allowlist mehr: der Nutzer waehlt den Ordner bewusst im
+    // Datei-Dialog (= explizite Freigabe). Schutz kommt aus Git-Repo-Pflicht,
+    // sauberem Arbeitsbaum, eigenem Branch, Sandbox und critical-Abbruch.
     let login = Command::new(codex_bin())
         .arg("login")
         .arg("status")
