@@ -268,3 +268,26 @@ Nächster Schritt:
 
 - Sobald Codex-Kontingent verfügbar (oder Upgrade): echten Task an Codex übergeben → Branch + Commit + execution_results prüfen.
 - Politur: echte Komponenten (Ampel/Balken/Diagramme) für Briefings; Auto-Merge/PR optional.
+
+## 2026-06-27 - Codex-Bridge LIVE im GUI verifiziert + Allowlist gelockert
+
+Projekt: KatoSync Desktop App
+Status: Codex-Bridge v1 end-to-end im GUI erfolgreich
+
+Ergebnis:
+
+- Echter GUI-Lauf: Briefing → „An Codex übergeben" → `KatoOS Sync app` → Codex hat ~5 Min gearbeitet (130 Events), 5 Dateien echt geändert (tauri.conf.json Hardened Runtime, Entitlements.plist, RELEASE_OWNER_RUNBOOK.md, release-env.example.sh, README) und **auto-committet auf Branch `katosync/...`** (Commit c13e711, nicht main, kein Merge). Run-Ordner `.katosync/runs/...` mit allen Audit-Dateien angelegt.
+- sourceRoots-Allowlist entfernt: der Nutzer wählt den Ordner bewusst im Datei-Dialog (= Freigabe); Schutz über Git-Repo-Pflicht, sauberen Baum, eigenen Branch, Sandbox, critical-Abbruch.
+- Animierte „Codex läuft …"-Anzeige im Briefing + Codex-Bridge-Panel.
+- Token-Hinweis: nach App-Neu-Builds kann der Schlüsselbund-Zugriff neu bestätigt werden müssen („Immer erlauben"); NICHT neu generieren (harte Rotation entwertet sonst den Mistral-Token).
+
+Offen / nächste Phase (PROJEKT-BOARD + Politur):
+
+- Live-Aktivitäts-Feed statt indeterminiertem Balken (Codex-JSONL-Events via Tauri-Events streamen).
+- Branch immer von main/default abzweigen (nicht vom aktuellen Branch) + danach zurück auf main.
+- Doppeltes `katosync/katosync/` im Branchnamen kürzen (bei Briefings projectId-Prefix weglassen).
+- „Repo pro Projekt merken" / Auto-Detect (kein Ordnerwählen mehr pro Lauf).
+- Optional: Branch auto-pushen + PR via gh erstellen.
+- GROSS: Projekt-Board — Mistral liefert pro Projekt strukturierte Tasks (create_pending_action_plan mit tasks[projectId,priority,risk]); KatoSync gruppiert nach Projekt, Triage (auswählen/Reihenfolge/aufschieben/ablehnen), Task-Status-Endpunkt im Server, sequentielle Queue mit dailyLimit. Briefing bleibt Leseschicht (briefings.action_plan_id verlinkt).
+
+Commit-Regel: Nur NMKato als Autor, KEIN „Co-Authored-By: Claude".

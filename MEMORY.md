@@ -1,5 +1,16 @@
 # KatoSync Memory
 
+## Commit-Regel (wichtig)
+
+- In Git-Commits NUR NMKato als Autor. KEIN `Co-Authored-By: Claude` o.ä. anhängen.
+
+## Stand 2026-06-27 (Session-Ende)
+
+- LIVE & funktionierend: (1) Briefings live aus dem MCP-Server (Markdown-Rendering), (2) Self-Service-Login (eigenes Supabase-Projekt, E-Mail-Registrierung) + „Connector-Token generieren", (3) Codex-Bridge v1 — Briefing/Action-Task → `run_codex_task` (Rust) → Preflight → eigener Branch → `codex exec` (Sandbox, ChatGPT-Login = keine API-Kosten) → Auto-Commit auf Branch (kein Merge) → Rückkanal `POST /api/execution-results`. Echter GUI-Lauf verifiziert (Commit c13e711, 5 Dateien).
+- Codex-Bridge: KEINE sourceRoots-Allowlist mehr (Ordnerwahl im Dialog = Freigabe). Branch wird vom AKTUELLEN HEAD abgezweigt (TODO: von main). Branch wird NICHT gepusht (kein Auto-PR; manuell `git push` für PR).
+- Schlüsselbund-Eigenheit: nach jedem App-Neu-Build (ad-hoc signiert) kann macOS den Token-Zugriff neu abfragen → „Immer erlauben"; NICHT neu generieren (harte Rotation entwertet sonst den in Mistral hinterlegten Token).
+- Nächste große Welle = Projekt-Board (Briefings → pro-Projekt-Tasks von Mistral, Triage/Queue/aufschieben/ablehnen, Task-Status-Endpunkt, Live-Aktivitäts-Feed).
+
 ## Projektkontext
 
 KatoSync ist eine Tauri/macOS Desktop-App. Sie synchronisiert lokale Projektstatus-, Memory-, Roadmap- und Task-Dateien in eine Mistral Library.
