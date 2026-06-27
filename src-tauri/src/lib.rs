@@ -728,7 +728,7 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
     {
         return Err("Der Projektordner ist kein Git-Repository.".to_string());
     }
-    if !git_capture(&repo_path, &["status", "--porcelain"])?.is_empty() {
+    if !git_capture(&repo_path, &["status", "--porcelain", "--", ":!.katosync"])?.is_empty() {
         return Err("Der Arbeitsbaum ist nicht sauber. Bitte erst committen oder stashen.".to_string());
     }
 
