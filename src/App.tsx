@@ -1406,6 +1406,13 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
                 Ablehnen
               </button>
             </footer>
+            {vm.busy === "codex-run" ? (
+              <div className="codex-running">
+                <Loader2 className="spin" size={16} />
+                <span>Codex läuft …</span>
+                <div className="codex-bar" />
+              </div>
+            ) : null}
           </article>
         ) : (
           <div className="empty-state">Wähle ein Briefing aus der Liste.</div>
@@ -1445,12 +1452,13 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
             good={run.status === "completed"}
             text={
               run.status === "running"
-                ? "Codex läuft …"
+                ? "Codex läuft … (kann 1–2 Minuten dauern)"
                 : run.status === "completed"
                   ? "Codex-Lauf abgeschlossen."
                   : `Codex-Lauf fehlgeschlagen${run.error ? `: ${run.error}` : ""}.`
             }
           />
+          {run.status === "running" ? <div className="codex-bar" style={{ marginTop: 12 }} /> : null}
           {result ? (
             <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
               <div>

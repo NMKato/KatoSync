@@ -1387,6 +1387,45 @@ input[type="range"] {
   border-color: rgba(0, 0, 0, 0.12);
 }
 
+/* Codex-Lauf-Anzeige (Created by Nikolas Kato) */
+.codex-running {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  color: #f4b352;
+  font-size: 13px;
+}
+.codex-running > span {
+  white-space: nowrap;
+}
+.codex-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  flex: 1;
+}
+.codex-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -40%;
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, #f59e0b, transparent);
+  animation: codex-indeterminate 1.2s infinite ease-in-out;
+}
+@keyframes codex-indeterminate {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+
 .suggested-action {
   display: grid;
   max-width: 920px;
