@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  BookOpenText,
   CalendarClock,
   CheckCircle2,
   ClipboardList,
@@ -19,6 +20,7 @@ import {
   PlayCircle,
   RefreshCcw,
   ShieldCheck,
+  Settings,
   SlidersHorizontal,
   Sun,
   TerminalSquare,
@@ -27,6 +29,8 @@ import {
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   FindingsTable,
   Metric,
@@ -39,16 +43,13 @@ import {
 import { licenseAgreement } from "./lib/license";
 import { weekdayLabels } from "./lib/defaults";
 import { useKatoSyncViewModel, type StepId } from "./viewmodels/useKatoSyncViewModel";
-import type { ActionPlan, FileFinding, Weekday } from "./types";
+import type { ActionPlan, Briefing, FileFinding, Weekday } from "./types";
 
 const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
   { id: "dashboard", label: "Dashboard", icon: Database },
   { id: "actionQueue", label: "Action Queue", icon: ClipboardList },
-  { id: "api", label: "API", icon: KeyRound },
-  { id: "library", label: "Library", icon: Library },
-  { id: "folders", label: "Ordner", icon: FolderOpen },
-  { id: "rules", label: "Regeln", icon: SlidersHorizontal },
-  { id: "schedule", label: "Uploadplan", icon: CalendarClock },
+  { id: "briefings", label: "Briefings", icon: BookOpenText },
+  { id: "settings", label: "Einstellungen", icon: Settings },
   { id: "logs", label: "Aktivitäten", icon: TerminalSquare }
 ];
 
@@ -68,6 +69,8 @@ const sectionByStep: Record<StepId, string> = {
   schedule: "section-schedule",
   dashboard: "section-status",
   actionQueue: "section-action-queue",
+  briefings: "section-briefings",
+  settings: "section-api",
   logs: "section-activities"
 };
 
@@ -115,6 +118,42 @@ const onboardingSteps: Array<{
   }
 ];
 
+function toVisibleStep(step: StepId): StepId {
+  if (step === "api" || step === "library" || step === "rules") return "settings";
+  if (step === "folders" || step === "schedule") return "dashboard";
+  return step;
+}
+
+function pageCopy(step: StepId) {
+  switch (toVisibleStep(step)) {
+    case "actionQueue":
+      return {
+        title: "Action Queue",
+        text: "Agent-Pläne lokal prüfen, freigeben oder ablehnen. Es wird nichts automatisch ausgeführt."
+      };
+    case "briefings":
+      return {
+        title: "Briefings",
+        text: "Mistral-Ergebnisse lesen, priorisieren und für die lokale Umsetzung vorbereiten."
+      };
+    case "settings":
+      return {
+        title: "Einstellungen",
+        text: "Mistral, MCP, Gerätekennung, Sync-Regeln und lokale Runner-Verbindungen gebündelt."
+      };
+    case "logs":
+      return {
+        title: "Aktivitäten",
+        text: "Protokolle, Hinweise und letzte Entscheidungen an einem Ort."
+      };
+    default:
+      return {
+        title: "KatoSync",
+        text: "Dashboard für Sync, Uploadplan, Action Queue und aktuellen Status."
+      };
+  }
+}
+
 type OnboardingPlacement = "left" | "right" | "top" | "bottom";
 
 interface OnboardingPosition {
@@ -147,6 +186,8 @@ export default function App() {
   const workState = getWorkState(vm.busy);
   const WorkIcon = workState?.icon;
   const activities = buildActivities(vm);
+  const visibleStep = toVisibleStep(vm.activeStep);
+  const page = pageCopy(visibleStep);
   const issueCount = getIssueCount(vm);
   const hints = buildHints(vm);
   const hintSignature = useMemo(() => buildHintSignature(hints), [hints]);
@@ -400,7 +441,7 @@ export default function App() {
         <nav className="steps">
           {steps.map((step) => (
             <StepButton
-              active={vm.activeStep === step.id}
+              active={visibleStep === step.id}
               icon={step.icon}
               key={step.id}
               label={step.label}
@@ -424,8 +465,8 @@ export default function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <h1>KatoSync</h1>
-            <p>Ein Dashboard für Mistral-Zugang, Projektordner, automatische Synchronisierung und Aktivitäten.</p>
+            <h1>{page.title}</h1>
+            <p>{page.text}</p>
           </div>
           <div className="setup-strip" aria-label="Setup-Fortschritt">
             <div className="completion-head">
@@ -537,7 +578,8 @@ export default function App() {
           </div>
         ) : null}
 
-        <section className="dashboard-grid overview-grid">
+        <section className={`dashboard-grid overview-grid page-${visibleStep}`}>
+          {visibleStep === "dashboard" ? (
           <Panel className="hero-panel" id="section-status">
             <div>
               <span className="section-label">Status</span>
@@ -553,8 +595,10 @@ export default function App() {
               <Metric label="Uploads" value={vm.report?.uploaded.length ?? 0} tone="ok" />
             </div>
           </Panel>
+          ) : null}
 
-          <Panel id="section-api" title="Mistral Zugang" icon={<KeyRound size={18} />}>
+          {visibleStep === "settings" ? (
+          <Panel className="settings-main-panel" id="section-api" title="Mistral Zugang" icon={<KeyRound size={18} />}>
             <div
               className={`form-grid ${spotlightId === "section-api-fields" ? "spotlight-target spotlight-pad" : ""}`}
               id="section-api-fields"
@@ -610,11 +654,12 @@ export default function App() {
                   value={config.mcp.baseUrl}
                 />
                 <span className="field-hint">
-                  Rückkanal für Action Plans aus Mistral Work.
+                  Basis-URL des Rückkanals — die App nutzt <code>/api</code>, deshalb hier OHNE <code>/mcp</code>.
+                  In Mistral denselben Server MIT <code>/mcp</code> eintragen: {config.mcp.baseUrl.replace(/\/+$/, "")}/mcp
                 </span>
               </label>
               <label>
-                MCP Connector Token
+                MCP Connector Token (manuell)
                 <div className="inline-input">
                   <input
                     onChange={(event) => vm.setMcpTokenInput(event.target.value)}
@@ -631,6 +676,93 @@ export default function App() {
                     {vm.busy === "mcp-token" ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
                   </button>
                 </div>
+              </label>
+              <label>
+                KatoSync Login (Token automatisch erzeugen)
+                {vm.sessionStatus.loggedIn ? (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <span className="field-hint">
+                      Angemeldet als {vm.sessionStatus.email || "KatoOS-Konto"}.
+                    </span>
+                    <div className="button-row">
+                      <button
+                        className="secondary"
+                        disabled={Boolean(vm.busy)}
+                        onClick={vm.handleGenerateConnectorToken}
+                        type="button"
+                      >
+                        {vm.busy === "mint-token" ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}
+                        {vm.busy === "mint-token" ? "Generiere…" : "Connector-Token generieren"}
+                      </button>
+                      <button className="ghost" disabled={Boolean(vm.busy)} onClick={vm.handleLogout} type="button">
+                        Abmelden
+                      </button>
+                    </div>
+                    {vm.generatedToken ? (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        <span className="field-hint" style={{ color: "#f59e0b" }}>
+                          Dein neuer Connector-Token — nur JETZT sichtbar. Kopieren und in Mistral eintragen:
+                        </span>
+                        <input
+                          readOnly
+                          value={vm.generatedToken}
+                          onFocus={(event) => event.currentTarget.select()}
+                        />
+                        <div className="button-row">
+                          <button className="secondary" onClick={vm.handleCopyToken} type="button">
+                            Token kopieren
+                          </button>
+                        </div>
+                        <span className="field-hint">
+                          In Mistral Studio: MCP-Server {config.mcp.baseUrl.replace(/\/+$/, "")}/mcp manuell hinzufügen und diesen Token als Bearer hinterlegen.
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <input
+                      autoComplete="username"
+                      onChange={(event) => vm.setLoginEmail(event.target.value)}
+                      placeholder="E-Mail"
+                      type="email"
+                      value={vm.loginEmail}
+                    />
+                    <input
+                      autoComplete="current-password"
+                      onChange={(event) => vm.setLoginPassword(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") vm.handleLogin();
+                      }}
+                      placeholder="Passwort"
+                      type="password"
+                      value={vm.loginPassword}
+                    />
+                    <div className="button-row">
+                      <button
+                        className="secondary"
+                        disabled={Boolean(vm.busy)}
+                        onClick={vm.handleLogin}
+                        type="button"
+                      >
+                        {vm.busy === "login" ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}
+                        Anmelden
+                      </button>
+                      <button
+                        className="ghost"
+                        disabled={Boolean(vm.busy)}
+                        onClick={vm.handleRegister}
+                        type="button"
+                      >
+                        {vm.busy === "register" ? <Loader2 className="spin" size={15} /> : null}
+                        Registrieren
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <span className="field-hint">
+                  Mit E-Mail registrieren oder anmelden, dann Connector-Token automatisch erzeugen. Google folgt. Das Feld oben bleibt als manueller Fallback.
+                </span>
               </label>
             </div>
             <div
@@ -660,9 +792,13 @@ export default function App() {
               </button>
             </div>
           </Panel>
+          ) : null}
 
-          <ActionQueuePanel vm={vm} />
+          {visibleStep === "dashboard" || visibleStep === "actionQueue" ? (
+            <ActionQueuePanel vm={vm} expanded={visibleStep === "actionQueue"} />
+          ) : null}
 
+          {visibleStep === "settings" ? (
           <Panel id="section-library" title="API-Kontingent" icon={<Activity size={18} />}>
             {vm.rateLimits.length ? (
               <div className="quota-list">
@@ -694,7 +830,9 @@ export default function App() {
               KatoSync Live-Header statt feste Zahlen zu raten.
             </p>
           </Panel>
+          ) : null}
 
+          {visibleStep === "dashboard" ? (
           <Panel
             className={spotlightId === "section-folders" ? "spotlight-target" : ""}
             id="section-folders"
@@ -745,7 +883,9 @@ export default function App() {
               </button>
             </div>
           </Panel>
+          ) : null}
 
+          {visibleStep === "settings" ? (
           <Panel
             className={spotlightId === "section-rules" ? "spotlight-target" : ""}
             id="section-rules"
@@ -807,7 +947,9 @@ export default function App() {
             </label>
           </div>
         </Panel>
+          ) : null}
 
+          {visibleStep === "dashboard" ? (
           <Panel
             className={spotlightId === "section-schedule" ? "spotlight-target" : ""}
             id="section-schedule"
@@ -869,7 +1011,9 @@ export default function App() {
               text={vm.launchStatus?.message || "Status unbekannt"}
             />
           </Panel>
+          ) : null}
 
+          {visibleStep === "dashboard" ? (
           <Panel
             className={`table-panel ${spotlightId === "section-findings" ? "spotlight-target" : ""}`}
             id="section-findings"
@@ -878,7 +1022,9 @@ export default function App() {
           >
             <FindingsTable scan={vm.scan ?? vm.report?.scan ?? null} />
           </Panel>
+          ) : null}
 
+          {visibleStep === "dashboard" ? (
           <Panel className="run-panel" id="section-sync" title="Sync ausführen" icon={<UploadCloud size={18} />}>
             <p className="field-hint">
               {config.schedule.enabled
@@ -920,7 +1066,9 @@ export default function App() {
               text={vm.report ? `${vm.report.currentFiles.length} CURRENT-Dateien erzeugt` : "Noch kein Lauf"}
             />
           </Panel>
+          ) : null}
 
+          {visibleStep === "logs" ? (
           <Panel id="section-activities" className="logs-panel" title="Aktivitäten" icon={<TerminalSquare size={18} />}>
             <div className="activity-list">
               {activities.map((item) => (
@@ -941,6 +1089,10 @@ export default function App() {
             </div>
             <pre>{vm.logs || "Noch keine Logs geladen."}</pre>
           </Panel>
+          ) : null}
+
+          {visibleStep === "briefings" ? <BriefingsPanel vm={vm} /> : null}
+          {visibleStep === "settings" ? <CodexBridgePanel vm={vm} /> : null}
         </section>
       </main>
 
@@ -1024,12 +1176,23 @@ export default function App() {
   );
 }
 
-function ActionQueuePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+function ActionQueuePanel({
+  vm,
+  expanded = false
+}: {
+  vm: ReturnType<typeof useKatoSyncViewModel>;
+  expanded?: boolean;
+}) {
   const visiblePlans = vm.actionPlans.filter(isOpenActionPlan);
   const pendingCount = visiblePlans.length;
 
   return (
-    <Panel className="queue-panel" id="section-action-queue" title="Action Queue" icon={<ClipboardList size={18} />}>
+    <Panel
+      className={expanded ? "queue-panel action-queue-full" : "queue-panel"}
+      id="section-action-queue"
+      title="Action Queue"
+      icon={<ClipboardList size={18} />}
+    >
       <div className="queue-summary">
         <div>
           <strong>{pendingCount}</strong>
@@ -1069,6 +1232,22 @@ function ActionQueuePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
                           {runnerLabel(task.targetRunner)} · {task.projectId}
                         </small>
                       </div>
+                      {task.targetRunner === "codex_cli" ? (
+                        <button
+                          className="ghost"
+                          disabled={Boolean(vm.busy)}
+                          onClick={() => void vm.handleRunCodexForTask(plan, task)}
+                          title="An Codex übergeben"
+                          type="button"
+                        >
+                          {vm.busy === "codex-run" ? (
+                            <Loader2 className="spin" size={14} />
+                          ) : (
+                            <PlayCircle size={14} />
+                          )}
+                          Codex
+                        </button>
+                      ) : null}
                     </li>
                   ))}
               </ol>
@@ -1113,6 +1292,197 @@ function ActionQueuePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
               erscheinen hier nach dem nächsten Mistral-Run.
             </span>
           </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const visibleBriefings = useMemo(
+    () => vm.briefings.filter((briefing) => briefing.status !== "archived"),
+    [vm.briefings]
+  );
+  const [selectedId, setSelectedId] = useState<string | null>(visibleBriefings[0]?.briefingId ?? null);
+  const selected = visibleBriefings.find((briefing) => briefing.briefingId === selectedId) ?? visibleBriefings[0];
+
+  useEffect(() => {
+    if (!selectedId && visibleBriefings[0]) setSelectedId(visibleBriefings[0].briefingId);
+    if (selectedId && !visibleBriefings.some((briefing) => briefing.briefingId === selectedId)) {
+      setSelectedId(visibleBriefings[0]?.briefingId ?? null);
+    }
+  }, [selectedId, visibleBriefings]);
+
+  return (
+    <div className="briefings-page" id="section-briefings">
+      <Panel className="briefing-list-panel" title="Briefing-Eingang" icon={<BookOpenText size={18} />}>
+        <div className="queue-summary">
+          <div>
+            <strong>{visibleBriefings.filter((briefing) => briefing.status === "new").length}</strong>
+            <span>neue Briefings</span>
+          </div>
+          <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleRefreshBriefings} type="button">
+            {vm.busy === "briefings" ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
+            Aktualisieren
+          </button>
+        </div>
+
+        <div className="briefing-list">
+          {visibleBriefings.length ? (
+            visibleBriefings.map((briefing) => (
+              <button
+                className={selected?.briefingId === briefing.briefingId ? "briefing-card active" : "briefing-card"}
+                key={briefing.briefingId}
+                onClick={() => setSelectedId(briefing.briefingId)}
+                type="button"
+              >
+                <span className="agent-name">{briefing.agentName}</span>
+                <strong>{briefing.title}</strong>
+                <small>{briefing.createdAt}</small>
+                <div>
+                  <span className={`priority-pill ${briefing.priority}`}>{briefingPriorityLabel(briefing.priority)}</span>
+                  <span className={`status-pill ${briefing.status}`}>{briefingStatusLabel(briefing.status)}</span>
+                </div>
+              </button>
+            ))
+          ) : (
+            <div className="queue-empty">
+              <CheckCircle2 size={18} />
+              <div>
+                <strong>Keine Briefings</strong>
+                <span>Neue Mistral-Ergebnisse erscheinen hier, sobald der MCP-Rückkanal sie liefert.</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </Panel>
+
+      <Panel className="briefing-reader-panel">
+        {selected ? (
+          <article className="briefing-reader">
+            <header>
+              <div>
+                <span className="section-label">{selected.agentName}</span>
+                <h2>{selected.title}</h2>
+                <p>{selected.createdAt} · {selected.source}</p>
+              </div>
+              <span className={`priority-pill ${selected.priority}`}>{briefingPriorityLabel(selected.priority)}</span>
+            </header>
+            <p className="briefing-summary">{selected.summary}</p>
+            <div className="briefing-body markdown-body">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.body}</ReactMarkdown>
+            </div>
+            {selected.suggestedAction ? (
+              <div className="suggested-action">
+                <span className="section-label">Vorgeschlagene Aktion</span>
+                <p>{selected.suggestedAction}</p>
+              </div>
+            ) : null}
+            <footer className="briefing-actions">
+              <button
+                className="secondary"
+                disabled={Boolean(vm.busy)}
+                onClick={() => void vm.handleAcceptBriefing(selected.briefingId)}
+                type="button"
+              >
+                <CheckCircle2 size={15} />
+                Annehmen
+              </button>
+              <button
+                className="primary"
+                disabled={Boolean(vm.busy)}
+                onClick={() => void vm.handleRunCodexForBriefing(selected)}
+                type="button"
+              >
+                {vm.busy === "codex-run" ? <Loader2 className="spin" size={15} /> : <PlayCircle size={15} />}
+                An Codex übergeben
+              </button>
+              <button
+                className="ghost danger"
+                disabled={Boolean(vm.busy)}
+                onClick={() => void vm.handleRejectBriefing(selected.briefingId)}
+                type="button"
+              >
+                Ablehnen
+              </button>
+            </footer>
+          </article>
+        ) : (
+          <div className="empty-state">Wähle ein Briefing aus der Liste.</div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const run = vm.codexRun;
+  const result = run.result;
+  return (
+    <Panel className="codex-panel" title="Codex Bridge" icon={<TerminalSquare size={18} />}>
+      <p>
+        Freigegebene Aufgaben werden lokal von der Codex-CLI ausgeführt — auf einem eigenen Branch,
+        mit Auto-Commit. Nichts wird automatisch in main gemergt; du prüfst den Branch und mergst selbst.
+      </p>
+      {run.status === "idle" ? (
+        <div className="codex-bridge-list">
+          <div>
+            <strong>So startest du</strong>
+            <span>In der Action Queue „Codex" pro Task, oder in einem Briefing „An Codex übergeben".</span>
+          </div>
+          <div>
+            <strong>Sicherheit</strong>
+            <span>Eigener Branch, Sandbox, Audit. Kritische Aufgaben werden nicht automatisch ausgeführt.</span>
+          </div>
+          <div>
+            <strong>Wirtschaftlich</strong>
+            <span>Läuft über deinen Codex/ChatGPT-Login — keine zusätzlichen API-Kosten.</span>
+          </div>
+        </div>
+      ) : (
+        <div className="codex-run-view">
+          <StatusLine
+            good={run.status === "completed"}
+            text={
+              run.status === "running"
+                ? "Codex läuft …"
+                : run.status === "completed"
+                  ? "Codex-Lauf abgeschlossen."
+                  : `Codex-Lauf fehlgeschlagen${run.error ? `: ${run.error}` : ""}.`
+            }
+          />
+          {result ? (
+            <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+              <div>
+                <strong>Branch:</strong> {result.branch}
+              </div>
+              {result.commit ? (
+                <div>
+                  <strong>Commit:</strong> {result.commit.slice(0, 12)}
+                </div>
+              ) : null}
+              <div>
+                <strong>Run-Ordner:</strong> <span className="field-hint">{result.runDir}</span>
+              </div>
+              <div>
+                <strong>Geänderte Dateien ({result.changedFiles.length}):</strong>
+              </div>
+              {result.changedFiles.length ? (
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {result.changedFiles.slice(0, 40).map((file) => (
+                    <li key={file}>{file}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="field-hint">Keine Dateiänderungen.</span>
+              )}
+              {result.resultSummary ? (
+                <div className="markdown-body" style={{ marginTop: 8 }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.resultSummary}</ReactMarkdown>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       )}
     </Panel>
@@ -1201,11 +1571,15 @@ function planStatusLabel(status: ActionPlan["status"]) {
     case "in_review":
       return "Zur Prüfung markiert. Bitte Aufgaben und Risiko prüfen.";
     case "approved":
-      return "Freigegeben. Runner-Anbindung folgt im nächsten 2.0-Schnitt.";
+      return "Freigegeben. Tasks mit Codex-Runner kannst du an Codex übergeben.";
+    case "running":
+      return "Codex läuft …";
     case "rejected":
       return "Abgelehnt. Keine lokale Aktion gestartet.";
     case "blocked":
       return "Blockiert. Menschliche Prüfung erforderlich.";
+    case "failed":
+      return "Fehlgeschlagen. Bitte den Branch prüfen.";
     case "completed":
       return "Abgeschlossen.";
     default:
@@ -1240,6 +1614,38 @@ function runnerLabel(runner: ActionPlan["tasks"][number]["targetRunner"]) {
       return "Manuelle Prüfung";
     default:
       return runner;
+  }
+}
+
+function briefingStatusLabel(status: Briefing["status"]) {
+  switch (status) {
+    case "new":
+      return "Neu";
+    case "accepted":
+      return "Angenommen";
+    case "queued":
+      return "Vorbereitet";
+    case "rejected":
+      return "Abgelehnt";
+    case "archived":
+      return "Archiviert";
+    default:
+      return status;
+  }
+}
+
+function briefingPriorityLabel(priority: Briefing["priority"]) {
+  switch (priority) {
+    case "low":
+      return "Niedrig";
+    case "medium":
+      return "Mittel";
+    case "high":
+      return "Hoch";
+    case "critical":
+      return "Kritisch";
+    default:
+      return priority;
   }
 }
 
@@ -1389,6 +1795,12 @@ function getWorkState(busy: string | null) {
         title: "Action Queue wird geladen",
         text: "KatoSync prüft lokale und spätere MCP-Action-Pläne."
       };
+    case "briefings":
+      return {
+        icon: BookOpenText,
+        title: "Briefings werden geladen",
+        text: "KatoSync prüft neue Mistral-Ergebnisse aus dem Rückkanal."
+      };
     default:
       return null;
   }
@@ -1399,6 +1811,8 @@ function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>) {
   const pendingPlans = vm.actionPlans.filter(isOpenActionPlan).length;
   const approvedPlans = vm.actionPlans.filter((plan) => plan.status === "approved").length;
   const rejectedPlans = vm.actionPlans.filter((plan) => plan.status === "rejected").length;
+  const newBriefings = vm.briefings.filter((briefing) => briefing.status === "new").length;
+  const queuedBriefings = vm.briefings.filter((briefing) => briefing.status === "queued").length;
   if (pendingPlans) {
     items.push({
       kind: "info",
@@ -1418,6 +1832,20 @@ function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>) {
       kind: "warn",
       title: "Abgelehnte Pläne",
       text: `${rejectedPlans} Plan/Pläne abgelehnt. Keine lokale Aktion gestartet.`
+    });
+  }
+  if (newBriefings) {
+    items.push({
+      kind: "info",
+      title: "Neue Briefings",
+      text: `${newBriefings} Briefing(s) warten im Rückkanal.`
+    });
+  }
+  if (queuedBriefings) {
+    items.push({
+      kind: "ok",
+      title: "Briefings vorbereitet",
+      text: `${queuedBriefings} Briefing(s) sind für die spätere Runner-Übergabe vorbereitet.`
     });
   }
   if (vm.report) {

@@ -10,3 +10,4 @@ src-tauri/target/
 .env
 .env.*
 !tests/fixtures/sample-project/.env
+._*

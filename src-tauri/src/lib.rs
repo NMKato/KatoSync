@@ -13,13 +13,14 @@ use std::{
     fs,
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     sync::{Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-use tokio::time::sleep;
+use tokio::process::Command as TokioCommand;
+use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
@@ -27,10 +28,15 @@ const APP_VERSION: &str = "1.0.1";
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";
+const SUPABASE_SESSION_ACCOUNT: &str = "supabase-refresh-token";
 const USER_AGENT: &str = "KatoSync/1.0.1";
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
+// KatoSync-eigenes Supabase-Projekt (oeffentlicher Anon-Key, bewusst client-seitig). Getrennt von KatoOS.
+const KATOSYNC_AUTH_URL: &str = "https://wspcuiylctlrvvpnwufk.supabase.co";
+const KATOSYNC_AUTH_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndzcGN1aXlsY3RscnZ2cG53dWZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzNzMwODMsImV4cCI6MjA5Nzk0OTA4M30.HJu_FxIFWoFDooVLE9TVOD10dgxJwLcpFZrUKK2_bv4";
 static API_KEY_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static MCP_CONNECTOR_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static SUPABASE_ACCESS_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -214,6 +220,14 @@ pub fn run() {
             delete_mcp_connector_token,
             load_remote_action_plans,
             update_remote_action_plan_status,
+            load_remote_briefings,
+            update_remote_briefing_status,
+            login_supabase,
+            signup_supabase,
+            supabase_session_status,
+            logout_supabase,
+            mint_connector_token,
+            run_codex_task,
             test_mistral_connection,
             test_library,
             scan_project,
@@ -348,6 +362,104 @@ fn delete_mcp_connector_token() -> Result<KeyStatus, String> {
 }
 
 #[tauri::command]
+async fn login_supabase(email: String, password: String) -> Result<SupabaseSessionStatus, String> {
+    let email_trim = email.trim();
+    if email_trim.is_empty() || password.trim().is_empty() {
+        return Err("E-Mail und Passwort dürfen nicht leer sein.".to_string());
+    }
+    let session = supabase_password_login(email_trim, &password)
+        .await
+        .map_err(error_to_string)?;
+    save_supabase_refresh_token(&session.refresh_token).map_err(error_to_string)?;
+    cache_supabase_access_token(Some(session.access_token.clone()));
+    let user_email = session
+        .user
+        .and_then(|user| user.email)
+        .unwrap_or_else(|| email_trim.to_string());
+    write_supabase_session_email(&user_email).map_err(error_to_string)?;
+    Ok(SupabaseSessionStatus {
+        logged_in: true,
+        email: Some(user_email),
+    })
+}
+
+#[tauri::command]
+async fn signup_supabase(email: String, password: String) -> Result<SupabaseSessionStatus, String> {
+    let email_trim = email.trim();
+    if email_trim.is_empty() || password.trim().len() < 6 {
+        return Err("Bitte E-Mail und ein Passwort mit mindestens 6 Zeichen angeben.".to_string());
+    }
+    let result = supabase_signup(email_trim, &password)
+        .await
+        .map_err(error_to_string)?;
+    let resolved_email = result
+        .user
+        .and_then(|user| user.email)
+        .or(result.email)
+        .unwrap_or_else(|| email_trim.to_string());
+
+    if let (Some(access), Some(refresh)) = (result.access_token, result.refresh_token) {
+        // Projekt ohne E-Mail-Bestaetigung: direkt angemeldet.
+        save_supabase_refresh_token(&refresh).map_err(error_to_string)?;
+        cache_supabase_access_token(Some(access));
+        write_supabase_session_email(&resolved_email).map_err(error_to_string)?;
+        Ok(SupabaseSessionStatus {
+            logged_in: true,
+            email: Some(resolved_email),
+        })
+    } else {
+        // E-Mail-Bestaetigung noetig: noch nicht eingeloggt.
+        Ok(SupabaseSessionStatus {
+            logged_in: false,
+            email: Some(resolved_email),
+        })
+    }
+}
+
+#[tauri::command]
+fn supabase_session_status() -> Result<SupabaseSessionStatus, String> {
+    let email = read_supabase_session_email();
+    Ok(SupabaseSessionStatus {
+        logged_in: email.is_some(),
+        email,
+    })
+}
+
+#[tauri::command]
+fn logout_supabase() -> Result<SupabaseSessionStatus, String> {
+    if let Ok(entry) = supabase_session_keychain_entry() {
+        let _ = entry.delete_credential();
+    }
+    cache_supabase_access_token(None);
+    let _ = remove_supabase_session_email();
+    Ok(SupabaseSessionStatus {
+        logged_in: false,
+        email: None,
+    })
+}
+
+#[tauri::command]
+async fn mint_connector_token(base_url: String) -> Result<serde_json::Value, String> {
+    let access_token = ensure_supabase_access_token().await.map_err(error_to_string)?;
+    let url = format!("{}/api/me/connector", normalize_base_url(&base_url));
+    let response = reqwest::Client::new()
+        .post(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(access_token.trim())
+        .json(&json!({}))
+        .send()
+        .await
+        .map_err(error_to_string)?;
+
+    let status = response.status();
+    let text = response.text().await.map_err(error_to_string)?;
+    if !status.is_success() {
+        return Err(format!("Token-Generierung fehlgeschlagen ({status}): {text}"));
+    }
+    serde_json::from_str(&text).map_err(error_to_string)
+}
+
+#[tauri::command]
 async fn load_remote_action_plans(base_url: String) -> Result<serde_json::Value, String> {
     let token = load_mcp_connector_token().map_err(error_to_string)?;
     let url = format!(
@@ -399,6 +511,430 @@ async fn update_remote_action_plan_status(
         ));
     }
     serde_json::from_str(&text).map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn load_remote_briefings(base_url: String) -> Result<serde_json::Value, String> {
+    let token = load_mcp_connector_token().map_err(error_to_string)?;
+    let url = format!(
+        "{}/api/briefings?includeArchived=false",
+        normalize_base_url(&base_url)
+    );
+    let response = reqwest::Client::new()
+        .get(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(token.trim())
+        .send()
+        .await
+        .map_err(error_to_string)?;
+
+    let status = response.status();
+    let text = response.text().await.map_err(error_to_string)?;
+    if !status.is_success() {
+        return Err(format!("MCP Briefings nicht erreichbar ({status}): {text}"));
+    }
+    serde_json::from_str(&text).map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn update_remote_briefing_status(
+    base_url: String,
+    briefing_id: String,
+    status: String,
+) -> Result<serde_json::Value, String> {
+    let token = load_mcp_connector_token().map_err(error_to_string)?;
+    let url = format!(
+        "{}/api/briefings/{}/status",
+        normalize_base_url(&base_url),
+        briefing_id
+    );
+    let response = reqwest::Client::new()
+        .patch(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(token.trim())
+        .json(&json!({ "status": status }))
+        .send()
+        .await
+        .map_err(error_to_string)?;
+
+    let response_status = response.status();
+    let text = response.text().await.map_err(error_to_string)?;
+    if !response_status.is_success() {
+        return Err(format!(
+            "MCP Briefing konnte nicht aktualisiert werden ({response_status}): {text}"
+        ));
+    }
+    serde_json::from_str(&text).map_err(error_to_string)
+}
+
+// ===== Codex-Bridge: lokale Ausfuehrung freigegebener Aufgaben via Codex-CLI =====
+
+const CODEX_BIN: &str = "/Applications/Codex.app/Contents/Resources/codex";
+const PROTECTED_BRANCHES: [&str; 5] = ["main", "master", "production", "develop", "release"];
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexRunRequest {
+    base_url: String,
+    repo_path: String,
+    trigger: String,
+    #[serde(default)]
+    action_plan_id: Option<String>,
+    #[serde(default)]
+    action_task_id: Option<String>,
+    #[serde(default)]
+    briefing_id: Option<String>,
+    #[serde(default)]
+    project_id: String,
+    #[serde(default)]
+    priority: u32,
+    title: String,
+    #[serde(default)]
+    risk_level: String,
+    prompt: String,
+    #[serde(default)]
+    input_plan: serde_json::Value,
+    #[serde(default)]
+    dry_run: bool,
+    #[serde(default)]
+    timeout_secs: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexRunResult {
+    status: String,
+    branch: String,
+    run_dir: String,
+    changed_files: Vec<String>,
+    commit: Option<String>,
+    result_summary: String,
+    exit_code: Option<i32>,
+    duration_ms: u64,
+    error: Option<String>,
+}
+
+fn codex_bin() -> String {
+    if Path::new(CODEX_BIN).exists() {
+        CODEX_BIN.to_string()
+    } else {
+        "codex".to_string()
+    }
+}
+
+fn git_capture(repo: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(error_to_string)?;
+    if !output.status.success() {
+        return Err(format!(
+            "git {} fehlgeschlagen: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+async fn patch_action_plan_status_inner(
+    base_url: &str,
+    plan_id: &str,
+    status: &str,
+) -> Result<(), String> {
+    let token = load_mcp_connector_token().map_err(error_to_string)?;
+    let url = format!(
+        "{}/api/action-plans/{}/status",
+        normalize_base_url(base_url),
+        plan_id
+    );
+    let response = reqwest::Client::new()
+        .patch(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(token.trim())
+        .json(&json!({ "status": status }))
+        .send()
+        .await
+        .map_err(error_to_string)?;
+    if !response.status().is_success() {
+        let s = response.status();
+        let t = response.text().await.unwrap_or_default();
+        return Err(format!("Status-Update fehlgeschlagen ({s}): {t}"));
+    }
+    Ok(())
+}
+
+async fn post_execution_result(base_url: &str, body: &serde_json::Value) -> Result<(), String> {
+    let token = load_mcp_connector_token().map_err(error_to_string)?;
+    let url = format!("{}/api/execution-results", normalize_base_url(base_url));
+    let response = reqwest::Client::new()
+        .post(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(token.trim())
+        .json(body)
+        .send()
+        .await
+        .map_err(error_to_string)?;
+    if !response.status().is_success() {
+        let s = response.status();
+        let t = response.text().await.unwrap_or_default();
+        return Err(format!("execution-results POST fehlgeschlagen ({s}): {t}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> {
+    let started = std::time::Instant::now();
+    let run_stamp = Local::now().format("%Y%m%d%H%M%S").to_string();
+    let repo_path = req.repo_path.trim().to_string();
+
+    // ---- Preflight (hart) ----
+    if req.risk_level.to_lowercase() == "critical" {
+        return Err(
+            "Kritische Aufgaben muessen manuell bearbeitet werden. Kein automatischer Codex-Lauf."
+                .to_string(),
+        );
+    }
+    let repo = Path::new(&repo_path);
+    if !repo.is_dir() {
+        return Err(format!("Projektordner nicht gefunden: {repo_path}"));
+    }
+    let config = load_config_inner().map_err(error_to_string)?;
+    let canon_repo = repo.canonicalize().map_err(error_to_string)?;
+    let allowed = config.source_roots.iter().any(|root| {
+        Path::new(root)
+            .canonicalize()
+            .map(|r| canon_repo.starts_with(&r))
+            .unwrap_or(false)
+    });
+    if !allowed {
+        return Err(
+            "Dieser Ordner liegt nicht in deinen KatoSync-Projektordnern. Aus Sicherheit abgebrochen."
+                .to_string(),
+        );
+    }
+    let login = Command::new(codex_bin())
+        .arg("login")
+        .arg("status")
+        .output()
+        .map_err(error_to_string)?;
+    if !login.status.success() {
+        return Err("Bitte zuerst in Codex per ChatGPT einloggen (codex login).".to_string());
+    }
+    if git_capture(&repo_path, &["rev-parse", "--is-inside-work-tree"]).unwrap_or_default() != "true"
+    {
+        return Err("Der Projektordner ist kein Git-Repository.".to_string());
+    }
+    if !git_capture(&repo_path, &["status", "--porcelain"])?.is_empty() {
+        return Err("Der Arbeitsbaum ist nicht sauber. Bitte erst committen oder stashen.".to_string());
+    }
+
+    // ---- Branch + Run-Ordner ----
+    let date = Local::now().format("%Y-%m-%d").to_string();
+    let project_slug = {
+        let s = slugify(&req.project_id);
+        if s.is_empty() { "projekt".to_string() } else { s }
+    };
+    let title_slug = {
+        let s: String = slugify(&req.title).chars().take(40).collect();
+        let s = s.trim_matches('-').to_string();
+        if s.is_empty() { "aufgabe".to_string() } else { s }
+    };
+    let branch = format!(
+        "katosync/{}/{}/task-{}-{}",
+        project_slug, date, req.priority, title_slug
+    );
+    let task_id = req
+        .action_task_id
+        .clone()
+        .or_else(|| req.briefing_id.clone())
+        .unwrap_or_else(|| run_stamp.clone());
+    let task_slug = {
+        let s = slugify(&task_id);
+        if s.is_empty() { "run".to_string() } else { s }
+    };
+    let run_dir = format!("{}/.katosync/runs/{}/task-{}", repo_path, date, task_slug);
+    fs::create_dir_all(&run_dir).map_err(error_to_string)?;
+    fs::write(
+        format!("{run_dir}/input_plan.json"),
+        serde_json::to_string_pretty(&req.input_plan).unwrap_or_else(|_| "{}".to_string()),
+    )
+    .map_err(error_to_string)?;
+    fs::write(format!("{run_dir}/prompt.md"), sanitize_log(&req.prompt)).map_err(error_to_string)?;
+
+    git_capture(&repo_path, &["checkout", "-b", &branch])
+        .map_err(|e| format!("Branch konnte nicht angelegt werden ({branch}): {e}"))?;
+    let _ = write_log(
+        "codex",
+        &format!("Codex-Lauf gestartet: {} (Branch {branch})", sanitize_log(&req.title)),
+    );
+
+    if let Some(plan_id) = &req.action_plan_id {
+        if let Err(e) = patch_action_plan_status_inner(&req.base_url, plan_id, "running").await {
+            let _ = write_log("codex", &format!("Warnung: Status running fehlgeschlagen: {e}"));
+        }
+    }
+
+    // ---- codex exec (Sandbox + Timeout) ----
+    let sandbox = if req.dry_run { "read-only" } else { "workspace-write" };
+    let timeout_secs = req.timeout_secs.unwrap_or(900);
+    let output_path = format!("{run_dir}/output.txt");
+    let events_path = format!("{run_dir}/execution_log.jsonl");
+    let stderr_path = format!("{run_dir}/codex_stderr.log");
+    let events_file = fs::File::create(&events_path).map_err(error_to_string)?;
+    let stderr_file = fs::File::create(&stderr_path).map_err(error_to_string)?;
+
+    let mut codex_error: Option<String> = None;
+    let mut exit_code: Option<i32> = None;
+    match TokioCommand::new(codex_bin())
+        .arg("exec")
+        .arg(&req.prompt)
+        .arg("--cd")
+        .arg(&repo_path)
+        .arg("--sandbox")
+        .arg(sandbox)
+        .arg("--json")
+        .arg("-o")
+        .arg(&output_path)
+        .arg("--color")
+        .arg("never")
+        .arg("-c")
+        .arg("approval_policy=\"never\"")
+        .stdout(Stdio::from(events_file))
+        .stderr(Stdio::from(stderr_file))
+        .spawn()
+    {
+        Ok(mut child) => match timeout(Duration::from_secs(timeout_secs), child.wait()).await {
+            Ok(Ok(status)) => {
+                exit_code = status.code();
+                if !status.success() {
+                    codex_error = Some(format!("Codex Exit-Code {:?}", status.code()));
+                }
+            }
+            Ok(Err(e)) => codex_error = Some(error_to_string(e)),
+            Err(_) => {
+                let _ = child.kill().await;
+                codex_error = Some(format!("Codex-Timeout nach {timeout_secs}s"));
+            }
+        },
+        Err(e) => codex_error = Some(format!("Codex-Start fehlgeschlagen: {}", error_to_string(e))),
+    }
+
+    // Bei Fehler: aussagekraeftige Meldung aus den JSONL-Events ziehen (z.B. Usage-Limit).
+    if codex_error.is_some() {
+        if let Ok(events) = fs::read_to_string(&events_path) {
+            for line in events.lines().rev() {
+                if !line.contains("\"error\"") {
+                    continue;
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                    let msg = v
+                        .get("message")
+                        .and_then(|m| m.as_str())
+                        .or_else(|| v.pointer("/error/message").and_then(|m| m.as_str()));
+                    if let Some(m) = msg {
+                        codex_error = Some(sanitize_log(m));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Diff + Auto-Commit (nur bei Erfolg) ----
+    // Run-Ordner (.katosync) bewusst NICHT mitcommitten -> bleibt lokaler Audit-Trail,
+    // die "geaenderte Dateien"-Liste zeigt nur die echten Aenderungen.
+    let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync"]);
+    let changed_files: Vec<String> = git_capture(&repo_path, &["diff", "--cached", "--name-only"])
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect();
+    let result_summary = fs::read_to_string(&output_path)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    let mut commit: Option<String> = None;
+    if codex_error.is_none() && !changed_files.is_empty() {
+        let msg = format!("katosync: {} (task {})", req.title.replace('\n', " "), task_id);
+        match git_capture(&repo_path, &["commit", "-m", &msg]) {
+            Ok(_) => commit = git_capture(&repo_path, &["rev-parse", "HEAD"]).ok(),
+            Err(e) => codex_error = Some(format!("Commit fehlgeschlagen: {e}")),
+        }
+    }
+    let final_status = if codex_error.is_none() { "completed" } else { "failed" };
+
+    let _ = fs::write(
+        format!("{run_dir}/changed_files.json"),
+        serde_json::to_string_pretty(&changed_files).unwrap_or_else(|_| "[]".to_string()),
+    );
+    let _ = fs::write(format!("{run_dir}/result_summary.md"), &result_summary);
+    let _ = fs::write(
+        format!("{run_dir}/status_update.md"),
+        format!(
+            "# Codex Run Status: {final_status}\n\nBranch: {branch}\nCommit: {}\nGeaenderte Dateien: {}\n",
+            commit.clone().unwrap_or_else(|| "-".to_string()),
+            changed_files.len()
+        ),
+    );
+
+    // ---- Rueckkanal an den Server (best effort) ----
+    let artifacts = json!({
+        "branch": branch,
+        "commit": commit,
+        "runDir": run_dir,
+        "deviceId": config.device.device_id,
+        "changedFiles": changed_files,
+        "exitCode": exit_code,
+        "durationMs": started.elapsed().as_millis() as u64,
+        "trigger": req.trigger,
+        "dryRun": req.dry_run,
+    });
+    let mut body = json!({
+        "idempotencyKey": format!("codex-{task_slug}-{run_stamp}"),
+        "status": final_status,
+        "message": codex_error.clone().unwrap_or_else(|| "Codex-Lauf abgeschlossen".to_string()),
+        "artifacts": artifacts,
+    });
+    if let Some(id) = &req.action_plan_id {
+        body["actionPlanId"] = json!(id);
+    }
+    if let Some(id) = &req.action_task_id {
+        body["actionTaskId"] = json!(id);
+    }
+    if let Some(id) = &req.briefing_id {
+        body["briefingId"] = json!(id);
+    }
+    if let Err(e) = post_execution_result(&req.base_url, &body).await {
+        let _ = write_log("codex", &format!("Warnung: execution-results POST fehlgeschlagen: {e}"));
+    }
+    if let Some(plan_id) = &req.action_plan_id {
+        if let Err(e) = patch_action_plan_status_inner(&req.base_url, plan_id, final_status).await {
+            let _ = write_log("codex", &format!("Warnung: Status {final_status} fehlgeschlagen: {e}"));
+        }
+    }
+
+    let _ = write_log(
+        "codex",
+        &format!("Codex-Lauf {final_status}: {} (Branch {branch})", sanitize_log(&req.title)),
+    );
+
+    Ok(CodexRunResult {
+        status: final_status.to_string(),
+        branch,
+        run_dir,
+        changed_files,
+        commit,
+        result_summary,
+        exit_code,
+        duration_ms: started.elapsed().as_millis() as u64,
+        error: codex_error,
+    })
 }
 
 #[tauri::command]
@@ -1732,6 +2268,166 @@ fn remove_mcp_connector_token_marker() -> Result<()> {
         fs::remove_file(path)?;
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SupabaseSessionStatus {
+    logged_in: bool,
+    email: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SupabaseAuthUser {
+    email: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SupabaseTokenResponse {
+    access_token: String,
+    refresh_token: String,
+    #[serde(default)]
+    user: Option<SupabaseAuthUser>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SupabaseSignupResponse {
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    user: Option<SupabaseAuthUser>,
+    #[serde(default)]
+    email: Option<String>,
+}
+
+fn supabase_session_keychain_entry() -> Result<Entry> {
+    Entry::new(KEYCHAIN_SERVICE, SUPABASE_SESSION_ACCOUNT).map_err(Into::into)
+}
+
+fn supabase_access_token_cache() -> &'static Mutex<Option<String>> {
+    SUPABASE_ACCESS_TOKEN_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn cached_supabase_access_token() -> Option<String> {
+    supabase_access_token_cache()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+fn cache_supabase_access_token(value: Option<String>) {
+    if let Ok(mut guard) = supabase_access_token_cache().lock() {
+        *guard = value;
+    }
+}
+
+fn save_supabase_refresh_token(token: &str) -> Result<()> {
+    supabase_session_keychain_entry()?.set_password(token)?;
+    Ok(())
+}
+
+fn load_supabase_refresh_token() -> Result<String> {
+    supabase_session_keychain_entry()?
+        .get_password()
+        .context("Keine aktive KatoOS-Sitzung gefunden")
+}
+
+fn supabase_session_email_path() -> Result<PathBuf> {
+    Ok(app_support_dir()?.join("supabase-session.email"))
+}
+
+fn read_supabase_session_email() -> Option<String> {
+    let path = supabase_session_email_path().ok()?;
+    let value = fs::read_to_string(path).ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn write_supabase_session_email(email: &str) -> Result<()> {
+    fs::write(supabase_session_email_path()?, email.trim())?;
+    Ok(())
+}
+
+fn remove_supabase_session_email() -> Result<()> {
+    let path = supabase_session_email_path()?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+async fn supabase_password_login(email: &str, password: &str) -> Result<SupabaseTokenResponse> {
+    let url = format!("{KATOSYNC_AUTH_URL}/auth/v1/token?grant_type=password");
+    let response = reqwest::Client::new()
+        .post(url)
+        .header("apikey", KATOSYNC_AUTH_ANON_KEY)
+        .header("User-Agent", USER_AGENT)
+        .json(&json!({ "email": email, "password": password }))
+        .send()
+        .await?;
+
+    let status = response.status();
+    let text = response.text().await?;
+    if !status.is_success() {
+        return Err(anyhow!(
+            "Login fehlgeschlagen ({status}). Bitte E-Mail und Passwort pruefen."
+        ));
+    }
+    serde_json::from_str(&text).map_err(Into::into)
+}
+
+async fn supabase_signup(email: &str, password: &str) -> Result<SupabaseSignupResponse> {
+    let url = format!("{KATOSYNC_AUTH_URL}/auth/v1/signup");
+    let response = reqwest::Client::new()
+        .post(url)
+        .header("apikey", KATOSYNC_AUTH_ANON_KEY)
+        .header("User-Agent", USER_AGENT)
+        .json(&json!({ "email": email, "password": password }))
+        .send()
+        .await?;
+
+    let status = response.status();
+    let text = response.text().await?;
+    if !status.is_success() {
+        return Err(anyhow!("Registrierung fehlgeschlagen ({status}): {text}"));
+    }
+    serde_json::from_str(&text).map_err(Into::into)
+}
+
+async fn supabase_refresh_session(refresh_token: &str) -> Result<SupabaseTokenResponse> {
+    let url = format!("{KATOSYNC_AUTH_URL}/auth/v1/token?grant_type=refresh_token");
+    let response = reqwest::Client::new()
+        .post(url)
+        .header("apikey", KATOSYNC_AUTH_ANON_KEY)
+        .header("User-Agent", USER_AGENT)
+        .json(&json!({ "refresh_token": refresh_token }))
+        .send()
+        .await?;
+
+    let status = response.status();
+    let text = response.text().await?;
+    if !status.is_success() {
+        return Err(anyhow!("KatoOS-Sitzung abgelaufen ({status}). Bitte neu anmelden."));
+    }
+    serde_json::from_str(&text).map_err(Into::into)
+}
+
+// Liefert ein gueltiges Access-Token: aus dem Cache, sonst per Refresh-Token erneuern.
+async fn ensure_supabase_access_token() -> Result<String> {
+    if let Some(token) = cached_supabase_access_token() {
+        return Ok(token);
+    }
+    let refresh = load_supabase_refresh_token()?;
+    let session = supabase_refresh_session(&refresh).await?;
+    let _ = save_supabase_refresh_token(&session.refresh_token);
+    cache_supabase_access_token(Some(session.access_token.clone()));
+    Ok(session.access_token)
 }
 
 fn normalize_base_url(base_url: &str) -> String {

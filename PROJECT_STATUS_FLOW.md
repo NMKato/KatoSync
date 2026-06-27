@@ -140,3 +140,131 @@ Nächster Schritt:
 
 - Build prüfen.
 - Danach App erneut bauen/installieren, damit der lokale Test dieselbe Version nutzt.
+
+## 2026-06-26 - KatoSync 2.0 Navigation und Briefings-Seite strukturiert
+
+Projekt: KatoSync Desktop App
+Status: Informationsarchitektur für 2.0 verdichtet
+
+Ergebnis:
+
+- Die Navigation wurde auf die produktrelevanten Hauptbereiche fokussiert:
+  - `Dashboard`
+  - `Action Queue`
+  - `Briefings`
+  - `Einstellungen`
+  - `Aktivitäten`
+- Lose Detailseiten wie `Library`, `Ordner` und `Regeln` werden nicht mehr als eigene Hauptseiten geführt.
+- Dashboard bleibt kompakt für Betriebsstatus, Action-Queue-Überblick, Projektordner, Uploadplan, Sync und gefundene Dateien.
+- Einstellungen bündelt Mistral-Zugang, Library-ID, MCP-Server, MCP Connector Token, Sync-Regeln und vorbereitete Codex-Bridge.
+- Briefings haben eine eigene Vollseite mit Liste links und lesbarem Bericht rechts.
+- Briefings können angenommen, abgelehnt oder für Codex vorbereitet werden.
+- Die UI-Cards wurden auf symmetrischere Grid-Spalten und kompaktere responsive Breakpoints ausgerichtet.
+- Der native Tauri-Rückkanal für Briefings wurde vorbereitet:
+  - `load_remote_briefings`
+  - `update_remote_briefing_status`
+
+Sicherheitsentscheidung:
+
+- Die Codex Bridge bleibt vorbereitend und startet noch keine lokale Ausführung.
+- Briefings und Action Plans bleiben Human-in-the-Loop.
+- MCP Briefings fallen bei fehlendem Backend-Endpunkt stabil auf lokale Demo-Daten zurück.
+
+Validierung:
+
+- `npm run build` erfolgreich.
+- `cargo check` in `src-tauri` erfolgreich.
+
+Nächster Schritt:
+
+- Backend-Endpunkte für Briefings im KatoOS MCP Server finalisieren.
+- Danach Briefings live aus Supabase/Worker laden.
+- Anschließend Codex CLI Bridge mit manueller Freigabe und Audit-Log anbinden.
+
+## 2026-06-27 - Briefings live aus dem MCP-Server
+
+Projekt: KatoSync Desktop App + KatoOS MCP Server
+Status: Briefing-Rückkanal end-to-end live (Demo-Fallback abgelöst)
+
+Ergebnis:
+
+- Die Briefing-Endpunkte im KatoOS MCP Server sind gebaut, deployed und live verifiziert:
+  - Supabase-Tabelle `briefings` (Migration `0003_add_briefings.sql`) mit Status `new`/`accepted`/`queued`/`rejected`/`archived` und Priority `low`/`medium`/`high`/`critical`.
+  - MCP-Tool `create_briefing` (Mistral Work pusht Briefings, analog `create_pending_action_plan`).
+  - REST-Routen `GET /api/briefings?includeArchived=false` und `PATCH /api/briefings/:id/status`.
+- Die App-Seite war bereits vollständig vorbereitet: Frontend, Repository-Schicht und die nativen Tauri-Commands `load_remote_briefings` und `update_remote_briefing_status` laden jetzt echte Live-Briefings statt der lokalen Demo-Daten.
+- Der bestehende MCP Connector Token funktioniert direkt auch für Briefings (gleiche Bearer-Auth wie die Action Queue).
+- Ein echtes Test-Briefing liegt in der Prod-DB (Status `new`), damit die Briefings-Seite sofort Live-Daten zeigt.
+
+Sicherheitsentscheidung:
+
+- Der Server ruft Mistral nicht selbst auf und führt nichts lokal aus; Briefings werden von Mistral Work über das MCP-Tool gepusht.
+- Briefings bleiben Human-in-the-Loop; die Codex Bridge bleibt vorbereitend.
+
+Validierung:
+
+- Server: `npm run typecheck` und `npm test` (18 Tests) erfolgreich.
+- Supabase-Migration `0003` live angewendet, Worker deployed (Version `c98e853b-f765-470e-807c-8ecf16e8d29a`).
+- Live-Test: `create_briefing` (created + idempotenter Replay `created:false`), `GET /api/briefings` im erwarteten Feldformat, `PATCH /api/briefings/:id/status` mit nicht-leerer JSON-Antwort.
+
+Nächster Schritt:
+
+- In Mistral Studio die Work Skills so verdrahten, dass sie `create_briefing` produktiv aufrufen.
+- Danach Codex CLI Bridge mit manueller Freigabe und Audit-Log anbinden.
+
+## 2026-06-27 - Self-Service Connector-Token über KatoOS-Login
+
+Projekt: KatoSync Desktop App + KatoOS MCP Server
+Status: Self-Service-Token-Generator gebaut (Login statt manuellem Token-Paste)
+
+Ergebnis:
+
+- KatoSync hat jetzt einen echten Login: Nutzer melden sich mit ihrem bestehenden KatoOS-Konto an (geteiltes Supabase-Projekt, SSO mit Website/KSP/KAI/iOS).
+- Über den Button „Connector-Token generieren" erzeugt der Nutzer seinen eigenen Token selbst — kein manuelles Einfügen, kein Admin-Token im Client.
+- Server-seitig neu: `POST /api/me/connector` (verifiziert das KatoOS-User-JWT, löst/provisioniert den Tenant 1:1, rotiert alte Tokens, gibt den Token einmalig zurück).
+- App-seitig neu: Rust-Commands `login_supabase` / `mint_connector_token` / `logout_supabase`, Refresh-Token im macOS-Schlüsselbund, Login-+-Generieren-Karte in den Einstellungen. Das manuelle Token-Feld bleibt als Fallback.
+
+Architektur-/Sicherheitsentscheidung:
+
+- Geteilter KatoOS-Login wiederverwendet (kein Auth-Insel-Projekt).
+- 1 Tenant pro Nutzer (auto), 1 aktives Token mit harter Rotation, unbefristet, nur Login.
+- Admin-Provisioning-Token und Service-Role-Key bleiben strikt server-only; nur der öffentliche Anon-Key liegt im Client.
+
+Validierung:
+
+- Server: `npm run typecheck` + `npm test` grün, Migration `0004_decouple_auth` live, Worker deployed (`b85f11d7`), 401-/GoTrue-Pfade live verifiziert.
+- App: Frontend-Build + `cargo check` grün, Release gebaut und nach `/Applications` installiert.
+- Happy-Path (Login → Token generieren → Briefings live) wird mit echtem KatoOS-Konto in der App getestet.
+
+Nächster Schritt:
+
+- Mit KatoOS-Konto in KatoSync einloggen, Token generieren, denselben Token im Mistral-Connector eintragen, Laura ausführen → Briefing erscheint live.
+- Danach Codex CLI Bridge.
+
+## 2026-06-27 - Codex-Bridge v1 + Markdown-Rendering der Briefings
+
+Projekt: KatoSync Desktop App + KatoOS MCP Server
+Status: Codex-Bridge v1 gebaut (lokale Ausführung freigegebener Aufgaben)
+
+Ergebnis:
+
+- Briefings rendern jetzt echtes Markdown (react-markdown + GFM): Überschriften, Tabellen, Listen sauber statt Roh-`##`/`|`.
+- Neue Codex-Bridge: gemeinsame Rust-Engine `run_codex_task` (src-tauri/src/lib.rs), angebunden an BEIDE Auslöser — „Codex" pro Action-Task (Runner codex_cli) und „An Codex übergeben" im Briefing.
+- Ablauf: Preflight (Codex-Login, Git-Repo, sauberer Baum, Repo-Allowlist aus sourceRoots, kritische Aufgaben werden abgebrochen) → eigener Branch `katosync/<projectId>/<datum>/task-…` → Run-Ordner `.katosync/runs/…` (input_plan.json, prompt.md, output.txt, execution_log.jsonl, changed_files.json, result_summary.md, status_update.md) → `codex exec` (Sandbox workspace-write, Timeout) → Auto-Commit auf den Branch (kein Merge) → Rückkanal an den Server.
+- Wirtschaftlich: läuft über den Codex/ChatGPT-Login — keine zusätzlichen API-/Mistral-Kosten.
+- Server-Rückkanal: neuer Endpunkt `POST /api/execution-results` (Migration 0005) + Action-Plan-Status running/completed/failed. CodexBridgePanel zeigt Status, Branch, geänderte Dateien und result_summary.
+
+Sicherheitsentscheidung:
+
+- Eigener Branch + Sandbox; kein Auto-Merge, nie auf main; kritische Aufgaben nur manuell; kein API-Key/Secret im Client.
+
+Validierung:
+
+- Server: typecheck + 20 Tests grün, Migration 0005 live, deployed (`bc072501`), Endpunkt live verifiziert (201/Idempotenz/Tenant/400/401).
+- App: Frontend-Build + `cargo check` grün, Release gebaut + nach `/Applications` installiert.
+- Codex-Invocation real verifiziert (Login, Flags, JSON-Events). Echter Schreib-Lauf aktuell durch ChatGPT/Codex-Nutzungslimit blockiert (Reset 30.06.) — die Engine behandelt das sauber als `failed` inkl. Klartext-Meldung.
+
+Nächster Schritt:
+
+- Sobald Codex-Kontingent verfügbar (oder Upgrade): echten Task an Codex übergeben → Branch + Commit + execution_results prüfen.
+- Politur: echte Komponenten (Ampel/Balken/Diagramme) für Briefings; Auto-Merge/PR optional.

@@ -5,16 +5,25 @@ import type {
   ActionPlan,
   ActionRiskLevel,
   ActionPlanStatus,
+  ActionTask,
   AppConfig,
   ApiCheckResponse,
+  Briefing,
+  BriefingPriority,
+  BriefingStatus,
+  CodexRunRequest,
+  CodexRunResult,
+  GeneratedConnectorToken,
   KeyStatus,
   LaunchAgentStatus,
   ScanSummary,
+  SupabaseSessionStatus,
   SyncReport
 } from "../types";
 
 const mockConfigKey = "katosync.config";
 const mockActionPlansKey = "katosync.actionPlans";
+const mockBriefingsKey = "katosync.briefings";
 const mockMcpConnectorTokenKey = "katosync.mcpConnectorToken";
 const isTauri = () => Boolean(window.__TAURI_INTERNALS__);
 
@@ -98,6 +107,122 @@ export async function deleteMcpConnectorToken(): Promise<KeyStatus> {
   }
   localStorage.removeItem(mockMcpConnectorTokenKey);
   return { exists: false, masked: null };
+}
+
+export async function getSupabaseSession(): Promise<SupabaseSessionStatus> {
+  if (isTauri()) {
+    return invoke<SupabaseSessionStatus>("supabase_session_status");
+  }
+  return { loggedIn: false, email: null };
+}
+
+export async function loginSupabase(email: string, password: string): Promise<SupabaseSessionStatus> {
+  if (isTauri()) {
+    return invoke<SupabaseSessionStatus>("login_supabase", { email, password });
+  }
+  throw new Error("Login ist nur in der Desktop-App verfügbar.");
+}
+
+export async function signupSupabase(email: string, password: string): Promise<SupabaseSessionStatus> {
+  if (isTauri()) {
+    return invoke<SupabaseSessionStatus>("signup_supabase", { email, password });
+  }
+  throw new Error("Registrierung ist nur in der Desktop-App verfügbar.");
+}
+
+export async function logoutSupabase(): Promise<SupabaseSessionStatus> {
+  if (isTauri()) {
+    return invoke<SupabaseSessionStatus>("logout_supabase");
+  }
+  return { loggedIn: false, email: null };
+}
+
+export async function generateConnectorToken(config: AppConfig): Promise<GeneratedConnectorToken> {
+  if (!isTauri()) {
+    throw new Error("Token-Generierung ist nur in der Desktop-App verfügbar.");
+  }
+  const result = await invoke<{ connectorToken?: string }>("mint_connector_token", {
+    baseUrl: config.mcp.baseUrl
+  });
+  const token = result?.connectorToken;
+  if (!token) {
+    throw new Error("Der Server hat kein Connector-Token zurückgegeben.");
+  }
+  const status = await saveMcpConnectorToken(token);
+  return { token, status };
+}
+
+export async function chooseRepoFolder(defaultPath?: string): Promise<string | null> {
+  if (isTauri()) {
+    const selected = await open({ directory: true, multiple: false, defaultPath });
+    if (!selected) return null;
+    return Array.isArray(selected) ? selected[0] ?? null : selected;
+  }
+  const value = window.prompt("Projektordner für den Codex-Lauf (absoluter Pfad):", defaultPath ?? "");
+  return value?.trim() ? value.trim() : null;
+}
+
+export async function runCodexTask(req: CodexRunRequest): Promise<CodexRunResult> {
+  if (isTauri()) {
+    return invoke<CodexRunResult>("run_codex_task", { req });
+  }
+  await delay(900);
+  return {
+    status: "completed",
+    branch: `katosync/demo/${new Date().toISOString().slice(0, 10)}/task-1-demo`,
+    runDir: "(browser-demo)",
+    changedFiles: ["src/demo.ts"],
+    commit: "demo0000",
+    resultSummary: "Browser-Demo: kein echter Codex-Lauf.",
+    exitCode: 0,
+    durationMs: 900,
+    error: null
+  };
+}
+
+const codexGuardrails = [
+  "Arbeite ausschliesslich im aktuellen Repository. Aendere keine Dateien ausserhalb.",
+  "Kein git merge, kein push, kein Branch-Wechsel, keine force-Operationen.",
+  "Gib keine Secrets/Keys aus und committe keine.",
+  "Wenn die Aufgabe unklar oder zu riskant ist, aendere nichts und erklaere kurz warum.",
+  "Schreibe am Ende eine kurze Zusammenfassung deiner Aenderungen."
+]
+  .map((line) => `- ${line}`)
+  .join("\n");
+
+export function buildCodexPromptFromTask(plan: ActionPlan, task: ActionTask): string {
+  return [
+    `# Aufgabe: ${task.title}`,
+    "",
+    "## Ziel",
+    task.summary || task.title,
+    "",
+    "## Kontext",
+    `Quelle: ${plan.agentName} (${plan.source})`,
+    `Projekt: ${task.projectId}`,
+    `Aufgabentyp: ${task.taskType}`,
+    `Risiko: ${task.riskLevel}`,
+    "",
+    "## Leitplanken (verbindlich)",
+    codexGuardrails
+  ].join("\n");
+}
+
+export function buildCodexPromptFromBriefing(briefing: Briefing): string {
+  return [
+    `# Briefing-Auftrag: ${briefing.title}`,
+    "",
+    "## Auszufuehren",
+    briefing.suggestedAction || briefing.summary,
+    "",
+    "## Kontext (Briefing)",
+    briefing.summary,
+    "",
+    briefing.body,
+    "",
+    "## Leitplanken (verbindlich)",
+    codexGuardrails
+  ].join("\n");
 }
 
 export async function testConnection(apiKey?: string): Promise<ApiCheckResponse> {
@@ -239,6 +364,39 @@ export async function loadActionPlans(config?: AppConfig): Promise<ActionPlan[]>
   return plans;
 }
 
+export async function loadBriefings(config?: AppConfig): Promise<Briefing[]> {
+  if (config) {
+    const remoteBriefings = await tryLoadRemoteBriefings(config);
+    if (remoteBriefings) return remoteBriefings;
+  }
+  const stored = localStorage.getItem(mockBriefingsKey);
+  if (stored) return JSON.parse(stored) as Briefing[];
+  const briefings = mockBriefings();
+  localStorage.setItem(mockBriefingsKey, JSON.stringify(briefings));
+  return briefings;
+}
+
+export async function updateBriefingStatus(
+  config: AppConfig | null,
+  briefingId: string,
+  status: BriefingStatus
+): Promise<Briefing[]> {
+  if (config) {
+    const remoteBriefings = await tryUpdateRemoteBriefingStatus(config, briefingId, status);
+    if (remoteBriefings) {
+      return remoteBriefings.map((briefing) =>
+        briefing.briefingId === briefingId ? { ...briefing, status } : briefing
+      );
+    }
+  }
+  const briefings = await loadBriefings(config ?? undefined);
+  const nextBriefings = briefings.map((briefing) =>
+    briefing.briefingId === briefingId ? { ...briefing, status } : briefing
+  );
+  localStorage.setItem(mockBriefingsKey, JSON.stringify(nextBriefings));
+  return nextBriefings;
+}
+
 export async function updateActionPlanStatus(
   config: AppConfig | null,
   planId: string,
@@ -246,7 +404,9 @@ export async function updateActionPlanStatus(
 ): Promise<ActionPlan[]> {
   if (config) {
     const remotePlans = await tryUpdateRemoteActionPlanStatus(config, planId, status);
-    if (remotePlans) return remotePlans;
+    if (remotePlans) {
+      return remotePlans.map((plan) => (plan.planId === planId ? { ...plan, status } : plan));
+    }
   }
   const plans = await loadActionPlans(config ?? undefined);
   const nextPlans = plans.map((plan) => (plan.planId === planId ? { ...plan, status } : plan));
@@ -381,6 +541,45 @@ function mockActionPlans(): ActionPlan[] {
   ];
 }
 
+function mockBriefings(): Briefing[] {
+  return [
+    {
+      briefingId: "briefing_2026_06_26_001",
+      source: "mistral_scheduler",
+      agentName: "Laura Mission Control",
+      title: "Morgenfokus KatoSync 2.0",
+      createdAt: "2026-06-26 07:15",
+      status: "new",
+      priority: "high",
+      summary:
+        "KatoSync 2.0 ist bereit für den nächsten Struktur-Schnitt: Briefings, Settings und lokale Runner-Freigabe sauber trennen.",
+      body: [
+        "KatoSync sollte Briefings als eigene Lesefläche behandeln, nicht als kleine Dashboard-Karte. Die Seite braucht eine Liste links und eine große Detailansicht rechts.",
+        "Action Plans bleiben in der Action Queue und werden erst nach lokaler Freigabe vorbereitet. Es wird nichts automatisch ausgeführt.",
+        "Settings bündeln API, Library, MCP Token, Gerätekennung, Scan-Regeln und später die Codex-CLI-Verbindung."
+      ].join("\n\n"),
+      suggestedAction: "Briefing-Seite aktivieren und Codex-Bridge als vorbereiteten Settings-Baustein sichtbar machen."
+    },
+    {
+      briefingId: "briefing_2026_06_26_002",
+      source: "mcp_connector_test",
+      agentName: "Thomas Risk Check",
+      title: "MCP Rückkanal Sicherheitsprüfung",
+      createdAt: "2026-06-26 07:05",
+      status: "new",
+      priority: "medium",
+      summary:
+        "Connector Tokens bleiben pro Tenant getrennt. Service-Role-Keys dürfen nie in der Desktop-App landen.",
+      body: [
+        "Der Desktop speichert nur den Connector Token im lokalen Schlüsselbund. Der Server validiert den Token gegen einen Hash.",
+        "Action Plans werden lokal angezeigt und müssen durch den User freigegeben werden. Dadurch bleibt die Ausführung menschlich kontrolliert.",
+        "Für mehrere Geräte ist die Geräte-ID in den CURRENT-Dateien wichtig, damit Mistral Quellen sauber unterscheiden kann."
+      ].join("\n\n"),
+      suggestedAction: "Token-Flow dokumentieren und in der Settings-Seite eindeutig als Rückkanal markieren."
+    }
+  ];
+}
+
 interface RemoteActionPlansResponse {
   ok: boolean;
   plans: RemoteActionPlanRow[];
@@ -409,6 +608,24 @@ interface RemoteActionTaskRow {
   assignee: string | null;
   due_at: string | null;
   sort_order: number;
+}
+
+interface RemoteBriefingsResponse {
+  ok: boolean;
+  briefings: RemoteBriefingRow[];
+}
+
+interface RemoteBriefingRow {
+  id: string;
+  source: string;
+  agent_name: string | null;
+  title: string;
+  summary: string | null;
+  body: string | null;
+  status: string;
+  priority: string;
+  created_at: string;
+  suggested_action: string | null;
 }
 
 async function tryLoadRemoteActionPlans(config: AppConfig): Promise<ActionPlan[] | null> {
@@ -453,6 +670,46 @@ async function tryUpdateRemoteActionPlanStatus(
   }
 }
 
+async function tryLoadRemoteBriefings(config: AppConfig): Promise<Briefing[] | null> {
+  try {
+    const tokenStatus = await getMcpConnectorTokenStatus();
+    if (!tokenStatus.exists) return null;
+    const response = isTauri()
+      ? await invoke<RemoteBriefingsResponse>("load_remote_briefings", {
+          baseUrl: config.mcp.baseUrl
+        })
+      : await fetchRemoteBriefings(config);
+    return mapRemoteBriefings(response);
+  } catch (error) {
+    console.warn("MCP Briefings nicht erreichbar, nutze lokale Demo-Briefings.", error);
+    return null;
+  }
+}
+
+async function tryUpdateRemoteBriefingStatus(
+  config: AppConfig,
+  briefingId: string,
+  status: BriefingStatus
+): Promise<Briefing[] | null> {
+  try {
+    const tokenStatus = await getMcpConnectorTokenStatus();
+    if (!tokenStatus.exists) return null;
+    if (isTauri()) {
+      await invoke("update_remote_briefing_status", {
+        baseUrl: config.mcp.baseUrl,
+        briefingId,
+        status
+      });
+    } else {
+      await patchRemoteBriefingStatus(config, briefingId, status);
+    }
+    return tryLoadRemoteBriefings(config);
+  } catch (error) {
+    console.warn("MCP Briefing konnte nicht aktualisiert werden.", error);
+    return null;
+  }
+}
+
 async function fetchRemoteActionPlans(config: AppConfig): Promise<RemoteActionPlansResponse> {
   const token = localStorage.getItem(mockMcpConnectorTokenKey);
   if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
@@ -479,6 +736,59 @@ async function patchRemoteActionPlanStatus(
     body: JSON.stringify({ status })
   });
   if (!response.ok) throw new Error(`MCP Action Plan konnte nicht aktualisiert werden (${response.status}).`);
+}
+
+async function fetchRemoteBriefings(config: AppConfig): Promise<RemoteBriefingsResponse> {
+  const token = localStorage.getItem(mockMcpConnectorTokenKey);
+  if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
+  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/briefings?includeArchived=false`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new Error(`MCP Briefings nicht erreichbar (${response.status}).`);
+  return response.json() as Promise<RemoteBriefingsResponse>;
+}
+
+async function patchRemoteBriefingStatus(
+  config: AppConfig,
+  briefingId: string,
+  status: BriefingStatus
+): Promise<void> {
+  const token = localStorage.getItem(mockMcpConnectorTokenKey);
+  if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
+  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/briefings/${briefingId}/status`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ status })
+  });
+  if (!response.ok) throw new Error(`MCP Briefing konnte nicht aktualisiert werden (${response.status}).`);
+}
+
+function mapRemoteBriefings(response: RemoteBriefingsResponse): Briefing[] {
+  return (response.briefings ?? []).map((briefing) => ({
+    briefingId: briefing.id,
+    source: briefing.source,
+    agentName: briefing.agent_name || "Mistral Work",
+    title: briefing.title,
+    createdAt: formatRemoteDate(briefing.created_at),
+    status: fromRemoteBriefingStatus(briefing.status),
+    priority: fromRemoteBriefingPriority(briefing.priority),
+    summary: briefing.summary || "",
+    body: briefing.body || briefing.summary || "",
+    suggestedAction: briefing.suggested_action
+  }));
+}
+
+function fromRemoteBriefingStatus(status: string): BriefingStatus {
+  if (status === "accepted" || status === "queued" || status === "rejected" || status === "archived") return status;
+  return "new";
+}
+
+function fromRemoteBriefingPriority(priority: string): BriefingPriority {
+  if (priority === "low" || priority === "medium" || priority === "high" || priority === "critical") return priority;
+  return "medium";
 }
 
 function mapRemoteActionPlans(response: RemoteActionPlansResponse): ActionPlan[] {
@@ -511,15 +821,28 @@ function mapRemoteActionPlans(response: RemoteActionPlansResponse): ActionPlan[]
 
 function fromRemoteStatus(status: string): ActionPlanStatus {
   if (status === "pending_review") return "pending_user_review";
-  if (status === "approved" || status === "rejected" || status === "completed") return status;
-  if (status === "running" || status === "queued") return "approved";
-  if (status === "failed") return "blocked";
+  if (
+    status === "approved" ||
+    status === "rejected" ||
+    status === "completed" ||
+    status === "running" ||
+    status === "failed"
+  )
+    return status;
+  if (status === "queued") return "approved";
   return "pending_user_review";
 }
 
 function toRemoteStatus(status: ActionPlanStatus): string | null {
   if (status === "pending_user_review") return "pending_review";
-  if (status === "approved" || status === "rejected" || status === "completed") return status;
+  if (
+    status === "approved" ||
+    status === "rejected" ||
+    status === "completed" ||
+    status === "running" ||
+    status === "failed"
+  )
+    return status;
   if (status === "blocked") return "failed";
   return null;
 }

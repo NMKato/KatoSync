@@ -107,3 +107,30 @@ Validierung:
   - `Action Queue` bleibt fuer strukturierte Aufgabenplaene und Freigabe.
   - `Briefings` wird eine eigene Vollseite fuer komplette Agentenberichte.
   - Briefings koennen angenommen, abgelehnt oder in die Action Queue uebernommen werden.
+
+## Umsetzung 2026-06-26 - 2.0 UI-Struktur
+
+- KatoSync 2.0 nutzt jetzt eine klarere Hauptnavigation:
+  - `Dashboard`
+  - `Action Queue`
+  - `Briefings`
+  - `Einstellungen`
+  - `Aktivitäten`
+- Dashboard ist die kompakte Betriebsübersicht.
+- Einstellungen ist der Ort für Zugangsdaten, Library, MCP Server, MCP Connector Token, Sync-Regeln und Codex-Bridge-Vorbereitung.
+- Briefings sind eine eigene Leseseite, nicht nur eine kleine Dashboard-Card.
+- Action Queue bleibt für strukturierte Action Plans mit lokaler Freigabe.
+- Aktivitäten zeigt Logs und erledigte/freigegebene/abgelehnte Vorgänge.
+- Die UI soll kompakt, symmetrisch und wie ein geordnetes Puzzle wirken: wenig ungenutzter White Space, aber weiterhin gut lesbar.
+- User-facing Texte bleiben auf Deutsch mit Umlauten.
+- Der native Desktop-Rückkanal für Briefings ist vorbereitet:
+  - `load_remote_briefings`
+  - `update_remote_briefing_status`
+- `npm run build` und `cargo check` waren nach der UI-Strukturierung erfolgreich.
+
+## Wichtige 2.0 Sicherheitslinie
+
+- KatoSync darf lokale Runner wie Codex oder KAI nicht ohne ausdrückliche Nutzerfreigabe starten.
+- Briefings dürfen angenommen oder vorbereitet werden, aber die automatische Ausführung kommt erst nach separater Bridge-Implementierung.
+- Keine Service-Role-Secrets in der Desktop-App.
+- MCP Connector Token wird lokal behandelt und nicht im Repository abgelegt.
