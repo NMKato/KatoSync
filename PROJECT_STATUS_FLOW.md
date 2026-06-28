@@ -1,5 +1,23 @@
 # KatoSync Project Statusflow
 
+## 2026-06-28 - Echter Abschluss / Merge-Rückkanal (DONE)
+
+Projekt: KatoSync Desktop App + KatoOS MCP Server
+Status: DONE — Aufgaben gelten erst nach Merge/Verifikation als erledigt (live verifiziert)
+
+Problem: Ein Task wurde nach dem Codex-Lauf sofort `completed` und verschwand vom Board, obwohl nur ein Branch/PR vorlag. „Fertig" wurde zu früh gesetzt.
+
+Lösung — zwei getrennte Endzustände + Rückkanal:
+
+- Neuer Task-Status `executed` (Ausgeführt: Lauf fertig, PR/Branch liegt vor) zwischen `running` und `completed`. `completed` = erledigt (gemerged/verifiziert), `rejected` = verworfen. `executed`-Tasks bleiben am Board sichtbar mit PR-Link.
+- Server (Migration `0007`): Status-CHECK um `executed`, Spalten `pr_url`/`branch`; Endpunkt nimmt optional `prUrl`/`branch`. Worker `70f85fe7`.
+- App Rust: Codex-Lauf-Erfolg setzt Task `executed` (statt completed) inkl. pr_url/branch. Neuer Command `check_codex_task` (gh pr view state + lokaler `git branch --merged`).
+- App: Lauf-Erfolg → `executed`; `handleCheckCompletions` (Button „Merge-Status prüfen" + automatisch beim Board-Öffnen) setzt gemergte PRs auf `completed`, geschlossene auf `rejected`; manueller „Erledigt"/„Verworfen"-Button (auch für Aufgaben ohne Repo). Queue überspringt `executed`. Board zeigt ausgeführte Tasks mit PR-Link + Status-prüfen/Erledigt/Verworfen.
+
+Entscheidungen (Nutzer): gh-Polling + Button (kein Webhook), on-demand (Board öffnen + Button), Signale: PR gemerged→erledigt, PR geschlossen→verworfen, lokaler Merge→erledigt, manueller Button.
+
+Validierung: cargo check + tsc + vite + tauri build grün; adversarialer Review (keine Blocker); Server 31 vitest grün; Live-E2E (executed mit prUrl/branch persistiert, completed, Negativ-URL 400). App installiert.
+
 ## 2026-06-28 - Offene Wellen abgeschlossen: Repo-pro-Projekt + Live-Feed (DONE)
 
 Projekt: KatoSync Desktop App

@@ -4,6 +4,7 @@ import {
   buildCodexPromptFromTask,
   chooseFolders,
   chooseRepoFolder,
+  checkCodexTask,
   dirExists,
   listenCodexEvents,
   NO_PROJECT_ID,
@@ -565,12 +566,19 @@ export function useKatoSyncViewModel() {
       try {
         await updateActionTaskStatus(config, task.taskId, "running");
         const result = await runCodexForTaskWithRepo(plan, task, repoPath);
-        const finalStatus = result.status === "completed" ? "completed" : "failed";
-        setActionPlans(await updateActionTaskStatus(config, task.taskId, finalStatus));
+        const ok = result.status === "completed";
+        // Erfolg = 'executed' (ausgefuehrt) inkl. PR/Branch; 'completed' folgt erst beim Merge/Verifikation.
+        const finalStatus = ok ? "executed" : "failed";
+        setActionPlans(
+          await updateActionTaskStatus(config, task.taskId, finalStatus, {
+            prUrl: result.prUrl ?? null,
+            branch: result.branch ?? null
+          })
+        );
         show(
-          result.status === "completed" ? "ok" : "warn",
-          result.status === "completed"
-            ? `Codex fertig: ${result.changedFiles.length} Datei(en) auf Branch ${result.branch}.`
+          ok ? "ok" : "warn",
+          ok
+            ? `Ausgeführt: ${result.changedFiles.length} Datei(en) auf Branch ${result.branch}.${result.prUrl ? " PR offen." : ""}`
             : `Codex-Lauf fehlgeschlagen: ${result.error ?? "unbekannt"}`
         );
       } catch (error) {
@@ -712,6 +720,90 @@ export function useKatoSyncViewModel() {
     show("info", "Queue stoppt nach der laufenden Aufgabe.");
   }, [show]);
 
+  // Abschluss: manuell als erledigt markieren (z.B. Aufgaben ohne Repo/GitHub oder verifiziert).
+  const handleMarkTaskDone = useCallback(
+    async (taskId: string) => {
+      setActionPlans(await updateActionTaskStatus(config, taskId, "completed"));
+      show("ok", "Aufgabe als erledigt markiert.");
+    },
+    [config, show]
+  );
+
+  // Abschluss: einen ausgefuehrten Task gegen GitHub/Git pruefen (gemerged -> erledigt, geschlossen -> verworfen).
+  const handleCheckTaskCompletion = useCallback(
+    async (task: ActionTask) => {
+      if (!config) return;
+      setBusy("check-completions");
+      try {
+        const repoPath = config.projectRepos?.[task.projectId] ?? "";
+        const state = await checkCodexTask(repoPath, task.branch ?? "", task.prUrl ?? "");
+        if (state === "merged") {
+          setActionPlans(await updateActionTaskStatus(config, task.taskId, "completed"));
+          show("ok", "PR gemerged → Aufgabe erledigt.");
+        } else if (state === "closed") {
+          setActionPlans(await updateActionTaskStatus(config, task.taskId, "rejected"));
+          show("info", "PR ohne Merge geschlossen → Aufgabe verworfen.");
+        } else {
+          show("info", "Noch kein Merge erkannt (PR offen).");
+        }
+      } finally {
+        setBusy(null);
+      }
+    },
+    [config, show]
+  );
+
+  // Abschluss: alle ausgefuehrten Tasks mit PR/Branch pruefen (Button + automatisch beim Board-Oeffnen).
+  const handleCheckCompletions = useCallback(
+    async (manual = false) => {
+      if (!config) return;
+      const executed = actionPlans
+        .flatMap((plan) => plan.tasks)
+        .filter((task) => task.status === "executed" && (task.prUrl || task.branch));
+      if (!executed.length) {
+        if (manual) show("info", "Keine ausgeführten Aufgaben mit PR/Branch zu prüfen.");
+        return;
+      }
+      if (manual) setBusy("check-completions");
+      try {
+        let changed = 0;
+        for (const task of executed) {
+          const repoPath = config.projectRepos?.[task.projectId] ?? "";
+          const state = await checkCodexTask(repoPath, task.branch ?? "", task.prUrl ?? "");
+          if (state === "merged") {
+            await updateActionTaskStatus(config, task.taskId, "completed");
+            changed += 1;
+          } else if (state === "closed") {
+            await updateActionTaskStatus(config, task.taskId, "rejected");
+            changed += 1;
+          }
+        }
+        if (changed) {
+          setActionPlans(await loadActionPlans(config));
+          show("ok", `${changed} Aufgabe(n) aktualisiert (gemerged/geschlossen).`);
+        } else if (manual) {
+          show("info", "Noch nichts gemerged/geschlossen.");
+        }
+      } finally {
+        if (manual) setBusy(null);
+      }
+    },
+    [actionPlans, config, show]
+  );
+
+  // On-demand: beim Betreten des Projekt-Boards einmal automatisch pruefen.
+  const boardEnteredRef = useRef(false);
+  useEffect(() => {
+    if (activeStep === "projectBoard") {
+      if (!boardEnteredRef.current) {
+        boardEnteredRef.current = true;
+        void handleCheckCompletions(false);
+      }
+    } else {
+      boardEnteredRef.current = false;
+    }
+  }, [activeStep, handleCheckCompletions]);
+
   // Sequentieller Executor PRO PROJEKT-SPALTE: ein Repo-Ordner je Lauf, ein Task nach dem anderen.
   const handleStartBoardQueue = useCallback(
     async (projectId: string) => {
@@ -725,7 +817,7 @@ export function useKatoSyncViewModel() {
             task.approved &&
             task.targetRunner === "codex_cli" &&
             task.riskLevel !== "critical" &&
-            !["completed", "rejected", "deferred", "running"].includes(task.status)
+            !["executed", "completed", "rejected", "deferred", "running"].includes(task.status)
         )
         .sort((a, b) => a.orderIndex - b.orderIndex);
 
@@ -762,13 +854,17 @@ export function useKatoSyncViewModel() {
             await updateActionTaskStatus(config, task.taskId, "queued");
             await updateActionTaskStatus(config, task.taskId, "running");
             const result = await runCodexForTaskWithRepo(plan, task, repoPath);
-            const finalStatus = result.status === "completed" ? "completed" : "failed";
-            await updateActionTaskStatus(config, task.taskId, finalStatus);
             if (result.status === "completed") {
+              // Erfolg = 'executed' (wartet auf Merge/Verifikation), inkl. PR/Branch.
+              await updateActionTaskStatus(config, task.taskId, "executed", {
+                prUrl: result.prUrl ?? null,
+                branch: result.branch ?? null
+              });
               done += 1;
               writeDailyCount(done);
               setDailyCount(done);
             } else {
+              await updateActionTaskStatus(config, task.taskId, "failed");
               // Fehlerpolitik: Queue laeuft weiter (Task bleibt failed).
               show("warn", `Aufgabe fehlgeschlagen: ${task.title}. Queue läuft weiter.`);
             }
@@ -868,9 +964,12 @@ export function useKatoSyncViewModel() {
     scan,
     sessionStatus,
     handleChooseFolders,
+    handleCheckCompletions,
+    handleCheckTaskCompletion,
     handleCopyToken,
     handleDeferTask,
     handleDeleteKey,
+    handleMarkTaskDone,
     handleDeleteMcpConnectorToken,
     handleForgetProjectRepo,
     handleGenerateConnectorToken,

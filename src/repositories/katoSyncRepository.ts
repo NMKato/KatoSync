@@ -444,26 +444,52 @@ export async function updateActionPlanStatus(
   return nextPlans;
 }
 
+export interface TaskStatusExtra {
+  prUrl?: string | null;
+  branch?: string | null;
+}
+
+// Abschluss-Rueckkanal: prueft via Tauri, ob ein ausgefuehrter Task gemerged/erledigt ist.
+// Liefert "merged" | "closed" | "open" | "unknown".
+export async function checkCodexTask(
+  repoPath: string,
+  branch: string,
+  prUrl: string
+): Promise<string> {
+  if (isTauri()) {
+    try {
+      return await invoke<string>("check_codex_task", { repoPath, branch, prUrl });
+    } catch {
+      return "unknown";
+    }
+  }
+  return "open"; // Browser-Demo
+}
+
 // Projekt-Board: setzt den Status eines einzelnen Tasks (serverseitig persistent).
 export async function updateActionTaskStatus(
   config: AppConfig | null,
   taskId: string,
-  status: ActionTaskStatus
+  status: ActionTaskStatus,
+  extra?: TaskStatusExtra
 ): Promise<ActionPlan[]> {
+  const patch = (task: ActionTask) =>
+    task.taskId === taskId
+      ? {
+          ...task,
+          status,
+          prUrl: extra?.prUrl ?? task.prUrl ?? null,
+          branch: extra?.branch ?? task.branch ?? null
+        }
+      : task;
   if (config) {
-    const remotePlans = await tryUpdateRemoteActionTaskStatus(config, taskId, status);
+    const remotePlans = await tryUpdateRemoteActionTaskStatus(config, taskId, status, extra);
     if (remotePlans) {
-      return remotePlans.map((plan) => ({
-        ...plan,
-        tasks: plan.tasks.map((task) => (task.taskId === taskId ? { ...task, status } : task))
-      }));
+      return remotePlans.map((plan) => ({ ...plan, tasks: plan.tasks.map(patch) }));
     }
   }
   const plans = await loadActionPlans(config ?? undefined);
-  const nextPlans = plans.map((plan) => ({
-    ...plan,
-    tasks: plan.tasks.map((task) => (task.taskId === taskId ? { ...task, status } : task))
-  }));
+  const nextPlans = plans.map((plan) => ({ ...plan, tasks: plan.tasks.map(patch) }));
   localStorage.setItem(mockActionPlansKey, JSON.stringify(nextPlans));
   return nextPlans;
 }
@@ -471,9 +497,12 @@ export async function updateActionTaskStatus(
 async function tryUpdateRemoteActionTaskStatus(
   config: AppConfig,
   taskId: string,
-  status: ActionTaskStatus
+  status: ActionTaskStatus,
+  extra?: TaskStatusExtra
 ): Promise<ActionPlan[] | null> {
   const remoteStatus = toRemoteTaskStatus(status);
+  const prUrl = extra?.prUrl ?? undefined;
+  const branch = extra?.branch ?? undefined;
   try {
     const tokenStatus = await getMcpConnectorTokenStatus();
     if (!tokenStatus.exists) return null;
@@ -481,10 +510,12 @@ async function tryUpdateRemoteActionTaskStatus(
       await invoke("update_remote_action_task_status", {
         baseUrl: config.mcp.baseUrl,
         taskId,
-        status: remoteStatus
+        status: remoteStatus,
+        prUrl,
+        branch
       });
     } else {
-      await patchRemoteActionTaskStatus(config, taskId, remoteStatus);
+      await patchRemoteActionTaskStatus(config, taskId, remoteStatus, prUrl, branch);
     }
     return tryLoadRemoteActionPlans(config);
   } catch (error) {
@@ -496,17 +527,22 @@ async function tryUpdateRemoteActionTaskStatus(
 async function patchRemoteActionTaskStatus(
   config: AppConfig,
   taskId: string,
-  status: string
+  status: string,
+  prUrl?: string,
+  branch?: string
 ): Promise<void> {
   const token = localStorage.getItem(mockMcpConnectorTokenKey);
   if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
+  const body: Record<string, unknown> = { status };
+  if (prUrl) body.prUrl = prUrl;
+  if (branch) body.branch = branch;
   const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/action-tasks/${taskId}/status`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ status })
+    body: JSON.stringify(body)
   });
   if (!response.ok) throw new Error(`MCP Action Task konnte nicht aktualisiert werden (${response.status}).`);
 }
@@ -607,12 +643,13 @@ function mockActionPlans(): ActionPlan[] {
           priority: 2,
           projectId: "katoos-web",
           title: "Statusflow nach Task-Abschluss ergänzen",
-          taskType: "project_management_task",
-          targetRunner: "manual_review",
+          taskType: "code_task",
+          targetRunner: "codex_cli",
           riskLevel: "low",
           requiresApproval: true,
-          status: "queued",
-          summary: "Ergebnisdateien und KATOSYNC_STATUSFLOW.md für spätere Runner vorbereiten."
+          status: "executed",
+          branch: "katosync/katoos-web/2026-06-28/task-2-statusflow",
+          summary: "Ausgeführt – wartet auf Verifikation (Browser-Demo, kein echter PR)."
         }
       ]
     },
@@ -715,6 +752,9 @@ interface RemoteActionTaskRow {
   project_external_id?: string | null;
   risk_level?: string | null;
   target_runner?: string | null;
+  // Abschluss-Rueckkanal (Migration 0007)
+  pr_url?: string | null;
+  branch?: string | null;
 }
 
 interface RemoteBriefingsResponse {
@@ -923,6 +963,8 @@ function mapRemoteActionPlans(response: RemoteActionPlansResponse): ActionPlan[]
         riskLevel: fromRemoteRisk(task.risk_level ?? plan.risk_level),
         requiresApproval: true,
         status: fromRemoteTaskStatus(task.status),
+        prUrl: task.pr_url ?? null,
+        branch: task.branch ?? null,
         summary: task.description
       }))
     };
@@ -983,6 +1025,7 @@ function fromRemoteTaskStatus(status: string | null | undefined): ActionTaskStat
     status === "pending" ||
     status === "queued" ||
     status === "running" ||
+    status === "executed" ||
     status === "completed" ||
     status === "rejected" ||
     status === "failed" ||

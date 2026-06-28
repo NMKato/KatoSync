@@ -1321,6 +1321,7 @@ function ActionQueuePanel({
 function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
   const groups = vm.boardGroups;
   const totalTasks = groups.reduce((sum, group) => sum + group.tasks.length, 0);
+  const hasExecuted = groups.some((group) => group.tasks.some((task) => task.status === "executed"));
 
   return (
     <Panel
@@ -1336,15 +1337,29 @@ function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel>
           </strong>
           <span>Codex-Läufe heute · {vm.boardSelection.length} ausgewählt</span>
         </div>
-        <button
-          className="secondary"
-          disabled={Boolean(vm.busy) || vm.queueRunning}
-          onClick={vm.handleRefreshActionPlans}
-          type="button"
-        >
-          {vm.busy === "action-plans" ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
-          Aktualisieren
-        </button>
+        <div className="board-head-actions">
+          {hasExecuted ? (
+            <button
+              className="secondary"
+              disabled={Boolean(vm.busy) || vm.queueRunning}
+              onClick={() => void vm.handleCheckCompletions(true)}
+              title="Ausgeführte Aufgaben gegen GitHub prüfen (gemerged → erledigt)"
+              type="button"
+            >
+              {vm.busy === "check-completions" ? <Loader2 className="spin" size={15} /> : <CheckCircle2 size={15} />}
+              Merge-Status prüfen
+            </button>
+          ) : null}
+          <button
+            className="secondary"
+            disabled={Boolean(vm.busy) || vm.queueRunning}
+            onClick={vm.handleRefreshActionPlans}
+            type="button"
+          >
+            {vm.busy === "action-plans" ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
+            Aktualisieren
+          </button>
+        </div>
       </div>
 
       {vm.queueRunning ? (
@@ -1454,9 +1469,52 @@ function BoardTaskCard({
       {task.riskLevel === "critical" ? (
         <StatusLine good={false} text="Kritische Aufgabe – nur manuelle Bearbeitung, kein automatischer Codex-Lauf." />
       ) : null}
+      {task.status === "executed" ? (
+        <StatusLine
+          good={false}
+          text={task.prUrl ? "Ausgeführt – PR offen, wartet auf Merge." : "Ausgeführt – wartet auf Verifikation."}
+        />
+      ) : null}
+      {task.status === "executed" && task.prUrl ? (
+        <div className="board-pr">
+          <a href={task.prUrl} target="_blank" rel="noreferrer">
+            Pull Request ansehen
+          </a>
+        </div>
+      ) : null}
 
       <footer className="board-actions">
-        {task.status === "deferred" ? (
+        {task.status === "executed" ? (
+          <>
+            <button
+              className="secondary"
+              disabled={disabled}
+              onClick={() => void vm.handleCheckTaskCompletion(task)}
+              title="PR-/Merge-Status prüfen"
+              type="button"
+            >
+              {vm.busy === "check-completions" ? <Loader2 className="spin" size={14} /> : <RefreshCcw size={14} />}
+              Status prüfen
+            </button>
+            <button
+              className="secondary"
+              disabled={disabled}
+              onClick={() => void vm.handleMarkTaskDone(task.taskId)}
+              title="Manuell als erledigt markieren"
+              type="button"
+            >
+              <CheckCircle2 size={14} /> Erledigt
+            </button>
+            <button
+              className="ghost danger"
+              disabled={disabled}
+              onClick={() => void vm.handleRejectTask(task.taskId)}
+              type="button"
+            >
+              Verworfen
+            </button>
+          </>
+        ) : task.status === "deferred" ? (
           <button
             className="secondary"
             disabled={disabled}
@@ -1953,6 +2011,8 @@ function taskStatusLabel(status: ActionTaskStatus) {
       return "Eingeplant";
     case "running":
       return "Läuft";
+    case "executed":
+      return "Ausgeführt";
     case "completed":
       return "Erledigt";
     case "rejected":

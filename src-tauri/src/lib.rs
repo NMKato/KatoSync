@@ -243,6 +243,7 @@ pub fn run() {
             mint_connector_token,
             run_codex_task,
             dir_exists,
+            check_codex_task,
             test_mistral_connection,
             test_library,
             scan_project,
@@ -534,6 +535,8 @@ async fn update_remote_action_task_status(
     base_url: String,
     task_id: String,
     status: String,
+    pr_url: Option<String>,
+    branch: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let token = load_mcp_connector_token().map_err(error_to_string)?;
     let url = format!(
@@ -541,11 +544,22 @@ async fn update_remote_action_task_status(
         normalize_base_url(&base_url),
         task_id
     );
+    let mut body = json!({ "status": status });
+    if let Some(p) = pr_url.as_deref() {
+        if !p.is_empty() {
+            body["prUrl"] = json!(p);
+        }
+    }
+    if let Some(b) = branch.as_deref() {
+        if !b.is_empty() {
+            body["branch"] = json!(b);
+        }
+    }
     let response = reqwest::Client::new()
         .patch(url)
         .header("User-Agent", USER_AGENT)
         .bearer_auth(token.trim())
-        .json(&json!({ "status": status }))
+        .json(&body)
         .send()
         .await
         .map_err(error_to_string)?;
@@ -782,10 +796,13 @@ async fn patch_action_plan_status_inner(
 }
 
 // Projekt-Board: Task-Status-Rueckkanal (best effort) waehrend eines Codex-Laufs.
+// pr_url/branch werden beim Wechsel auf 'executed' mitgeschickt (Board-Anzeige + Merge-Polling).
 async fn patch_action_task_status_inner(
     base_url: &str,
     task_id: &str,
     status: &str,
+    pr_url: Option<&str>,
+    branch: Option<&str>,
 ) -> Result<(), String> {
     let token = load_mcp_connector_token().map_err(error_to_string)?;
     let url = format!(
@@ -793,11 +810,22 @@ async fn patch_action_task_status_inner(
         normalize_base_url(base_url),
         task_id
     );
+    let mut body = json!({ "status": status });
+    if let Some(p) = pr_url {
+        if !p.is_empty() {
+            body["prUrl"] = json!(p);
+        }
+    }
+    if let Some(b) = branch {
+        if !b.is_empty() {
+            body["branch"] = json!(b);
+        }
+    }
     let response = reqwest::Client::new()
         .patch(url)
         .header("User-Agent", USER_AGENT)
         .bearer_auth(token.trim())
-        .json(&json!({ "status": status }))
+        .json(&body)
         .send()
         .await
         .map_err(error_to_string)?;
@@ -832,6 +860,54 @@ async fn post_execution_result(base_url: &str, body: &serde_json::Value) -> Resu
 fn dir_exists(path: String) -> bool {
     let p = path.trim();
     !p.is_empty() && Path::new(p).is_dir()
+}
+
+// Abschluss-Rueckkanal: prueft, ob ein ausgefuehrter Task wirklich erledigt ist.
+// Liefert "merged" | "closed" | "open" (Frontend macht aus invoke-Fehlern "unknown").
+//  1) PR-Status via gh (wenn pr_url eine echte PR-URL ist) -> deckt auch Squash/Rebase-Merges ab.
+//  2) lokaler Merge-Check (Fallback ohne PR): Branch in den Default-Branch gemerged?
+//     Hinweis: erkennt nur Merge-Commits, nicht Squash/Rebase (andere SHAs); dafuer ist der gh-Pfad zustaendig.
+#[tauri::command]
+async fn check_codex_task(repo_path: String, branch: String, pr_url: String) -> Result<String, String> {
+    let pr = pr_url.trim();
+    if pr.contains("/pull/") && !pr.contains("/pull/new/") {
+        let mut cmd = Command::new(gh_bin());
+        cmd.args(["pr", "view", pr, "--json", "state", "-q", ".state"]);
+        let repo = repo_path.trim();
+        if !repo.is_empty() && Path::new(repo).is_dir() {
+            cmd.current_dir(repo);
+        }
+        if let Ok(out) = cmd.output() {
+            if out.status.success() {
+                match String::from_utf8_lossy(&out.stdout).trim().to_uppercase().as_str() {
+                    "MERGED" => return Ok("merged".to_string()),
+                    "CLOSED" => return Ok("closed".to_string()),
+                    "OPEN" => return Ok("open".to_string()),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Lokaler Merge-Check (z.B. manuell gemerged ohne PR).
+    let repo = repo_path.trim();
+    let br = branch.trim();
+    if !repo.is_empty() && Path::new(repo).is_dir() && !br.is_empty() {
+        let default_branch = detect_default_branch(repo);
+        let _ = git_capture(repo, &["fetch", "origin", &default_branch]); // best effort
+        for base in [format!("origin/{default_branch}"), default_branch.clone()] {
+            if let Ok(list) = git_capture(repo, &["branch", "--merged", &base]) {
+                let merged = list
+                    .lines()
+                    .any(|l| l.trim().trim_start_matches('*').trim() == br);
+                if merged {
+                    return Ok("merged".to_string());
+                }
+            }
+        }
+    }
+
+    Ok("open".to_string())
 }
 
 #[tauri::command]
@@ -929,7 +1005,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         }
     }
     if let Some(task_id) = &req.action_task_id {
-        if let Err(e) = patch_action_task_status_inner(&req.base_url, task_id, "running").await {
+        if let Err(e) = patch_action_task_status_inner(&req.base_url, task_id, "running", None, None).await {
             let _ = write_log("codex", &format!("Warnung: Task-Status running fehlgeschlagen: {e}"));
         }
     }
@@ -1184,9 +1260,14 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             let _ = write_log("codex", &format!("Warnung: Status {final_status} fehlgeschlagen: {e}"));
         }
     }
+    // Task-Status: Erfolg = 'executed' (ausgefuehrt, wartet auf Merge/Verifikation), inkl. PR/Branch.
     if let Some(task_id) = &req.action_task_id {
-        if let Err(e) = patch_action_task_status_inner(&req.base_url, task_id, final_status).await {
-            let _ = write_log("codex", &format!("Warnung: Task-Status {final_status} fehlgeschlagen: {e}"));
+        let task_status = if final_status == "completed" { "executed" } else { final_status };
+        if let Err(e) =
+            patch_action_task_status_inner(&req.base_url, task_id, task_status, pr_url.as_deref(), Some(&branch))
+                .await
+        {
+            let _ = write_log("codex", &format!("Warnung: Task-Status {task_status} fehlgeschlagen: {e}"));
         }
     }
 

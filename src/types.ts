@@ -156,6 +156,7 @@ export type ActionTaskStatus =
   | "pending"
   | "queued"
   | "running"
+  | "executed"
   | "completed"
   | "rejected"
   | "failed"
@@ -173,6 +174,9 @@ export interface ActionTask {
   riskLevel: ActionRiskLevel; // Server: risk_level (jetzt PRO TASK, nicht mehr vom Plan)
   requiresApproval: boolean;
   status: ActionTaskStatus; // Server: action_tasks.status
+  // Abschluss-Rueckkanal: PR/Branch des ausgefuehrten Laufs (fuer Anzeige + Merge-Check).
+  prUrl?: string | null;
+  branch?: string | null;
   summary?: string | null;
 }
 

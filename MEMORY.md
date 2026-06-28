@@ -11,6 +11,13 @@
 - Schlüsselbund-Eigenheit: nach jedem App-Neu-Build (ad-hoc signiert) kann macOS den Token-Zugriff neu abfragen → „Immer erlauben"; NICHT neu generieren (harte Rotation entwertet sonst den in Mistral hinterlegten Token).
 - Nächste große Welle = Projekt-Board (Briefings → pro-Projekt-Tasks von Mistral, Triage/Queue/aufschieben/ablehnen, Task-Status-Endpunkt, Live-Aktivitäts-Feed).
 
+## Abschluss / Merge-Rückkanal (seit 2026-06-28)
+
+- Task-Status `executed` (Ausgeführt) zwischen `running` und `completed`: nach erfolgreichem Codex-Lauf wird der Task `executed` (NICHT mehr sofort `completed`) inkl. `prUrl`/`branch`; er bleibt am Board sichtbar. `completed` = erledigt (gemerged/verifiziert), `rejected` = verworfen.
+- Merge-Erkennung CLIENT-seitig: Rust-Command `check_codex_task(repo_path, branch, pr_url)` → "merged"|"closed"|"open" via `gh pr view <url> --json state -q .state` (nur bei echter PR-URL, nicht bei `/pull/new/`) bzw. lokalem `git branch --merged origin/<default>`. ViewModel: `handleCheckCompletions(manual?)` (Button „Merge-Status prüfen" + Auto beim Board-Öffnen via boardEnteredRef-Guard), `handleCheckTaskCompletion` (einzeln), `handleMarkTaskDone` (manuell completed), `handleRejectTask` (verworfen).
+- gh per ABSOLUTEM Pfad (GUI-PATH!); `update_remote_action_task_status` + Repo-`updateActionTaskStatus(config,taskId,status,extra?{prUrl,branch})` reichen prUrl/branch durch. Queue-Filter schließt `executed` aus. Board: groupTasksByProject zeigt `executed` (nur completed/rejected verschwinden).
+- WICHTIG: Server-Code für neue Statuswerte MUSS deployed sein, bevor die App sie sendet (sonst 400 VALIDATION). Worker `70f85fe7`.
+
 ## Repo-pro-Projekt + Live-Feed (seit 2026-06-28)
 
 - Repo-pro-Projekt: `AppConfig.projectRepos` (projectId → Ordner), persistiert. Tauri-Command `dir_exists`. ViewModel `resolveRepoForProject(projectId)` nutzt den gemerkten Ordner (Existenzprüfung), fragt nur einmal/wenn weg und merkt ihn via `saveConfig`. Genutzt in Board-Queue (pro Projekt-Spalte), Einzel-Codex (task.projectId), Briefing ("katosync"). „Ordner vergessen" in den Einstellungen (`handleForgetProjectRepo`). → Kein Ordner-Dialog mehr pro Lauf.

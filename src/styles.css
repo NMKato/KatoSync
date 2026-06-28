@@ -1501,6 +1501,11 @@ input[type="range"] {
   background: rgba(81, 205, 123, 0.14);
 }
 
+.status-pill.executed {
+  color: #c7b3ff;
+  background: rgba(165, 130, 255, 0.16);
+}
+
 .status-pill.neutral {
   color: #c7d0e0;
   background: rgba(140, 160, 190, 0.14);
@@ -1566,6 +1571,17 @@ input[type="range"] {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.board-pr {
+  margin: 2px 0 6px;
+  font-size: 12px;
+}
+
+.board-head-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .board-running {
