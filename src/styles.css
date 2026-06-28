@@ -3119,3 +3119,20 @@ pre {
     width: 100%;
   }
 }
+
+/* Token-Reveal (Connector-Token: maskiert/zeigen + kopieren) */
+.token-reveal {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.token-reveal input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/* Aktiver Praesentationsmodus-Button in der Sidebar */
+.sidebar-footer .license-link.is-active {
+  color: var(--brand);
+  background: var(--brand-soft);
+}

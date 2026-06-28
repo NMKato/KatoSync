@@ -7,6 +7,8 @@ import {
   ClipboardList,
   Clock3,
   Database,
+  Eye,
+  EyeOff,
   FileCheck2,
   FileText,
   FolderOpen,
@@ -195,6 +197,14 @@ export default function App() {
   );
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingSnoozed, setOnboardingSnoozed] = useState(false);
+  // Praesentationsmodus: maskiert sensible Werte (Token/Library-ID/Geraete-ID/E-Mail) fuer Screenshots/Streams.
+  const [presentation, setPresentation] = useState(() => localStorage.getItem("katosync.presentation") === "1");
+  const togglePresentation = () =>
+    setPresentation((on) => {
+      const next = !on;
+      localStorage.setItem("katosync.presentation", next ? "1" : "0");
+      return next;
+    });
   const [onboardingIndex, setOnboardingIndex] = useState(0);
   const [showSplash, setShowSplash] = useState(true);
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
@@ -424,6 +434,15 @@ export default function App() {
         </nav>
 
         <div className="sidebar-footer">
+          <button
+            className={`ghost license-link${presentation ? " is-active" : ""}`}
+            onClick={togglePresentation}
+            title={presentation ? "Präsentationsmodus aus (Daten wieder sichtbar)" : "Präsentationsmodus an (sensible Daten maskieren)"}
+            type="button"
+          >
+            {presentation ? <EyeOff size={16} /> : <Eye size={16} />}
+            <span>{presentation ? "Präsentationsmodus an" : "Präsentationsmodus"}</span>
+          </button>
           <button className="ghost license-link" onClick={() => setLicenseOpen(true)} title="Nutzungsvereinbarung anzeigen" type="button">
             <FileText size={16} />
             <span>Nutzungsvereinbarung</span>
@@ -601,6 +620,7 @@ export default function App() {
                 <input
                   onChange={(event) => vm.updateConfig("libraryId", event.target.value)}
                   placeholder="mistral-library-id"
+                  type={presentation ? "password" : "text"}
                   value={config.libraryId}
                 />
               </label>
@@ -617,7 +637,12 @@ export default function App() {
                   value={config.device.deviceName}
                 />
                 <span className="field-hint">
-                  Geräte-ID: {config.device.deviceId || "wird automatisch erstellt"}
+                  Geräte-ID:{" "}
+                  {config.device.deviceId
+                    ? presentation
+                      ? maskId(config.device.deviceId)
+                      : config.device.deviceId
+                    : "wird automatisch erstellt"}
                 </span>
               </label>
               <label>
@@ -664,7 +689,11 @@ export default function App() {
                 {vm.sessionStatus.loggedIn ? (
                   <div style={{ display: "grid", gap: 8 }}>
                     <span className="field-hint">
-                      Angemeldet als {vm.sessionStatus.email || "KatoOS-Konto"}.
+                      Angemeldet als{" "}
+                      {presentation
+                        ? maskEmail(vm.sessionStatus.email)
+                        : vm.sessionStatus.email || "KatoOS-Konto"}
+                      .
                     </span>
                     <div className="button-row">
                       <button
@@ -683,18 +712,14 @@ export default function App() {
                     {vm.generatedToken ? (
                       <div style={{ display: "grid", gap: 6 }}>
                         <span className="field-hint" style={{ color: "#f59e0b" }}>
-                          Dein neuer Connector-Token — nur JETZT sichtbar. Kopieren und in Mistral eintragen:
+                          Dein neuer Connector-Token — nur JETZT sichtbar. Kopieren und in Mistral eintragen
+                          (wird beim Minimieren/Tab-Wechsel ausgeblendet):
                         </span>
-                        <input
-                          readOnly
-                          value={vm.generatedToken}
-                          onFocus={(event) => event.currentTarget.select()}
+                        <TokenReveal
+                          token={vm.generatedToken}
+                          presentation={presentation}
+                          onCopy={vm.handleCopyToken}
                         />
-                        <div className="button-row">
-                          <button className="secondary" onClick={vm.handleCopyToken} type="button">
-                            Token kopieren
-                          </button>
-                        </div>
                         <span className="field-hint">
                           In Mistral Studio: MCP-Server {config.mcp.baseUrl.replace(/\/+$/, "")}/mcp manuell hinzufügen und diesen Token als Bearer hinterlegen.
                         </span>
@@ -2083,6 +2108,79 @@ function projectLabel(projectId: string) {
     default:
       return projectId;
   }
+}
+
+// ===== Maskierung (Token-Reveal + Praesentationsmodus) =====
+function maskMiddle(value: string, front: number, back: number) {
+  const v = value || "";
+  if (v.length <= front + back + 2) return "•".repeat(Math.max(6, v.length));
+  return `${v.slice(0, front)}••••••${v.slice(-back)}`;
+}
+
+function maskToken(token: string) {
+  return maskMiddle(token, 10, 4);
+}
+
+function maskId(id: string) {
+  return maskMiddle(id, 6, 4);
+}
+
+function maskEmail(email: string | null | undefined) {
+  const e = email || "";
+  const at = e.indexOf("@");
+  if (at < 1) return e ? "•".repeat(Math.max(6, e.length)) : "";
+  const local = e.slice(0, at);
+  const tld = e.slice(at + 1).split(".").pop() || "";
+  return `${local.slice(0, 1)}••••@••••.${tld}`;
+}
+
+// Connector-Token: nur 1x sichtbar; bei Fenster-Blur/Minimieren/Tab-Wechsel re-maskiert; Praesentation erzwingt Maske.
+function TokenReveal({
+  token,
+  presentation,
+  onCopy
+}: {
+  token: string;
+  presentation: boolean;
+  onCopy: () => void;
+}) {
+  const [revealed, setRevealed] = useState(true);
+  useEffect(() => {
+    const hide = () => setRevealed(false);
+    const onVis = () => {
+      if (document.hidden) setRevealed(false);
+    };
+    window.addEventListener("blur", hide);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("blur", hide);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+  const show = revealed && !presentation;
+  return (
+    <div className="token-reveal">
+      <input
+        readOnly
+        value={show ? token : maskToken(token)}
+        onBlur={() => setRevealed(false)}
+        onFocus={(event) => {
+          if (show) event.currentTarget.select();
+        }}
+      />
+      <button
+        className="icon-button"
+        onClick={() => setRevealed((current) => !current)}
+        title={show ? "Verbergen" : "Anzeigen"}
+        type="button"
+      >
+        {show ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+      <button className="secondary" onClick={onCopy} type="button">
+        Kopieren
+      </button>
+    </div>
+  );
 }
 
 function briefingPriorityLabel(priority: Briefing["priority"]) {
