@@ -1,5 +1,26 @@
 # KatoSync Project Statusflow
 
+## 2026-06-28 - Offene Wellen abgeschlossen: Repo-pro-Projekt + Live-Feed (DONE)
+
+Projekt: KatoSync Desktop App
+Status: DONE — die zwei letzten offenen Wellen sind umgesetzt, gebaut, installiert
+
+1) Repo-pro-Projekt-Auto-Detect:
+
+- AppConfig hat neu `projectRepos` (projectId → lokaler Repo-Ordner), persistiert (Rust HashMap `#[serde(default)]` + TS + defaults + normalizeConfig).
+- Neuer Tauri-Command `dir_exists`. ViewModel `resolveRepoForProject(projectId)`: nutzt den gemerkten Ordner (prüft Existenz), fragt nur beim ersten Mal / wenn verschwunden per Datei-Dialog und merkt ihn dann (saveConfig).
+- Eingesetzt in Board-Queue (pro Projekt-Spalte), Einzel-„An Codex übergeben" (task.projectId) und Briefing („katosync"). Kein Ordner-Dialog mehr pro Lauf.
+- Einstellungen (Codex-Bridge-Karte): Liste „Gemerkte Projekt-Ordner" mit „Ordner vergessen".
+
+2) Live-Aktivitäts-Feed der Codex-Läufe (statt indeterminiertem Balken):
+
+- Rust: `run_codex_task` bekommt `AppHandle`; codex-stdout wird als Pipe gelesen (tokio-Reader), jede JSONL-Zeile geht weiterhin in `execution_log.jsonl` UND wird als Tauri-Event `codex-event` (`{taskId,seq,label,text}`) gestreamt. `summarize_codex_event` fasst Events defensiv zusammen. Timeout/Kill bleibt; der Reader wird nach Kill mit eigenem 5s-Timeout + `abort` abgesichert (kein Hängen, falls ein Subprozess das Pipe offen hält).
+- Frontend: `listenCodexEvents` (Event-Abo), ViewModel `codexEvents` (letzte 300, Reset pro Lauf), Live-Liste im Codex-Bridge-Panel.
+
+Validierung: `cargo check` grün (nur vorbestehende Dead-Code-Warnung), `tsc` + `npm run build` grün, adversarialer Diff-Review (1 MAJOR gefunden + behoben: Reader-await mit Timeout/abort), `npm run tauri build` grün + installiert.
+
+Damit sind ALLE in der Welle „Codex-Politur"/„nächste Phase" genannten Punkte erledigt (branch-from-main, return-to-main, Prefix-Fix, Auto-Push, PR, Repo-pro-Projekt, Live-Feed). Optionale Zukunft: PR-Auto-Merge-bei-grün, KAI-Runner.
+
 ## 2026-06-28 - Codex-Bridge v2: Auto-Push + PR + branch-from-main (DONE)
 
 Projekt: KatoSync Desktop App

@@ -17,8 +17,9 @@ use std::{
     sync::{Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use tokio::time::{sleep, timeout};
 use uuid::Uuid;
@@ -57,6 +58,9 @@ pub struct AppConfig {
     codex_auto_push: bool,
     #[serde(default = "default_true")]
     codex_create_pr: bool,
+    // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectExternalId -> Pfad).
+    #[serde(default)]
+    project_repos: std::collections::HashMap<String, String>,
 }
 
 fn default_true() -> bool {
@@ -238,6 +242,7 @@ pub fn run() {
             logout_supabase,
             mint_connector_token,
             run_codex_task,
+            dir_exists,
             test_mistral_connection,
             test_library,
             scan_project,
@@ -703,6 +708,35 @@ fn git_remote_https_url(repo: &str) -> Option<String> {
     Some(url.trim_end_matches(".git").trim_end_matches('/').to_string())
 }
 
+// Codex --json Event -> (Label, Kurztext) fuer den Live-Feed. Defensiv ueber unbekannte Schemata.
+fn summarize_codex_event(line: &str) -> (String, String) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return ("event".to_string(), String::new());
+    }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        let label = v
+            .get("type")
+            .and_then(|t| t.as_str())
+            .or_else(|| v.pointer("/msg/type").and_then(|t| t.as_str()))
+            .or_else(|| v.pointer("/item/type").and_then(|t| t.as_str()))
+            .unwrap_or("event")
+            .to_string();
+        let text = v
+            .pointer("/msg/message")
+            .and_then(|t| t.as_str())
+            .or_else(|| v.pointer("/msg/text").and_then(|t| t.as_str()))
+            .or_else(|| v.get("message").and_then(|t| t.as_str()))
+            .or_else(|| v.pointer("/item/text").and_then(|t| t.as_str()))
+            .or_else(|| v.pointer("/item/title").and_then(|t| t.as_str()))
+            .unwrap_or("");
+        let text: String = sanitize_log(text).chars().take(160).collect();
+        return (sanitize_log(&label), text);
+    }
+    let raw: String = sanitize_log(trimmed).chars().take(160).collect();
+    ("log".to_string(), raw)
+}
+
 fn git_capture(repo: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
@@ -795,7 +829,13 @@ async fn post_execution_result(base_url: &str, body: &serde_json::Value) -> Resu
 }
 
 #[tauri::command]
-async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> {
+fn dir_exists(path: String) -> bool {
+    let p = path.trim();
+    !p.is_empty() && Path::new(p).is_dir()
+}
+
+#[tauri::command]
+async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<CodexRunResult, String> {
     let started = std::time::Instant::now();
     let run_stamp = Local::now().format("%Y%m%d%H%M%S").to_string();
     let repo_path = req.repo_path.trim().to_string();
@@ -900,7 +940,8 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
     let output_path = format!("{run_dir}/output.txt");
     let events_path = format!("{run_dir}/execution_log.jsonl");
     let stderr_path = format!("{run_dir}/codex_stderr.log");
-    let events_file = fs::File::create(&events_path).map_err(error_to_string)?;
+    // events-Datei leeren (der Reader haengt die JSONL-Zeilen an); stderr direkt in Datei.
+    fs::File::create(&events_path).map_err(error_to_string)?;
     let stderr_file = fs::File::create(&stderr_path).map_err(error_to_string)?;
 
     let mut codex_error: Option<String> = None;
@@ -919,23 +960,67 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
         .arg("never")
         .arg("-c")
         .arg("approval_policy=\"never\"")
-        .stdout(Stdio::from(events_file))
+        .stdout(Stdio::piped())
         .stderr(Stdio::from(stderr_file))
         .spawn()
     {
-        Ok(mut child) => match timeout(Duration::from_secs(timeout_secs), child.wait()).await {
-            Ok(Ok(status)) => {
-                exit_code = status.code();
-                if !status.success() {
-                    codex_error = Some(format!("Codex Exit-Code {:?}", status.code()));
+        Ok(mut child) => {
+            // Live-Feed: codex-stdout (JSONL) zeilenweise -> in execution_log.jsonl schreiben
+            // UND als Tauri-Event "codex-event" ans Frontend streamen.
+            let reader_handle = child.stdout.take().map(|stdout| {
+                let app = app.clone();
+                let events_path = events_path.clone();
+                let task_label = task_id.clone();
+                tokio::spawn(async move {
+                    let mut file = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&events_path)
+                        .ok();
+                    let mut lines = BufReader::new(stdout).lines();
+                    let mut seq: u64 = 0;
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        if let Some(f) = file.as_mut() {
+                            let _ = writeln!(f, "{line}");
+                        }
+                        seq += 1;
+                        let (label, text) = summarize_codex_event(&line);
+                        let _ = app.emit(
+                            "codex-event",
+                            json!({
+                                "taskId": task_label,
+                                "seq": seq,
+                                "label": label,
+                                "text": text,
+                            }),
+                        );
+                    }
+                })
+            });
+
+            match timeout(Duration::from_secs(timeout_secs), child.wait()).await {
+                Ok(Ok(status)) => {
+                    exit_code = status.code();
+                    if !status.success() {
+                        codex_error = Some(format!("Codex Exit-Code {:?}", status.code()));
+                    }
+                }
+                Ok(Err(e)) => codex_error = Some(error_to_string(e)),
+                Err(_) => {
+                    let _ = child.kill().await;
+                    codex_error = Some(format!("Codex-Timeout nach {timeout_secs}s"));
                 }
             }
-            Ok(Err(e)) => codex_error = Some(error_to_string(e)),
-            Err(_) => {
-                let _ = child.kill().await;
-                codex_error = Some(format!("Codex-Timeout nach {timeout_secs}s"));
+            // Restliche Zeilen flushen lassen — aber nie unbegrenzt warten: falls ein
+            // Codex-Subprozess das stdout-Pipe offen haelt (kein EOF nach kill), den Reader abbrechen,
+            // sonst wuerde der Timeout ausgehebelt und der Command haengen.
+            if let Some(handle) = reader_handle {
+                let abort = handle.abort_handle();
+                if timeout(Duration::from_secs(5), handle).await.is_err() {
+                    abort.abort();
+                }
             }
-        },
+        }
         Err(e) => codex_error = Some(format!("Codex-Start fehlgeschlagen: {}", error_to_string(e))),
     }
 
@@ -2248,6 +2333,7 @@ fn default_config() -> Result<AppConfig> {
         },
         codex_auto_push: true,
         codex_create_pr: true,
+        project_repos: std::collections::HashMap::new(),
     })
 }
 

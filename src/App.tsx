@@ -1684,6 +1684,27 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
       <p className="field-hint" style={{ marginTop: -2 }}>
         Änderungen an diesen Schaltern erst mit „Einstellungen speichern" übernehmen.
       </p>
+      {vm.config && Object.keys(vm.config.projectRepos ?? {}).length ? (
+        <div className="project-repo-list">
+          <strong className="section-label">Gemerkte Projekt-Ordner</strong>
+          {Object.entries(vm.config.projectRepos).map(([projectId, path]) => (
+            <div className="project-repo-row" key={projectId}>
+              <div>
+                <strong>{projectLabel(projectId)}</strong>
+                <span className="field-hint">{path}</span>
+              </div>
+              <button
+                className="ghost"
+                disabled={Boolean(vm.busy) || vm.queueRunning}
+                onClick={() => void vm.handleForgetProjectRepo(projectId)}
+                type="button"
+              >
+                Ordner vergessen
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {run.status === "idle" ? (
         <div className="codex-bridge-list">
           <div>
@@ -1712,6 +1733,16 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
             }
           />
           {run.status === "running" ? <div className="codex-bar" style={{ marginTop: 12 }} /> : null}
+          {run.status === "running" && vm.codexEvents.length ? (
+            <div className="codex-feed">
+              {vm.codexEvents.slice(-15).map((event) => (
+                <div className="codex-feed-line" key={`${event.taskId}-${event.seq}`}>
+                  <span className="codex-feed-label">{event.label}</span>
+                  {event.text ? <span className="codex-feed-text">{event.text}</span> : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
           {result ? (
             <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
               <div>

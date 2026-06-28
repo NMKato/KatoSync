@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { defaultConfig } from "../lib/defaults";
 import type {
@@ -9,6 +10,7 @@ import type {
   ActionTask,
   ActionTaskStatus,
   AppConfig,
+  CodexEvent,
   ApiCheckResponse,
   Briefing,
   BriefingPriority,
@@ -155,6 +157,29 @@ export async function generateConnectorToken(config: AppConfig): Promise<Generat
   }
   const status = await saveMcpConnectorToken(token);
   return { token, status };
+}
+
+export async function dirExists(path: string): Promise<boolean> {
+  if (!path) return false;
+  if (isTauri()) {
+    try {
+      return await invoke<boolean>("dir_exists", { path });
+    } catch {
+      return false;
+    }
+  }
+  return true; // Browser-Demo: keine echte FS-Pruefung
+}
+
+// Live-Feed: abonniert gestreamte Codex-Events. Gibt eine Unsubscribe-Funktion zurueck.
+export async function listenCodexEvents(cb: (event: CodexEvent) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const unlisten = await listen<CodexEvent>("codex-event", (evt) => cb(evt.payload));
+    return unlisten;
+  } catch {
+    return () => {};
+  }
 }
 
 export async function chooseRepoFolder(defaultPath?: string): Promise<string | null> {
@@ -1008,7 +1033,8 @@ function normalizeConfig(config: AppConfig): AppConfig {
       deviceName: config.device?.deviceName || "Dieser Rechner"
     },
     codexAutoPush: config.codexAutoPush ?? defaultConfig.codexAutoPush,
-    codexCreatePr: config.codexCreatePr ?? defaultConfig.codexCreatePr
+    codexCreatePr: config.codexCreatePr ?? defaultConfig.codexCreatePr,
+    projectRepos: config.projectRepos ?? {}
   };
 }
 

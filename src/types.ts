@@ -36,6 +36,8 @@ export interface AppConfig {
   // Codex-Bridge v2: Branch nach erfolgreichem Lauf pushen / PR erstellen.
   codexAutoPush: boolean;
   codexCreatePr: boolean;
+  // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectId -> Pfad).
+  projectRepos: Record<string, string>;
 }
 
 export interface McpConfig {
@@ -241,6 +243,14 @@ export interface CodexRunState {
   status: "idle" | "running" | "completed" | "failed";
   result?: CodexRunResult;
   error?: string;
+}
+
+// Live-Feed: ein gestreamtes Codex-Event (JSONL-Zeile, zusammengefasst).
+export interface CodexEvent {
+  taskId: string;
+  seq: number;
+  label: string;
+  text: string;
 }
 
 export interface LaunchAgentStatus {

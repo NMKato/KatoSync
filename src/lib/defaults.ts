@@ -33,7 +33,8 @@ export const defaultConfig: AppConfig = {
     secretScanEnabled: true
   },
   codexAutoPush: true,
-  codexCreatePr: true
+  codexCreatePr: true,
+  projectRepos: {}
 };
 
 export const weekdayLabels: Record<string, string> = {

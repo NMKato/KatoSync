@@ -4,6 +4,8 @@ import {
   buildCodexPromptFromTask,
   chooseFolders,
   chooseRepoFolder,
+  dirExists,
+  listenCodexEvents,
   NO_PROJECT_ID,
   runCodexTask,
   deleteApiKey,
@@ -43,6 +45,7 @@ import type {
   ActionTaskStatus,
   AppConfig,
   Briefing,
+  CodexEvent,
   CodexRunResult,
   CodexRunState,
   RateLimitMetric,
@@ -95,6 +98,7 @@ export function useKatoSyncViewModel() {
   const [loginPassword, setLoginPassword] = useState("");
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
   const [codexRun, setCodexRun] = useState<CodexRunState>({ status: "idle" });
+  const [codexEvents, setCodexEvents] = useState<CodexEvent[]>([]);
   const [scan, setScan] = useState<ScanSummary | null>(null);
   const [report, setReport] = useState<SyncReport | null>(null);
   const [launchStatus, setLaunchStatus] = useState<LaunchAgentStatus | null>(null);
@@ -144,6 +148,26 @@ export function useKatoSyncViewModel() {
   useEffect(() => {
     void boot();
   }, [boot]);
+
+  // Live-Feed: gestreamte Codex-Events sammeln (letzte 300).
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      const un = await listenCodexEvents((event) => {
+        setCodexEvents((prev) => {
+          const next = [...prev, event];
+          return next.length > 300 ? next.slice(next.length - 300) : next;
+        });
+      });
+      if (active) unlisten = un;
+      else un();
+    })();
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
 
   const updateConfig = useCallback(<K extends keyof AppConfig>(key: K, value: AppConfig[K]) => {
     setConfig((current) => (current ? { ...current, [key]: value } : current));
@@ -458,10 +482,49 @@ export function useKatoSyncViewModel() {
     [config, show]
   );
 
+  // Repo-pro-Projekt: gemerkten Ordner nutzen; nur fragen, wenn unbekannt/verschwunden -> dann merken.
+  const resolveRepoForProject = useCallback(
+    async (projectId: string): Promise<string | null> => {
+      if (!config) return null;
+      const stored = config.projectRepos?.[projectId];
+      if (stored && (await dirExists(stored))) return stored;
+      const picked = await chooseRepoFolder(stored ?? config.sourceRoots[0]);
+      if (!picked) return null;
+      const nextConfig: AppConfig = {
+        ...config,
+        projectRepos: { ...(config.projectRepos ?? {}), [projectId]: picked }
+      };
+      try {
+        setConfig(await saveConfig(nextConfig));
+      } catch {
+        setConfig(nextConfig);
+      }
+      return picked;
+    },
+    [config]
+  );
+
+  const handleForgetProjectRepo = useCallback(
+    async (projectId: string) => {
+      if (!config) return;
+      const next = { ...(config.projectRepos ?? {}) };
+      delete next[projectId];
+      const nextConfig: AppConfig = { ...config, projectRepos: next };
+      try {
+        setConfig(await saveConfig(nextConfig));
+      } catch {
+        setConfig(nextConfig);
+      }
+      show("info", "Projekt-Ordner entfernt. Beim nächsten Lauf fragt KatoSync erneut.");
+    },
+    [config, show]
+  );
+
   // Kern-Codex-Lauf OHNE Ordnerdialog (vom Einzel-Button UND vom Board-Executor genutzt).
   const runCodexForTaskWithRepo = useCallback(
     async (plan: ActionPlan, task: ActionTask, repoPath: string): Promise<CodexRunResult> => {
       if (!config) throw new Error("Keine Konfiguration geladen.");
+      setCodexEvents([]);
       setCodexRun({ status: "running" });
       const result = await runCodexTask({
         baseUrl: config.mcp.baseUrl,
@@ -496,7 +559,7 @@ export function useKatoSyncViewModel() {
   const handleRunCodexForTask = useCallback(
     async (plan: ActionPlan, task: ActionTask) => {
       if (!config) return;
-      const repoPath = await chooseRepoFolder(config.sourceRoots[0]);
+      const repoPath = await resolveRepoForProject(task.projectId);
       if (!repoPath) return;
       setBusy("codex-run");
       try {
@@ -519,15 +582,16 @@ export function useKatoSyncViewModel() {
         setBusy(null);
       }
     },
-    [config, runCodexForTaskWithRepo, show]
+    [config, resolveRepoForProject, runCodexForTaskWithRepo, show]
   );
 
   const handleRunCodexForBriefing = useCallback(
     async (briefing: Briefing) => {
       if (!config) return;
-      const repoPath = await chooseRepoFolder(config.sourceRoots[0]);
+      const repoPath = await resolveRepoForProject("katosync");
       if (!repoPath) return;
       setBusy("codex-run");
+      setCodexEvents([]);
       setCodexRun({ status: "running" });
       try {
         const result = await runCodexTask({
@@ -565,7 +629,7 @@ export function useKatoSyncViewModel() {
         setBusy(null);
       }
     },
-    [config, show]
+    [config, resolveRepoForProject, show]
   );
 
   // ===== Projekt-Board =====
@@ -676,7 +740,7 @@ export function useKatoSyncViewModel() {
         return;
       }
 
-      const repoPath = await chooseRepoFolder(config.sourceRoots[0]);
+      const repoPath = await resolveRepoForProject(projectId);
       if (!repoPath) return;
 
       stopRef.current = false;
@@ -719,7 +783,16 @@ export function useKatoSyncViewModel() {
         setActionPlans(await loadActionPlans(config));
       }
     },
-    [actionPlans, boardDailyLimit, boardGroups, config, queueRunning, runCodexForTaskWithRepo, show]
+    [
+      actionPlans,
+      boardDailyLimit,
+      boardGroups,
+      config,
+      queueRunning,
+      resolveRepoForProject,
+      runCodexForTaskWithRepo,
+      show
+    ]
   );
 
   const handleAcceptBriefing = useCallback(
@@ -789,6 +862,7 @@ export function useKatoSyncViewModel() {
     notice,
     generatedToken,
     codexRun,
+    codexEvents,
     rateLimits,
     report,
     scan,
@@ -798,6 +872,7 @@ export function useKatoSyncViewModel() {
     handleDeferTask,
     handleDeleteKey,
     handleDeleteMcpConnectorToken,
+    handleForgetProjectRepo,
     handleGenerateConnectorToken,
     handleRejectTask,
     handleReorderTask,

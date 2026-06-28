@@ -11,6 +11,12 @@
 - Schlüsselbund-Eigenheit: nach jedem App-Neu-Build (ad-hoc signiert) kann macOS den Token-Zugriff neu abfragen → „Immer erlauben"; NICHT neu generieren (harte Rotation entwertet sonst den in Mistral hinterlegten Token).
 - Nächste große Welle = Projekt-Board (Briefings → pro-Projekt-Tasks von Mistral, Triage/Queue/aufschieben/ablehnen, Task-Status-Endpunkt, Live-Aktivitäts-Feed).
 
+## Repo-pro-Projekt + Live-Feed (seit 2026-06-28)
+
+- Repo-pro-Projekt: `AppConfig.projectRepos` (projectId → Ordner), persistiert. Tauri-Command `dir_exists`. ViewModel `resolveRepoForProject(projectId)` nutzt den gemerkten Ordner (Existenzprüfung), fragt nur einmal/wenn weg und merkt ihn via `saveConfig`. Genutzt in Board-Queue (pro Projekt-Spalte), Einzel-Codex (task.projectId), Briefing ("katosync"). „Ordner vergessen" in den Einstellungen (`handleForgetProjectRepo`). → Kein Ordner-Dialog mehr pro Lauf.
+- Live-Feed: `run_codex_task(app: AppHandle)`, codex-stdout als Pipe gelesen (tokio-Reader) → jede JSONL-Zeile in `execution_log.jsonl` UND als Tauri-Event `codex-event` (`{taskId,seq,label,text}`, `summarize_codex_event`) gestreamt. WICHTIG: Reader nach Timeout/Kill mit eigenem 5s-`timeout`+`abort` absichern (sonst Hänger, wenn Subprozess das Pipe offen hält). Frontend: `listenCodexEvents` (Event `codex-event`), ViewModel `codexEvents` (letzte 300, Reset pro Lauf), Live-Liste im Codex-Panel statt Balken.
+- Event-Name MUSS auf beiden Seiten exakt `codex-event` sein (Rust `app.emit` ↔ TS `listen`).
+
 ## Codex-Bridge v2 (seit 2026-06-28)
 
 - Codex-Läufe zweigen jetzt IMMER von main/Default ab (`detect_default_branch`: main→master→aktuell, offline; best-effort `git fetch`; `git checkout <default>` vor `checkout -b`) und kehren nach dem Lauf **zurück auf den Default-Branch** (Arbeitskopie sauber; Codex-Änderungen leben nur auf dem Branch). Fehlgeschlagener Lauf ohne Commit → leerer Branch wird gelöscht.
