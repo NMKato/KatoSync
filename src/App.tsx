@@ -10,8 +10,12 @@ import {
   FileCheck2,
   FileText,
   FolderOpen,
+  ChevronDown,
+  ChevronUp,
+  CheckSquare,
   HardDriveUpload,
   KeyRound,
+  LayoutGrid,
   Library,
   ListChecks,
   Loader2,
@@ -19,9 +23,12 @@ import {
   Power,
   PlayCircle,
   RefreshCcw,
+  RotateCcw,
   ShieldCheck,
   Settings,
   SlidersHorizontal,
+  Square,
+  StopCircle,
   Sun,
   TerminalSquare,
   Trash2,
@@ -42,12 +49,18 @@ import {
 } from "./components/Primitives";
 import { licenseAgreement } from "./lib/license";
 import { weekdayLabels } from "./lib/defaults";
-import { useKatoSyncViewModel, type StepId } from "./viewmodels/useKatoSyncViewModel";
-import type { ActionPlan, Briefing, FileFinding, Weekday } from "./types";
+import {
+  useKatoSyncViewModel,
+  type BoardTask,
+  type StepId
+} from "./viewmodels/useKatoSyncViewModel";
+import { NO_PROJECT_ID } from "./repositories/katoSyncRepository";
+import type { ActionPlan, ActionTaskStatus, Briefing, FileFinding, Weekday } from "./types";
 
 const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
   { id: "dashboard", label: "Dashboard", icon: Database },
   { id: "actionQueue", label: "Action Queue", icon: ClipboardList },
+  { id: "projectBoard", label: "Projekt-Board", icon: LayoutGrid },
   { id: "briefings", label: "Briefings", icon: BookOpenText },
   { id: "settings", label: "Einstellungen", icon: Settings },
   { id: "logs", label: "Aktivitäten", icon: TerminalSquare }
@@ -69,6 +82,7 @@ const sectionByStep: Record<StepId, string> = {
   schedule: "section-schedule",
   dashboard: "section-status",
   actionQueue: "section-action-queue",
+  projectBoard: "section-project-board",
   briefings: "section-briefings",
   settings: "section-api",
   logs: "section-activities"
@@ -130,6 +144,11 @@ function pageCopy(step: StepId) {
       return {
         title: "Action Queue",
         text: "Agent-Pläne lokal prüfen, freigeben oder ablehnen. Es wird nichts automatisch ausgeführt."
+      };
+    case "projectBoard":
+      return {
+        title: "Projekt-Board",
+        text: "Freigegebene Aufgaben pro Projekt einplanen, sortieren und sequenziell an Codex übergeben."
       };
     case "briefings":
       return {
@@ -1091,6 +1110,7 @@ export default function App() {
           </Panel>
           ) : null}
 
+          {visibleStep === "projectBoard" ? <ProjectBoardPanel vm={vm} /> : null}
           {visibleStep === "briefings" ? <BriefingsPanel vm={vm} /> : null}
           {visibleStep === "settings" ? <CodexBridgePanel vm={vm} /> : null}
         </section>
@@ -1295,6 +1315,221 @@ function ActionQueuePanel({
         </div>
       )}
     </Panel>
+  );
+}
+
+function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const groups = vm.boardGroups;
+  const totalTasks = groups.reduce((sum, group) => sum + group.tasks.length, 0);
+
+  return (
+    <Panel
+      className="queue-panel board-panel"
+      id="section-project-board"
+      title="Projekt-Board"
+      icon={<LayoutGrid size={18} />}
+    >
+      <div className="queue-summary">
+        <div>
+          <strong>
+            {vm.dailyCount} von {vm.boardDailyLimit}
+          </strong>
+          <span>Codex-Läufe heute · {vm.boardSelection.length} ausgewählt</span>
+        </div>
+        <button
+          className="secondary"
+          disabled={Boolean(vm.busy) || vm.queueRunning}
+          onClick={vm.handleRefreshActionPlans}
+          type="button"
+        >
+          {vm.busy === "action-plans" ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
+          Aktualisieren
+        </button>
+      </div>
+
+      {vm.queueRunning ? (
+        <div className="board-running">
+          <Loader2 className="spin" size={15} />
+          <span>Codex-Queue läuft. Aufgaben werden nacheinander ausgeführt.</span>
+          <button className="ghost" onClick={vm.handleStopBoardQueue} type="button">
+            <StopCircle size={14} /> Stoppen
+          </button>
+        </div>
+      ) : null}
+
+      {totalTasks ? (
+        <div className="board-grid">
+          {groups.map((group) => {
+            const executable = group.tasks.filter(
+              (task) =>
+                task.selected &&
+                task.approved &&
+                task.targetRunner === "codex_cli" &&
+                task.riskLevel !== "critical" &&
+                task.status !== "deferred"
+            ).length;
+            return (
+              <section className="board-column" key={group.projectId}>
+                <header className="board-column-head">
+                  <div>
+                    <strong>{projectLabel(group.projectId)}</strong>
+                    <small>{group.tasks.length} Aufgabe(n)</small>
+                  </div>
+                  <button
+                    className="secondary"
+                    disabled={
+                      Boolean(vm.busy) ||
+                      vm.queueRunning ||
+                      executable === 0 ||
+                      vm.dailyCount >= vm.boardDailyLimit
+                    }
+                    onClick={() => void vm.handleStartBoardQueue(group.projectId)}
+                    title="Ausgewählte Codex-Aufgaben dieses Projekts sequenziell ausführen"
+                    type="button"
+                  >
+                    <PlayCircle size={14} /> Queue starten
+                  </button>
+                </header>
+                <div className="board-column-body">
+                  {group.tasks.map((task) => (
+                    <BoardTaskCard key={task.taskId} vm={vm} task={task} />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="queue-empty">
+          <CheckCircle2 size={18} />
+          <div>
+            <strong>Keine offenen Aufgaben</strong>
+            <span>
+              Gib in der Action Queue einen Plan frei – seine Aufgaben erscheinen dann hier nach
+              Projekt gruppiert und lassen sich einplanen.
+            </span>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function BoardTaskCard({
+  vm,
+  task
+}: {
+  vm: ReturnType<typeof useKatoSyncViewModel>;
+  task: BoardTask;
+}) {
+  const disabled = Boolean(vm.busy) || vm.queueRunning;
+  const isCurrent = vm.currentQueueTaskId === task.taskId;
+  const canCodex = task.approved && task.targetRunner === "codex_cli" && task.riskLevel !== "critical";
+  const plan = vm.actionPlans.find((entry) => entry.planId === task.planId);
+
+  return (
+    <article className={`action-plan-card board-task${task.selected ? " selected" : ""}`}>
+      <header>
+        <div>
+          <span className="agent-name">{task.agentName}</span>
+          <strong>{task.title}</strong>
+          <small>{task.source}</small>
+        </div>
+        <span className={`status-pill ${task.status}`}>{taskStatusLabel(task.status)}</span>
+      </header>
+      <div className="board-pills">
+        <span className={`risk-pill ${task.riskLevel}`}>{riskLabel(task.riskLevel)}</span>
+        <span className="status-pill neutral">{runnerLabel(task.targetRunner)}</span>
+        {isCurrent ? (
+          <span className="status-pill running">
+            <Loader2 className="spin" size={12} /> Läuft
+          </span>
+        ) : null}
+      </div>
+      {task.summary ? <p className="board-summary">{task.summary}</p> : null}
+
+      {!task.approved ? (
+        <StatusLine good={false} text="Plan in der Action Queue freigeben, um diese Aufgabe auszuführen." />
+      ) : null}
+      {task.riskLevel === "critical" ? (
+        <StatusLine good={false} text="Kritische Aufgabe – nur manuelle Bearbeitung, kein automatischer Codex-Lauf." />
+      ) : null}
+
+      <footer className="board-actions">
+        {task.status === "deferred" ? (
+          <button
+            className="secondary"
+            disabled={disabled}
+            onClick={() => void vm.handleResumeTask(task.taskId)}
+            type="button"
+          >
+            <RotateCcw size={14} /> Wieder einplanen
+          </button>
+        ) : (
+          <>
+            <button
+              className="secondary"
+              disabled={disabled || !task.approved}
+              onClick={() => vm.handleSelectTask(task.taskId)}
+              type="button"
+            >
+              {task.selected ? <CheckSquare size={14} /> : <Square size={14} />}
+              {task.selected ? "Ausgewählt" : "Auswählen"}
+            </button>
+            {task.selected ? (
+              <>
+                <button
+                  className="ghost"
+                  disabled={disabled}
+                  onClick={() => vm.handleReorderTask(task.taskId, "up")}
+                  title="Nach oben"
+                  type="button"
+                >
+                  <ChevronUp size={14} />
+                </button>
+                <button
+                  className="ghost"
+                  disabled={disabled}
+                  onClick={() => vm.handleReorderTask(task.taskId, "down")}
+                  title="Nach unten"
+                  type="button"
+                >
+                  <ChevronDown size={14} />
+                </button>
+              </>
+            ) : null}
+            <button
+              className="ghost"
+              disabled={disabled}
+              onClick={() => void vm.handleDeferTask(task.taskId)}
+              type="button"
+            >
+              Aufschieben
+            </button>
+            {canCodex && plan ? (
+              <button
+                className="secondary"
+                disabled={disabled}
+                onClick={() => void vm.handleRunCodexForTask(plan, task)}
+                title="An Codex übergeben"
+                type="button"
+              >
+                {vm.busy === "codex-run" ? <Loader2 className="spin" size={14} /> : <PlayCircle size={14} />}
+                An Codex übergeben
+              </button>
+            ) : null}
+            <button
+              className="ghost danger"
+              disabled={disabled}
+              onClick={() => void vm.handleRejectTask(task.taskId)}
+              type="button"
+            >
+              Ablehnen
+            </button>
+          </>
+        )}
+      </footer>
+    </article>
   );
 }
 
@@ -1639,6 +1874,41 @@ function briefingStatusLabel(status: Briefing["status"]) {
       return "Archiviert";
     default:
       return status;
+  }
+}
+
+function taskStatusLabel(status: ActionTaskStatus) {
+  switch (status) {
+    case "pending":
+      return "Offen";
+    case "queued":
+      return "Eingeplant";
+    case "running":
+      return "Läuft";
+    case "completed":
+      return "Erledigt";
+    case "rejected":
+      return "Abgelehnt";
+    case "failed":
+      return "Fehlgeschlagen";
+    case "deferred":
+      return "Aufgeschoben";
+    default:
+      return status;
+  }
+}
+
+function projectLabel(projectId: string) {
+  if (projectId === NO_PROJECT_ID) return "Ohne Projekt";
+  switch (projectId) {
+    case "katosync":
+      return "KatoSync";
+    case "katoos-mcp":
+      return "KatoOS MCP";
+    case "katoos-web":
+      return "KatoOS Web";
+    default:
+      return projectId;
   }
 }
 

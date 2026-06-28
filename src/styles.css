@@ -1477,9 +1477,110 @@ input[type="range"] {
 
 .priority-pill.high,
 .priority-pill.critical,
-.status-pill.rejected {
+.status-pill.rejected,
+.status-pill.failed {
   color: #ffb3b3;
   background: rgba(255, 116, 116, 0.14);
+}
+
+/* Projekt-Board: weitere Task-Status-Pills */
+.status-pill.pending,
+.status-pill.deferred {
+  color: #ffd887;
+  background: rgba(255, 200, 87, 0.14);
+}
+
+.status-pill.running {
+  color: #9ec5ff;
+  background: rgba(120, 160, 255, 0.16);
+  gap: 5px;
+}
+
+.status-pill.completed {
+  color: #9df2b9;
+  background: rgba(81, 205, 123, 0.14);
+}
+
+.status-pill.neutral {
+  color: #c7d0e0;
+  background: rgba(140, 160, 190, 0.14);
+}
+
+/* Projekt-Board: Spalten pro Projekt */
+.board-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  align-items: start;
+  margin-top: 14px;
+}
+
+.board-column {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.board-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px;
+}
+
+.board-column-head strong {
+  font-size: 14px;
+}
+
+.board-column-head small {
+  display: block;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.board-column-body {
+  display: grid;
+  gap: 10px;
+}
+
+.board-task.selected {
+  border-color: rgba(120, 160, 255, 0.55);
+}
+
+.board-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.board-summary {
+  margin: 2px 0 0;
+  font-size: 12px;
+  opacity: 0.8;
+  line-height: 1.4;
+}
+
+.board-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.board-running {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(120, 160, 255, 0.1);
+  font-size: 13px;
+}
+
+.board-running button {
+  margin-left: auto;
 }
 
 .codex-bridge-list {

@@ -11,6 +11,16 @@
 - Schlüsselbund-Eigenheit: nach jedem App-Neu-Build (ad-hoc signiert) kann macOS den Token-Zugriff neu abfragen → „Immer erlauben"; NICHT neu generieren (harte Rotation entwertet sonst den in Mistral hinterlegten Token).
 - Nächste große Welle = Projekt-Board (Briefings → pro-Projekt-Tasks von Mistral, Triage/Queue/aufschieben/ablehnen, Task-Status-Endpunkt, Live-Aktivitäts-Feed).
 
+## Projekt-Board (live seit 2026-06-28)
+
+- Neue Seite „Projekt-Board" (StepId `projectBoard`) NEBEN der Action Queue (die bleibt das plan-zentrierte Freigabe-Tor + Dashboard-Widget + Onboarding — bewusst NICHT umgebaut).
+- `ActionTask` hat jetzt ein Pflichtfeld `status: ActionTaskStatus` (`pending/queued/running/completed/rejected/failed/deferred`). `projectId` = Server-`project_external_id` mit Sentinel `NO_PROJECT_ID` (`__no_project__` → Label „Ohne Projekt"). `priority` bleibt NUMBER = Rang aus `sort_order` (NICHT die textuelle Server-`priority`).
+- Mapping-Helfer in `katoSyncRepository.ts`: `fromRemoteRunner` (Passthrough gegen App-`ActionRunner`-Union, Fallback `manual_review`), `fromRemoteTaskStatus` (`approved`→`queued`, sonst `pending`), `toRemoteTaskStatus` (Identität), `fromRemoteRisk` (`blocked`→`critical`, sonst `medium`). Lade-Query: `?status=pending_review,approved`. localStorage-Key-Bump `katosync.actionPlans.v2`.
+- Task-Status-Rückkanal: Public `updateActionTaskStatus` → Tauri-Command `update_remote_action_task_status` (Keychain-Token) bzw. Browser-`fetch`-Fallback → `PATCH /api/action-tasks/:id/status`. `run_codex_task` (Rust) meldet zusätzlich `running`/final auf Task-Ebene (best effort, idempotent).
+- ViewModel: `boardGroups` (gruppiert nach Projekt), `boardDailyLimit` (Max der approved-Plan-`dailyLimit`, Fallback 3), `dailyCount` (lokaler Zähler, Key `katosync.board.completed.<YYYY-MM-DD>` → Auto-Tagesreset). Handler: `handleSelectTask`/`handleReorderTask`/`handleDeferTask`/`handleRejectTask`/`handleResumeTask`/`handleStopBoardQueue`/`handleStartBoardQueue(projectId)`.
+- Sequentieller Executor: PRO PROJEKT-SPALTE starten (ein Repo-Ordner je Lauf — Repo-pro-Projekt-Automatik ist NOCH NICHT drin), striktes `await` pro Task, lokaler Tageszähler im Loop (kein React-State-Stale-Closure), Fehler → `failed` + WEITER (continue), Stop bei Limit/Stop-Button. `critical`-Tasks sind aus dem Codex-Lauf ausgeschlossen.
+- WICHTIG: Das Board führt nur Tasks **freigegebener** (`approved`) Pläne aus; offene Pläne erscheinen read-only mit Hinweis „in der Action Queue freigeben". Freigabe-Tor bleibt also am Plan.
+
 ## Projektkontext
 
 KatoSync ist eine Tauri/macOS Desktop-App. Sie synchronisiert lokale Projektstatus-, Memory-, Roadmap- und Task-Dateien in eine Mistral Library.

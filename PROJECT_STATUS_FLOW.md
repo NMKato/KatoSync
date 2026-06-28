@@ -1,5 +1,32 @@
 # KatoSync Project Statusflow
 
+## 2026-06-28 - Projekt-Board Welle 1 (DONE)
+
+Projekt: KatoSync Desktop App + KatoOS MCP Server
+Status: DONE — Projekt-Board live (Server verifiziert, App gebaut + installiert)
+
+Ergebnis:
+
+- Neue Seite „Projekt-Board" (`projectBoard`); die Action Queue bleibt unverändert das plan-zentrierte Freigabe-Tor (+ Dashboard-Widget + Onboarding).
+- Board gruppiert TASKS nach Projekt (Multi-Projekt-Plan möglich). Pro Task: Titel + Pills (Priorität/Risiko/Runner/Status). Triage: auswählen, Reihenfolge (Hoch/Runter), aufschieben (`deferred`), ablehnen, „Wieder einplanen"; „An Codex übergeben" nur bei `approved` + `codex_cli` + nicht `critical`.
+- Sequentielle Client-Queue PRO PROJEKT-SPALTE: ein Repo-Ordner je Lauf, ein Task nach dem anderen; Tageslimit client-seitig (lokaler Zähler, Datums-Key → Auto-Reset, überlebt Neustart); Fehlerpolitik = weiterlaufen (Task → `failed`, nächster Task); Stoppen nach laufender Aufgabe.
+- Task-Status serverseitig persistent über `PATCH /api/action-tasks/:id/status` (Tauri-Command `update_remote_action_task_status` + Browser-Fallback). Codex-Lauf meldet zusätzlich `running`/`completed`/`failed` auf Task-Ebene (best effort).
+- Remote-Mapping liest echte Task-Spalten (`project_external_id`/`risk_level`/`target_runner`/`status`); „Ohne Projekt"-Sentinel statt Fehlbeschriftung; Lade-Query auf `status=pending_review,approved`. localStorage-Key-Bump `katosync.actionPlans.v2`.
+- Verträge: `target_runner` = volle App-`ActionRunner`-Union (nur `codex_cli` lokal ausführbar); Task-`risk_level` = `low/medium/high/critical` (`critical` → kein Codex-Lauf, Preflight-Abbruch).
+
+Validierung:
+
+- App: `tsc` + `npm run build` (Vite) grün; `cargo check` grün; `npm run tauri build` grün (`KatoSync.app` gebaut, nach `/Applications` installiert, v1.0.1).
+- Server: 29 vitest grün, `0006` live (`supabase db push`), Worker deployed (`789f405e-…`). Live-E2E (Smoke-Tenant): Multi-Projekt-Insert, neue Felder im GET, `PATCH …{deferred}` persistent, Negativpfade 401/400/Tenant-Guard.
+
+Sicherheit:
+
+- Freigabe-Tor bleibt am Plan (Board führt nur Tasks `approved`er Pläne aus). Kein Auto-Merge/main; `critical` nur manuell; kein Secret im Client.
+
+Plan-Datei: `/Users/nmk/.claude/plans/splendid-popping-hinton.md`.
+
+Nächste Wellen (offen): Live-Aktivitäts-Feed (JSONL via Tauri-Events), Codex-Politur (branch-from-main, doppeltes `katosync/katosync/`-Prefix, Repo-pro-Projekt, optional Auto-Push/PR).
+
 ## 2026-06-25 - KatoSync 2.0 Blueprint aufgenommen
 
 Projekt: KatoSync Desktop App
