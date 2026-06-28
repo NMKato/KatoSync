@@ -34,6 +34,10 @@ npm run tauri build
 
 Der Web-Frontend-Build wurde verifiziert. Der Tauri/Rust-Build braucht eine installierte Rust-Toolchain.
 
+## Release Packaging
+
+Die Owner-Checkliste fuer macOS Signing, Notarization und ffmpeg-Sidecar liegt in `docs/RELEASE_OWNER_RUNBOOK.md`. Secret-freie Env-Var-Platzhalter stehen in `docs/release-env.example.sh`.
+
 ## Reports Inbox
 
 Die geplante Erweiterung für fertige Mistral-Agentenberichte ist als Version 1.1 in `docs/ARCHITECTURE.md` beschrieben. Priorisiert wird die Mistral Workflow Runs API statt Gmail/Outlook. Die Trennung zwischen lokalem Uploadplan und Mistral Work Scheduler ist in `docs/MISTRAL_WORK_SCHEDULER.md` dokumentiert.
