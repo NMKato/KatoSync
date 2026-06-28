@@ -220,6 +220,7 @@ pub fn run() {
             delete_mcp_connector_token,
             load_remote_action_plans,
             update_remote_action_plan_status,
+            update_remote_action_task_status,
             load_remote_briefings,
             update_remote_briefing_status,
             login_supabase,
@@ -462,8 +463,9 @@ async fn mint_connector_token(base_url: String) -> Result<serde_json::Value, Str
 #[tauri::command]
 async fn load_remote_action_plans(base_url: String) -> Result<serde_json::Value, String> {
     let token = load_mcp_connector_token().map_err(error_to_string)?;
+    // Projekt-Board: auch freigegebene (approved) Plaene laden, damit deren Tasks ausfuehrbar sind.
     let url = format!(
-        "{}/api/action-plans?status=pending_review&includeTasks=true",
+        "{}/api/action-plans?status=pending_review,approved&includeTasks=true",
         normalize_base_url(&base_url)
     );
     let response = reqwest::Client::new()
@@ -508,6 +510,37 @@ async fn update_remote_action_plan_status(
     if !response_status.is_success() {
         return Err(format!(
             "MCP Action Plan konnte nicht aktualisiert werden ({response_status}): {text}"
+        ));
+    }
+    serde_json::from_str(&text).map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn update_remote_action_task_status(
+    base_url: String,
+    task_id: String,
+    status: String,
+) -> Result<serde_json::Value, String> {
+    let token = load_mcp_connector_token().map_err(error_to_string)?;
+    let url = format!(
+        "{}/api/action-tasks/{}/status",
+        normalize_base_url(&base_url),
+        task_id
+    );
+    let response = reqwest::Client::new()
+        .patch(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(token.trim())
+        .json(&json!({ "status": status }))
+        .send()
+        .await
+        .map_err(error_to_string)?;
+
+    let response_status = response.status();
+    let text = response.text().await.map_err(error_to_string)?;
+    if !response_status.is_success() {
+        return Err(format!(
+            "MCP Action Task konnte nicht aktualisiert werden ({response_status}): {text}"
         ));
     }
     serde_json::from_str(&text).map_err(error_to_string)
@@ -666,6 +699,34 @@ async fn patch_action_plan_status_inner(
     Ok(())
 }
 
+// Projekt-Board: Task-Status-Rueckkanal (best effort) waehrend eines Codex-Laufs.
+async fn patch_action_task_status_inner(
+    base_url: &str,
+    task_id: &str,
+    status: &str,
+) -> Result<(), String> {
+    let token = load_mcp_connector_token().map_err(error_to_string)?;
+    let url = format!(
+        "{}/api/action-tasks/{}/status",
+        normalize_base_url(base_url),
+        task_id
+    );
+    let response = reqwest::Client::new()
+        .patch(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(token.trim())
+        .json(&json!({ "status": status }))
+        .send()
+        .await
+        .map_err(error_to_string)?;
+    if !response.status().is_success() {
+        let s = response.status();
+        let t = response.text().await.unwrap_or_default();
+        return Err(format!("Task-Status-Update fehlgeschlagen ({s}): {t}"));
+    }
+    Ok(())
+}
+
 async fn post_execution_result(base_url: &str, body: &serde_json::Value) -> Result<(), String> {
     let token = load_mcp_connector_token().map_err(error_to_string)?;
     let url = format!("{}/api/execution-results", normalize_base_url(base_url));
@@ -765,6 +826,11 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
     if let Some(plan_id) = &req.action_plan_id {
         if let Err(e) = patch_action_plan_status_inner(&req.base_url, plan_id, "running").await {
             let _ = write_log("codex", &format!("Warnung: Status running fehlgeschlagen: {e}"));
+        }
+    }
+    if let Some(task_id) = &req.action_task_id {
+        if let Err(e) = patch_action_task_status_inner(&req.base_url, task_id, "running").await {
+            let _ = write_log("codex", &format!("Warnung: Task-Status running fehlgeschlagen: {e}"));
         }
     }
 
@@ -906,6 +972,11 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
     if let Some(plan_id) = &req.action_plan_id {
         if let Err(e) = patch_action_plan_status_inner(&req.base_url, plan_id, final_status).await {
             let _ = write_log("codex", &format!("Warnung: Status {final_status} fehlgeschlagen: {e}"));
+        }
+    }
+    if let Some(task_id) = &req.action_task_id {
+        if let Err(e) = patch_action_task_status_inner(&req.base_url, task_id, final_status).await {
+            let _ = write_log("codex", &format!("Warnung: Task-Status {final_status} fehlgeschlagen: {e}"));
         }
     }
 

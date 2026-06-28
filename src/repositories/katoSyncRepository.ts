@@ -5,7 +5,9 @@ import type {
   ActionPlan,
   ActionRiskLevel,
   ActionPlanStatus,
+  ActionRunner,
   ActionTask,
+  ActionTaskStatus,
   AppConfig,
   ApiCheckResponse,
   Briefing,
@@ -22,9 +24,12 @@ import type {
 } from "../types";
 
 const mockConfigKey = "katosync.config";
-const mockActionPlansKey = "katosync.actionPlans";
+// v2: Projekt-Board fuegt Tasks ein Pflichtfeld 'status' hinzu -> Key-Bump verwirft Alt-Caches ohne status.
+const mockActionPlansKey = "katosync.actionPlans.v2";
 const mockBriefingsKey = "katosync.briefings";
 const mockMcpConnectorTokenKey = "katosync.mcpConnectorToken";
+// Projekt-Board: Tasks ohne project_external_id landen in einer neutralen "Ohne Projekt"-Gruppe.
+export const NO_PROJECT_ID = "__no_project__";
 const isTauri = () => Boolean(window.__TAURI_INTERNALS__);
 
 export async function loadConfig(): Promise<AppConfig> {
@@ -414,6 +419,73 @@ export async function updateActionPlanStatus(
   return nextPlans;
 }
 
+// Projekt-Board: setzt den Status eines einzelnen Tasks (serverseitig persistent).
+export async function updateActionTaskStatus(
+  config: AppConfig | null,
+  taskId: string,
+  status: ActionTaskStatus
+): Promise<ActionPlan[]> {
+  if (config) {
+    const remotePlans = await tryUpdateRemoteActionTaskStatus(config, taskId, status);
+    if (remotePlans) {
+      return remotePlans.map((plan) => ({
+        ...plan,
+        tasks: plan.tasks.map((task) => (task.taskId === taskId ? { ...task, status } : task))
+      }));
+    }
+  }
+  const plans = await loadActionPlans(config ?? undefined);
+  const nextPlans = plans.map((plan) => ({
+    ...plan,
+    tasks: plan.tasks.map((task) => (task.taskId === taskId ? { ...task, status } : task))
+  }));
+  localStorage.setItem(mockActionPlansKey, JSON.stringify(nextPlans));
+  return nextPlans;
+}
+
+async function tryUpdateRemoteActionTaskStatus(
+  config: AppConfig,
+  taskId: string,
+  status: ActionTaskStatus
+): Promise<ActionPlan[] | null> {
+  const remoteStatus = toRemoteTaskStatus(status);
+  try {
+    const tokenStatus = await getMcpConnectorTokenStatus();
+    if (!tokenStatus.exists) return null;
+    if (isTauri()) {
+      await invoke("update_remote_action_task_status", {
+        baseUrl: config.mcp.baseUrl,
+        taskId,
+        status: remoteStatus
+      });
+    } else {
+      await patchRemoteActionTaskStatus(config, taskId, remoteStatus);
+    }
+    return tryLoadRemoteActionPlans(config);
+  } catch (error) {
+    console.warn("MCP Action Task konnte nicht aktualisiert werden.", error);
+    return null;
+  }
+}
+
+async function patchRemoteActionTaskStatus(
+  config: AppConfig,
+  taskId: string,
+  status: string
+): Promise<void> {
+  const token = localStorage.getItem(mockMcpConnectorTokenKey);
+  if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
+  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/action-tasks/${taskId}/status`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ status })
+  });
+  if (!response.ok) throw new Error(`MCP Action Task konnte nicht aktualisiert werden (${response.status}).`);
+}
+
 export async function quitApp(): Promise<void> {
   if (isTauri()) {
     return invoke<void>("quit_app");
@@ -477,6 +549,9 @@ function currentFileName(config: AppConfig, stem: string, extension: string) {
   return `${stem}__${deviceSlug(config)}.${extension}`;
 }
 
+// Demo-Fallback: NUR aktiv ohne Token/Server (kein Feature). Bildet die Projekt-Board-Felder
+// konsistent ab (Multi-Projekt-Plan + Task-Status); ein bereits freigegebener Plan macht den
+// Board-Executor im Browser-Demo sichtbar.
 function mockActionPlans(): ActionPlan[] {
   return [
     {
@@ -484,7 +559,7 @@ function mockActionPlans(): ActionPlan[] {
       source: "mistral_scheduler",
       agentName: "Laura Mission Control",
       createdAt: "2026-06-25 07:15",
-      status: "pending_user_review",
+      status: "approved",
       executionMode: "sequential",
       dailyLimit: 3,
       riskLevel: "medium",
@@ -499,17 +574,19 @@ function mockActionPlans(): ActionPlan[] {
           targetRunner: "codex_cli",
           riskLevel: "medium",
           requiresApproval: true,
+          status: "pending",
           summary: "Lokale Action-Plan-Struktur vorbereiten, noch ohne automatische Ausführung."
         },
         {
           taskId: "task_002",
           priority: 2,
-          projectId: "katosync",
+          projectId: "katoos-web",
           title: "Statusflow nach Task-Abschluss ergänzen",
           taskType: "project_management_task",
           targetRunner: "manual_review",
           riskLevel: "low",
           requiresApproval: true,
+          status: "queued",
           summary: "Ergebnisdateien und KATOSYNC_STATUSFLOW.md für spätere Runner vorbereiten."
         }
       ]
@@ -534,6 +611,7 @@ function mockActionPlans(): ActionPlan[] {
           targetRunner: "manual_review",
           riskLevel: "high",
           requiresApproval: true,
+          status: "pending",
           summary: "Prüft Token-Scopes, Tenant-Trennung und keine Service-Keys im Desktop."
         }
       ]
@@ -608,6 +686,10 @@ interface RemoteActionTaskRow {
   assignee: string | null;
   due_at: string | null;
   sort_order: number;
+  // Projekt-Board (Migration 0006); bei Alt-Tasks ggf. null/undefined.
+  project_external_id?: string | null;
+  risk_level?: string | null;
+  target_runner?: string | null;
 }
 
 interface RemoteBriefingsResponse {
@@ -713,7 +795,7 @@ async function tryUpdateRemoteBriefingStatus(
 async function fetchRemoteActionPlans(config: AppConfig): Promise<RemoteActionPlansResponse> {
   const token = localStorage.getItem(mockMcpConnectorTokenKey);
   if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
-  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/action-plans?status=pending_review&includeTasks=true`, {
+  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/action-plans?status=pending_review,approved&includeTasks=true`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   if (!response.ok) throw new Error(`MCP Action Queue nicht erreichbar (${response.status}).`);
@@ -806,13 +888,16 @@ function mapRemoteActionPlans(response: RemoteActionPlansResponse): ActionPlan[]
       requiresUserReview: plan.execution_mode !== "auto_allowed",
       tasks: tasks.map((task, index) => ({
         taskId: task.id,
-        priority: index + 1,
-        projectId: task.assignee || "katosync",
+        // Ausfuehrungs-Rang aus dem Server-sort_order (Fallback Array-Index).
+        priority: typeof task.sort_order === "number" ? task.sort_order + 1 : index + 1,
+        // "Ohne Projekt"-Sentinel statt assignee/katosync, damit NULL-Tasks nicht fehlbeschriftet werden.
+        projectId: task.project_external_id || NO_PROJECT_ID,
         title: task.title,
         taskType: "project_management_task",
-        targetRunner: "manual_review",
-        riskLevel: fromRemoteRisk(plan.risk_level),
+        targetRunner: fromRemoteRunner(task.target_runner),
+        riskLevel: fromRemoteRisk(task.risk_level ?? plan.risk_level),
         requiresApproval: true,
+        status: fromRemoteTaskStatus(task.status),
         summary: task.description
       }))
     };
@@ -847,9 +932,45 @@ function toRemoteStatus(status: ActionPlanStatus): string | null {
   return null;
 }
 
-function fromRemoteRisk(risk: string): ActionRiskLevel {
-  if (risk === "low" || risk === "medium" || risk === "high") return risk;
-  return "critical";
+function fromRemoteRisk(risk: string | null | undefined): ActionRiskLevel {
+  if (risk === "low" || risk === "medium" || risk === "high" || risk === "critical") return risk;
+  if (risk === "blocked") return "critical"; // Plan-Level 'blocked' -> hoechste App-Stufe
+  return "medium";
+}
+
+// Projekt-Board: Vertrag = volle App-ActionRunner-Union (Server-CHECK ist deckungsgleich).
+function fromRemoteRunner(runner: string | null | undefined): ActionRunner {
+  const allowed: ActionRunner[] = [
+    "codex_cli",
+    "codex_desktop",
+    "kai_desktop",
+    "local_llm",
+    "mistral_api",
+    "openai_api",
+    "anthropic_api",
+    "manual_review"
+  ];
+  return allowed.includes(runner as ActionRunner) ? (runner as ActionRunner) : "manual_review";
+}
+
+function fromRemoteTaskStatus(status: string | null | undefined): ActionTaskStatus {
+  if (
+    status === "pending" ||
+    status === "queued" ||
+    status === "running" ||
+    status === "completed" ||
+    status === "rejected" ||
+    status === "failed" ||
+    status === "deferred"
+  )
+    return status;
+  if (status === "approved") return "queued"; // Server-Superset defensiv abfangen
+  return "pending";
+}
+
+// App-Werte == Server-Werte (Identitaet); separat gehalten fuer Symmetrie zu toRemoteStatus.
+function toRemoteTaskStatus(status: ActionTaskStatus): string {
+  return status;
 }
 
 function formatRemoteDate(value: string) {

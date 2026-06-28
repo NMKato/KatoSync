@@ -144,15 +144,30 @@ export type ActionRunner =
 
 export type ActionRiskLevel = "low" | "medium" | "high" | "critical";
 
+// Projekt-Board: Task-Status spiegelt die Server-Spalte action_tasks.status.
+// Server-Superset enthaelt zusaetzlich 'approved'; das Mapping faengt es als 'queued' ab.
+// 'deferred' = aufgeschoben (vom sequentiellen Executor uebersprungen).
+export type ActionTaskStatus =
+  | "pending"
+  | "queued"
+  | "running"
+  | "completed"
+  | "rejected"
+  | "failed"
+  | "deferred";
+
 export interface ActionTask {
   taskId: string;
+  // Ausfuehrungs-Rang (1 = zuerst). Kanonisch NUMBER; eindirektional aus dem Server-sort_order abgeleitet.
+  // NICHT verwechseln mit der textuellen Server-Spalte action_tasks.priority (Severity) - die nutzt das Board nicht.
   priority: number;
-  projectId: string;
+  projectId: string; // Server: project_external_id ("__no_project__" = ohne Projekt)
   title: string;
   taskType: ActionTaskType;
-  targetRunner: ActionRunner;
-  riskLevel: ActionRiskLevel;
+  targetRunner: ActionRunner; // Server: target_runner (nur codex_cli ist lokal ausfuehrbar)
+  riskLevel: ActionRiskLevel; // Server: risk_level (jetzt PRO TASK, nicht mehr vom Plan)
   requiresApproval: boolean;
+  status: ActionTaskStatus; // Server: action_tasks.status
   summary?: string | null;
 }
 

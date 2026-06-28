@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildCodexPromptFromBriefing,
   buildCodexPromptFromTask,
   chooseFolders,
   chooseRepoFolder,
+  NO_PROJECT_ID,
   runCodexTask,
   deleteApiKey,
   deleteMcpConnectorToken,
@@ -31,14 +32,18 @@ import {
   testConnection,
   testLibrary,
   updateActionPlanStatus,
+  updateActionTaskStatus,
   updateBriefingStatus
 } from "../repositories/katoSyncRepository";
 import type { Notice } from "../components/Primitives";
 import type {
   ActionPlan,
+  ActionPlanStatus,
   ActionTask,
+  ActionTaskStatus,
   AppConfig,
   Briefing,
+  CodexRunResult,
   CodexRunState,
   RateLimitMetric,
   KeyStatus,
@@ -47,6 +52,22 @@ import type {
   SupabaseSessionStatus,
   SyncReport
 } from "../types";
+
+// Projekt-Board: ein abgeflachter Task mit Plan-Kontext fuer die Projekt-Gruppierung.
+export interface BoardTask extends ActionTask {
+  planId: string;
+  planStatus: ActionPlanStatus;
+  agentName: string;
+  source: string;
+  approved: boolean;
+  selected: boolean;
+  orderIndex: number;
+}
+
+export interface BoardGroup {
+  projectId: string;
+  tasks: BoardTask[];
+}
 
 export type StepId =
   | "welcome"
@@ -57,6 +78,7 @@ export type StepId =
   | "schedule"
   | "dashboard"
   | "actionQueue"
+  | "projectBoard"
   | "briefings"
   | "settings"
   | "logs";
@@ -84,6 +106,13 @@ export function useKatoSyncViewModel() {
   const [briefings, setBriefings] = useState<Briefing[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Projekt-Board
+  const [boardSelection, setBoardSelection] = useState<string[]>([]);
+  const [boardOrder, setBoardOrder] = useState<string[]>([]);
+  const [queueRunning, setQueueRunning] = useState(false);
+  const [currentQueueTaskId, setCurrentQueueTaskId] = useState<string | null>(null);
+  const [dailyCount, setDailyCount] = useState<number>(() => readDailyCount());
+  const stopRef = useRef(false);
 
   const show = useCallback((kind: Notice["kind"], text: string) => setNotice({ kind, text }), []);
 
@@ -429,54 +458,68 @@ export function useKatoSyncViewModel() {
     [config, show]
   );
 
+  // Kern-Codex-Lauf OHNE Ordnerdialog (vom Einzel-Button UND vom Board-Executor genutzt).
+  const runCodexForTaskWithRepo = useCallback(
+    async (plan: ActionPlan, task: ActionTask, repoPath: string): Promise<CodexRunResult> => {
+      if (!config) throw new Error("Keine Konfiguration geladen.");
+      setCodexRun({ status: "running" });
+      const result = await runCodexTask({
+        baseUrl: config.mcp.baseUrl,
+        repoPath,
+        trigger: "action_task",
+        actionPlanId: plan.planId,
+        actionTaskId: task.taskId,
+        projectId: task.projectId,
+        priority: task.priority,
+        title: task.title,
+        riskLevel: task.riskLevel,
+        prompt: buildCodexPromptFromTask(plan, task),
+        inputPlan: {
+          trigger: "action_task",
+          source: plan.source,
+          agentName: plan.agentName,
+          planId: plan.planId,
+          taskId: task.taskId,
+          title: task.title,
+          summary: task.summary,
+          taskType: task.taskType,
+          projectId: task.projectId,
+          riskLevel: task.riskLevel
+        }
+      });
+      setCodexRun({ status: result.status === "completed" ? "completed" : "failed", result });
+      return result;
+    },
+    [config]
+  );
+
   const handleRunCodexForTask = useCallback(
     async (plan: ActionPlan, task: ActionTask) => {
       if (!config) return;
       const repoPath = await chooseRepoFolder(config.sourceRoots[0]);
       if (!repoPath) return;
       setBusy("codex-run");
-      setCodexRun({ status: "running" });
       try {
-        const result = await runCodexTask({
-          baseUrl: config.mcp.baseUrl,
-          repoPath,
-          trigger: "action_task",
-          actionPlanId: plan.planId,
-          actionTaskId: task.taskId,
-          projectId: task.projectId,
-          priority: task.priority,
-          title: task.title,
-          riskLevel: task.riskLevel,
-          prompt: buildCodexPromptFromTask(plan, task),
-          inputPlan: {
-            trigger: "action_task",
-            source: plan.source,
-            agentName: plan.agentName,
-            planId: plan.planId,
-            taskId: task.taskId,
-            title: task.title,
-            summary: task.summary,
-            taskType: task.taskType,
-            projectId: task.projectId,
-            riskLevel: task.riskLevel
-          }
-        });
-        setCodexRun({ status: result.status === "completed" ? "completed" : "failed", result });
+        await updateActionTaskStatus(config, task.taskId, "running");
+        const result = await runCodexForTaskWithRepo(plan, task, repoPath);
+        const finalStatus = result.status === "completed" ? "completed" : "failed";
+        setActionPlans(await updateActionTaskStatus(config, task.taskId, finalStatus));
         show(
           result.status === "completed" ? "ok" : "warn",
           result.status === "completed"
             ? `Codex fertig: ${result.changedFiles.length} Datei(en) auf Branch ${result.branch}.`
             : `Codex-Lauf fehlgeschlagen: ${result.error ?? "unbekannt"}`
         );
-        setActionPlans(await loadActionPlans(config));
       } catch (error) {
         setCodexRun({ status: "failed", error: getMessage(error) });
+        await updateActionTaskStatus(config, task.taskId, "failed").catch(() => undefined);
+        setActionPlans(await loadActionPlans(config));
         show("error", getMessage(error));
       } finally {
         setBusy(null);
       }
     },
-    [config, show]
+    [config, runCodexForTaskWithRepo, show]
   );
 
   const handleRunCodexForBriefing = useCallback(
@@ -525,6 +568,160 @@ export function useKatoSyncViewModel() {
     [config, show]
   );
 
+  // ===== Projekt-Board =====
+  const boardGroups = useMemo<BoardGroup[]>(
+    () => groupTasksByProject(actionPlans, boardSelection, boardOrder),
+    [actionPlans, boardSelection, boardOrder]
+  );
+
+  const boardDailyLimit = useMemo(() => {
+    const limits = actionPlans
+      .filter((plan) => plan.status === "approved")
+      .map((plan) => plan.dailyLimit)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    return limits.length ? Math.max(...limits) : 3;
+  }, [actionPlans]);
+
+  // Selektion/Reihenfolge bereinigen, sobald ein Task das aktive Board verlaesst.
+  useEffect(() => {
+    const activeIds = new Set<string>();
+    for (const plan of actionPlans) {
+      for (const task of plan.tasks) {
+        if (task.status !== "completed" && task.status !== "rejected") activeIds.add(task.taskId);
+      }
+    }
+    setBoardSelection((prev) => prev.filter((id) => activeIds.has(id)));
+    setBoardOrder((prev) => prev.filter((id) => activeIds.has(id)));
+  }, [actionPlans]);
+
+  const handleSelectTask = useCallback((taskId: string) => {
+    setBoardSelection((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+    );
+    setBoardOrder((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+    );
+  }, []);
+
+  const handleReorderTask = useCallback((taskId: string, dir: "up" | "down") => {
+    setBoardOrder((prev) => {
+      const index = prev.indexOf(taskId);
+      if (index === -1) return prev;
+      const target = dir === "up" ? index - 1 : index + 1;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }, []);
+
+  const handleDeferTask = useCallback(
+    async (taskId: string) => {
+      setActionPlans(await updateActionTaskStatus(config, taskId, "deferred"));
+      setBoardSelection((prev) => prev.filter((id) => id !== taskId));
+      setBoardOrder((prev) => prev.filter((id) => id !== taskId));
+      show("info", "Aufgabe aufgeschoben.");
+    },
+    [config, show]
+  );
+
+  const handleRejectTask = useCallback(
+    async (taskId: string) => {
+      setActionPlans(await updateActionTaskStatus(config, taskId, "rejected"));
+      setBoardSelection((prev) => prev.filter((id) => id !== taskId));
+      setBoardOrder((prev) => prev.filter((id) => id !== taskId));
+      show("info", "Aufgabe abgelehnt.");
+    },
+    [config, show]
+  );
+
+  const handleResumeTask = useCallback(
+    async (taskId: string) => {
+      setActionPlans(await updateActionTaskStatus(config, taskId, "pending"));
+      show("info", "Aufgabe wieder eingeplant.");
+    },
+    [config, show]
+  );
+
+  const handleStopBoardQueue = useCallback(() => {
+    stopRef.current = true;
+    show("info", "Queue stoppt nach der laufenden Aufgabe.");
+  }, [show]);
+
+  // Sequentieller Executor PRO PROJEKT-SPALTE: ein Repo-Ordner je Lauf, ein Task nach dem anderen.
+  const handleStartBoardQueue = useCallback(
+    async (projectId: string) => {
+      if (!config || queueRunning) return;
+      const group = boardGroups.find((entry) => entry.projectId === projectId);
+      if (!group) return;
+      const ordered = group.tasks
+        .filter(
+          (task) =>
+            task.selected &&
+            task.approved &&
+            task.targetRunner === "codex_cli" &&
+            task.riskLevel !== "critical" &&
+            !["completed", "rejected", "deferred", "running"].includes(task.status)
+        )
+        .sort((a, b) => a.orderIndex - b.orderIndex);
+
+      if (!ordered.length) {
+        show("warn", "Keine ausgewählten, ausführbaren Codex-Aufgaben in diesem Projekt.");
+        return;
+      }
+
+      let done = readDailyCount();
+      if (done >= boardDailyLimit) {
+        show("warn", `Tageslimit (${boardDailyLimit}) bereits erreicht.`);
+        return;
+      }
+
+      const repoPath = await chooseRepoFolder(config.sourceRoots[0]);
+      if (!repoPath) return;
+
+      stopRef.current = false;
+      setQueueRunning(true);
+      try {
+        for (const task of ordered) {
+          if (stopRef.current) break;
+          if (done >= boardDailyLimit) {
+            show("warn", `Tageslimit (${boardDailyLimit}) erreicht. Queue gestoppt.`);
+            break;
+          }
+          if (task.status === "deferred") continue;
+
+          const plan = actionPlans.find((entry) => entry.planId === task.planId);
+          if (!plan) continue;
+
+          setCurrentQueueTaskId(task.taskId);
+          try {
+            await updateActionTaskStatus(config, task.taskId, "queued");
+            await updateActionTaskStatus(config, task.taskId, "running");
+            const result = await runCodexForTaskWithRepo(plan, task, repoPath);
+            const finalStatus = result.status === "completed" ? "completed" : "failed";
+            await updateActionTaskStatus(config, task.taskId, finalStatus);
+            if (result.status === "completed") {
+              done += 1;
+              writeDailyCount(done);
+              setDailyCount(done);
+            } else {
+              // Fehlerpolitik: Queue laeuft weiter (Task bleibt failed).
+              show("warn", `Aufgabe fehlgeschlagen: ${task.title}. Queue läuft weiter.`);
+            }
+          } catch (error) {
+            await updateActionTaskStatus(config, task.taskId, "failed").catch(() => undefined);
+            show("warn", `Aufgabe abgebrochen: ${task.title}. Queue läuft weiter.`);
+          }
+        }
+      } finally {
+        setQueueRunning(false);
+        setCurrentQueueTaskId(null);
+        setActionPlans(await loadActionPlans(config));
+      }
+    },
+    [actionPlans, boardDailyLimit, boardGroups, config, queueRunning, runCodexForTaskWithRepo, show]
+  );
+
   const handleAcceptBriefing = useCallback(
     async (briefingId: string) => {
       setBriefings(await updateBriefingStatus(config, briefingId, "accepted"));
@@ -569,11 +766,17 @@ export function useKatoSyncViewModel() {
   return {
     activeStep,
     actionPlans,
+    boardDailyLimit,
+    boardGroups,
+    boardSelection,
     briefings,
     busy,
     completion,
     config,
     connectionOk,
+    currentQueueTaskId,
+    dailyCount,
+    queueRunning,
     keyInput,
     keyStatus,
     libraryOk,
@@ -592,9 +795,16 @@ export function useKatoSyncViewModel() {
     sessionStatus,
     handleChooseFolders,
     handleCopyToken,
+    handleDeferTask,
     handleDeleteKey,
     handleDeleteMcpConnectorToken,
     handleGenerateConnectorToken,
+    handleRejectTask,
+    handleReorderTask,
+    handleResumeTask,
+    handleSelectTask,
+    handleStartBoardQueue,
+    handleStopBoardQueue,
     handleLogin,
     handleLogout,
     handleRegister,
@@ -639,4 +849,79 @@ function waitForPaint() {
   return new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   });
+}
+
+// Projekt-Board: Tagesgrenze client-seitig, Datum im Key -> automatischer Reset pro Tag.
+function dailyCountKey() {
+  return `katosync.board.completed.${new Date().toISOString().slice(0, 10)}`;
+}
+
+function readDailyCount() {
+  const raw = localStorage.getItem(dailyCountKey());
+  const value = raw ? Number.parseInt(raw, 10) : 0;
+  return Number.isFinite(value) ? value : 0;
+}
+
+function writeDailyCount(value: number) {
+  localStorage.setItem(dailyCountKey(), String(value));
+}
+
+// Board-Plan-Status, deren Tasks im Board sichtbar sind (approved = ausfuehrbar, Rest read-only).
+const BOARD_PLAN_STATUSES: ActionPlanStatus[] = [
+  "approved",
+  "pending_user_review",
+  "in_review",
+  "running"
+];
+
+function groupTasksByProject(
+  plans: ActionPlan[],
+  selection: string[],
+  order: string[]
+): BoardGroup[] {
+  const selectionSet = new Set(selection);
+  const groups = new Map<string, BoardTask[]>();
+
+  for (const plan of plans) {
+    if (!BOARD_PLAN_STATUSES.includes(plan.status)) continue;
+    for (const task of plan.tasks) {
+      // Erledigte/abgelehnte Tasks verlassen das aktive Board.
+      if (task.status === "completed" || task.status === "rejected") continue;
+      const boardTask: BoardTask = {
+        ...task,
+        planId: plan.planId,
+        planStatus: plan.status,
+        agentName: plan.agentName,
+        source: plan.source,
+        approved: plan.status === "approved",
+        selected: selectionSet.has(task.taskId),
+        orderIndex: order.indexOf(task.taskId)
+      };
+      const key = task.projectId || NO_PROJECT_ID;
+      const bucket = groups.get(key) ?? [];
+      bucket.push(boardTask);
+      groups.set(key, bucket);
+    }
+  }
+
+  for (const bucket of groups.values()) {
+    bucket.sort((a, b) => {
+      const aDeferred = a.status === "deferred" ? 1 : 0;
+      const bDeferred = b.status === "deferred" ? 1 : 0;
+      if (aDeferred !== bDeferred) return aDeferred - bDeferred; // deferred ans Ende
+      const aSelected = a.selected ? 0 : 1;
+      const bSelected = b.selected ? 0 : 1;
+      if (aSelected !== bSelected) return aSelected - bSelected; // selektiert zuerst
+      if (a.selected && b.selected) return a.orderIndex - b.orderIndex;
+      return a.priority - b.priority;
+    });
+  }
+
+  return [...groups.entries()]
+    .sort(([a], [b]) => {
+      if (a === NO_PROJECT_ID) return 1; // "Ohne Projekt" zuletzt
+      if (b === NO_PROJECT_ID) return -1;
+      return a.localeCompare(b);
+    })
+    .map(([projectId, tasks]) => ({ projectId, tasks }));
 }
