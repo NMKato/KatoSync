@@ -1,9 +1,9 @@
 # KatoSync Project Statusflow
 
-## 2026-06-28 - UX Welle 5: Dashboard-Cockpit + Release 2.0 Beta (DONE/In Auslieferung)
+## 2026-06-28 - UX Welle 5: Dashboard-Cockpit + Release 2.0 Beta (DONE)
 
 Projekt: KatoSync Desktop App
-Status: Cockpit DONE (gebaut + installiert + adversarial reviewed); Version auf 2.0.0 (Beta) gebumpt; Signierung/Notarisierung + GitHub-Release laufen.
+Status: DONE — Cockpit gebaut + installiert + adversarial reviewed; Version 2.0.0; signiert + notarisiert + als GitHub Pre-Release ausgeliefert.
 
 - Dashboard von statischen Status-Karten zu einem echten Live-Cockpit umgebaut — speist sich AUSSCHLIESSLICH aus echten `vm`-Daten (keine Mock-Daten), sonst ehrlicher Leerzustand.
 - Wiederverwendete Diagramm-Bausteine in neue Datei `src/components/DiagramComponents.tsx` ausgelagert (KpiTiles/Donut/Bars/StatusList/Timeline/Callout + Typen + Utils, exportiert); `RichMarkdown.tsx` importiert sie jetzt (Verhalten unveraendert).
@@ -11,7 +11,8 @@ Status: Cockpit DONE (gebaut + installiert + adversarial reviewed); Version auf 
 - Cockpit-Zonen: Jetzt-Status (Live-Punkt: Codex/Queue/busy + naechster geplanter Lauf), Arbeitsstand (Donut Offen/Ausgefuehrt/Erledigt/Aufgeschoben/Verworfen + KPI inkl. „Heute erledigt"), Codex-Live-Feed (Timeline aus `codexEvents`), Letzter Lauf + Upload-Erfolg, Was kam neu rein (neue Briefings), Scan je Kategorie, Verlauf je Tag. Sync-Button + FindingsTable bleiben als Steuerung unten.
 - Mehr-Agenten-Review (4 Dimensionen, adversarial verifiziert): 4 echte Findungen behoben — Donut-Leerzustand bei 0 Aufgaben (Mock-Regel), Verlauf in React-State (kein Render-Lag/localStorage-Parse pro Render), `deferred`=Aufgeschoben statt rot „Verworfen/Fehler", totes Hero-CSS entfernt. 3 Fehlalarme korrekt verworfen.
 - Validierung: `tsc` + `npm run build` (Vite) gruen; `npm run tauri build` gruen, `.app` nach `/Applications` installiert.
-- Release: Version 2.0.0 (package.json + tauri.conf.json + Cargo.toml/lock). Developer-ID-Cert `MK Heartbeat UG (T8SB89JPX7)` vorhanden; Notar-Credentials muss der Owner setzen (kein Profil/Env hinterlegt). GitHub-Release als Pre-Release „KatoSync 2.0 Beta" (Tag `v2.0.0-beta.1`).
+- Release (DONE): Version 2.0.0; signiert mit Developer ID `MK Heartbeat UG (T8SB89JPX7)` (Hardened Runtime, Timestamp), Apple-notarisiert (Submission `778d6712-05ff-4759-bd06-036f61a79792`, Accepted) + gestapelt; `spctl` = „Notarized Developer ID". GitHub Pre-Release „KatoSync 2.0 Beta" (Tag `v2.0.0-beta.1`) mit Asset `KatoSync-2.0.0-beta.1-macos.zip`: https://github.com/NMKato/KatoSync/releases/tag/v2.0.0-beta.1
+- WICHTIG fuer kuenftige Releases: Tauris eigener Signier-Schritt scheitert auf dem exFAT-Volume A004 an `xattr` (`failed to run xattr`) -> Bundle bleibt ad-hoc. Loesung: nur `--bundles app` bauen, dann die `.app` auf eine APFS-Kopie ditto-en und dort manuell `xattr -cr` + `codesign --options runtime --timestamp --entitlements Entitlements.plist --sign "Developer ID Application: MK Heartbeat UG (haftungsbeschraenkt) (T8SB89JPX7)"` + `notarytool submit --keychain-profile katosync --wait` + `stapler staple` + ZIP. Notar-Profil `katosync` = App-Store-Connect-API-Key (Key ID 455UYSJP94, Issuer 6c0479d2-...), `.p8` liegt lokal (nicht im Repo).
 - OFFEN (naechste Welle laut Plan): i18n (De/En/Es/Ru).
 
 ## 2026-06-28 - UX Welle 4: Briefings Rich-Komponenten + Format-Contract (DONE)
