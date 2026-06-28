@@ -11,3 +11,6 @@ src-tauri/target/
 .env.*
 !tests/fixtures/sample-project/.env
 ._*
+
+# Lokale Codex-Run-Artefakte (nie committen)
+.katosync/

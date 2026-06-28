@@ -49,6 +49,7 @@ import {
   StepButton,
   Toggle
 } from "./components/Primitives";
+import { RichMarkdown } from "./components/RichMarkdown";
 import { licenseAgreement } from "./lib/license";
 import { weekdayLabels } from "./lib/defaults";
 import {
@@ -1658,7 +1659,7 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
             </header>
             <p className="briefing-summary">{selected.summary}</p>
             <div className="briefing-body markdown-body">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.body}</ReactMarkdown>
+              <RichMarkdown>{selected.body}</RichMarkdown>
             </div>
             {selected.suggestedAction ? (
               <div className="suggested-action">
