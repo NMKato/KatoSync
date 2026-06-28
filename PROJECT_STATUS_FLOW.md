@@ -1,5 +1,27 @@
 # KatoSync Project Statusflow
 
+## 2026-06-28 - UX Welle 4: Briefings Rich-Komponenten + Format-Contract (DONE)
+
+Projekt: KatoSync Desktop App
+Status: DONE (App-Renderer); Mistral-Skill-Text geliefert (vom Nutzer in Mistral Studio einzusetzen)
+
+- Neue Komponente `src/components/RichMarkdown.tsx`: rendert Briefing-Markdown UND erkennt eingebettete Codeblöcke `katosync:<typ>` als animierte Komponenten (SVG/CSS, Theme-Token, Light/Dark): `kpi`, `donut`, `bar`, `status` (Ampel), `timeline`, `callout`. Ungültiges JSON → Rohtext-Fallback (nie kaputt).
+- Format-Contract (tone/state: brand|ok|warn|danger|info):
+  - kpi: `{items:[{label,value,delta?,tone?}]}`
+  - donut: `{title?,segments:[{label,value,tone?}]}`
+  - bar: `{title?,max?,bars:[{label,value,tone?}]}`
+  - status: `{items:[{label,state,note?}]}`
+  - timeline: `{items:[{time?,label,state?}]}`
+  - callout: `{tone?,title?,text}`
+- BriefingsPanel nutzt `RichMarkdown` statt ReactMarkdown. CSS via `:has()` neutralisiert den pre-Wrapper um katosync-Blöcke.
+- Skill-Text für Laura/Personas formuliert (Briefing-Body mit Komponenten + projectExternalId/riskLevel/targetRunner-Pflicht bei create_pending_action_plan). Muss in Mistral Studio in die Persona-Anweisung.
+- OFFEN/Verifikation: echter Laura-Lauf mit dem neuen Format → Briefing erscheint in KatoSync mit Komponenten (Nutzer testet). Voraussetzung: gleicher Connector-Token in Mistral + KatoSync (gleicher Tenant).
+
+## 2026-06-28 - UX Welle 3: Token-Maskierung + Präsentationsmodus (DONE)
+
+- Token-Maskierung (`TokenReveal` in App.tsx): generierter Connector-Token nur 1× sichtbar; re-maskiert bei window-blur / visibilitychange / Feld-blur → `ks_mcp_AB••••••YZ`; Auge-Toggle + Kopieren. Helfer `maskToken/maskId/maskEmail`.
+- Präsentationsmodus (Auge-Schalter Sidebar-Fußzeile, persistent `localStorage["katosync.presentation"]`): maskiert Token/Library-ID/Geräte-ID/E-Mail in der UI (Screenshots/Streams). Nur Anzeige, Werte bleiben intakt.
+
 ## 2026-06-28 - UX-Redesign Welle 1+2: Foundation, Onboarding, Settings (DONE)
 
 Projekt: KatoSync Desktop App

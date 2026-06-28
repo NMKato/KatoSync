@@ -45,6 +45,24 @@
 - Sequentieller Executor: PRO PROJEKT-SPALTE starten (ein Repo-Ordner je Lauf — Repo-pro-Projekt-Automatik ist NOCH NICHT drin), striktes `await` pro Task, lokaler Tageszähler im Loop (kein React-State-Stale-Closure), Fehler → `failed` + WEITER (continue), Stop bei Limit/Stop-Button. `critical`-Tasks sind aus dem Codex-Lauf ausgeschlossen.
 - WICHTIG: Das Board führt nur Tasks **freigegebener** (`approved`) Pläne aus; offene Pläne erscheinen read-only mit Hinweis „in der Action Queue freigeben". Freigabe-Tor bleibt also am Plan.
 
+## UX-Redesign (Stand 2026-06-28)
+
+Großer UX/UI-Umbau (Agenten-Design-Exploration „Lotse"). Plan/Blaupause: `/Users/nmk/.claude/plans/katosync-ux-blueprint.md`. Übergabe: `/Users/nmk/.claude/plans/katosync-uebergabe-prompt.md`.
+
+DONE (committet + gepusht, app main):
+- **Foundation**: CSS-Design-Token-Schicht (`:root` dark + `[data-theme=light]`), Light-Mode lesbar, Reduced-Motion entschärft.
+- **Onboarding**: Splash (jeder Start) → `LoginGate` (Vollbild, bestehendes Supabase-Login) → Terms → Spotlight-Pflicht-Tour 1→5 (API-Key/Library/MCP-Token/Ordner/Uploadplan). Anker `section-api-key/-api-library/-mcp-token`. Strikt +1, Auto-Advance mit „Bereits eingerichtet ✓" + Balken (~2,6s). Karte erst sichtbar wenn positioniert (Effekt mit frischer Closure, sonst verschwand sie!). Setup-% = `vm.setupGates` (5 PERSISTENTE Gates, NICHT die flüchtigen Test-Flags).
+- **Settings-Konsolidierung**: Ordner + Uploadplan in Einstellungen (`toVisibleStep`). Settings-Layout: Mistral-Zugang volle Breite (2-spaltiges Formular), Panels paarweise (span 6), Codex Bridge volle Breite, `align-items:start`.
+- **Token-Maskierung + Präsentationsmodus** (s. eigener Abschnitt unten — schon dokumentiert via PROJECT_STATUS_FLOW).
+- **Briefings Rich-Komponenten**: `src/components/RichMarkdown.tsx`, Format-Contract `katosync:kpi|donut|bar|status|timeline|callout`. Skill-Text für Mistral geliefert (Nutzer setzt ihn in Mistral Studio ein).
+
+OFFEN (nächste Wellen, in Reihenfolge):
+1. **Dashboard-Cockpit** — Dashboard zu Live-Cockpit (was läuft, neu, Verlauf letzte Tage + nächster Lauf, Diagramme). Nutzt RichMarkdown-Komponenten/dieselben SVG/CSS-Bausteine.
+2. **i18n** (De/En/Es/Ru) — Struktur (t()/Resource-Dateien, Sprache auto+umschaltbar) + Übersetzungen, GANZ am Schluss.
+3. *(optional)* restliche Hex→Token-Migration als Politur.
+
+Verifikation offen: echter Laura-Lauf mit Format-Contract → Briefing mit Komponenten in KatoSync (Connector-Token muss in Mistral + App gleich sein = gleicher Tenant).
+
 ## Projektkontext
 
 KatoSync ist eine Tauri/macOS Desktop-App. Sie synchronisiert lokale Projektstatus-, Memory-, Roadmap- und Task-Dateien in eine Mistral Library.
