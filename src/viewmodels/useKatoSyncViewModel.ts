@@ -919,18 +919,24 @@ export function useKatoSyncViewModel() {
     await quitApp();
   }, []);
 
-  const completion = useMemo(() => {
-    if (!config) return 0;
-    const checks = [
-      keyStatus.exists,
-      Boolean(config.libraryId),
-      config.sourceRoots.length > 0,
-      Boolean(config.outputDir),
-      Boolean(scan || report),
-      Boolean(launchStatus?.installed)
+  // Eine einzige Quelle der Wahrheit fuer Setup-Fortschritt (Setup-Strip %, Checkliste UND Onboarding-Tour
+  // teilen dieselben Gates -> keine Divergenz mehr). Reihenfolge = onboardingSteps in App.tsx.
+  // Setup-% spiegelt PERSISTENTE Konfiguration (ueberlebt App-Neustart). Bewusst NICHT die fluechtigen
+  // Live-Test-Flags (connectionOk/libraryOk) -> sonst faellt das Setup bei jedem Start zurueck.
+  const setupGates = useMemo(() => {
+    if (!config) return [false, false, false, false, false];
+    return [
+      keyStatus.exists, // 1 API-Key gespeichert (Keychain)
+      Boolean(config.libraryId.trim()), // 2 Library-ID gesetzt
+      mcpTokenStatus.exists, // 3 MCP-Connector-Token vorhanden
+      config.sourceRoots.length > 0, // 4 Quellordner gewaehlt
+      Boolean(config.schedule.enabled && launchStatus?.installed) // 5 Zeitplan aktiv + Agent installiert
     ];
-    return Math.round((checks.filter(Boolean).length / checks.length) * 100);
-  }, [config, keyStatus.exists, launchStatus?.installed, report, scan]);
+  }, [config, keyStatus.exists, launchStatus?.installed, mcpTokenStatus.exists]);
+  const completion = useMemo(
+    () => Math.round((setupGates.filter(Boolean).length / setupGates.length) * 100),
+    [setupGates]
+  );
 
   return {
     activeStep,
@@ -941,6 +947,7 @@ export function useKatoSyncViewModel() {
     briefings,
     busy,
     completion,
+    setupGates,
     config,
     connectionOk,
     currentQueueTaskId,

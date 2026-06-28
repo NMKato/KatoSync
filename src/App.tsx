@@ -95,46 +95,48 @@ const onboardingSteps: Array<{
   step: StepId;
 }> = [
   {
-    title: "Mistral-Zugang speichern",
-    text: "Füge zuerst deinen Mistral API-Key ein, speichere ihn im Schlüsselbund und trage die Library ID ein.",
-    sectionId: "section-api-fields",
+    title: "Schritt 1 — Mistral API-Key",
+    text: "Füge deinen Mistral API-Key ein, speichere ihn im Schlüsselbund und teste die Verbindung. Den Key findest du unter console.mistral.ai → API Keys.",
+    sectionId: "section-api-key",
     step: "api"
   },
   {
-    title: "Verbindung prüfen",
-    text: "Teste API und Library einmal. Wenn beide grün sind, kann KatoSync sicher mit deiner Mistral Library sprechen.",
-    sectionId: "section-api-tests",
+    title: "Schritt 2 — Library-ID",
+    text: "Trage deine Mistral Library-ID ein und teste die Library. Die ID findest du in Mistral bei deiner Library (URL/Einstellungen).",
+    sectionId: "section-api-library",
     step: "api"
   },
   {
-    title: "Projektordner auswählen",
-    text: "Wähle einen oder mehrere Hauptordner. KatoSync scannt auch Unterordner, damit keine Projektstände fehlen.",
+    title: "Schritt 3 — MCP-Connector-Token",
+    text: "Generiere deinen Connector-Token, kopiere ihn und trage DENSELBEN Token im Mistral-Connector ein (gleicher Token = gleicher Tenant). Achtung: Er wird nur EINMAL angezeigt — bei Verlust neu generieren und an beiden Stellen neu eintragen.",
+    sectionId: "section-mcp-token",
+    step: "api"
+  },
+  {
+    title: "Schritt 4 — Projektordner",
+    text: "Wähle einen oder mehrere Hauptordner deiner Projekte. KatoSync scannt auch Unterordner, damit keine Projektstände fehlen.",
     sectionId: "section-folders",
     step: "folders"
   },
   {
-    title: "Regeln und Schutz prüfen",
-    text: "Der Secret-Scanner bleibt aktiv. Status-, Memory-, Roadmap- und Task-Dateien werden gebündelt, Secret-Dateien übersprungen.",
-    sectionId: "section-rules",
-    step: "rules"
-  },
-  {
-    title: "Uploadplan aktivieren",
-    text: "Lege Uhrzeit und Wochentage fest. Der Mac muss eingeschaltet und angemeldet sein; nach dem Aufwachen startet macOS geplante Jobs normalerweise zum nächstmöglichen Zeitpunkt.",
+    title: "Schritt 5 — Uploadplan aktivieren",
+    text: "Lege Uhrzeit und Wochentage fest und installiere den LaunchAgent, damit KatoSync automatisch nach Plan synchronisiert. Danach ist die Einrichtung abgeschlossen.",
     sectionId: "section-schedule",
     step: "schedule"
-  },
-  {
-    title: "Einmal synchronisieren",
-    text: "Starte zum Abschluss einen Sofortlauf. Danach arbeitet KatoSync automatisch nach deinem Uploadplan; manuell klickst du nur noch für Extra-Läufe.",
-    sectionId: "section-sync-actions",
-    step: "dashboard"
   }
 ];
 
 function toVisibleStep(step: StepId): StepId {
-  if (step === "api" || step === "library" || step === "rules") return "settings";
-  if (step === "folders" || step === "schedule") return "dashboard";
+  // Alles Setup lebt in den Einstellungen (auch Quellordner + Uploadplan).
+  if (
+    step === "api" ||
+    step === "library" ||
+    step === "rules" ||
+    step === "folders" ||
+    step === "schedule"
+  ) {
+    return "settings";
+  }
   return step;
 }
 
@@ -192,8 +194,9 @@ export default function App() {
     () => localStorage.getItem(acknowledgedHintsKey) ?? ""
   );
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingSnoozed, setOnboardingSnoozed] = useState(false);
   const [onboardingIndex, setOnboardingIndex] = useState(0);
-  const [showSplash, setShowSplash] = useState(() => !localStorage.getItem(splashSeenKey));
+  const [showSplash, setShowSplash] = useState(true);
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [onboardingPosition, setOnboardingPosition] = useState<OnboardingPosition | null>(null);
   const [quitConfirmOpen, setQuitConfirmOpen] = useState(false);
@@ -211,27 +214,8 @@ export default function App() {
   const hints = buildHints(vm);
   const hintSignature = useMemo(() => buildHintSignature(hints), [hints]);
   const hasNewHints = issueCount > 0 && hintSignature !== acknowledgedHintSignature;
-  const onboardingCompletion = useMemo(
-    () => [
-      Boolean(vm.keyStatus.exists && config?.libraryId.trim()),
-      Boolean(vm.connectionOk && vm.libraryOk),
-      Boolean(config?.sourceRoots.length),
-      Boolean(config?.safety.secretScanEnabled),
-      Boolean(vm.launchStatus?.installed && vm.launchStatus.loaded),
-      Boolean(vm.report)
-    ],
-    [
-      config?.libraryId,
-      config?.safety.secretScanEnabled,
-      config?.sourceRoots.length,
-      vm.connectionOk,
-      vm.keyStatus.exists,
-      vm.launchStatus?.installed,
-      vm.launchStatus?.loaded,
-      vm.libraryOk,
-      vm.report
-    ]
-  );
+  // Eine Quelle der Wahrheit: identisch zur Setup-%-Berechnung im ViewModel (vm.setupGates).
+  const onboardingCompletion = vm.setupGates;
   const getNextOnboardingIndex = useCallback(
     (startIndex: number) => {
       const next = onboardingCompletion.findIndex((complete, index) => index >= startIndex && !complete);
@@ -245,37 +229,36 @@ export default function App() {
     localStorage.setItem("katosync.theme", theme);
   }, [theme]);
 
+  // Splash: animiertes Logo bei JEDEM Start, dann ausblenden.
   useEffect(() => {
-    if (!showSplash) return undefined;
-    if (localStorage.getItem(splashSeenKey)) {
-      setShowSplash(false);
-      return undefined;
-    }
-    const timer = window.setTimeout(() => {
-      localStorage.setItem(splashSeenKey, "true");
-      setShowSplash(false);
-    }, 1150);
+    const timer = window.setTimeout(() => setShowSplash(false), 1200);
     return () => window.clearTimeout(timer);
-  }, [showSplash]);
+  }, []);
 
+  // Onboarding-Pflicht: nach Splash + Login + Nutzungsbedingungen, solange Setup < 100 %.
   useEffect(() => {
-    if (!config) return;
+    if (!config || showSplash) return;
+    if (!vm.sessionStatus.loggedIn) return;
     if (licenseOpen) return;
-    if (localStorage.getItem(onboardingDoneKey)) return;
     const firstOpenStep = getNextOnboardingIndex(0);
     if (firstOpenStep === -1) {
       localStorage.setItem(onboardingDoneKey, "true");
-      setShowSplash(false);
+      if (onboardingOpen) setOnboardingOpen(false);
       return;
     }
-    const timer = window.setTimeout(() => {
-      localStorage.setItem(splashSeenKey, "true");
-      setShowSplash(false);
+    if (!onboardingOpen && !onboardingSnoozed) {
       setOnboardingOpen(true);
       focusOnboardingStep(firstOpenStep);
-    }, showSplash ? 1250 : 250);
-    return () => window.clearTimeout(timer);
-  }, [config, getNextOnboardingIndex, licenseOpen, showSplash]);
+    }
+  }, [
+    config,
+    getNextOnboardingIndex,
+    licenseOpen,
+    onboardingOpen,
+    onboardingSnoozed,
+    showSplash,
+    vm.sessionStatus.loggedIn
+  ]);
 
   const acceptLicense = () => {
     localStorage.setItem(acceptedLicenseKey, licenseAgreement.version);
@@ -319,67 +302,25 @@ export default function App() {
     if (!target || !card) return;
 
     const rect = target.getBoundingClientRect();
-    const cardWidth = card.offsetWidth || Math.min(430, window.innerWidth - 56);
-    const cardHeight = card.offsetHeight || 330;
-    const margin = 18;
-    const gap = 18;
+    const cardWidth = card.offsetWidth || Math.min(360, window.innerWidth - 48);
+    const cardHeight = card.offsetHeight || 300;
+    const margin = 16;
+    const gap = 16;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
+    const clampLeft = (value: number) =>
+      Math.min(Math.max(value, margin), Math.max(margin, viewportWidth - cardWidth - margin));
 
-    const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), Math.max(min, max));
-    const clampLeft = (value: number) => clamp(value, margin, viewportWidth - cardWidth - margin);
-    const clampTop = (value: number) => clamp(value, margin, viewportHeight - cardHeight - margin);
-    const centeredTop = rect.top + rect.height / 2 - cardHeight / 2;
-    const centeredLeft = rect.left + rect.width / 2 - cardWidth / 2;
+    // Karte IMMER auf die gegenueberliegende Haelfte des Ziels legen -> verdeckt das Feld nie,
+    // auch bei kleinem Fenster. Horizontal unter/ueber dem Feld zentriert, in den Viewport geklemmt.
+    const left = clampLeft(rect.left + rect.width / 2 - cardWidth / 2);
+    const targetCenterY = rect.top + rect.height / 2;
+    const placeBelow = targetCenterY < viewportHeight * 0.5;
+    const top = placeBelow
+      ? Math.min(rect.bottom + gap, viewportHeight - cardHeight - margin)
+      : Math.max(rect.top - cardHeight - gap, margin);
 
-    const candidates = [
-      {
-        placement: "right" as const,
-        left: rect.right + gap,
-        top: centeredTop,
-        preference: 0
-      },
-      {
-        placement: "left" as const,
-        left: rect.left - cardWidth - gap,
-        top: centeredTop,
-        preference: 1
-      },
-      {
-        placement: "bottom" as const,
-        left: centeredLeft,
-        top: rect.bottom + gap,
-        preference: 2
-      },
-      {
-        placement: "top" as const,
-        left: centeredLeft,
-        top: rect.top - cardHeight - gap,
-        preference: 3
-      }
-    ].map((candidate) => {
-      const left = clampLeft(candidate.left);
-      const top = clampTop(candidate.top);
-      const overlap = getOverlapArea(
-        { left, top, right: left + cardWidth, bottom: top + cardHeight },
-        {
-          left: rect.left - gap,
-          top: rect.top - gap,
-          right: rect.right + gap,
-          bottom: rect.bottom + gap
-        }
-      );
-      const movementPenalty = Math.abs(left - candidate.left) + Math.abs(top - candidate.top);
-      return {
-        ...candidate,
-        left,
-        top,
-        score: overlap * 1000 + movementPenalty + candidate.preference
-      };
-    });
-
-    const best = candidates.sort((a, b) => a.score - b.score)[0];
-    setOnboardingPosition(best);
+    setOnboardingPosition({ left, top, placement: placeBelow ? "bottom" : "top" });
   }, [onboardingIndex, onboardingOpen, spotlightId]);
 
   const focusOnboardingStep = (index: number) => {
@@ -387,13 +328,12 @@ export default function App() {
     if (!step) return;
     setOnboardingIndex(index);
     vm.setActiveStep(step.step);
-    document.getElementById(step.sectionId)?.scrollIntoView({
-      behavior: "smooth",
-      block: "center"
-    });
     setSpotlightId(step.sectionId);
-    window.setTimeout(updateOnboardingPosition, 120);
-    window.setTimeout(updateOnboardingPosition, 420);
+    // Smooth zum Feld scrollen. Die Karten-Positionierung uebernimmt der Effekt unten
+    // (mit frischer Closure: sofort + nach dem Scroll), damit die Karte zuverlaessig erscheint.
+    window.requestAnimationFrame(() => {
+      document.getElementById(step.sectionId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
   };
 
   const closeOnboarding = (done = false) => {
@@ -405,29 +345,45 @@ export default function App() {
 
   useEffect(() => {
     if (!onboardingOpen) return undefined;
-    const workspace = document.querySelector(".workspace");
-    const update = () => window.requestAnimationFrame(updateOnboardingPosition);
-    update();
+    // Position mit FRISCHER Closure berechnen: sofort (Karte erscheint schnell) + nach dem Smooth-Scroll
+    // (stabile Endposition). Re-runs bei jedem Schrittwechsel, da updateOnboardingPosition von
+    // onboardingIndex/spotlightId abhaengt. KEIN Scroll-Listener -> kein Hinterherwackeln.
+    const update = () => updateOnboardingPosition();
+    const raf = window.requestAnimationFrame(update);
+    const t1 = window.setTimeout(update, 480);
+    const t2 = window.setTimeout(update, 780);
     window.addEventListener("resize", update);
-    workspace?.addEventListener("scroll", update, { passive: true });
     return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
       window.removeEventListener("resize", update);
-      workspace?.removeEventListener("scroll", update);
     };
   }, [onboardingOpen, updateOnboardingPosition]);
 
+  // Auto-Advance: ist der aktuelle Schritt erfuellt, gehe strikt EINEN Schritt weiter (1->5).
   useEffect(() => {
     if (!onboardingOpen || vm.busy || !onboardingCompletion[onboardingIndex]) return undefined;
     const timer = window.setTimeout(() => {
-      const next = getNextOnboardingIndex(onboardingIndex + 1);
-      if (next === -1) {
+      if (onboardingIndex >= onboardingSteps.length - 1) {
+        setOnboardingSnoozed(true);
         closeOnboarding(true);
         return;
       }
-      focusOnboardingStep(next);
-    }, 650);
+      focusOnboardingStep(onboardingIndex + 1);
+    }, 2600);
     return () => window.clearTimeout(timer);
-  }, [getNextOnboardingIndex, onboardingCompletion, onboardingIndex, onboardingOpen, vm.busy]);
+  }, [onboardingCompletion, onboardingIndex, onboardingOpen, vm.busy]);
+
+  if (showSplash) {
+    return (
+      <div className="startup-splash" aria-label="KatoSync startet">
+        <img alt="" src="/katoos_icon_logo_trans.png" />
+        <strong>KatoSync</strong>
+        <span className="startup-tagline">Project Memory Uploader</span>
+      </div>
+    );
+  }
 
   if (!config) {
     return (
@@ -438,14 +394,12 @@ export default function App() {
     );
   }
 
+  if (!vm.sessionStatus.loggedIn) {
+    return <LoginGate vm={vm} />;
+  }
+
   return (
     <div className="app-shell">
-      {showSplash && !localStorage.getItem(onboardingDoneKey) ? (
-        <div className="startup-splash" aria-label="KatoSync startet">
-          <img alt="" src="/katoos_icon_logo_trans.png" />
-          <strong>KatoSync</strong>
-        </div>
-      ) : null}
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -622,7 +576,10 @@ export default function App() {
               className={`form-grid ${spotlightId === "section-api-fields" ? "spotlight-target spotlight-pad" : ""}`}
               id="section-api-fields"
             >
-              <label>
+              <label
+                id="section-api-key"
+                className={spotlightId === "section-api-key" ? "spotlight-target spotlight-pad" : ""}
+              >
                 API-Key
                 <div className="inline-input">
                   <input
@@ -636,7 +593,10 @@ export default function App() {
                   </button>
                 </div>
               </label>
-              <label>
+              <label
+                id="section-api-library"
+                className={spotlightId === "section-api-library" ? "spotlight-target spotlight-pad" : ""}
+              >
                 Library ID
                 <input
                   onChange={(event) => vm.updateConfig("libraryId", event.target.value)}
@@ -696,7 +656,10 @@ export default function App() {
                   </button>
                 </div>
               </label>
-              <label>
+              <label
+                id="section-mcp-token"
+                className={spotlightId === "section-mcp-token" ? "spotlight-target spotlight-pad" : ""}
+              >
                 KatoSync Login (Token automatisch erzeugen)
                 {vm.sessionStatus.loggedIn ? (
                   <div style={{ display: "grid", gap: 8 }}>
@@ -851,7 +814,7 @@ export default function App() {
           </Panel>
           ) : null}
 
-          {visibleStep === "dashboard" ? (
+          {visibleStep === "settings" ? (
           <Panel
             className={spotlightId === "section-folders" ? "spotlight-target" : ""}
             id="section-folders"
@@ -968,7 +931,7 @@ export default function App() {
         </Panel>
           ) : null}
 
-          {visibleStep === "dashboard" ? (
+          {visibleStep === "settings" ? (
           <Panel
             className={spotlightId === "section-schedule" ? "spotlight-target" : ""}
             id="section-schedule"
@@ -1119,16 +1082,23 @@ export default function App() {
       {onboardingOpen ? (
         <OnboardingDialog
           currentIndex={onboardingIndex}
+          done={Boolean(onboardingCompletion[onboardingIndex])}
           onBack={() => focusOnboardingStep(Math.max(0, onboardingIndex - 1))}
-          onClose={() => closeOnboarding(false)}
-          onDone={() => closeOnboarding(true)}
+          onClose={() => {
+            setOnboardingSnoozed(true);
+            closeOnboarding(false);
+          }}
+          onDone={() => {
+            setOnboardingSnoozed(true);
+            closeOnboarding(false);
+          }}
           onNext={() => {
-            const next = getNextOnboardingIndex(onboardingIndex + 1);
-            if (next === -1) {
+            if (onboardingIndex >= onboardingSteps.length - 1) {
+              setOnboardingSnoozed(true);
               closeOnboarding(true);
               return;
             }
-            focusOnboardingStep(next);
+            focusOnboardingStep(onboardingIndex + 1);
           }}
           position={onboardingPosition}
         />
@@ -1858,6 +1828,81 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
   );
 }
 
+function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const busy = vm.busy === "login" || vm.busy === "register";
+  const submit = () => {
+    if (mode === "login") void vm.handleLogin();
+    else void vm.handleRegister();
+  };
+  return (
+    <div className="login-gate">
+      <div className="login-card">
+        <div className="login-brand">
+          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <div>
+            <strong>KatoSync</strong>
+            <span>Bei deinem KatoOS-Konto anmelden</span>
+          </div>
+        </div>
+        <div className="login-tabs">
+          <button
+            className={mode === "login" ? "active" : ""}
+            onClick={() => setMode("login")}
+            type="button"
+          >
+            Anmelden
+          </button>
+          <button
+            className={mode === "register" ? "active" : ""}
+            onClick={() => setMode("register")}
+            type="button"
+          >
+            Registrieren
+          </button>
+        </div>
+        {vm.notice ? <NoticeBar notice={vm.notice} onClose={() => vm.setNotice(null)} /> : null}
+        <label>
+          E-Mail
+          <input
+            autoComplete="email"
+            onChange={(event) => vm.setLoginEmail(event.target.value)}
+            placeholder="du@example.com"
+            type="email"
+            value={vm.loginEmail}
+          />
+        </label>
+        <label>
+          Passwort
+          <input
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            onChange={(event) => vm.setLoginPassword(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") submit();
+            }}
+            placeholder="••••••••"
+            type="password"
+            value={vm.loginPassword}
+          />
+        </label>
+        <button
+          className="primary login-submit"
+          disabled={busy || !vm.loginEmail || !vm.loginPassword}
+          onClick={submit}
+          type="button"
+        >
+          {busy ? <Loader2 className="spin" size={16} /> : null}
+          {mode === "login" ? "Anmelden" : "Registrieren"}
+        </button>
+        <p className="login-hint">
+          Mit deinem KatoOS-Konto (SSO mit Website/KSP/KAI). Nach der Anmeldung führt dich KatoSync
+          durch die Einrichtung.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function LicenseDialog({
   accepted,
   checked,
@@ -2057,6 +2102,7 @@ function briefingPriorityLabel(priority: Briefing["priority"]) {
 
 function OnboardingDialog({
   currentIndex,
+  done,
   onBack,
   onClose,
   onDone,
@@ -2064,6 +2110,7 @@ function OnboardingDialog({
   position
 }: {
   currentIndex: number;
+  done: boolean;
   onBack: () => void;
   onClose: () => void;
   onDone: () => void;
@@ -2072,12 +2119,8 @@ function OnboardingDialog({
 }) {
   const step = onboardingSteps[currentIndex];
   const isLast = currentIndex === onboardingSteps.length - 1;
-  const style = position
-    ? ({
-        left: `${position.left}px`,
-        top: `${position.top}px`
-      } satisfies CSSProperties)
-    : undefined;
+  // Karte erst zeigen, wenn die Position berechnet ist -> kein Teleport-Sprung von rechts/unten.
+  const style: CSSProperties = position ? { left: `${position.left}px`, top: `${position.top}px` } : {};
 
   return (
     <>
@@ -2085,7 +2128,7 @@ function OnboardingDialog({
       <section
         aria-labelledby="onboarding-title"
         aria-modal="true"
-        className={`onboarding-card ${position ? `placement-${position.placement}` : ""}`}
+        className={`onboarding-card ${position ? `is-ready placement-${position.placement}` : ""}`}
         role="dialog"
         style={style}
       >
@@ -2103,6 +2146,17 @@ function OnboardingDialog({
         </div>
         <h2 id="onboarding-title">{step.title}</h2>
         <p>{step.text}</p>
+        {done ? (
+          <div className="onboarding-done" key={currentIndex}>
+            <span className="onboarding-done-row">
+              <CheckCircle2 className="onboarding-done-check" size={16} />
+              {isLast ? "Bereits eingerichtet — fertig" : "Bereits eingerichtet — weiter …"}
+            </span>
+            <span className="onboarding-advance">
+              <span className="onboarding-advance-fill" />
+            </span>
+          </div>
+        ) : null}
         <footer>
           <button className="ghost" onClick={onDone} type="button">
             Später

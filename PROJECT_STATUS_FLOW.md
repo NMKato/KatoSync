@@ -1,5 +1,27 @@
 # KatoSync Project Statusflow
 
+## 2026-06-28 - UX-Redesign Welle 1+2: Foundation, Onboarding, Settings (DONE)
+
+Projekt: KatoSync Desktop App
+Status: DONE — großer UX/UI-Umbau (Agenten-Design-Exploration „Lotse"-Richtung umgesetzt)
+
+Foundation:
+- CSS-Design-Token-Schicht (`:root` dark + `[data-theme=light]`): Marke (Orange) behalten, Light-Mode lesbar gemacht; Reduced-Motion entschärft (nur dekorative Loops aus, sanfte Übergänge bleiben).
+
+Onboarding (neu, Pflicht, geführt):
+- Phasen: Splash (animiertes Logo bei jedem Start) → E-Mail Login/Registrierung (Vollbild-`LoginGate`, nutzt bestehendes Supabase-Login) → Nutzungsbedingungen → Spotlight-Pflicht-Tour 1→5 → App.
+- 5 Schritte auf echte Felder (Spotlight-Coachmarks): 1 API-Key, 2 Library-ID, 3 MCP-Token (generieren→kopieren→in Mistral), 4 Quellordner, 5 Uploadplan. Anker `section-api-key`/`-api-library`/`-mcp-token` ergänzt.
+- Strikt sequenziell (+1), Auto-Advance bei erfülltem Schritt mit „Bereits eingerichtet ✓" + Fortschrittsbalken (~2,6 s, ruhig). Karte erscheint erst positioniert (kein Sprung), gleitet, „Später"/„Fertig" snoozen für die Sitzung.
+- Setup-% = 5 PERSISTENTE Gates (Key/Library/Token/Ordner/Zeitplan+Agent) — NICHT mehr die flüchtigen Live-Test-Flags (sonst fiel das Setup pro Start zurück). Eine Quelle (`vm.setupGates`) für Balken/Checkliste/Tour.
+
+Settings-Konsolidierung:
+- Projektordner + Lokaler Uploadplan (Uhrzeit/Wochentage/LaunchAgent) aus dem Dashboard in die Einstellungen verschoben (`toVisibleStep`). Dashboard = nur noch Live/Status.
+- Settings-Layout schlüssig: Mistral-Zugang volle Breite (2-spaltiges Formular), API-Kontingent/Ordner/Sync-Regeln/Uploadplan paarweise (je 6 Spalten), Codex Bridge volle Breite, `align-items:start` (keine gestreckten Leerflächen).
+
+Validierung: `tsc` + `npm run build` + `npm run tauri build` grün; iterativ visuell mit Nutzer getestet (Onboarding-Flow, Tempo, Layout, Light-Mode).
+
+Noch offen (nächste Wellen): Token-Maskierung + Präsentationsmodus; Briefings Rich-Komponenten + Persona/Skill-Format-Contract; Dashboard-Cockpit (Diagramme/Verlauf); i18n De/En/Es/Ru. Plan/Blaupause: `/Users/nmk/.claude/plans/katosync-ux-blueprint.md`.
+
 ## 2026-06-28 - Echter Abschluss / Merge-Rückkanal (DONE)
 
 Projekt: KatoSync Desktop App + KatoOS MCP Server
