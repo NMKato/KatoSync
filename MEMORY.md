@@ -11,6 +11,17 @@
 - Schlüsselbund-Eigenheit: nach jedem App-Neu-Build (ad-hoc signiert) kann macOS den Token-Zugriff neu abfragen → „Immer erlauben"; NICHT neu generieren (harte Rotation entwertet sonst den in Mistral hinterlegten Token).
 - Nächste große Welle = Projekt-Board (Briefings → pro-Projekt-Tasks von Mistral, Triage/Queue/aufschieben/ablehnen, Task-Status-Endpunkt, Live-Aktivitäts-Feed).
 
+## Codex-Bridge v2 (seit 2026-06-28)
+
+- Codex-Läufe zweigen jetzt IMMER von main/Default ab (`detect_default_branch`: main→master→aktuell, offline; best-effort `git fetch`; `git checkout <default>` vor `checkout -b`) und kehren nach dem Lauf **zurück auf den Default-Branch** (Arbeitskopie sauber; Codex-Änderungen leben nur auf dem Branch). Fehlgeschlagener Lauf ohne Commit → leerer Branch wird gelöscht.
+- Branch-Prefix-Fix: generisches Projekt-Segment (`katosync`/leer) wird weggelassen (kein `katosync/katosync/`).
+- Auto-Push (Config `codexAutoPush`, Default an): `git push -u origin <branch>` nur bei Erfolg. Funktioniert aus dem GUI-Prozess über `credential.helper=osxkeychain` (kein `gh` im PATH nötig). `git` = /usr/bin/git (immer da).
+- PR (Config `codexCreatePr`, Default an): `gh pr create --base <default> --head <branch>` über ABSOLUTEN Pfad `/opt/homebrew/bin/gh` (GUI-Prozess erbt Shell-PATH nicht!). PR-URL → `CodexRunResult.prUrl`. Fallback ohne PR: `<repo>/pull/new/<branch>`-Link aus der Remote-URL.
+- `CodexRunResult` hat jetzt `pushed`/`branchUrl`/`prUrl` (auch in `execution_results`-Artefakten). Panel zeigt Push-Status + klickbaren PR-Link; zwei Toggles in den Einstellungen (greifen erst nach „Einstellungen speichern", da `run_codex_task` die Config von der Platte liest).
+- WICHTIG (Denkfehler-Fix): vorher wurde nur committet, NIE gepusht → nichts auf GitHub. Jetzt push+PR auf eigenem Branch, niemals auf main; mergen wenn grün via PR.
+- Voraussetzungen: beide Repos haben `origin` (GitHub: NMKato/KatoSync, NMKato/KatoOS-MCP-Server), `gh` eingeloggt als NMKato (`repo`+`workflow`).
+- NOCH offen: Repo-pro-Projekt-Auto-Detect (aktuell Ordnerwahl pro Projekt-Spalte).
+
 ## Projekt-Board (live seit 2026-06-28)
 
 - Neue Seite „Projekt-Board" (StepId `projectBoard`) NEBEN der Action Queue (die bleibt das plan-zentrierte Freigabe-Tor + Dashboard-Widget + Onboarding — bewusst NICHT umgebaut).

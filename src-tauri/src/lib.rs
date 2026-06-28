@@ -52,6 +52,15 @@ pub struct AppConfig {
     schedule: ScheduleConfig,
     scan_rules: ScanRules,
     safety: SafetyConfig,
+    // Codex-Bridge v2: nach erfolgreichem Lauf den Branch pushen bzw. einen PR erstellen.
+    #[serde(default = "default_true")]
+    codex_auto_push: bool,
+    #[serde(default = "default_true")]
+    codex_create_pr: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -645,6 +654,10 @@ pub struct CodexRunResult {
     exit_code: Option<i32>,
     duration_ms: u64,
     error: Option<String>,
+    // Codex-Bridge v2
+    pushed: bool,
+    branch_url: Option<String>,
+    pr_url: Option<String>,
 }
 
 fn codex_bin() -> String {
@@ -653,6 +666,41 @@ fn codex_bin() -> String {
     } else {
         "codex".to_string()
     }
+}
+
+// Codex-Bridge v2: gh-CLI (GUI-Prozess erbt den Shell-PATH nicht -> absolute Pfade probieren).
+fn gh_bin() -> String {
+    for p in ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"] {
+        if Path::new(p).exists() {
+            return p.to_string();
+        }
+    }
+    "gh".to_string()
+}
+
+// Default-Branch offline ermitteln (origin/HEAD ist oft nicht gesetzt): main -> master -> aktueller.
+fn detect_default_branch(repo: &str) -> String {
+    if git_capture(repo, &["show-ref", "--verify", "--quiet", "refs/heads/main"]).is_ok() {
+        return "main".to_string();
+    }
+    if git_capture(repo, &["show-ref", "--verify", "--quiet", "refs/heads/master"]).is_ok() {
+        return "master".to_string();
+    }
+    git_capture(repo, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|_| "main".to_string())
+}
+
+// origin-Remote als https-Basis-URL (ssh -> https), ohne abschliessendes .git. Fuer Branch-/PR-Links.
+fn git_remote_https_url(repo: &str) -> Option<String> {
+    let raw = git_capture(repo, &["remote", "get-url", "origin"]).ok()?;
+    let raw = raw.trim();
+    let url = if let Some(rest) = raw.strip_prefix("git@github.com:") {
+        format!("https://github.com/{rest}")
+    } else if let Some(rest) = raw.strip_prefix("ssh://git@github.com/") {
+        format!("https://github.com/{rest}")
+    } else {
+        raw.to_string()
+    };
+    Some(url.trim_end_matches(".git").trim_end_matches('/').to_string())
 }
 
 fn git_capture(repo: &str, args: &[&str]) -> Result<String, String> {
@@ -794,10 +842,18 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
         let s = s.trim_matches('-').to_string();
         if s.is_empty() { "aufgabe".to_string() } else { s }
     };
+    // Prefix-Fix: bei generischem Projekt ("katosync"/leer) das Projekt-Segment weglassen
+    // -> kein doppeltes "katosync/katosync/".
+    let project_segment = if project_slug == "katosync" || project_slug == "projekt" {
+        String::new()
+    } else {
+        format!("{project_slug}/")
+    };
     let branch = format!(
-        "katosync/{}/{}/task-{}-{}",
-        project_slug, date, req.priority, title_slug
+        "katosync/{}{}/task-{}-{}",
+        project_segment, date, req.priority, title_slug
     );
+    let default_branch = detect_default_branch(&repo_path);
     let task_id = req
         .action_task_id
         .clone()
@@ -816,11 +872,15 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
     .map_err(error_to_string)?;
     fs::write(format!("{run_dir}/prompt.md"), sanitize_log(&req.prompt)).map_err(error_to_string)?;
 
+    // Immer von main/Default abzweigen (nicht vom aktuellen HEAD -> kein Codex-auf-Codex-Stapeln).
+    let _ = git_capture(&repo_path, &["fetch", "origin", &default_branch]); // best effort
+    git_capture(&repo_path, &["checkout", &default_branch])
+        .map_err(|e| format!("Wechsel auf {default_branch} fehlgeschlagen: {e}"))?;
     git_capture(&repo_path, &["checkout", "-b", &branch])
         .map_err(|e| format!("Branch konnte nicht angelegt werden ({branch}): {e}"))?;
     let _ = write_log(
         "codex",
-        &format!("Codex-Lauf gestartet: {} (Branch {branch})", sanitize_log(&req.title)),
+        &format!("Codex-Lauf gestartet: {} (Branch {branch} von {default_branch})", sanitize_log(&req.title)),
     );
 
     if let Some(plan_id) = &req.action_plan_id {
@@ -939,6 +999,68 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
         ),
     );
 
+    // ---- Codex-Bridge v2: Push + PR (nur bei Erfolg, best effort) ----
+    let mut pushed = false;
+    let mut branch_url: Option<String> = None;
+    let mut pr_url: Option<String> = None;
+    let repo_web = git_remote_https_url(&repo_path);
+    if final_status == "completed" && commit.is_some() && config.codex_auto_push {
+        match git_capture(&repo_path, &["push", "-u", "origin", &branch]) {
+            Ok(_) => {
+                pushed = true;
+                branch_url = repo_web.as_ref().map(|u| format!("{u}/tree/{branch}"));
+                let _ = write_log("codex", &format!("Branch gepusht: {branch}"));
+                if config.codex_create_pr {
+                    let pr_title = format!("KatoSync: {}", req.title.replace('\n', " "));
+                    let pr_body = format!(
+                        "Automatischer Codex-Lauf aus KatoSync.\n\nBranch: `{branch}`\nGeaenderte Dateien: {}\n",
+                        changed_files.len()
+                    );
+                    let pr_out = Command::new(gh_bin())
+                        .current_dir(&repo_path)
+                        .args([
+                            "pr",
+                            "create",
+                            "--base",
+                            &default_branch,
+                            "--head",
+                            &branch,
+                            "--title",
+                            &pr_title,
+                            "--body",
+                            &pr_body,
+                        ])
+                        .output();
+                    match pr_out {
+                        Ok(o) if o.status.success() => {
+                            let url = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                            if !url.is_empty() {
+                                let _ = write_log("codex", &format!("PR erstellt: {url}"));
+                                pr_url = Some(url);
+                            }
+                        }
+                        Ok(o) => {
+                            let _ = write_log(
+                                "codex",
+                                &format!("gh pr create Hinweis: {}", String::from_utf8_lossy(&o.stderr).trim()),
+                            );
+                        }
+                        Err(e) => {
+                            let _ = write_log("codex", &format!("gh nicht verfuegbar: {e}"));
+                        }
+                    }
+                }
+                // Fallback: ohne erzeugten PR den GitHub "Compare & pull request"-Link anbieten.
+                if pr_url.is_none() {
+                    pr_url = repo_web.as_ref().map(|u| format!("{u}/pull/new/{branch}"));
+                }
+            }
+            Err(e) => {
+                let _ = write_log("codex", &format!("Warnung: git push fehlgeschlagen: {e}"));
+            }
+        }
+    }
+
     // ---- Rueckkanal an den Server (best effort) ----
     let artifacts = json!({
         "branch": branch,
@@ -950,6 +1072,9 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
         "durationMs": started.elapsed().as_millis() as u64,
         "trigger": req.trigger,
         "dryRun": req.dry_run,
+        "pushed": pushed,
+        "branchUrl": branch_url.clone(),
+        "prUrl": pr_url.clone(),
     });
     let mut body = json!({
         "idempotencyKey": format!("codex-{task_slug}-{run_stamp}"),
@@ -980,6 +1105,13 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
         }
     }
 
+    // Zurueck auf den Default-Branch -> Arbeitskopie bleibt sauber; Codex-Aenderungen leben auf dem Branch.
+    let _ = git_capture(&repo_path, &["checkout", &default_branch]);
+    if commit.is_none() {
+        // Fehlgeschlagener Lauf ohne Commit -> leeren Codex-Branch wieder entfernen.
+        let _ = git_capture(&repo_path, &["branch", "-D", &branch]);
+    }
+
     let _ = write_log(
         "codex",
         &format!("Codex-Lauf {final_status}: {} (Branch {branch})", sanitize_log(&req.title)),
@@ -995,6 +1127,9 @@ async fn run_codex_task(req: CodexRunRequest) -> Result<CodexRunResult, String> 
         exit_code,
         duration_ms: started.elapsed().as_millis() as u64,
         error: codex_error,
+        pushed,
+        branch_url,
+        pr_url,
     })
 }
 
@@ -2111,6 +2246,8 @@ fn default_config() -> Result<AppConfig> {
             cleanup_enabled: false,
             secret_scan_enabled: true,
         },
+        codex_auto_push: true,
+        codex_create_pr: true,
     })
 }
 

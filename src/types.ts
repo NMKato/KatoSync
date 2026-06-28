@@ -33,6 +33,9 @@ export interface AppConfig {
   schedule: ScheduleConfig;
   scanRules: ScanRules;
   safety: SafetyConfig;
+  // Codex-Bridge v2: Branch nach erfolgreichem Lauf pushen / PR erstellen.
+  codexAutoPush: boolean;
+  codexCreatePr: boolean;
 }
 
 export interface McpConfig {
@@ -228,6 +231,10 @@ export interface CodexRunResult {
   exitCode?: number | null;
   durationMs: number;
   error?: string | null;
+  // Codex-Bridge v2
+  pushed?: boolean;
+  branchUrl?: string | null;
+  prUrl?: string | null;
 }
 
 export interface CodexRunState {

@@ -1006,7 +1006,9 @@ function normalizeConfig(config: AppConfig): AppConfig {
     device: {
       deviceId: config.device?.deviceId || "demo-device",
       deviceName: config.device?.deviceName || "Dieser Rechner"
-    }
+    },
+    codexAutoPush: config.codexAutoPush ?? defaultConfig.codexAutoPush,
+    codexCreatePr: config.codexCreatePr ?? defaultConfig.codexCreatePr
   };
 }
 

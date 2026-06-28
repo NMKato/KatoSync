@@ -31,7 +31,9 @@ export const defaultConfig: AppConfig = {
     dryRunDefault: true,
     cleanupEnabled: false,
     secretScanEnabled: true
-  }
+  },
+  codexAutoPush: true,
+  codexCreatePr: true
 };
 
 export const weekdayLabels: Record<string, string> = {

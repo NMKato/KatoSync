@@ -1,5 +1,28 @@
 # KatoSync Project Statusflow
 
+## 2026-06-28 - Codex-Bridge v2: Auto-Push + PR + branch-from-main (DONE)
+
+Projekt: KatoSync Desktop App
+Status: DONE — Codex-Läufe landen jetzt auf GitHub (Branch + PR), Arbeitskopie bleibt auf main
+
+Problem (Denkfehler): Die Codex-Bridge committete nur lokal und pushte NIE → nichts auf GitHub; außerdem wurde der Branch vom aktuellen HEAD abgezweigt (Codex-auf-Codex-Stapeln, doppeltes `katosync/katosync/`-Prefix) und die Arbeitskopie blieb nach dem Lauf auf dem Codex-Branch hängen.
+
+Fix (`src-tauri/src/lib.rs`, `run_codex_task`):
+
+- **Von main/Default abzweigen**: `detect_default_branch` (main→master→aktuell, offline), best-effort `git fetch`, `git checkout <default>` vor `checkout -b`. Danach immer **zurück auf den Default-Branch** (Arbeitskopie sauber; Codex-Änderungen leben auf dem Branch). Fehlgeschlagener Lauf ohne Commit → leerer Branch wird gelöscht.
+- **Prefix-Fix**: generisches Projekt-Segment (`katosync`/leer) wird weggelassen → kein doppeltes `katosync/katosync/`.
+- **Auto-Push** (nur bei Erfolg): `git push -u origin <branch>` über die macOS-Keychain (`credential.helper=osxkeychain` → funktioniert auch aus dem GUI-Prozess ohne `gh` im PATH). Steuerbar per Config `codexAutoPush` (Default an).
+- **PR** (Default an, `codexCreatePr`): `gh pr create --base <default> --head <branch>` über absoluten `gh`-Pfad (`/opt/homebrew/bin/gh`); PR-URL wird zurückgegeben. Fallback ohne erzeugten PR: GitHub „Compare & pull request"-Link aus der Remote-URL.
+- **CodexRunResult** um `pushed`/`branchUrl`/`prUrl` erweitert; `execution_results`-Artefakte enthalten sie ebenfalls. Codex-Bridge-Panel zeigt Push-Status + klickbaren PR-/Branch-Link; zwei Toggles in den Einstellungen.
+
+Sofort-Aufräumen (manuell): vorhandener Codex-Branch `katosync/katosync/2026-06-28/…` (Commit `d1ff3d3`) nach GitHub gepusht; App-Repo zurück auf `main`.
+
+Validierung: `cargo check` grün, `tsc` + `npm run build` grün, `npm run tauri build` grün + installiert.
+
+Voraussetzungen verifiziert: beide Repos haben `origin` (GitHub), `gh` als NMKato eingeloggt (`repo`+`workflow`-Scopes), `credential.helper=osxkeychain`.
+
+Noch offen (nicht in v2): Repo-pro-Projekt-Auto-Detect (aktuell wählst du pro Projekt-Spalte den Ordner), Live-Aktivitäts-Feed.
+
 ## 2026-06-28 - Projekt-Board Welle 1 (DONE)
 
 Projekt: KatoSync Desktop App + KatoOS MCP Server

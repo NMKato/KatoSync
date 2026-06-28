@@ -1663,8 +1663,26 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
   return (
     <Panel className="codex-panel" title="Codex Bridge" icon={<TerminalSquare size={18} />}>
       <p>
-        Freigegebene Aufgaben werden lokal von der Codex-CLI ausgeführt — auf einem eigenen Branch,
-        mit Auto-Commit. Nichts wird automatisch in main gemergt; du prüfst den Branch und mergst selbst.
+        Freigegebene Aufgaben werden lokal von der Codex-CLI ausgeführt — auf einem eigenen Branch
+        (von main abgezweigt), mit Auto-Commit. Nichts wird automatisch in main gemergt; du prüfst den
+        Branch bzw. Pull Request und mergst selbst.
+      </p>
+      {vm.config ? (
+        <div className="switch-grid" style={{ marginBottom: 6 }}>
+          <Toggle
+            checked={vm.config.codexAutoPush}
+            label="Branch nach Lauf pushen"
+            onChange={(checked) => vm.updateConfig("codexAutoPush", checked)}
+          />
+          <Toggle
+            checked={vm.config.codexCreatePr}
+            label="Pull Request erstellen"
+            onChange={(checked) => vm.updateConfig("codexCreatePr", checked)}
+          />
+        </div>
+      ) : null}
+      <p className="field-hint" style={{ marginTop: -2 }}>
+        Änderungen an diesen Schaltern erst mit „Einstellungen speichern" übernehmen.
       </p>
       {run.status === "idle" ? (
         <div className="codex-bridge-list">
@@ -1702,6 +1720,25 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
               {result.commit ? (
                 <div>
                   <strong>Commit:</strong> {result.commit.slice(0, 12)}
+                </div>
+              ) : null}
+              <div>
+                <strong>Push:</strong>{" "}
+                {result.pushed ? "Branch auf GitHub gepusht ✓" : "nicht gepusht (lokal)"}
+              </div>
+              {result.prUrl ? (
+                <div>
+                  <strong>Pull Request:</strong>{" "}
+                  <a href={result.prUrl} target="_blank" rel="noreferrer">
+                    {result.prUrl}
+                  </a>
+                </div>
+              ) : result.branchUrl ? (
+                <div>
+                  <strong>Branch:</strong>{" "}
+                  <a href={result.branchUrl} target="_blank" rel="noreferrer">
+                    auf GitHub ansehen
+                  </a>
                 </div>
               ) : null}
               <div>
