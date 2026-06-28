@@ -42,7 +42,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   FindingsTable,
-  Metric,
   NoticeBar,
   Panel,
   StatusLine,
@@ -50,6 +49,19 @@ import {
   Toggle
 } from "./components/Primitives";
 import { RichMarkdown } from "./components/RichMarkdown";
+import { Bars, Donut, KpiTiles, StatusList, Timeline } from "./components/DiagramComponents";
+import {
+  codexTimeline,
+  computeNextRun,
+  lastRunKpis,
+  newBriefingItems,
+  scanBars,
+  taskBuckets,
+  taskDonut,
+  taskKpis,
+  uploadDonut
+} from "./lib/cockpit";
+import { historyBars, loadRunHistory, recordRun, type RunRecord } from "./lib/runHistory";
 import { licenseAgreement } from "./lib/license";
 import { weekdayLabels } from "./lib/defaults";
 import {
@@ -77,13 +89,13 @@ const acknowledgedHintsKey = "katosync.acknowledgedHints";
 const acceptedLicenseKey = "katosync.license.acceptedVersion";
 
 const sectionByStep: Record<StepId, string> = {
-  welcome: "section-status",
+  welcome: "section-cockpit",
   api: "section-api",
   library: "section-library",
   folders: "section-folders",
   rules: "section-rules",
   schedule: "section-schedule",
-  dashboard: "section-status",
+  dashboard: "section-cockpit",
   actionQueue: "section-action-queue",
   projectBoard: "section-project-board",
   briefings: "section-briefings",
@@ -239,6 +251,15 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("katosync.theme", theme);
   }, [theme]);
+
+  // Verlauf: jeden abgeschlossenen Lauf in den lokalen Run-Ring schreiben (dedupliziert ueber finishedAt).
+  // In State gehalten, damit der frisch beendete Lauf sofort im Cockpit erscheint (kein Render-Lag, kein Parse pro Render).
+  const [runHistory, setRunHistory] = useState<RunRecord[]>(() => loadRunHistory());
+  useEffect(() => {
+    if (vm.report?.finishedAt) {
+      setRunHistory(recordRun(vm.report));
+    }
+  }, [vm.report?.finishedAt]);
 
   // Splash: animiertes Logo bei JEDEM Start, dann ausblenden.
   useEffect(() => {
@@ -572,23 +593,7 @@ export default function App() {
         ) : null}
 
         <section className={`dashboard-grid overview-grid page-${visibleStep}`}>
-          {visibleStep === "dashboard" ? (
-          <Panel className="hero-panel" id="section-status">
-            <div>
-              <span className="section-label">Status</span>
-              <h2>{vm.report ? "Letzter Lauf ist bereit" : "Bereit für die Einrichtung"}</h2>
-              <p>
-                KatoSync sammelt relevante Projektstände, schützt Secret-Dateien und synchronisiert
-                die CURRENT-Dateien mit deiner Mistral Library.
-              </p>
-            </div>
-            <div className="hero-metrics">
-              <Metric label="Relevant" value={vm.scan?.relevantFiles ?? vm.report?.scan.relevantFiles ?? 0} />
-              <Metric label="Secrets" value={vm.scan?.secretWarnings ?? vm.report?.scan.secretWarnings ?? 0} tone="warn" />
-              <Metric label="Uploads" value={vm.report?.uploaded.length ?? 0} tone="ok" />
-            </div>
-          </Panel>
-          ) : null}
+          {visibleStep === "dashboard" ? <CockpitPanel vm={vm} runHistory={runHistory} /> : null}
 
           {visibleStep === "settings" ? (
           <Panel className="settings-main-panel" id="section-api" title="Mistral Zugang" icon={<KeyRound size={18} />}>
@@ -1189,6 +1194,154 @@ export default function App() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+// Dashboard-Cockpit: Live-Status + echte Diagramme (wiederverwendete katosync-Bausteine), kein Mock.
+function CockpitPanel({
+  vm,
+  runHistory
+}: {
+  vm: ReturnType<typeof useKatoSyncViewModel>;
+  runHistory: RunRecord[];
+}) {
+  const config = vm.config;
+  if (!config) return null;
+
+  const work = getWorkState(vm.busy);
+  const codexRunning = vm.codexRun.status === "running";
+  const next = computeNextRun(config.schedule, Boolean(vm.launchStatus?.installed));
+  const buckets = taskBuckets(vm.actionPlans);
+  const feed = codexTimeline(vm.codexEvents);
+  const briefingItems = newBriefingItems(vm.briefings);
+  const runKpis = lastRunKpis(vm.report);
+  const upload = uploadDonut(vm.report);
+  const scanByCategory = scanBars(vm.scan ?? vm.report?.scan ?? null);
+  const history = historyBars(runHistory);
+
+  let liveActive = false;
+  let liveTitle = "Alles ruhig";
+  let liveText = "Aktuell läuft kein Lauf. Starte einen Sync oder gib eine Aufgabe an Codex.";
+  if (codexRunning) {
+    liveActive = true;
+    liveTitle = "Codex läuft";
+    liveText = vm.codexEvents.length
+      ? `${vm.codexEvents.length} Ereignisse im Live-Feed …`
+      : "Aufgabe wird auf eigenem Branch ausgeführt …";
+  } else if (vm.queueRunning) {
+    liveActive = true;
+    liveTitle = "Projekt-Queue läuft";
+    liveText = vm.currentQueueTaskId ? "Aufgabe wird abgearbeitet …" : "Warteschlange aktiv …";
+  } else if (work) {
+    liveActive = true;
+    liveTitle = work.title;
+    liveText = work.text;
+  } else if (vm.report) {
+    liveTitle = vm.report.errors.length ? "Bereit (mit Hinweisen)" : "Bereit";
+    liveText = `Letzter Lauf: ${vm.report.uploaded.length} Uploads, ${vm.report.errors.length} Fehler, ${vm.report.warnings.length} Warnungen.`;
+  }
+
+  return (
+    <Panel className="cockpit-panel" id="section-cockpit" title="Cockpit" icon={<LayoutGrid size={18} />}>
+      <div className="cockpit-now">
+        <div className="cockpit-live">
+          <span className={`cockpit-dot ${liveActive ? "on" : "idle"}`} aria-hidden="true" />
+          <div>
+            <strong>{liveTitle}</strong>
+            <span>{liveText}</span>
+          </div>
+        </div>
+        <div className={`cockpit-next ${next.active ? "active" : ""}`}>
+          <CalendarClock size={18} />
+          <div>
+            <strong>Nächster geplanter Lauf</strong>
+            <span>{next.label}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="cockpit-grid">
+        <div className="cockpit-cell">
+          {buckets.total > 0 ? (
+            <Donut title="Aufgaben gesamt" segments={taskDonut(buckets)} />
+          ) : (
+            <>
+              <div className="ks-title">Aufgaben gesamt</div>
+              <p className="cockpit-empty">Noch keine Aufgaben im Board.</p>
+            </>
+          )}
+        </div>
+        <div className="cockpit-cell">
+          <KpiTiles title="Arbeitsstand" items={taskKpis(buckets, vm.dailyCount)} />
+        </div>
+
+        <div className="cockpit-cell cockpit-cell-wide">
+          <div className="ks-title">Codex-Live-Feed</div>
+          {feed.length ? (
+            <Timeline items={feed} />
+          ) : (
+            <p className="cockpit-empty">
+              {vm.codexRun.status === "completed"
+                ? "Letzter Codex-Lauf abgeschlossen. Beim nächsten Lauf erscheinen die Ereignisse hier live."
+                : "Kein aktiver Codex-Lauf. Übergib eine Aufgabe aus Action Queue oder Briefing."}
+            </p>
+          )}
+        </div>
+
+        <div className="cockpit-cell">
+          {runKpis.length ? (
+            <KpiTiles title="Letzter Lauf" items={runKpis} />
+          ) : (
+            <>
+              <div className="ks-title">Letzter Lauf</div>
+              <p className="cockpit-empty">Noch kein Lauf — starte unten einen Sync.</p>
+            </>
+          )}
+        </div>
+        <div className="cockpit-cell">
+          {upload.length ? (
+            <Donut title="Upload-Erfolg" segments={upload} />
+          ) : (
+            <>
+              <div className="ks-title">Upload-Erfolg</div>
+              <p className="cockpit-empty">Noch keine Uploads erfasst.</p>
+            </>
+          )}
+        </div>
+
+        <div className="cockpit-cell">
+          <div className="ks-title">Was kam neu rein</div>
+          {briefingItems.length ? (
+            <StatusList items={briefingItems} />
+          ) : (
+            <p className="cockpit-empty">Keine neuen Briefings im Rückkanal.</p>
+          )}
+        </div>
+        <div className="cockpit-cell">
+          {scanByCategory.length ? (
+            <Bars title="Gefundene Dateien je Kategorie" bars={scanByCategory} />
+          ) : (
+            <>
+              <div className="ks-title">Gefundene Dateien</div>
+              <p className="cockpit-empty">Noch kein Scan ausgeführt.</p>
+            </>
+          )}
+        </div>
+
+        <div className="cockpit-cell cockpit-cell-wide">
+          {history.length ? (
+            <Bars title="Verlauf — Uploads je Tag" bars={history} />
+          ) : (
+            <>
+              <div className="ks-title">Verlauf (letzte Tage)</div>
+              <p className="cockpit-empty">
+                Der Verlauf sammelt echte Daten ab dem ersten Lauf. Nach den nächsten Syncs erscheinen hier die Tage.
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    </Panel>
   );
 }
 
