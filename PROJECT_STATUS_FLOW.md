@@ -1,5 +1,18 @@
 # KatoSync Project Statusflow
 
+## 2026-06-29 - UX Welle 8: Skill-Generator (Persona -> KatoSync-Skill) (DONE)
+
+Projekt: KatoSync Desktop App
+Status: DONE — Skill-Generator gebaut + ins Onboarding integriert; adversarial reviewed + Fixes.
+
+- Idee (Nutzer): Nutzer fuegt die Persona seines Agenten ein, druckt „Generieren", KatoSync haengt automatisch die kanonischen Integrations-Anweisungen an (Diagramm-Format-Contract + Action-Plan-Pflichtfelder), kopiert das Ergebnis in seinen Mistral-Skill -> Daten kommen sauber + mit Diagrammen ueber MCP an.
+- `src/lib/skillTemplate.ts`: `buildSkillPrompt(persona, {mcpUrl, projects})` — Persona unveraendert, dann abgegrenzter Block „=== KatoSync-Integration (Contract v1) ===" mit: katosync:* Bloecke (kpi/donut/bar/status/timeline/callout, tone/state-Enums), Briefing- vs. Action-Plan-Tools, Pflichtfelder (projectExternalId, riskLevel, **volle** targetRunner-Union, priority) als „WENN-dann" (nicht erzwingend), Few-Shot-Beispiel, Token-Hygiene-Hinweis. Echte MCP-URL + bekannte Projekte werden eingesetzt.
+- `SkillGeneratorPanel` (Einstellungen): Textarea Persona -> Generieren -> read-only Output + Kopieren (Clipboard mit Select-Fallback). i18n (skill.* in allen 4 Sprachen).
+- Onboarding: neuer **6., weicher** Schritt (`section-skill`). Gate = skillGenerated ODER skillSeen (persistent). Setup-% bleibt bei 5 Config-Gates, Nav nicht gesperrt. Review-Fix: persistenter `katosync.onboarding.skillSeen` verhindert das Wieder-Aufpoppen der Tour bei jedem Start (Bestands-Nutzer sehen den Schritt EINMAL).
+- Review (3 Dim + Verify): behoben — Tour-Nag (major), targetRunner-Union, Clipboard-Feedback, veraltete Kommentare. Offen/v1: generiertes Template ist Deutsch (LLM-Anweisung, sprachneutral genug); spaeter ggf. Validator (Round-Trip-Check).
+- tsc + Vite gruen. App gebaut + installiert.
+
+
 ## 2026-06-29 - UX Welle 7: i18n vollstaendig + Lizenz KI-Transparenz (EU AI Act) (DONE)
 
 Projekt: KatoSync Desktop App

@@ -377,7 +377,20 @@ const es: Record<TKey, string> = {
   "onboarding.step.4.title": "Paso 4 — Carpetas de proyecto",
   "onboarding.step.4.text": "Elige una o varias carpetas principales de tus proyectos. KatoSync también escanea las subcarpetas para que no falte ningún estado del proyecto.",
   "onboarding.step.5.title": "Paso 5 — Activar el plan de subida",
-  "onboarding.step.5.text": "Define la hora y los días de la semana e instala el LaunchAgent para que KatoSync sincronice automáticamente según el plan. Después, la configuración está completa."
+  "onboarding.step.5.text": "Define la hora y los días de la semana e instala el LaunchAgent para que KatoSync sincronice automáticamente según el plan. Después, la configuración está completa.",
+  "onboarding.step.6.title": "Paso 6 — Conecta el skill de tu agente",
+  "onboarding.step.6.text": "Pega abajo la persona de tu agente y pulsa «Generar». KatoSync añade las instrucciones necesarias (diagramas + campos de action plan). Copia el resultado y ponlo como skill/persona de tu agente en Mistral, para que los briefings y planes lleguen correctamente.",
+  "skill.title": "Generador de skills",
+  "skill.intro": "Pega la persona de tu agente. KatoSync añade las instrucciones de integración necesarias (formato de diagramas + campos de action plan) para que los briefings y planes lleguen correctamente por MCP.",
+  "skill.personaLabel": "Persona del agente",
+  "skill.personaPlaceholder": "Pega aquí la persona / system prompt de tu agente …",
+  "skill.generate": "Generar",
+  "skill.outputLabel": "Prompt de skill listo",
+  "skill.copy": "Copiar",
+  "skill.copied": "Copiado ✓",
+  "skill.empty": "Pega una persona y pulsa «Generar»: el resultado aparece aquí para copiar.",
+  "skill.meta": "Contract v{version} · MCP: {mcp}",
+  "skill.tokenNote": "Nota: tu token del connector va en la configuración del connector de Mistral (Bearer), NO en esta persona."
 };
 
 export default es;

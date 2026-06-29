@@ -395,6 +395,19 @@ const de = {
   "onboarding.step.4.text": "Wähle einen oder mehrere Hauptordner deiner Projekte. KatoSync scannt auch Unterordner, damit keine Projektstände fehlen.",
   "onboarding.step.5.title": "Schritt 5 — Uploadplan aktivieren",
   "onboarding.step.5.text": "Lege Uhrzeit und Wochentage fest und installiere den LaunchAgent, damit KatoSync automatisch nach Plan synchronisiert. Danach ist die Einrichtung abgeschlossen.",
+  "onboarding.step.6.title": "Schritt 6 — Agenten-Skill verbinden",
+  "onboarding.step.6.text": "Füge unten die Persona deines Agenten ein und drücke „Generieren“. KatoSync ergänzt die nötigen Anweisungen (Diagramme + Action-Plan-Felder). Kopiere das Ergebnis und setze es als Skill/Persona deines Agenten in Mistral ein — damit Briefings und Pläne sauber ankommen.",
+  "skill.title": "Skill-Generator",
+  "skill.intro": "Füge die Persona deines Agenten ein. KatoSync hängt die nötigen Integrations-Anweisungen an (Diagramm-Format + Action-Plan-Felder), damit Briefings und Pläne korrekt über MCP ankommen.",
+  "skill.personaLabel": "Agenten-Persona",
+  "skill.personaPlaceholder": "Persona / System-Prompt deines Agenten hier einfügen …",
+  "skill.generate": "Generieren",
+  "skill.outputLabel": "Fertiger Skill-Prompt",
+  "skill.copy": "Kopieren",
+  "skill.copied": "Kopiert ✓",
+  "skill.empty": "Persona einfügen und auf „Generieren“ drücken — das Ergebnis erscheint hier zum Kopieren.",
+  "skill.meta": "Contract v{version} · MCP: {mcp}",
+  "skill.tokenNote": "Hinweis: Dein Connector-Token gehört in die Mistral-Connector-Konfiguration (Bearer), NICHT in diese Persona."
 } as const;
 
 export type TKey = keyof typeof de;

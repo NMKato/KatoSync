@@ -924,10 +924,9 @@ export function useKatoSyncViewModel() {
     await quitApp();
   }, []);
 
-  // Eine einzige Quelle der Wahrheit fuer Setup-Fortschritt (Setup-Strip %, Checkliste UND Onboarding-Tour
-  // teilen dieselben Gates -> keine Divergenz mehr). Reihenfolge = onboardingSteps in App.tsx.
-  // Setup-% spiegelt PERSISTENTE Konfiguration (ueberlebt App-Neustart). Bewusst NICHT die fluechtigen
-  // Live-Test-Flags (connectionOk/libraryOk) -> sonst faellt das Setup bei jedem Start zurueck.
+  // Die 5 PERSISTENTEN Setup-Gates = Quelle fuer das Setup-Strip-% und die ersten 5 Onboarding-Schritte.
+  // (Die Tour haengt in App.tsx noch einen 6., weichen Skill-Schritt an; der zaehlt bewusst NICHT ins Setup-%.)
+  // Bewusst NICHT die fluechtigen Live-Test-Flags (connectionOk/libraryOk) -> sonst faellt das Setup bei jedem Start zurueck.
   const setupGates = useMemo(() => {
     if (!config) return [false, false, false, false, false];
     return [

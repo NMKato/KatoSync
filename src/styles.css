@@ -3537,3 +3537,46 @@ pre {
   }
 }
 
+
+/* ===== Skill-Generator (Einstellungen) ===== */
+.page-settings .skill-panel {
+  grid-column: span 12;
+}
+.skill-field {
+  display: grid;
+  gap: 6px;
+}
+.skill-input {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: var(--r-md, 8px);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.skill-input:focus-visible {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--focus-ring);
+}
+.skill-readonly {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.skill-output {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.skill-output-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.skill-token-note {
+  color: var(--warn, #ffc857);
+}

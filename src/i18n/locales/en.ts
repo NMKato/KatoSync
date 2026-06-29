@@ -377,7 +377,20 @@ const en: Record<TKey, string> = {
   "onboarding.step.4.title": "Step 4 — Project folders",
   "onboarding.step.4.text": "Pick one or more main folders of your projects. KatoSync also scans subfolders so no project states are missed.",
   "onboarding.step.5.title": "Step 5 — Activate upload plan",
-  "onboarding.step.5.text": "Set the time and weekdays and install the LaunchAgent so KatoSync syncs automatically on schedule. Setup is then complete."
+  "onboarding.step.5.text": "Set the time and weekdays and install the LaunchAgent so KatoSync syncs automatically on schedule. Setup is then complete.",
+  "onboarding.step.6.title": "Step 6 — Connect your agent skill",
+  "onboarding.step.6.text": "Paste your agent's persona below and press “Generate”. KatoSync appends the needed instructions (diagrams + action-plan fields). Copy the result and set it as your agent's skill/persona in Mistral — so briefings and plans arrive cleanly.",
+  "skill.title": "Skill generator",
+  "skill.intro": "Paste your agent's persona. KatoSync appends the needed integration instructions (diagram format + action-plan fields) so briefings and plans arrive correctly over MCP.",
+  "skill.personaLabel": "Agent persona",
+  "skill.personaPlaceholder": "Paste your agent's persona / system prompt here …",
+  "skill.generate": "Generate",
+  "skill.outputLabel": "Ready-made skill prompt",
+  "skill.copy": "Copy",
+  "skill.copied": "Copied ✓",
+  "skill.empty": "Paste a persona and press “Generate” — the result appears here to copy.",
+  "skill.meta": "Contract v{version} · MCP: {mcp}",
+  "skill.tokenNote": "Note: your connector token belongs in the Mistral connector configuration (Bearer), NOT in this persona."
 };
 
 export default en;

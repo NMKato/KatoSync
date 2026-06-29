@@ -3,8 +3,10 @@ import {
   AlertTriangle,
   BookOpenText,
   CalendarClock,
+  Check,
   CheckCircle2,
   ClipboardList,
+  Copy,
   Clock3,
   Database,
   Eye,
@@ -38,7 +40,7 @@ import {
   UploadCloud,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -63,6 +65,7 @@ import {
   uploadDonut
 } from "./lib/cockpit";
 import { historyBars, loadRunHistory, recordRun, type RunRecord } from "./lib/runHistory";
+import { buildSkillPrompt, knownProjectIds, mcpEndpoint, SKILL_CONTRACT_VERSION } from "./lib/skillTemplate";
 import { useT, type Lang, type TFunc, type TKey } from "./i18n";
 import { licenseAgreement } from "./lib/license";
 import { weekdayLabels } from "./lib/defaults";
@@ -140,6 +143,12 @@ const onboardingSteps: Array<{
     text: "Lege Uhrzeit und Wochentage fest und installiere den LaunchAgent, damit KatoSync automatisch nach Plan synchronisiert. Danach ist die Einrichtung abgeschlossen.",
     sectionId: "section-schedule",
     step: "schedule"
+  },
+  {
+    title: "Schritt 6 — Agenten-Skill verbinden",
+    text: "Füge unten die Persona deines Agenten ein und drücke „Generieren\". KatoSync ergänzt die nötigen Anweisungen, kopiere das Ergebnis in den Skill deines Agenten.",
+    sectionId: "section-skill",
+    step: "api"
   }
 ];
 
@@ -218,8 +227,20 @@ export default function App() {
   const hints = buildHints(vm, t);
   const hintSignature = useMemo(() => buildHintSignature(hints), [hints]);
   const hasNewHints = issueCount > 0 && hintSignature !== acknowledgedHintSignature;
-  // Eine Quelle der Wahrheit: identisch zur Setup-%-Berechnung im ViewModel (vm.setupGates).
-  const onboardingCompletion = vm.setupGates;
+  // Skill-Schritt (6): weiches Gate. Erfuellt, sobald der Nutzer einen Skill generiert hat (skillGenerated)
+  // ODER die Tour nach abgeschlossenem Setup einmal geschlossen hat (skillSeen, persistent) -> wird NICHT bei jedem
+  // Start neu aufgepoppt. Beeinflusst NUR die Tour, nicht das Setup-% / die Nav.
+  const [skillGenerated, setSkillGenerated] = useState(
+    () => localStorage.getItem("katosync.skill.generated") === "1"
+  );
+  const [skillSeen, setSkillSeen] = useState(
+    () => localStorage.getItem("katosync.onboarding.skillSeen") === "1"
+  );
+  // Tour-Gates: die 5 Setup-Gates (= Setup-%) plus der weiche Skill-Schritt am Ende.
+  const onboardingCompletion = useMemo(
+    () => [...vm.setupGates, skillGenerated || skillSeen],
+    [vm.setupGates, skillGenerated, skillSeen]
+  );
   const getNextOnboardingIndex = useCallback(
     (startIndex: number) => {
       const next = onboardingCompletion.findIndex((complete, index) => index >= startIndex && !complete);
@@ -354,6 +375,12 @@ export default function App() {
     setSpotlightId(null);
     setOnboardingPosition(null);
     if (done) localStorage.setItem(onboardingDoneKey, "true");
+    // Skill-Schritt nur EINMAL zeigen: ist das Config-Setup fertig und die Tour wird geschlossen,
+    // dauerhaft als gesehen merken -> kein erneutes Aufpoppen bei jedem Start.
+    if (vm.setupGates.every(Boolean)) {
+      localStorage.setItem("katosync.onboarding.skillSeen", "1");
+      setSkillSeen(true);
+    }
   };
 
   useEffect(() => {
@@ -374,7 +401,7 @@ export default function App() {
     };
   }, [onboardingOpen, updateOnboardingPosition]);
 
-  // Auto-Advance: ist der aktuelle Schritt erfuellt, gehe strikt EINEN Schritt weiter (1->5).
+  // Auto-Advance: ist der aktuelle Schritt erfuellt, gehe strikt EINEN Schritt weiter (1->6, inkl. Skill).
   useEffect(() => {
     if (!onboardingOpen || vm.busy || !onboardingCompletion[onboardingIndex]) return undefined;
     const timer = window.setTimeout(() => {
@@ -402,7 +429,7 @@ export default function App() {
     return (
       <div className="boot-screen">
         <Loader2 className="spin" size={28} />
-        <span>KatoSync wird vorbereitet</span>
+        <span>{t("shell.preparing")}</span>
       </div>
     );
   }
@@ -1110,6 +1137,13 @@ export default function App() {
 
           {visibleStep === "projectBoard" ? <ProjectBoardPanel vm={vm} /> : null}
           {visibleStep === "briefings" ? <BriefingsPanel vm={vm} /> : null}
+          {visibleStep === "settings" ? (
+            <SkillGeneratorPanel
+              vm={vm}
+              spotlightId={spotlightId}
+              onGenerated={() => setSkillGenerated(true)}
+            />
+          ) : null}
           {visibleStep === "settings" ? <CodexBridgePanel vm={vm} /> : null}
         </section>
       </main>
@@ -1993,6 +2027,90 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
             </div>
           ) : null}
         </div>
+      )}
+    </Panel>
+  );
+}
+
+// Skill-Generator: Persona einfuegen -> KatoSync haengt die Integrations-Anweisungen an -> kopieren -> in Mistral-Skill.
+function SkillGeneratorPanel({
+  vm,
+  spotlightId,
+  onGenerated
+}: {
+  vm: ReturnType<typeof useKatoSyncViewModel>;
+  spotlightId?: string | null;
+  onGenerated?: () => void;
+}) {
+  const { t } = useT();
+  const [persona, setPersona] = useState("");
+  const [output, setOutput] = useState("");
+  const [copied, setCopied] = useState(false);
+  const outputRef = useRef<HTMLTextAreaElement>(null);
+  const config = vm.config;
+  const mcp = mcpEndpoint(config?.mcp.baseUrl ?? "");
+  const projects = useMemo(
+    () => knownProjectIds(config, vm.boardGroups.map((group) => group.projectId)),
+    [config, vm.boardGroups]
+  );
+
+  const generate = () => {
+    setOutput(buildSkillPrompt(persona, { mcpUrl: config?.mcp.baseUrl ?? "", projects }));
+    setCopied(false);
+    localStorage.setItem("katosync.skill.generated", "1");
+    onGenerated?.();
+  };
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(output);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Fallback (z. B. ohne Clipboard-Permission): Text markieren, damit der Nutzer manuell Cmd+C drueckt.
+      outputRef.current?.focus();
+      outputRef.current?.select();
+    }
+  };
+
+  return (
+    <Panel
+      className={`skill-panel ${spotlightId === "section-skill" ? "spotlight-target" : ""}`}
+      id="section-skill"
+      title={t("skill.title")}
+      icon={<SlidersHorizontal size={18} />}
+    >
+      <p className="field-hint">{t("skill.intro")}</p>
+      <label className="skill-field">
+        {t("skill.personaLabel")}
+        <textarea
+          className="skill-input"
+          onChange={(event) => setPersona(event.target.value)}
+          placeholder={t("skill.personaPlaceholder")}
+          rows={6}
+          value={persona}
+        />
+      </label>
+      <div className="button-row">
+        <button className="primary" disabled={!persona.trim()} onClick={generate} type="button">
+          <SlidersHorizontal size={15} />
+          {t("skill.generate")}
+        </button>
+      </div>
+      {output ? (
+        <div className="skill-output">
+          <div className="skill-output-head">
+            <strong className="section-label">{t("skill.outputLabel")}</strong>
+            <button className="secondary" onClick={copy} type="button">
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              {copied ? t("skill.copied") : t("skill.copy")}
+            </button>
+          </div>
+          <textarea className="skill-input skill-readonly" readOnly ref={outputRef} rows={12} value={output} />
+          <p className="field-hint">{t("skill.meta", { version: SKILL_CONTRACT_VERSION, mcp })}</p>
+          <p className="field-hint skill-token-note">{t("skill.tokenNote")}</p>
+        </div>
+      ) : (
+        <p className="field-hint">{t("skill.empty")}</p>
       )}
     </Panel>
   );
