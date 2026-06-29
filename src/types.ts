@@ -12,6 +12,7 @@ export interface ScanRules {
   includeRoadmaps: boolean;
   includeTasks: boolean;
   includeCsv: boolean;
+  includeDocuments: boolean;
   maxFileSizeMb: number;
   uploadIndividualStatusFiles: boolean;
   maxIndividualUploads: number;

@@ -1035,7 +1035,7 @@ function mapRemoteBriefings(response: RemoteBriefingsResponse): Briefing[] {
     status: fromRemoteBriefingStatus(briefing.status),
     priority: fromRemoteBriefingPriority(briefing.priority),
     summary: briefing.summary || "",
-    body: briefing.body || briefing.summary || "",
+    body: briefing.body ?? "",
     suggestedAction: briefing.suggested_action,
     archivedAt: briefing.archived_at ?? null
   }));

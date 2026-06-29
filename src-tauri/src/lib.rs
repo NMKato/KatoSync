@@ -96,6 +96,8 @@ pub struct ScanRules {
     include_roadmaps: bool,
     include_tasks: bool,
     include_csv: bool,
+    #[serde(default)]
+    include_documents: bool,
     max_file_size_mb: u64,
     upload_individual_status_files: bool,
     max_individual_uploads: usize,
@@ -693,7 +695,6 @@ async fn delete_remote_briefing(
 // ===== Codex-Bridge: lokale Ausfuehrung freigegebener Aufgaben via Codex-CLI =====
 
 const CODEX_BIN: &str = "/Applications/Codex.app/Contents/Resources/codex";
-const PROTECTED_BRANCHES: [&str; 5] = ["main", "master", "production", "develop", "release"];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1972,6 +1973,16 @@ fn upload_order(output_dir: &Path, config: &AppConfig, scan: &ScanSummary) -> Ve
             .collect::<Vec<_>>();
         files.append(&mut individual);
     }
+    if config.scan_rules.include_documents {
+        // Allgemeine Dokumente (PDF/Bilder/Text) werden direkt als Datei hochgeladen.
+        let mut documents = scan
+            .findings
+            .iter()
+            .filter(|finding| !finding.skipped && finding.category == "document")
+            .map(|finding| PathBuf::from(&finding.path))
+            .collect::<Vec<_>>();
+        files.append(&mut documents);
+    }
     files
 }
 
@@ -2136,30 +2147,64 @@ async fn upload_document(
         .and_then(OsStr::to_str)
         .ok_or_else(|| anyhow!("Ungültiger Dateiname"))?
         .to_string();
-    let content = fs::read_to_string(file_path)
-        .with_context(|| format!("Datei kann nicht gelesen werden: {}", file_path.display()))?;
-    if secret_regex().is_match(&content) {
+    // Secrets nie hochladen: Dateiname-Marker greift fuer Text UND Binaer (.env/.key/.pem/...).
+    if file_name_has_secret_marker(file_path) {
         return Ok(UploadResult {
             file_name,
             document_id: None,
             processing_status: None,
             rate_limits: Vec::new(),
             success: false,
-            error: Some("Secret-Muster im Upload-Inhalt erkannt.".to_string()),
+            error: Some("Secret-Datei vom Upload ausgeschlossen.".to_string()),
         });
     }
 
-    let url = format!("https://api.mistral.ai/v1/libraries/{library_id}/documents");
-    let mime = if file_name.ends_with(".txt") {
-        "text/plain"
-    } else if file_name.ends_with(".json") {
-        "application/json"
-    } else if file_name.ends_with(".csv") {
-        "text/csv"
+    let lower = file_name.to_lowercase();
+    let is_binary = lower.ends_with(".pdf")
+        || lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg");
+
+    let (bytes, mime): (Vec<u8>, &str) = if is_binary {
+        // Binaer (PDF/Bild): direkt als Bytes hochladen. Inhalts-Secret-Scan ist auf
+        // Binaerdaten nicht moeglich -> Schutz ueber Dateiname + Ordner-Ausschluss (Scan).
+        let data = fs::read(file_path)
+            .with_context(|| format!("Datei kann nicht gelesen werden: {}", file_path.display()))?;
+        let mime = if lower.ends_with(".pdf") {
+            "application/pdf"
+        } else if lower.ends_with(".png") {
+            "image/png"
+        } else {
+            "image/jpeg"
+        };
+        (data, mime)
     } else {
-        "text/markdown"
+        let content = fs::read_to_string(file_path)
+            .with_context(|| format!("Datei kann nicht gelesen werden: {}", file_path.display()))?;
+        if secret_regex().is_match(&content) {
+            return Ok(UploadResult {
+                file_name,
+                document_id: None,
+                processing_status: None,
+                rate_limits: Vec::new(),
+                success: false,
+                error: Some("Secret-Muster im Upload-Inhalt erkannt.".to_string()),
+            });
+        }
+        let mime = if lower.ends_with(".txt") {
+            "text/plain"
+        } else if lower.ends_with(".json") {
+            "application/json"
+        } else if lower.ends_with(".csv") {
+            "text/csv"
+        } else {
+            "text/markdown"
+        };
+        (content.into_bytes(), mime)
     };
-    let part = Part::bytes(content.into_bytes())
+
+    let url = format!("https://api.mistral.ai/v1/libraries/{library_id}/documents");
+    let part = Part::bytes(bytes)
         .file_name(file_name.clone())
         .mime_str(mime)?;
     let form = Form::new().part("file", part);
@@ -2311,11 +2356,21 @@ fn categorize_file(path: &Path, rules: &ScanRules) -> String {
         .and_then(OsStr::to_str)
         .unwrap_or_default()
         .to_lowercase();
-    let allowed_ext = extension == "md"
+    // Binaere Dokumente (PDF/Bilder) gibt es nur im Dokument-Modus und immer als Kategorie "document";
+    // sie koennen nicht als Text-Aggregat gerendert werden.
+    let is_binary_doc_ext =
+        extension == "pdf" || extension == "png" || extension == "jpg" || extension == "jpeg";
+    if is_binary_doc_ext {
+        if rules.include_documents {
+            return "document".to_string();
+        }
+        return "ignore".to_string();
+    }
+    let is_text_ext = extension == "md"
         || extension == "txt"
         || extension == "json"
         || (rules.include_csv && extension == "csv");
-    if !allowed_ext {
+    if !is_text_ext {
         return "ignore".to_string();
     }
     if name.contains("memory") && rules.include_memory {
@@ -2337,6 +2392,10 @@ fn categorize_file(path: &Path, rules: &ScanRules) -> String {
         && rules.include_tasks
     {
         return "task".to_string();
+    }
+    // Beliebige andere Text-Datei: im Dokument-Modus als allgemeines Dokument behandeln.
+    if rules.include_documents {
+        return "document".to_string();
     }
     "ignore".to_string()
 }
@@ -2465,6 +2524,7 @@ fn default_config() -> Result<AppConfig> {
             include_roadmaps: true,
             include_tasks: true,
             include_csv: false,
+            include_documents: false,
             max_file_size_mb: 5,
             upload_individual_status_files: false,
             max_individual_uploads: 5,

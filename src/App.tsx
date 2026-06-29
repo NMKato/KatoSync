@@ -71,6 +71,7 @@ import { historyBars, loadRunHistory, recordRun, type RunRecord } from "./lib/ru
 import { buildSkillPrompt, knownProjectIds, mcpEndpoint, SKILL_CONTRACT_VERSION } from "./lib/skillTemplate";
 import { copyText } from "./lib/clipboard";
 import { briefingToMarkdown } from "./lib/briefingExport";
+import { safeHttpUrl } from "./lib/url";
 import { useT, type Lang, type TFunc, type TKey } from "./i18n";
 import { licenseAgreement } from "./lib/license";
 import { weekdayLabels } from "./lib/defaults";
@@ -94,7 +95,6 @@ const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
 const weekdays = Object.keys(weekdayLabels) as Weekday[];
 type ThemeMode = "dark" | "light";
 const onboardingDoneKey = "katosync.onboarding.done";
-const splashSeenKey = "katosync.onboarding.splashSeen";
 const acknowledgedHintsKey = "katosync.acknowledgedHints";
 const acceptedLicenseKey = "katosync.license.acceptedVersion";
 
@@ -968,32 +968,52 @@ export default function App() {
             icon={<ListChecks size={18} />}
           >
             <div className="switch-grid">
-              <Toggle
-                checked={config.scanRules.includeMemory}
-                label={t("settings.rules.includeMemory")}
-                onChange={(checked) => vm.updateNested("scanRules", { includeMemory: checked })}
-              />
-              <Toggle
-                checked={config.scanRules.includeRoadmaps}
-                label={t("settings.rules.includeRoadmaps")}
-                onChange={(checked) => vm.updateNested("scanRules", { includeRoadmaps: checked })}
-              />
-              <Toggle
-                checked={config.scanRules.includeTasks}
-                label={t("settings.rules.includeTasks")}
-                onChange={(checked) => vm.updateNested("scanRules", { includeTasks: checked })}
-              />
-              <Toggle
-                checked={config.safety.secretScanEnabled}
-                label={t("settings.rules.secretScanner")}
-                onChange={(checked) => vm.updateNested("safety", { secretScanEnabled: checked })}
-              />
-              <Toggle
-                checked={config.scanRules.uploadIndividualStatusFiles}
-                label={t("settings.rules.individualOptional")}
-                onChange={(checked) => vm.updateNested("scanRules", { uploadIndividualStatusFiles: checked })}
-              />
+              <HoverTip title={t("settings.rules.includeMemory")} description={t("settings.rules.includeMemoryDesc")}>
+                <Toggle
+                  checked={config.scanRules.includeMemory}
+                  label={t("settings.rules.includeMemory")}
+                  onChange={(checked) => vm.updateNested("scanRules", { includeMemory: checked })}
+                />
+              </HoverTip>
+              <HoverTip title={t("settings.rules.includeRoadmaps")} description={t("settings.rules.includeRoadmapsDesc")}>
+                <Toggle
+                  checked={config.scanRules.includeRoadmaps}
+                  label={t("settings.rules.includeRoadmaps")}
+                  onChange={(checked) => vm.updateNested("scanRules", { includeRoadmaps: checked })}
+                />
+              </HoverTip>
+              <HoverTip title={t("settings.rules.includeTasks")} description={t("settings.rules.includeTasksDesc")}>
+                <Toggle
+                  checked={config.scanRules.includeTasks}
+                  label={t("settings.rules.includeTasks")}
+                  onChange={(checked) => vm.updateNested("scanRules", { includeTasks: checked })}
+                />
+              </HoverTip>
+              <HoverTip title={t("settings.rules.includeDocuments")} description={t("settings.rules.includeDocumentsDesc")}>
+                <Toggle
+                  checked={config.scanRules.includeDocuments}
+                  label={t("settings.rules.includeDocuments")}
+                  onChange={(checked) => vm.updateNested("scanRules", { includeDocuments: checked })}
+                />
+              </HoverTip>
+              <HoverTip title={t("settings.rules.secretScanner")} description={t("settings.rules.secretScannerDesc")}>
+                <Toggle
+                  checked={config.safety.secretScanEnabled}
+                  label={t("settings.rules.secretScanner")}
+                  onChange={(checked) => vm.updateNested("safety", { secretScanEnabled: checked })}
+                />
+              </HoverTip>
+              <HoverTip title={t("settings.rules.individualOptional")} description={t("settings.rules.individualOptionalDesc")}>
+                <Toggle
+                  checked={config.scanRules.uploadIndividualStatusFiles}
+                  label={t("settings.rules.individualOptional")}
+                  onChange={(checked) => vm.updateNested("scanRules", { uploadIndividualStatusFiles: checked })}
+                />
+              </HoverTip>
             </div>
+            {config.scanRules.includeDocuments ? (
+              <p className="documents-warning">{t("settings.rules.documentsWarning")}</p>
+            ) : null}
             <div className="range-row">
               <label>
                 {t("settings.rules.maxFileSize")}
@@ -1684,9 +1704,9 @@ function BoardTaskCard({
           text={task.prUrl ? t("board.statusExecutedPrOpen") : t("board.statusExecutedWaiting")}
         />
       ) : null}
-      {task.status === "executed" && task.prUrl ? (
+      {task.status === "executed" && safeHttpUrl(task.prUrl) ? (
         <div className="board-pr">
-          <a href={task.prUrl} target="_blank" rel="noreferrer">
+          <a href={safeHttpUrl(task.prUrl)} target="_blank" rel="noreferrer">
             {t("board.viewPullRequest")}
           </a>
         </div>
@@ -2189,17 +2209,17 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
                 <strong>{t("codex.result.push")}</strong>{" "}
                 {result.pushed ? t("codex.result.pushed") : t("codex.result.notPushed")}
               </div>
-              {result.prUrl ? (
+              {safeHttpUrl(result.prUrl) ? (
                 <div>
                   <strong>{t("codex.result.pullRequest")}</strong>{" "}
-                  <a href={result.prUrl} target="_blank" rel="noreferrer">
+                  <a href={safeHttpUrl(result.prUrl)} target="_blank" rel="noreferrer">
                     {result.prUrl}
                   </a>
                 </div>
-              ) : result.branchUrl ? (
+              ) : safeHttpUrl(result.branchUrl) ? (
                 <div>
                   <strong>{t("codex.result.branch")}</strong>{" "}
-                  <a href={result.branchUrl} target="_blank" rel="noreferrer">
+                  <a href={safeHttpUrl(result.branchUrl)} target="_blank" rel="noreferrer">
                     {t("codex.result.viewOnGithub")}
                   </a>
                 </div>
@@ -2741,15 +2761,6 @@ function OnboardingDialog({
       </section>
     </>
   );
-}
-
-function getOverlapArea(
-  first: { left: number; top: number; right: number; bottom: number },
-  second: { left: number; top: number; right: number; bottom: number }
-) {
-  const horizontal = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
-  const vertical = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
-  return horizontal * vertical;
 }
 
 function quotaWidth(remaining?: string | null, limit?: string | null) {

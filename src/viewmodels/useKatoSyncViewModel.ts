@@ -45,7 +45,6 @@ import type {
   ActionPlan,
   ActionPlanStatus,
   ActionTask,
-  ActionTaskStatus,
   AppConfig,
   Briefing,
   CodexEvent,
@@ -906,14 +905,6 @@ export function useKatoSyncViewModel() {
     [config, show]
   );
 
-  const handleQueueBriefing = useCallback(
-    async (briefingId: string) => {
-      setBriefings(await updateBriefingStatus(config, briefingId, "queued"));
-      show("warn", "Briefing vorbereitet. Codex-Bridge startet erst im nächsten 2.0-Schnitt.");
-    },
-    [config, show]
-  );
-
   const handleRejectBriefing = useCallback(
     async (briefingId: string) => {
       setBriefings(await updateBriefingStatus(config, briefingId, "rejected"));
@@ -924,38 +915,50 @@ export function useKatoSyncViewModel() {
 
   const handleArchiveBriefing = useCallback(
     async (briefingId: string) => {
+      if (busy) return;
+      setBusy("briefing-mut");
       try {
         setBriefings(await archiveBriefing(config, briefings, briefingId, true));
         show("info", "Briefing ins Archiv verschoben.");
       } catch {
         show("error", "Briefing konnte nicht archiviert werden.");
+      } finally {
+        setBusy(null);
       }
     },
-    [config, briefings, show]
+    [busy, config, briefings, show]
   );
 
   const handleRestoreBriefing = useCallback(
     async (briefingId: string) => {
+      if (busy) return;
+      setBusy("briefing-mut");
       try {
         setBriefings(await archiveBriefing(config, briefings, briefingId, false));
         show("ok", "Briefing aus dem Archiv geholt.");
       } catch {
         show("error", "Briefing konnte nicht wiederhergestellt werden.");
+      } finally {
+        setBusy(null);
       }
     },
-    [config, briefings, show]
+    [busy, config, briefings, show]
   );
 
   const handleDeleteBriefing = useCallback(
     async (briefingId: string) => {
+      if (busy) return;
+      setBusy("briefing-mut");
       try {
         setBriefings(await deleteBriefing(config, briefings, briefingId));
         show("info", "Briefing endgültig gelöscht.");
       } catch {
         show("error", "Briefing konnte nicht gelöscht werden.");
+      } finally {
+        setBusy(null);
       }
     },
-    [config, briefings, show]
+    [busy, config, briefings, show]
   );
 
   const handleQuitApp = useCallback(async () => {
@@ -1046,7 +1049,6 @@ export function useKatoSyncViewModel() {
     handleReviewActionPlan,
     handleRun,
     handleAcceptBriefing,
-    handleQueueBriefing,
     handleSaveKey,
     handleSaveMcpConnectorToken,
     handleScan,

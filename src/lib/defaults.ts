@@ -23,6 +23,7 @@ export const defaultConfig: AppConfig = {
     includeRoadmaps: true,
     includeTasks: true,
     includeCsv: false,
+    includeDocuments: false,
     maxFileSizeMb: 5,
     uploadIndividualStatusFiles: false,
     maxIndividualUploads: 5
