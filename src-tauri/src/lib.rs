@@ -744,6 +744,9 @@ pub struct CodexRunResult {
     pushed: bool,
     branch_url: Option<String>,
     pr_url: Option<String>,
+    // Datei-Modus dieses Laufs (autoritativ aus der frisch von der Platte geladenen Config),
+    // damit das Frontend den Task-Status nicht aus evtl. ungespeicherter In-Memory-Config ableitet.
+    file_mode: bool,
 }
 
 fn codex_bin() -> String {
@@ -833,6 +836,25 @@ fn git_capture(repo: &str, args: &[&str]) -> Result<String, String> {
         ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+// Wie git_capture, aber liefert rohes stdout ohne Trim — fuer NUL-getrennte (-z) Ausgaben,
+// bei denen git Pfade unescaped laesst (sonst quotet git Nicht-ASCII/Umlaute mit fuehrendem '"').
+fn git_capture_raw(repo: &str, args: &[&str]) -> Result<Vec<u8>, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(error_to_string)?;
+    if !output.status.success() {
+        return Err(format!(
+            "git {} fehlgeschlagen: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(output.stdout)
 }
 
 async fn patch_action_plan_status_inner(
@@ -1082,7 +1104,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     fs::write(format!("{run_dir}/prompt.md"), sanitize_log(&req.prompt)).map_err(error_to_string)?;
 
     // Datei-Modus: Ergebnis-Ordner anlegen und Codex anweisen, NUR dorthin zu schreiben.
-    let result_rel = format!("_KatoSync_Ergebnisse/task-{task_slug}");
+    let result_rel = format!("KatoResults/task-{task_slug}");
     let effective_prompt = if file_mode {
         let result_dir = format!("{repo_path}/{result_rel}");
         fs::create_dir_all(&result_dir).map_err(error_to_string)?;
@@ -1231,19 +1253,28 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     // Run-Ordner (.katosync) bewusst NICHT mitcommitten -> bleibt lokaler Audit-Trail,
     // die "geaenderte Dateien"-Liste zeigt nur die echten Aenderungen.
     let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync"]);
-    let changed_files: Vec<String> = git_capture(&repo_path, &["diff", "--cached", "--name-only"])
-        .unwrap_or_default()
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| l.to_string())
-        .collect();
+    // -z + core.quotepath=false: NUL-getrennte, UNescapte UTF-8-Pfade. Ohne das quotet git
+    // Umlaut-Namen (z.B. "Lebenslauf_Mueller.md" mit Ue) mit fuehrendem '"' -> der starts_with-
+    // Scope-Check unten wuerde sie faelschlich als "ausserhalb" werten und den Lauf verwerfen.
+    let changed_files: Vec<String> = git_capture_raw(
+        &repo_path,
+        &["-c", "core.quotepath=false", "diff", "--cached", "-z", "--name-only"],
+    )
+    .unwrap_or_default()
+    .split(|b| *b == 0)
+    .filter(|s| !s.is_empty())
+    .map(|s| String::from_utf8_lossy(s).to_string())
+    .collect();
 
     // Datei-Modus: Codex darf nur in den Ergebnis-Ordner geschrieben haben. Aenderungen
     // ausserhalb -> Lauf verwerfen (kein blindes Mergen ins Projekt).
     if file_mode && codex_error.is_none() {
+        // Mit abschliessendem '/' vergleichen, sonst wuerde ein Geschwister-Ordner wie
+        // "KatoResults/task-<slug>-x/" den starts_with-Check faelschlich bestehen.
+        let scope_prefix = format!("{result_rel}/");
         let out_of_scope: Vec<&str> = changed_files
             .iter()
-            .filter(|f| !f.starts_with(&result_rel))
+            .filter(|f| !f.starts_with(&scope_prefix))
             .map(|f| f.as_str())
             .collect();
         if !out_of_scope.is_empty() {
@@ -1405,13 +1436,30 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         }
     }
 
+    // Datei-Modus + Fehlschlag (kein Commit): evtl. von Codex geschriebene Teil-Dateien NICHT
+    // mit auf den Default-Branch nehmen. Sonst bliebe der Arbeitsbaum dauerhaft schmutzig und
+    // jeder weitere Lauf scheiterte am sauberer-Baum-Check. Auf den Ausgangszustand zuruecksetzen.
+    if file_mode && commit.is_none() {
+        let _ = git_capture(&repo_path, &["reset", "--hard"]);
+        let _ = git_capture(&repo_path, &["clean", "-fd", "-e", ".katosync"]);
+    }
     // Zurueck auf den Default-Branch -> Arbeitskopie bleibt sauber; Codex-Aenderungen leben auf dem Branch.
     let _ = git_capture(&repo_path, &["checkout", &default_branch]);
     if file_mode && commit.is_some() {
         // Datei-Modus: Ergebnis in den Default-Branch mergen, damit es lokal im Ordner sichtbar ist
-        // (kein GitHub-Push). Danach den temporaeren Branch entfernen.
-        let _ = git_capture(&repo_path, &["merge", "--ff-only", &branch]);
-        let _ = git_capture(&repo_path, &["branch", "-D", &branch]);
+        // (kein GitHub-Push). Branch NUR loeschen, wenn der Merge wirklich gelang -> sonst ginge
+        // der Ergebnis-Commit durch das force-Delete (-D) verloren.
+        match git_capture(&repo_path, &["merge", "--ff-only", &branch]) {
+            Ok(_) => {
+                let _ = git_capture(&repo_path, &["branch", "-D", &branch]);
+            }
+            Err(e) => {
+                let _ = write_log(
+                    "codex",
+                    &format!("Datei-Modus: ff-only-Merge fehlgeschlagen, Branch {branch} bleibt erhalten: {e}"),
+                );
+            }
+        }
     } else if commit.is_none() {
         // Fehlgeschlagener Lauf ohne Commit -> leeren Codex-Branch wieder entfernen.
         let _ = git_capture(&repo_path, &["branch", "-D", &branch]);
@@ -1435,6 +1483,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         pushed,
         branch_url,
         pr_url,
+        file_mode,
     })
 }
 
@@ -2379,7 +2428,7 @@ fn should_enter(entry: &DirEntry, config: &AppConfig) -> bool {
     let name = entry.file_name().to_string_lossy().to_lowercase();
     let blocked_names = [
         ".git",
-        "_katosync_ergebnisse",
+        "katoresults",
         "node_modules",
         ".env",
         "secrets",

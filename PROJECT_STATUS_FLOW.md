@@ -1,5 +1,17 @@
 # KatoSync Project Statusflow
 
+## 2026-06-29 - Welle 11b: Datei-Modus-Haertung (adversarialer Multi-Agent-Review) (committet, NICHT released)
+
+Projekt: KatoSync Desktop App. Status: committet auf main, NICHT released. Vor dem echten Codex-Datei-Modus-Lauf wurde der Welle-11-Diff adversarial reviewed (3 Dimensionen x Verify, 5 Funde bestaetigt, 1 widerlegt). Build gruen (tsc+vite+cargo check), App gebaut + nach /Applications installiert.
+
+- **Umlaut-Bug (HIGH, Happy-Path-Bruch) behoben:** `git diff --cached --name-only` quotet Nicht-ASCII-Pfade (core.quotepath), ein Ergebnisfile mit Ae/Ue/Oe kam als `"..M\303\274ller.md"` (fuehrendes Anfuehrungszeichen) zurueck -> starts_with-Scope-Check schlug fehl -> Lauf wurde als "ausserhalb" verworfen, Ergebnis geloescht, faelschlich "failed". Fix: neuer Helfer `git_capture_raw` + `git -c core.quotepath=false diff --cached -z --name-only` (NUL-getrennt, unescaped UTF-8). Traf genau den Bewerbungs-/Dokumente-Anwendungsfall (deutsche Dateinamen).
+- **Geschwister-Pfad-Loch (LOW) geschlossen:** Scope-Check vergleicht jetzt gegen `result_rel + "/"` statt nur `result_rel` (sonst haette `KatoResults/task-<slug>-x/` den Check bestanden).
+- **Dirty-Tree nach Fehlschlag (HIGH-Folge) behoben:** Schlug ein Datei-Modus-Lauf NACH Teil-Schreibvorgaengen fehl, blieben die uncommitteten Dateien liegen (Cleanup war auf codex_error.is_none() gegated) -> wanderten auf den Default-Branch -> jeder weitere Lauf scheiterte am sauberer-Baum-Check. Fix: bei `file_mode && commit.is_none()` vor dem Rueckwechsel `reset --hard` + `clean -fd -e .katosync`.
+- **Stiller Commit-Verlust (MED) behoben:** `git branch -D` lief frueher unbedingt nach ignoriertem `git merge --ff-only`. Jetzt: Branch nur loeschen, wenn der Merge gelang; sonst bleibt der Branch + Log-Hinweis.
+- **Status-Divergenz (LOW) behoben:** TS leitete den Task-Status aus evtl. ungespeicherter In-Memory-Config ab, Rust aus der frisch geladenen Platten-Config. Fix: `file_mode` autoritativ in `CodexRunResult` (Rust + TS-Typ); useKatoSyncViewModel nutzt `result.fileMode` (Fallback Config).
+- **Label-Mismatch (MED) behoben (Nutzer-Entscheidung KatoResults):** UI versprach an 12 Stellen "KatoResults", Code legte `_KatoSync_Ergebnisse` an. Code an UI angeglichen -> Ergebnis-Ordner heisst jetzt **KatoResults** (result_rel + Scan-Blockliste "katoresults"); i18n unveraendert. Loop-Schutz greift weiter (contains-Match auf lowercased Namen).
+- OFFEN: echten Datei-Modus-Lauf jetzt mit der gehaerteten App verifizieren (frischer Ordner -> Toggle "Coding-Modus" aus -> Aufgabe -> Ergebnis in KatoResults + Task "erledigt"); dann ggf. beta.7. Multi-Runner + Audit-Restthemen weiterhin offen.
+
 ## 2026-06-29 - Welle 11: Codex Coding-/Datei-Modus (Option B) (committet, NICHT released)
 
 Projekt: KatoSync Desktop App. Status: committet `483b95b` auf main, NICHT in beta.6. Echter Codex-Datei-Modus-Lauf noch NICHT End-to-End verifiziert (Codex-Login/Limit) -> vor Release testen.

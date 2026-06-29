@@ -244,6 +244,8 @@ export interface CodexRunResult {
   pushed?: boolean;
   branchUrl?: string | null;
   prUrl?: string | null;
+  // Datei-Modus dieses Laufs (autoritativ aus dem Rust-Lauf, nicht aus der UI-Config abgeleitet).
+  fileMode?: boolean;
 }
 
 export interface CodexRunState {
