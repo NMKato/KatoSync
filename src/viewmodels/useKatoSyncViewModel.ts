@@ -170,8 +170,11 @@ export function useKatoSyncViewModel() {
     };
   }, []);
 
+  // Ungespeicherte Aenderungen: wird bei Formular-Edits gesetzt, beim Speichern geleert.
+  const [dirty, setDirty] = useState(false);
   const updateConfig = useCallback(<K extends keyof AppConfig>(key: K, value: AppConfig[K]) => {
     setConfig((current) => (current ? { ...current, [key]: value } : current));
+    setDirty(true);
   }, []);
 
   const updateNested = useCallback(
@@ -179,6 +182,7 @@ export function useKatoSyncViewModel() {
       setConfig((current) =>
         current ? { ...current, [key]: { ...current[key], ...value } } : current
       );
+      setDirty(true);
     },
     []
   );
@@ -188,6 +192,7 @@ export function useKatoSyncViewModel() {
     setBusy("save");
     try {
       setConfig(await saveConfig(config));
+      setDirty(false);
       show("ok", "Konfiguration gespeichert.");
     } catch (error) {
       show("error", getMessage(error));
@@ -952,6 +957,7 @@ export function useKatoSyncViewModel() {
     connectionOk,
     currentQueueTaskId,
     dailyCount,
+    dirty,
     queueRunning,
     keyInput,
     keyStatus,

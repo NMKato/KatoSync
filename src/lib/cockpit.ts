@@ -12,6 +12,7 @@ import type {
   Weekday
 } from "../types";
 import type { BarItem, KpiItem, Segment, StatusItem, TimelineItem, Tone } from "../components/DiagramComponents";
+import type { Lang, TFunc } from "../i18n";
 
 // ===== Aufgaben-Buckets (Task-Ebene: Offen / Ausgefuehrt / Erledigt / Problem) =====
 export interface TaskBuckets {
@@ -62,22 +63,22 @@ export function taskBuckets(plans: ActionPlan[]): TaskBuckets {
   return buckets;
 }
 
-export function taskDonut(buckets: TaskBuckets): Segment[] {
+export function taskDonut(buckets: TaskBuckets, t: TFunc): Segment[] {
   return [
-    { label: "Offen", value: buckets.offen, tone: "info" },
-    { label: "Ausgeführt", value: buckets.ausgefuehrt, tone: "brand" },
-    { label: "Erledigt", value: buckets.erledigt, tone: "ok" },
-    { label: "Aufgeschoben", value: buckets.aufgeschoben, tone: "warn" },
-    { label: "Verworfen/Fehler", value: buckets.problem, tone: "danger" }
+    { label: t("tasks.open"), value: buckets.offen, tone: "info" },
+    { label: t("tasks.executed"), value: buckets.ausgefuehrt, tone: "brand" },
+    { label: t("tasks.done"), value: buckets.erledigt, tone: "ok" },
+    { label: t("tasks.deferred"), value: buckets.aufgeschoben, tone: "warn" },
+    { label: t("tasks.problem"), value: buckets.problem, tone: "danger" }
   ];
 }
 
-export function taskKpis(buckets: TaskBuckets, dailyCount: number): KpiItem[] {
+export function taskKpis(buckets: TaskBuckets, dailyCount: number, t: TFunc): KpiItem[] {
   return [
-    { label: "Offen", value: buckets.offen, tone: "info" },
-    { label: "Ausgeführt", value: buckets.ausgefuehrt, tone: "brand" },
-    { label: "Erledigt", value: buckets.erledigt, tone: "ok" },
-    { label: "Heute erledigt", value: dailyCount, tone: "ok" }
+    { label: t("tasks.open"), value: buckets.offen, tone: "info" },
+    { label: t("tasks.executed"), value: buckets.ausgefuehrt, tone: "brand" },
+    { label: t("tasks.done"), value: buckets.erledigt, tone: "ok" },
+    { label: t("tasks.todayDone"), value: dailyCount, tone: "ok" }
   ];
 }
 
@@ -92,32 +93,32 @@ export function formatDuration(startedAt?: string | null, finishedAt?: string | 
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
-export function lastRunKpis(report: SyncReport | null): KpiItem[] {
+export function lastRunKpis(report: SyncReport | null, t: TFunc): KpiItem[] {
   if (!report) return [];
   return [
-    { label: "Dauer", value: formatDuration(report.startedAt, report.finishedAt), tone: "info" },
-    { label: report.dryRun ? "Geprüft" : "Uploads", value: report.uploaded.length, tone: "ok" },
-    { label: "Fehler", value: report.errors.length, tone: report.errors.length ? "danger" : "ok" },
-    { label: "Warnungen", value: report.warnings.length, tone: report.warnings.length ? "warn" : "ok" }
+    { label: t("lastRun.duration"), value: formatDuration(report.startedAt, report.finishedAt), tone: "info" },
+    { label: report.dryRun ? t("lastRun.checked") : t("lastRun.uploads"), value: report.uploaded.length, tone: "ok" },
+    { label: t("lastRun.errors"), value: report.errors.length, tone: report.errors.length ? "danger" : "ok" },
+    { label: t("lastRun.warnings"), value: report.warnings.length, tone: report.warnings.length ? "warn" : "ok" }
   ];
 }
 
-export function uploadDonut(report: SyncReport | null): Segment[] {
+export function uploadDonut(report: SyncReport | null, t: TFunc): Segment[] {
   if (!report || !report.uploaded.length) return [];
   const ok = report.uploaded.filter((u) => u.success).length;
   const failed = report.uploaded.length - ok;
-  const segments: Segment[] = [{ label: "Erfolgreich", value: ok, tone: "ok" }];
-  if (failed > 0) segments.push({ label: "Fehlgeschlagen", value: failed, tone: "danger" });
+  const segments: Segment[] = [{ label: t("upload.success"), value: ok, tone: "ok" }];
+  if (failed > 0) segments.push({ label: t("upload.failed"), value: failed, tone: "danger" });
   return segments;
 }
 
 // ===== Scan nach Kategorie =====
-export function scanBars(scan: ScanSummary | null): BarItem[] {
+export function scanBars(scan: ScanSummary | null, t: TFunc): BarItem[] {
   if (!scan) return [];
   const counts = new Map<string, number>();
   for (const finding of scan.findings) {
     if (finding.skipped) continue;
-    const key = finding.category || "Sonstige";
+    const key = finding.category || t("cockpit.scan.other");
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return Array.from(counts.entries())
@@ -168,12 +169,12 @@ function shortWhen(iso: string): string {
     : `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.`;
 }
 
-export function newBriefingItems(briefings: Briefing[], limit = 6): StatusItem[] {
+export function newBriefingItems(briefings: Briefing[], t: TFunc, limit = 6): StatusItem[] {
   return briefings
     .filter((briefing) => briefing.status === "new")
     .slice(0, limit)
     .map((briefing) => ({
-      label: briefing.title || "Neues Briefing",
+      label: briefing.title || t("cockpit.newIn.untitled"),
       state: priorityTone(briefing.priority),
       note: `${briefing.agentName || briefing.source}${briefing.createdAt ? ` · ${shortWhen(briefing.createdAt)}` : ""}`
     }));
@@ -189,20 +190,23 @@ const DAY_INDEX: Record<Weekday, number> = {
   fri: 5,
   sat: 6
 };
-const WEEKDAY_LONG = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
-
 export interface NextRunInfo {
   active: boolean;
   label: string;
 }
 
-export function computeNextRun(schedule: ScheduleConfig, launchInstalled: boolean): NextRunInfo {
+export function computeNextRun(
+  schedule: ScheduleConfig,
+  launchInstalled: boolean,
+  t: TFunc,
+  lang: Lang
+): NextRunInfo {
   if (!schedule.enabled || !launchInstalled) {
-    return { active: false, label: "Kein automatischer Lauf geplant" };
+    return { active: false, label: t("next.none") };
   }
   const days = schedule.weekdays.map((d) => DAY_INDEX[d]);
   if (!days.length) {
-    return { active: false, label: "Keine Wochentage gewählt" };
+    return { active: false, label: t("next.noWeekdays") };
   }
   const pad = (n: number) => String(n).padStart(2, "0");
   const time = `${pad(schedule.hour)}:${pad(schedule.minute)}`;
@@ -212,9 +216,14 @@ export function computeNextRun(schedule: ScheduleConfig, launchInstalled: boolea
     candidate.setDate(now.getDate() + add);
     candidate.setHours(schedule.hour, schedule.minute, 0, 0);
     if (days.includes(candidate.getDay()) && candidate.getTime() > now.getTime()) {
-      const prefix = add === 0 ? "Heute" : add === 1 ? "Morgen" : WEEKDAY_LONG[candidate.getDay()];
-      return { active: true, label: `${prefix}, ${time} Uhr` };
+      const prefix =
+        add === 0
+          ? t("next.today")
+          : add === 1
+            ? t("next.tomorrow")
+            : new Intl.DateTimeFormat(lang, { weekday: "long" }).format(candidate);
+      return { active: true, label: t("next.value", { day: prefix, time }) };
     }
   }
-  return { active: true, label: `geplant um ${time} Uhr` };
+  return { active: true, label: t("next.scheduledAt", { time }) };
 }

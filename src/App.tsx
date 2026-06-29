@@ -17,6 +17,7 @@ import {
   CheckSquare,
   HardDriveUpload,
   KeyRound,
+  Languages,
   LayoutGrid,
   Library,
   ListChecks,
@@ -62,6 +63,7 @@ import {
   uploadDonut
 } from "./lib/cockpit";
 import { historyBars, loadRunHistory, recordRun, type RunRecord } from "./lib/runHistory";
+import { useT, type Lang, type TFunc, type TKey } from "./i18n";
 import { licenseAgreement } from "./lib/license";
 import { weekdayLabels } from "./lib/defaults";
 import {
@@ -155,39 +157,17 @@ function toVisibleStep(step: StepId): StepId {
   return step;
 }
 
-function pageCopy(step: StepId) {
-  switch (toVisibleStep(step)) {
-    case "actionQueue":
-      return {
-        title: "Action Queue",
-        text: "Agent-Pläne lokal prüfen, freigeben oder ablehnen. Es wird nichts automatisch ausgeführt."
-      };
-    case "projectBoard":
-      return {
-        title: "Projekt-Board",
-        text: "Freigegebene Aufgaben pro Projekt einplanen, sortieren und sequenziell an Codex übergeben."
-      };
-    case "briefings":
-      return {
-        title: "Briefings",
-        text: "Mistral-Ergebnisse lesen, priorisieren und für die lokale Umsetzung vorbereiten."
-      };
-    case "settings":
-      return {
-        title: "Einstellungen",
-        text: "Mistral, MCP, Gerätekennung, Sync-Regeln und lokale Runner-Verbindungen gebündelt."
-      };
-    case "logs":
-      return {
-        title: "Aktivitäten",
-        text: "Protokolle, Hinweise und letzte Entscheidungen an einem Ort."
-      };
-    default:
-      return {
-        title: "KatoSync",
-        text: "Dashboard für Sync, Uploadplan, Action Queue und aktuellen Status."
-      };
-  }
+function pageCopy(step: StepId, t: TFunc) {
+  const visible = toVisibleStep(step);
+  const key =
+    visible === "actionQueue" ||
+    visible === "projectBoard" ||
+    visible === "briefings" ||
+    visible === "settings" ||
+    visible === "logs"
+      ? visible
+      : "dashboard";
+  return { title: t(`page.${key}.title` as TKey), text: t(`page.${key}.text` as TKey) };
 }
 
 type OnboardingPlacement = "left" | "right" | "top" | "bottom";
@@ -228,11 +208,12 @@ export default function App() {
   );
   const [licenseChecked, setLicenseChecked] = useState(false);
   const { config } = vm;
-  const workState = getWorkState(vm.busy);
+  const { t, lang, setLang } = useT();
+  const workState = getWorkState(vm.busy, t);
   const WorkIcon = workState?.icon;
   const activities = buildActivities(vm);
   const visibleStep = toVisibleStep(vm.activeStep);
-  const page = pageCopy(visibleStep);
+  const page = pageCopy(visibleStep, t);
   const issueCount = getIssueCount(vm);
   const hints = buildHints(vm);
   const hintSignature = useMemo(() => buildHintSignature(hints), [hints]);
@@ -449,7 +430,7 @@ export default function App() {
               active={visibleStep === step.id}
               icon={step.icon}
               key={step.id}
-              label={step.label}
+              label={t(`nav.${step.id}` as TKey)}
               onClick={() => handleStepSelect(step.id)}
             />
           ))}
@@ -459,19 +440,32 @@ export default function App() {
           <button
             className={`ghost license-link${presentation ? " is-active" : ""}`}
             onClick={togglePresentation}
-            title={presentation ? "Präsentationsmodus aus (Daten wieder sichtbar)" : "Präsentationsmodus an (sensible Daten maskieren)"}
+            title={presentation ? t("sidebar.presentationTitleOn") : t("sidebar.presentationTitleOff")}
             type="button"
           >
             {presentation ? <EyeOff size={16} /> : <Eye size={16} />}
-            <span>{presentation ? "Präsentationsmodus an" : "Präsentationsmodus"}</span>
+            <span>{presentation ? t("sidebar.presentationOn") : t("sidebar.presentation")}</span>
           </button>
-          <button className="ghost license-link" onClick={() => setLicenseOpen(true)} title="Nutzungsvereinbarung anzeigen" type="button">
+          <label className="ghost license-link lang-switch" title={t("sidebar.languageTitle")}>
+            <Languages size={16} />
+            <select
+              aria-label={t("sidebar.languageTitle")}
+              onChange={(event) => setLang(event.target.value as Lang)}
+              value={lang}
+            >
+              <option value="de">{t("lang.de")}</option>
+              <option value="en">{t("lang.en")}</option>
+              <option value="es">{t("lang.es")}</option>
+              <option value="ru">{t("lang.ru")}</option>
+            </select>
+          </label>
+          <button className="ghost license-link" onClick={() => setLicenseOpen(true)} title={t("sidebar.license")} type="button">
             <FileText size={16} />
-            <span>Nutzungsvereinbarung</span>
+            <span>{t("sidebar.license")}</span>
           </button>
-          <button className="ghost danger compact-danger" onClick={() => setQuitConfirmOpen(true)} title="Programm beenden" type="button">
+          <button className="ghost danger compact-danger" onClick={() => setQuitConfirmOpen(true)} title={t("sidebar.quit")} type="button">
             <Power size={16} />
-            <span>Programm beenden</span>
+            <span>{t("sidebar.quit")}</span>
           </button>
         </div>
       </aside>
@@ -514,9 +508,16 @@ export default function App() {
               <Moon size={15} />
               <span className="theme-knob" />
             </button>
-            <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.persist} type="button">
+            <button
+              className={vm.dirty ? "secondary has-unsaved" : "secondary"}
+              disabled={Boolean(vm.busy)}
+              onClick={vm.persist}
+              title={vm.dirty ? t("topbar.unsavedHint") : t("topbar.save")}
+              type="button"
+            >
               {vm.busy === "save" ? <Loader2 className="spin" size={16} /> : <CheckCircle2 size={16} />}
-              Einstellungen speichern
+              {t("topbar.save")}
+              {vm.dirty ? <span className="unsaved-dot" aria-hidden="true" /> : null}
             </button>
           </div>
         </header>
@@ -528,6 +529,16 @@ export default function App() {
               <strong>{workState.title}</strong>
               <span>{workState.text}</span>
             </div>
+          </div>
+        ) : null}
+
+        {vm.dirty ? (
+          <div className="unsaved-banner" role="status" aria-live="polite">
+            <AlertTriangle size={16} />
+            <span>{t("topbar.unsavedHint")}</span>
+            <button className="primary" disabled={Boolean(vm.busy)} onClick={vm.persist} type="button">
+              {t("topbar.save")}
+            </button>
           </div>
         ) : null}
 
@@ -1205,44 +1216,49 @@ function CockpitPanel({
   vm: ReturnType<typeof useKatoSyncViewModel>;
   runHistory: RunRecord[];
 }) {
+  const { t, lang } = useT();
   const config = vm.config;
   if (!config) return null;
 
-  const work = getWorkState(vm.busy);
+  const work = getWorkState(vm.busy, t);
   const codexRunning = vm.codexRun.status === "running";
-  const next = computeNextRun(config.schedule, Boolean(vm.launchStatus?.installed));
+  const next = computeNextRun(config.schedule, Boolean(vm.launchStatus?.installed), t, lang);
   const buckets = taskBuckets(vm.actionPlans);
   const feed = codexTimeline(vm.codexEvents);
-  const briefingItems = newBriefingItems(vm.briefings);
-  const runKpis = lastRunKpis(vm.report);
-  const upload = uploadDonut(vm.report);
-  const scanByCategory = scanBars(vm.scan ?? vm.report?.scan ?? null);
-  const history = historyBars(runHistory);
+  const briefingItems = newBriefingItems(vm.briefings, t);
+  const runKpis = lastRunKpis(vm.report, t);
+  const upload = uploadDonut(vm.report, t);
+  const scanByCategory = scanBars(vm.scan ?? vm.report?.scan ?? null, t);
+  const history = historyBars(runHistory, lang);
 
   let liveActive = false;
-  let liveTitle = "Alles ruhig";
-  let liveText = "Aktuell läuft kein Lauf. Starte einen Sync oder gib eine Aufgabe an Codex.";
+  let liveTitle = t("cockpit.live.idle.title");
+  let liveText = t("cockpit.live.idle.text");
   if (codexRunning) {
     liveActive = true;
-    liveTitle = "Codex läuft";
+    liveTitle = t("cockpit.live.codex.title");
     liveText = vm.codexEvents.length
-      ? `${vm.codexEvents.length} Ereignisse im Live-Feed …`
-      : "Aufgabe wird auf eigenem Branch ausgeführt …";
+      ? t("cockpit.live.codex.events", { count: vm.codexEvents.length })
+      : t("cockpit.live.codex.running");
   } else if (vm.queueRunning) {
     liveActive = true;
-    liveTitle = "Projekt-Queue läuft";
-    liveText = vm.currentQueueTaskId ? "Aufgabe wird abgearbeitet …" : "Warteschlange aktiv …";
+    liveTitle = t("cockpit.live.queue.title");
+    liveText = vm.currentQueueTaskId ? t("cockpit.live.queue.task") : t("cockpit.live.queue.active");
   } else if (work) {
     liveActive = true;
     liveTitle = work.title;
     liveText = work.text;
   } else if (vm.report) {
-    liveTitle = vm.report.errors.length ? "Bereit (mit Hinweisen)" : "Bereit";
-    liveText = `Letzter Lauf: ${vm.report.uploaded.length} Uploads, ${vm.report.errors.length} Fehler, ${vm.report.warnings.length} Warnungen.`;
+    liveTitle = vm.report.errors.length ? t("cockpit.live.readyHints.title") : t("cockpit.live.ready.title");
+    liveText = t("cockpit.live.ready.text", {
+      uploads: vm.report.uploaded.length,
+      errors: vm.report.errors.length,
+      warnings: vm.report.warnings.length
+    });
   }
 
   return (
-    <Panel className="cockpit-panel" id="section-cockpit" title="Cockpit" icon={<LayoutGrid size={18} />}>
+    <Panel className="cockpit-panel" id="section-cockpit" title={t("cockpit.title")} icon={<LayoutGrid size={18} />}>
       <div className="cockpit-now">
         <div className="cockpit-live">
           <span className={`cockpit-dot ${liveActive ? "on" : "idle"}`} aria-hidden="true" />
@@ -1254,7 +1270,7 @@ function CockpitPanel({
         <div className={`cockpit-next ${next.active ? "active" : ""}`}>
           <CalendarClock size={18} />
           <div>
-            <strong>Nächster geplanter Lauf</strong>
+            <strong>{t("cockpit.next.title")}</strong>
             <span>{next.label}</span>
           </div>
         </div>
@@ -1263,80 +1279,76 @@ function CockpitPanel({
       <div className="cockpit-grid">
         <div className="cockpit-cell">
           {buckets.total > 0 ? (
-            <Donut title="Aufgaben gesamt" segments={taskDonut(buckets)} />
+            <Donut title={t("cockpit.section.tasks")} segments={taskDonut(buckets, t)} />
           ) : (
             <>
-              <div className="ks-title">Aufgaben gesamt</div>
-              <p className="cockpit-empty">Noch keine Aufgaben im Board.</p>
+              <div className="ks-title">{t("cockpit.section.tasks")}</div>
+              <p className="cockpit-empty">{t("cockpit.empty.tasks")}</p>
             </>
           )}
         </div>
         <div className="cockpit-cell">
-          <KpiTiles title="Arbeitsstand" items={taskKpis(buckets, vm.dailyCount)} />
+          <KpiTiles title={t("cockpit.section.work")} items={taskKpis(buckets, vm.dailyCount, t)} />
         </div>
 
         <div className="cockpit-cell cockpit-cell-wide">
-          <div className="ks-title">Codex-Live-Feed</div>
+          <div className="ks-title">{t("cockpit.section.feed")}</div>
           {feed.length ? (
             <Timeline items={feed} />
           ) : (
             <p className="cockpit-empty">
-              {vm.codexRun.status === "completed"
-                ? "Letzter Codex-Lauf abgeschlossen. Beim nächsten Lauf erscheinen die Ereignisse hier live."
-                : "Kein aktiver Codex-Lauf. Übergib eine Aufgabe aus Action Queue oder Briefing."}
+              {vm.codexRun.status === "completed" ? t("cockpit.empty.feedDone") : t("cockpit.empty.feedIdle")}
             </p>
           )}
         </div>
 
         <div className="cockpit-cell">
           {runKpis.length ? (
-            <KpiTiles title="Letzter Lauf" items={runKpis} />
+            <KpiTiles title={t("cockpit.section.lastRun")} items={runKpis} />
           ) : (
             <>
-              <div className="ks-title">Letzter Lauf</div>
-              <p className="cockpit-empty">Noch kein Lauf — starte unten einen Sync.</p>
+              <div className="ks-title">{t("cockpit.section.lastRun")}</div>
+              <p className="cockpit-empty">{t("cockpit.empty.lastRun")}</p>
             </>
           )}
         </div>
         <div className="cockpit-cell">
           {upload.length ? (
-            <Donut title="Upload-Erfolg" segments={upload} />
+            <Donut title={t("cockpit.section.upload")} segments={upload} />
           ) : (
             <>
-              <div className="ks-title">Upload-Erfolg</div>
-              <p className="cockpit-empty">Noch keine Uploads erfasst.</p>
+              <div className="ks-title">{t("cockpit.section.upload")}</div>
+              <p className="cockpit-empty">{t("cockpit.empty.upload")}</p>
             </>
           )}
         </div>
 
         <div className="cockpit-cell">
-          <div className="ks-title">Was kam neu rein</div>
+          <div className="ks-title">{t("cockpit.section.newIn")}</div>
           {briefingItems.length ? (
             <StatusList items={briefingItems} />
           ) : (
-            <p className="cockpit-empty">Keine neuen Briefings im Rückkanal.</p>
+            <p className="cockpit-empty">{t("cockpit.empty.newIn")}</p>
           )}
         </div>
         <div className="cockpit-cell">
           {scanByCategory.length ? (
-            <Bars title="Gefundene Dateien je Kategorie" bars={scanByCategory} />
+            <Bars title={t("cockpit.section.scanByCategory")} bars={scanByCategory} />
           ) : (
             <>
-              <div className="ks-title">Gefundene Dateien</div>
-              <p className="cockpit-empty">Noch kein Scan ausgeführt.</p>
+              <div className="ks-title">{t("cockpit.section.scan")}</div>
+              <p className="cockpit-empty">{t("cockpit.empty.scan")}</p>
             </>
           )}
         </div>
 
         <div className="cockpit-cell cockpit-cell-wide">
           {history.length ? (
-            <Bars title="Verlauf — Uploads je Tag" bars={history} />
+            <Bars title={t("cockpit.section.historyBars")} bars={history} />
           ) : (
             <>
-              <div className="ks-title">Verlauf (letzte Tage)</div>
-              <p className="cockpit-empty">
-                Der Verlauf sammelt echte Daten ab dem ersten Lauf. Nach den nächsten Syncs erscheinen hier die Tage.
-              </p>
+              <div className="ks-title">{t("cockpit.section.history")}</div>
+              <p className="cockpit-empty">{t("cockpit.empty.history")}</p>
             </>
           )}
         </div>
@@ -2445,77 +2457,28 @@ function quotaWidth(remaining?: string | null, limit?: string | null) {
   return `${Math.max(0, Math.min(100, Math.round((remainingNumber / limitNumber) * 100)))}%`;
 }
 
-function getWorkState(busy: string | null) {
-  switch (busy) {
-    case "scan":
-      return {
-        icon: RefreshCcw,
-        title: "Scan läuft",
-        text: "KatoSync durchsucht die ausgewählten Hauptordner inklusive Unterordner."
-      };
-    case "dry-run":
-      return {
-        icon: FileCheck2,
-        title: "Dry-Run läuft",
-        text: "CURRENT-Dateien werden neu erzeugt. Es wird nichts hochgeladen."
-      };
-    case "sync":
-      return {
-        icon: UploadCloud,
-        title: "Upload läuft",
-        text: "Freigegebene CURRENT-Dateien werden an Mistral gesendet."
-      };
-    case "connection":
-      return {
-        icon: KeyRound,
-        title: "Verbindungstest läuft",
-        text: "KatoSync prüft den Mistral API-Zugang."
-      };
-    case "library":
-      return {
-        icon: Library,
-        title: "Library-Test läuft",
-        text: "KatoSync prüft, ob die Mistral Library erreichbar ist."
-      };
-    case "mcp-token":
-      return {
-        icon: ShieldCheck,
-        title: "MCP Token wird gespeichert",
-        text: "Der Connector Token wird im macOS-Schlüsselbund gesichert."
-      };
-    case "save":
-      return {
-        icon: CheckCircle2,
-        title: "Speichern läuft",
-        text: "Die lokale Konfiguration wird gesichert."
-      };
-    case "logs":
-      return {
-        icon: TerminalSquare,
-        title: "Logs werden geladen",
-        text: "KatoSync liest die lokalen Protokolle."
-      };
-    case "launch":
-      return {
-        icon: CalendarClock,
-        title: "Uploadplan wird geändert",
-        text: "Der lokale LaunchAgent wird aktualisiert."
-      };
-    case "action-plans":
-      return {
-        icon: ClipboardList,
-        title: "Action Queue wird geladen",
-        text: "KatoSync prüft lokale und spätere MCP-Action-Pläne."
-      };
-    case "briefings":
-      return {
-        icon: BookOpenText,
-        title: "Briefings werden geladen",
-        text: "KatoSync prüft neue Mistral-Ergebnisse aus dem Rückkanal."
-      };
-    default:
-      return null;
-  }
+const WORK_STATES: Record<string, { icon: typeof Activity; key: string }> = {
+  scan: { icon: RefreshCcw, key: "scan" },
+  "dry-run": { icon: FileCheck2, key: "dryRun" },
+  sync: { icon: UploadCloud, key: "sync" },
+  connection: { icon: KeyRound, key: "connection" },
+  library: { icon: Library, key: "library" },
+  "mcp-token": { icon: ShieldCheck, key: "mcpToken" },
+  save: { icon: CheckCircle2, key: "save" },
+  logs: { icon: TerminalSquare, key: "logs" },
+  launch: { icon: CalendarClock, key: "launch" },
+  "action-plans": { icon: ClipboardList, key: "actionPlans" },
+  briefings: { icon: BookOpenText, key: "briefings" }
+};
+
+function getWorkState(busy: string | null, t: TFunc) {
+  const entry = busy ? WORK_STATES[busy] : undefined;
+  if (!entry) return null;
+  return {
+    icon: entry.icon,
+    title: t(`work.${entry.key}.title` as TKey),
+    text: t(`work.${entry.key}.text` as TKey)
+  };
 }
 
 function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>) {

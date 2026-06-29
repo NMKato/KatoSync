@@ -3,6 +3,7 @@
 // Der Client schreibt nach jedem abgeschlossenen Lauf einen Datensatz in einen localStorage-Ring.
 import type { SyncReport } from "../types";
 import type { BarItem } from "../components/DiagramComponents";
+import type { Lang } from "../i18n";
 
 export interface RunRecord {
   finishedAt: string;
@@ -61,16 +62,16 @@ export function recordRun(report: SyncReport): RunRecord[] {
 
 export interface RunDay {
   day: string; // ISO-Datum (YYYY-MM-DD)
-  label: string; // kurzes deutsches Tageslabel
+  label: string; // kurzes Tageslabel, lokalisiert (Intl)
   runs: number;
   uploads: number;
   errors: number;
 }
 
-const WEEKDAY_SHORT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
-
 // Aggregiert die letzten `days` Tage MIT mindestens einem Lauf (leere Tage werden nicht erfunden).
-export function historyDays(records: RunRecord[], days = 14): RunDay[] {
+// Wochentags-Label lokalisiert ueber Intl (lang).
+export function historyDays(records: RunRecord[], lang: Lang, days = 14): RunDay[] {
+  const weekday = new Intl.DateTimeFormat(lang, { weekday: "short" });
   const byDay = new Map<string, RunDay>();
   for (const entry of records) {
     const date = new Date(entry.finishedAt);
@@ -78,7 +79,7 @@ export function historyDays(records: RunRecord[], days = 14): RunDay[] {
     const day = entry.finishedAt.slice(0, 10);
     const current =
       byDay.get(day) ??
-      ({ day, label: `${WEEKDAY_SHORT[date.getDay()]} ${date.getDate()}.`, runs: 0, uploads: 0, errors: 0 } as RunDay);
+      ({ day, label: `${weekday.format(date)} ${date.getDate()}.`, runs: 0, uploads: 0, errors: 0 } as RunDay);
     current.runs += 1;
     current.uploads += entry.uploads;
     current.errors += entry.errors;
@@ -90,8 +91,8 @@ export function historyDays(records: RunRecord[], days = 14): RunDay[] {
 }
 
 // Verlaufs-Balken: Uploads pro Tag (Fehlertage in danger-tone). Leeres Array -> Komponente zeigt Leerzustand.
-export function historyBars(records: RunRecord[], days = 14): BarItem[] {
-  return historyDays(records, days).map((entry) => ({
+export function historyBars(records: RunRecord[], lang: Lang, days = 14): BarItem[] {
+  return historyDays(records, lang, days).map((entry) => ({
     label: entry.label,
     value: entry.uploads,
     tone: entry.errors > 0 ? "danger" : "ok"

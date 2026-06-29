@@ -1,5 +1,19 @@
 # KatoSync Project Statusflow
 
+## 2026-06-29 - UX Welle 6: i18n (De/En/Es/Ru) + Speicher-Hinweis + Diagramm-Auto-Layout (DONE)
+
+Projekt: KatoSync Desktop App
+Status: DONE — Kernflaechen mehrsprachig; signiert + notarisiert als GitHub Pre-Release v2.0.0-beta.2 ausgeliefert.
+
+- i18n-Schicht (leicht, ohne Framework): `src/i18n/index.ts` (`I18nProvider`, `useT`, `t(key, vars)`, `detectLang` aus `navigator.language`, persistiert `katosync.lang`, setzt `document.documentElement.lang`). Locales `de/en/es/ru` in `src/i18n/locales/*.ts` — je ~105 Keys, Typsicherheit ueber `Record<TKey,string>` (erzwingt Vollstaendigkeit). Locale-Dateien bewusst OHNE Autoren-Header.
+- Uebersetzungen via Agenten-Workflow (parallel pro Sprache + Integritaets-/Qualitaets-Review): Platzhalter erhalten, Produktbegriffe (KatoSync/Codex/Mistral/MCP/Sync/Action Queue/Briefings/Dashboard) unuebersetzt; ru count-agnostische Genitiv-Plural-Form; es/ru Lehnwoerter klein im Satz.
+- Verdrahtet (Scope dieser Welle): Navigation, Seiten-Titel (`pageCopy`), KOMPLETTES Cockpit (Diagramm-Labels + Live-Status + getWorkState + naechster Lauf; Wochentage via `Intl`), Sidebar-Fusszeile + neuer Sprachschalter. Adapter (`cockpit.ts`/`runHistory.ts`) nehmen jetzt `t`/`lang`. NOCH deutsch (naechste Welle): Setup-Strip, Einstellungen, Projekt-Board, Briefings-Chrome, Onboarding, Login.
+- Speicher-Hinweis (Nutzerwunsch): ViewModel-`dirty`-Flag (gesetzt bei `updateConfig`/`updateNested`, geleert bei `persist`). Topbar-Speichern-Button bekommt Markierung + Punkt; bei ungespeicherten Aenderungen erscheint ein Hinweis-Banner „… mit ‚Einstellungen speichern‘ uebernehmen" (lokalisiert).
+- Diagramm-Auto-Layout-Fix: Rich-Komponenten (KPI-Cards/Balken) liefen in den Briefings ueber den rechten Rand. Ursache: Grid-Items mit `min-width:auto`. Fix: `.briefing-reader-panel`/`.markdown-body` + `.katosync-block` + `.ks-kpi-grid`/`.ks-bars`/`.ks-bar-row` auf `min-width:0`/`max-width:100%`; KPI-`auto-fit` umbricht jetzt sauber; lange `pre`-Zeilen scrollen.
+- Adversariale Review (4 Dim + Verify): behoben — Beenden-Button vergessen, `scanBars`/`newBriefingItems` deutsche Fallbacks, initiales `document.lang`; es/ru-Politur. tsc + Vite gruen.
+- Release: signiert (Developer ID MK Heartbeat UG T8SB89JPX7) + notarisiert + gestapelt, GitHub Pre-Release `v2.0.0-beta.2`.
+
+
 ## 2026-06-28 - UX Welle 5: Dashboard-Cockpit + Release 2.0 Beta (DONE)
 
 Projekt: KatoSync Desktop App

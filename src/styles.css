@@ -309,6 +309,34 @@ button:disabled {
   background: rgba(255, 255, 255, 0.045);
 }
 
+/* Sprachschalter in der Sidebar-Fußzeile (select sieht aus wie die Footer-Buttons). */
+.lang-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+.lang-switch select {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  appearance: none;
+}
+.lang-switch select:focus-visible {
+  outline: 2px solid var(--focus, rgba(255, 107, 53, 0.6));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.lang-switch select option {
+  color: #16202c;
+}
+
 .completion-head {
   display: flex;
   justify-content: space-between;
@@ -538,6 +566,42 @@ button:disabled {
   line-height: 1.35;
 }
 
+/* Ungespeicherte-Aenderungen: Hinweis-Banner + Markierung am Speichern-Button */
+.secondary.has-unsaved {
+  border-color: var(--warn, #ffc857);
+  box-shadow: inset 0 0 0 1px var(--warn, #ffc857);
+}
+.unsaved-dot {
+  width: 8px;
+  height: 8px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--warn, #ffc857);
+}
+.unsaved-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--warn, #ffc857) 48%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn, #ffc857) 12%, rgba(22, 25, 31, 0.92));
+  color: #f6f7f9;
+}
+.unsaved-banner svg {
+  flex: 0 0 auto;
+  color: var(--warn, #ffc857);
+}
+.unsaved-banner span {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.unsaved-banner button {
+  flex: 0 0 auto;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -644,6 +708,7 @@ button:disabled {
 .briefing-reader-panel {
   grid-column: auto;
   min-height: 100%;
+  min-width: 0; /* Grid-Item darf unter seine Inhalts-Mindestbreite schrumpfen (sonst laufen Diagramme ueber den Rand) */
 }
 
 .panel[id] {
@@ -1415,8 +1480,13 @@ input[type="range"] {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   padding: 12px;
+  max-width: 100%;
   overflow-x: auto;
   margin: 0 0 12px;
+}
+.markdown-body {
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 .markdown-body pre code { background: none; border: none; padding: 0; }
 .markdown-body blockquote {
@@ -3104,6 +3174,8 @@ pre {
 /* ===== KatoSync Rich-Komponenten in Briefings (Format-Contract katosync:*) ===== */
 .katosync-block {
   margin: 12px 0;
+  max-width: 100%;
+  min-width: 0;
 }
 /* pre/code-Wrapper neutralisieren, wenn er einen KatoSync-Block enthaelt */
 .markdown-body pre:has(.katosync-block) {
@@ -3147,12 +3219,14 @@ pre {
 /* KPI-Kacheln */
 .ks-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
   gap: 10px;
+  min-width: 0;
 }
 .ks-kpi-tile {
   display: grid;
   gap: 2px;
+  min-width: 0;
   padding: 12px 14px;
   border-radius: var(--r-md);
   background: var(--surface-2);
@@ -3237,12 +3311,14 @@ pre {
 .ks-bars {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 .ks-bar-row {
   display: grid;
-  grid-template-columns: minmax(80px, 130px) 1fr 44px;
+  grid-template-columns: minmax(64px, 120px) minmax(0, 1fr) 40px;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   font-size: 13px;
 }
 .ks-bar-label {
