@@ -259,6 +259,8 @@ const es: Record<TKey, string> = {
   "briefings.reader.accept": "Aceptar",
   "briefings.reader.handToCodex": "Entregar a Codex",
   "briefings.reader.reject": "Rechazar",
+  "briefings.reader.copy": "Copiar",
+  "briefings.reader.copied": "Copiado ✓",
   "briefings.reader.codexRunning": "Codex en curso …",
   "briefings.reader.emptyState": "Selecciona un Briefing de la lista.",
   "codex.intro.description": "Las tareas liberadas las ejecuta localmente la CLI de Codex, en su propio branch (derivado de main) y con auto-commit. Nada se mergea automáticamente en main; tú revisas el branch o el Pull Request y mergeas tú mismo.",

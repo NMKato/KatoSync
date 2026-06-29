@@ -67,6 +67,8 @@ import {
 } from "./lib/cockpit";
 import { historyBars, loadRunHistory, recordRun, type RunRecord } from "./lib/runHistory";
 import { buildSkillPrompt, knownProjectIds, mcpEndpoint, SKILL_CONTRACT_VERSION } from "./lib/skillTemplate";
+import { copyText } from "./lib/clipboard";
+import { briefingToMarkdown } from "./lib/briefingExport";
 import { useT, type Lang, type TFunc, type TKey } from "./i18n";
 import { licenseAgreement } from "./lib/license";
 import { weekdayLabels } from "./lib/defaults";
@@ -1786,6 +1788,7 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
   );
   const [selectedId, setSelectedId] = useState<string | null>(visibleBriefings[0]?.briefingId ?? null);
   const selected = visibleBriefings.find((briefing) => briefing.briefingId === selectedId) ?? visibleBriefings[0];
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!selectedId && visibleBriefings[0]) setSelectedId(visibleBriefings[0].briefingId);
@@ -1793,6 +1796,19 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
       setSelectedId(visibleBriefings[0]?.briefingId ?? null);
     }
   }, [selectedId, visibleBriefings]);
+
+  useEffect(() => {
+    setCopied(false);
+  }, [selectedId]);
+
+  const handleCopyBriefing = async () => {
+    if (!selected) return;
+    const ok = await copyText(briefingToMarkdown(selected, t("briefings.reader.suggestedAction")));
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    }
+  };
 
   return (
     <div className="briefings-page" id="section-briefings">
@@ -1860,6 +1876,15 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
               </div>
             ) : null}
             <footer className="briefing-actions">
+              <button
+                className="ghost"
+                onClick={() => void handleCopyBriefing()}
+                title={t("briefings.reader.copy")}
+                type="button"
+              >
+                {copied ? <Check size={15} /> : <Copy size={15} />}
+                {copied ? t("briefings.reader.copied") : t("briefings.reader.copy")}
+              </button>
               <button
                 className="secondary"
                 disabled={Boolean(vm.busy)}

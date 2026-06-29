@@ -259,6 +259,8 @@ const en: Record<TKey, string> = {
   "briefings.reader.accept": "Accept",
   "briefings.reader.handToCodex": "Hand to Codex",
   "briefings.reader.reject": "Reject",
+  "briefings.reader.copy": "Copy",
+  "briefings.reader.copied": "Copied ✓",
   "briefings.reader.codexRunning": "Codex running …",
   "briefings.reader.emptyState": "Pick a Briefing from the list.",
   "codex.intro.description": "Released tasks run locally via the Codex CLI — on a dedicated branch (forked from main), with auto-commit. Nothing is merged into main automatically; you review the branch or pull request and merge it yourself.",

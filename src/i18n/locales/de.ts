@@ -276,6 +276,8 @@ const de = {
   "briefings.reader.accept": "Annehmen",
   "briefings.reader.handToCodex": "An Codex übergeben",
   "briefings.reader.reject": "Ablehnen",
+  "briefings.reader.copy": "Kopieren",
+  "briefings.reader.copied": "Kopiert ✓",
   "briefings.reader.codexRunning": "Codex läuft …",
   "briefings.reader.emptyState": "Wähle ein Briefing aus der Liste.",
   "codex.intro.description": "Freigegebene Aufgaben werden lokal von der Codex-CLI ausgeführt — auf einem eigenen Branch (von main abgezweigt), mit Auto-Commit. Nichts wird automatisch in main gemergt; du prüfst den Branch bzw. Pull Request und mergst selbst.",

@@ -259,6 +259,8 @@ const ru: Record<TKey, string> = {
   "briefings.reader.accept": "Принять",
   "briefings.reader.handToCodex": "Передать в Codex",
   "briefings.reader.reject": "Отклонить",
+  "briefings.reader.copy": "Копировать",
+  "briefings.reader.copied": "Скопировано ✓",
   "briefings.reader.codexRunning": "Codex выполняется …",
   "briefings.reader.emptyState": "Выберите Briefing из списка.",
   "codex.intro.description": "Утверждённые задачи выполняются локально через Codex-CLI — в отдельном branch (ответвлённом от main), с автокоммитом. Ничего не мерджится в main автоматически; вы проверяете branch или Pull Request и мерджите сами.",
