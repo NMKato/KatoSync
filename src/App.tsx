@@ -319,11 +319,12 @@ export default function App() {
     setHintsOpen(false);
     setOnboardingOpen(false);
     vm.setActiveStep(step);
-    document.getElementById(sectionId)?.scrollIntoView({
-      behavior: "smooth",
-      block: "center"
-    });
     setSpotlightId(sectionId);
+    // Erst nach dem Re-Render scrollen: der Ziel-Panel (z. B. section-findings) wird durch den
+    // Step-Wechsel evtl. gerade erst gemountet -> sonst findet getElementById nichts.
+    const scroll = () => document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.requestAnimationFrame(scroll);
+    window.setTimeout(scroll, 120);
     window.setTimeout(() => setSpotlightId(null), 1800);
   };
 
@@ -606,7 +607,7 @@ export default function App() {
                   className="secondary"
                   onClick={() => {
                     acknowledgeHints();
-                    jumpToSection("folders", "section-findings");
+                    jumpToSection("dashboard", "section-findings");
                   }}
                   type="button"
                 >
