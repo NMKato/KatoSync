@@ -427,6 +427,42 @@ export async function updateBriefingStatus(
   return nextBriefings;
 }
 
+export async function archiveBriefing(
+  config: AppConfig | null,
+  current: Briefing[],
+  briefingId: string,
+  archived: boolean
+): Promise<Briefing[]> {
+  if (config) {
+    const remoteBriefings = await tryArchiveRemoteBriefing(config, briefingId, archived);
+    if (remoteBriefings) return remoteBriefings;
+  }
+  // Lokaler Fallback (Demo ODER Server kennt das Feld noch nicht): auf dem AKTUELL
+  // angezeigten Stand arbeiten, NICHT die Liste neu laden -> sonst gehen zuvor lokal
+  // archivierte Briefings verloren.
+  const nextBriefings = current.map((briefing) =>
+    briefing.briefingId === briefingId
+      ? { ...briefing, archivedAt: archived ? new Date().toISOString() : null }
+      : briefing
+  );
+  localStorage.setItem(mockBriefingsKey, JSON.stringify(nextBriefings));
+  return nextBriefings;
+}
+
+export async function deleteBriefing(
+  config: AppConfig | null,
+  current: Briefing[],
+  briefingId: string
+): Promise<Briefing[]> {
+  if (config) {
+    const remoteBriefings = await tryDeleteRemoteBriefing(config, briefingId);
+    if (remoteBriefings) return remoteBriefings;
+  }
+  const nextBriefings = current.filter((briefing) => briefing.briefingId !== briefingId);
+  localStorage.setItem(mockBriefingsKey, JSON.stringify(nextBriefings));
+  return nextBriefings;
+}
+
 export async function updateActionPlanStatus(
   config: AppConfig | null,
   planId: string,
@@ -773,6 +809,7 @@ interface RemoteBriefingRow {
   priority: string;
   created_at: string;
   suggested_action: string | null;
+  archived_at: string | null;
 }
 
 async function tryLoadRemoteActionPlans(config: AppConfig): Promise<ActionPlan[] | null> {
@@ -888,7 +925,7 @@ async function patchRemoteActionPlanStatus(
 async function fetchRemoteBriefings(config: AppConfig): Promise<RemoteBriefingsResponse> {
   const token = localStorage.getItem(mockMcpConnectorTokenKey);
   if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
-  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/briefings?includeArchived=false`, {
+  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/briefings?includeArchived=true&limit=100`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   if (!response.ok) throw new Error(`MCP Briefings nicht erreichbar (${response.status}).`);
@@ -913,6 +950,81 @@ async function patchRemoteBriefingStatus(
   if (!response.ok) throw new Error(`MCP Briefing konnte nicht aktualisiert werden (${response.status}).`);
 }
 
+async function tryArchiveRemoteBriefing(
+  config: AppConfig,
+  briefingId: string,
+  archived: boolean
+): Promise<Briefing[] | null> {
+  try {
+    const tokenStatus = await getMcpConnectorTokenStatus();
+    if (!tokenStatus.exists) return null; // Demo-Modus -> lokaler Mock.
+    if (isTauri()) {
+      await invoke("archive_remote_briefing", {
+        baseUrl: config.mcp.baseUrl,
+        briefingId,
+        archived
+      });
+    } else {
+      await patchRemoteBriefingArchive(config, briefingId, archived);
+    }
+    return tryLoadRemoteBriefings(config);
+  } catch (error) {
+    // Server (noch) nicht erreichbar/deployt -> lokal weiterarbeiten (wie bei Annehmen/Ablehnen).
+    console.warn("MCP Briefing konnte nicht archiviert werden, nutze lokalen Stand.", error);
+    return null;
+  }
+}
+
+async function tryDeleteRemoteBriefing(
+  config: AppConfig,
+  briefingId: string
+): Promise<Briefing[] | null> {
+  try {
+    const tokenStatus = await getMcpConnectorTokenStatus();
+    if (!tokenStatus.exists) return null; // Demo-Modus -> lokaler Mock.
+    if (isTauri()) {
+      await invoke("delete_remote_briefing", {
+        baseUrl: config.mcp.baseUrl,
+        briefingId
+      });
+    } else {
+      await deleteRemoteBriefing(config, briefingId);
+    }
+    return tryLoadRemoteBriefings(config);
+  } catch (error) {
+    console.warn("MCP Briefing konnte nicht geloescht werden, nutze lokalen Stand.", error);
+    return null;
+  }
+}
+
+async function patchRemoteBriefingArchive(
+  config: AppConfig,
+  briefingId: string,
+  archived: boolean
+): Promise<void> {
+  const token = localStorage.getItem(mockMcpConnectorTokenKey);
+  if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
+  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/briefings/${briefingId}/archive`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ archived })
+  });
+  if (!response.ok) throw new Error(`MCP Briefing konnte nicht archiviert werden (${response.status}).`);
+}
+
+async function deleteRemoteBriefing(config: AppConfig, briefingId: string): Promise<void> {
+  const token = localStorage.getItem(mockMcpConnectorTokenKey);
+  if (!token) throw new Error("Kein MCP Connector Token gespeichert.");
+  const response = await fetch(`${config.mcp.baseUrl.replace(/\/$/, "")}/api/briefings/${briefingId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new Error(`MCP Briefing konnte nicht geloescht werden (${response.status}).`);
+}
+
 function mapRemoteBriefings(response: RemoteBriefingsResponse): Briefing[] {
   return (response.briefings ?? []).map((briefing) => ({
     briefingId: briefing.id,
@@ -924,7 +1036,8 @@ function mapRemoteBriefings(response: RemoteBriefingsResponse): Briefing[] {
     priority: fromRemoteBriefingPriority(briefing.priority),
     summary: briefing.summary || "",
     body: briefing.body || briefing.summary || "",
-    suggestedAction: briefing.suggested_action
+    suggestedAction: briefing.suggested_action,
+    archivedAt: briefing.archived_at ?? null
   }));
 }
 

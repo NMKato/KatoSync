@@ -1,10 +1,12 @@
 import {
   Activity,
   AlertTriangle,
+  Archive,
   BookOpenText,
   CalendarClock,
   Check,
   CheckCircle2,
+  ChevronRight,
   ClipboardList,
   Copy,
   Clock3,
@@ -78,7 +80,7 @@ import {
   type StepId
 } from "./viewmodels/useKatoSyncViewModel";
 import { NO_PROJECT_ID } from "./repositories/katoSyncRepository";
-import type { ActionPlan, ActionTaskStatus, Briefing, FileFinding, Weekday } from "./types";
+import type { ActionPlan, ActionTaskStatus, Briefing, BriefingStatus, FileFinding, Weekday } from "./types";
 
 const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
   { id: "dashboard", label: "Dashboard", icon: Database },
@@ -854,8 +856,26 @@ export default function App() {
           </Panel>
           ) : null}
 
-          {visibleStep === "dashboard" || visibleStep === "actionQueue" ? (
-            <ActionQueuePanel vm={vm} expanded={visibleStep === "actionQueue"} />
+          {visibleStep === "actionQueue" ? (
+            <ActionQueuePanel vm={vm} expanded />
+          ) : null}
+
+          {visibleStep === "dashboard" ? (
+            <button
+              className="dashboard-queue-link"
+              onClick={() => vm.setActiveStep("actionQueue")}
+              type="button"
+            >
+              <ClipboardList size={18} />
+              <span className="dashboard-queue-text">
+                <strong>{vm.actionPlans.filter(isOpenActionPlan).length}</strong>
+                {t("queue.pendingLabel")}
+              </span>
+              <span className="dashboard-queue-cta">
+                {t("dashboard.queueLink.cta")}
+                <ChevronRight size={16} />
+              </span>
+            </button>
           ) : null}
 
           {visibleStep === "settings" ? (
@@ -1782,20 +1802,26 @@ function BoardTaskCard({
 
 function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
   const { t } = useT();
-  const visibleBriefings = useMemo(
-    () => vm.briefings.filter((briefing) => briefing.status !== "archived"),
+  const inboxBriefings = useMemo(
+    () => vm.briefings.filter((briefing) => !briefing.archivedAt),
     [vm.briefings]
   );
-  const [selectedId, setSelectedId] = useState<string | null>(visibleBriefings[0]?.briefingId ?? null);
-  const selected = visibleBriefings.find((briefing) => briefing.briefingId === selectedId) ?? visibleBriefings[0];
+  const archivedBriefings = useMemo(
+    () => vm.briefings.filter((briefing) => Boolean(briefing.archivedAt)),
+    [vm.briefings]
+  );
+  const [view, setView] = useState<"inbox" | "archive">("inbox");
+  const [selectedId, setSelectedId] = useState<string | null>(inboxBriefings[0]?.briefingId ?? null);
+  const selected = inboxBriefings.find((briefing) => briefing.briefingId === selectedId) ?? inboxBriefings[0];
   const [copied, setCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<Briefing | null>(null);
 
   useEffect(() => {
-    if (!selectedId && visibleBriefings[0]) setSelectedId(visibleBriefings[0].briefingId);
-    if (selectedId && !visibleBriefings.some((briefing) => briefing.briefingId === selectedId)) {
-      setSelectedId(visibleBriefings[0]?.briefingId ?? null);
+    if (!selectedId && inboxBriefings[0]) setSelectedId(inboxBriefings[0].briefingId);
+    if (selectedId && !inboxBriefings.some((briefing) => briefing.briefingId === selectedId)) {
+      setSelectedId(inboxBriefings[0]?.briefingId ?? null);
     }
-  }, [selectedId, visibleBriefings]);
+  }, [selectedId, inboxBriefings]);
 
   useEffect(() => {
     setCopied(false);
@@ -1810,12 +1836,40 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
     }
   };
 
+  // Archiv-Spalten nach dem fachlichen Status gruppieren (der Status bleibt beim Archivieren erhalten).
+  // Feste Reihenfolge, aber ALLE Status abdecken (auch den Alt-Wert "archived"), damit kein
+  // archiviertes Briefing ohne Spalte unsichtbar/unlöschbar wird.
+  const archiveColumns = (["rejected", "queued", "accepted", "new", "archived"] as BriefingStatus[])
+    .map((status) => ({ status, items: archivedBriefings.filter((briefing) => briefing.status === status) }))
+    .filter((column) => column.items.length > 0);
+
   return (
-    <div className="briefings-page" id="section-briefings">
+    <div className="briefings-shell" id="section-briefings">
+      <div className="briefing-tabs">
+        <button
+          className={view === "inbox" ? "briefing-tab active" : "briefing-tab"}
+          onClick={() => setView("inbox")}
+          type="button"
+        >
+          <BookOpenText size={15} />
+          {t("briefings.tabs.inbox")} ({inboxBriefings.length})
+        </button>
+        <button
+          className={view === "archive" ? "briefing-tab active" : "briefing-tab"}
+          onClick={() => setView("archive")}
+          type="button"
+        >
+          <Archive size={15} />
+          {t("briefings.tabs.archive")} ({archivedBriefings.length})
+        </button>
+      </div>
+
+      {view === "inbox" ? (
+      <div className="briefings-page">
       <Panel className="briefing-list-panel" title={t("briefings.inbox.title")} icon={<BookOpenText size={18} />}>
         <div className="queue-summary">
           <div>
-            <strong>{visibleBriefings.filter((briefing) => briefing.status === "new").length}</strong>
+            <strong>{inboxBriefings.filter((briefing) => briefing.status === "new").length}</strong>
             <span>{t("briefings.inbox.newCount")}</span>
           </div>
           <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleRefreshBriefings} type="button">
@@ -1825,8 +1879,8 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
         </div>
 
         <div className="briefing-list">
-          {visibleBriefings.length ? (
-            visibleBriefings.map((briefing) => (
+          {inboxBriefings.length ? (
+            inboxBriefings.map((briefing) => (
               <button
                 className={selected?.briefingId === briefing.briefingId ? "briefing-card active" : "briefing-card"}
                 key={briefing.briefingId}
@@ -1911,6 +1965,16 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
               >
                 {t("briefings.reader.reject")}
               </button>
+              <button
+                className="ghost"
+                disabled={Boolean(vm.busy)}
+                onClick={() => void vm.handleArchiveBriefing(selected.briefingId)}
+                title={t("briefings.reader.archive")}
+                type="button"
+              >
+                <Archive size={15} />
+                {t("briefings.reader.archive")}
+              </button>
             </footer>
             {vm.busy === "codex-run" ? (
               <div className="codex-running">
@@ -1924,6 +1988,106 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
           <div className="empty-state">{t("briefings.reader.emptyState")}</div>
         )}
       </Panel>
+      </div>
+      ) : (
+        <div className="briefing-archive">
+          {archiveColumns.length ? (
+            <div className="archive-columns">
+              {archiveColumns.map((column) => (
+                <div className="archive-column" key={column.status}>
+                  <header className="archive-column-head">
+                    <span className={`status-pill ${column.status}`}>{briefingStatusLabel(column.status, t)}</span>
+                    <span className="archive-count">{column.items.length}</span>
+                  </header>
+                  <div className="archive-cards">
+                    {column.items.map((briefing) => (
+                      <div className="archive-card" key={briefing.briefingId}>
+                        <span className="agent-name">{briefing.agentName}</span>
+                        <strong>{briefing.title}</strong>
+                        <small>{briefing.createdAt}</small>
+                        <div className="archive-card-actions">
+                          <button
+                            className="ghost"
+                            disabled={Boolean(vm.busy)}
+                            onClick={() => void vm.handleRestoreBriefing(briefing.briefingId)}
+                            title={t("briefings.archive.restore")}
+                            type="button"
+                          >
+                            <RotateCcw size={14} />
+                            {t("briefings.archive.restore")}
+                          </button>
+                          <button
+                            className="ghost danger"
+                            disabled={Boolean(vm.busy)}
+                            onClick={() => setConfirmDelete(briefing)}
+                            title={t("briefings.archive.deleteForever")}
+                            type="button"
+                          >
+                            <Trash2 size={14} />
+                            {t("briefings.archive.deleteForever")}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="queue-empty archive-empty">
+              <Archive size={18} />
+              <div>
+                <strong>{t("briefings.archive.emptyTitle")}</strong>
+                <span>{t("briefings.archive.emptyHint")}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {confirmDelete ? (
+        <div
+          className="modal-backdrop quit-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setConfirmDelete(null);
+          }}
+          role="presentation"
+        >
+          <section aria-labelledby="briefing-delete-title" aria-modal="true" className="quit-dialog" role="dialog">
+            <button
+              aria-label={t("briefings.delete.cancel")}
+              className="icon-button quit-close"
+              onClick={() => setConfirmDelete(null)}
+              type="button"
+            >
+              <X size={18} />
+            </button>
+            <div className="quit-icon danger">
+              <Trash2 size={22} />
+            </div>
+            <span className="section-label">{t("briefings.archive.deleteForever")}</span>
+            <h2 id="briefing-delete-title">{t("briefings.delete.confirmTitle")}</h2>
+            <p className="briefing-delete-name">{confirmDelete.title}</p>
+            <p>{confirmDelete.status === "queued" ? t("briefings.delete.codexWarning") : t("briefings.delete.body")}</p>
+            <footer>
+              <button className="secondary" onClick={() => setConfirmDelete(null)} type="button">
+                {t("briefings.delete.cancel")}
+              </button>
+              <button
+                className="ghost danger quit-confirm"
+                onClick={() => {
+                  void vm.handleDeleteBriefing(confirmDelete.briefingId);
+                  setConfirmDelete(null);
+                }}
+                type="button"
+              >
+                <Trash2 size={16} />
+                {t("briefings.delete.confirm")}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2626,8 +2790,9 @@ function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>, t: TFunc) 
   const pendingPlans = vm.actionPlans.filter(isOpenActionPlan).length;
   const approvedPlans = vm.actionPlans.filter((plan) => plan.status === "approved").length;
   const rejectedPlans = vm.actionPlans.filter((plan) => plan.status === "rejected").length;
-  const newBriefings = vm.briefings.filter((briefing) => briefing.status === "new").length;
-  const queuedBriefings = vm.briefings.filter((briefing) => briefing.status === "queued").length;
+  const activeBriefings = vm.briefings.filter((briefing) => !briefing.archivedAt);
+  const newBriefings = activeBriefings.filter((briefing) => briefing.status === "new").length;
+  const queuedBriefings = activeBriefings.filter((briefing) => briefing.status === "queued").length;
   if (pendingPlans) {
     items.push({
       kind: "info",

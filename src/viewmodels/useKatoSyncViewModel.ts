@@ -36,7 +36,9 @@ import {
   testLibrary,
   updateActionPlanStatus,
   updateActionTaskStatus,
-  updateBriefingStatus
+  updateBriefingStatus,
+  archiveBriefing,
+  deleteBriefing
 } from "../repositories/katoSyncRepository";
 import type { Notice } from "../components/Primitives";
 import type {
@@ -920,6 +922,42 @@ export function useKatoSyncViewModel() {
     [config, show]
   );
 
+  const handleArchiveBriefing = useCallback(
+    async (briefingId: string) => {
+      try {
+        setBriefings(await archiveBriefing(config, briefings, briefingId, true));
+        show("info", "Briefing ins Archiv verschoben.");
+      } catch {
+        show("error", "Briefing konnte nicht archiviert werden.");
+      }
+    },
+    [config, briefings, show]
+  );
+
+  const handleRestoreBriefing = useCallback(
+    async (briefingId: string) => {
+      try {
+        setBriefings(await archiveBriefing(config, briefings, briefingId, false));
+        show("ok", "Briefing aus dem Archiv geholt.");
+      } catch {
+        show("error", "Briefing konnte nicht wiederhergestellt werden.");
+      }
+    },
+    [config, briefings, show]
+  );
+
+  const handleDeleteBriefing = useCallback(
+    async (briefingId: string) => {
+      try {
+        setBriefings(await deleteBriefing(config, briefings, briefingId));
+        show("info", "Briefing endgültig gelöscht.");
+      } catch {
+        show("error", "Briefing konnte nicht gelöscht werden.");
+      }
+    },
+    [config, briefings, show]
+  );
+
   const handleQuitApp = useCallback(async () => {
     await quitApp();
   }, []);
@@ -1002,6 +1040,9 @@ export function useKatoSyncViewModel() {
     handleRefreshBriefings,
     handleRejectActionPlan,
     handleRejectBriefing,
+    handleArchiveBriefing,
+    handleRestoreBriefing,
+    handleDeleteBriefing,
     handleReviewActionPlan,
     handleRun,
     handleAcceptBriefing,

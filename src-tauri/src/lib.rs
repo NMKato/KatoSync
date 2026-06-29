@@ -236,6 +236,8 @@ pub fn run() {
             update_remote_action_task_status,
             load_remote_briefings,
             update_remote_briefing_status,
+            archive_remote_briefing,
+            delete_remote_briefing,
             login_supabase,
             signup_supabase,
             supabase_session_status,
@@ -578,7 +580,7 @@ async fn update_remote_action_task_status(
 async fn load_remote_briefings(base_url: String) -> Result<serde_json::Value, String> {
     let token = load_mcp_connector_token().map_err(error_to_string)?;
     let url = format!(
-        "{}/api/briefings?includeArchived=false",
+        "{}/api/briefings?includeArchived=true&limit=100",
         normalize_base_url(&base_url)
     );
     let response = reqwest::Client::new()
@@ -623,6 +625,66 @@ async fn update_remote_briefing_status(
     if !response_status.is_success() {
         return Err(format!(
             "MCP Briefing konnte nicht aktualisiert werden ({response_status}): {text}"
+        ));
+    }
+    serde_json::from_str(&text).map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn archive_remote_briefing(
+    base_url: String,
+    briefing_id: String,
+    archived: bool,
+) -> Result<serde_json::Value, String> {
+    let token = load_mcp_connector_token().map_err(error_to_string)?;
+    let url = format!(
+        "{}/api/briefings/{}/archive",
+        normalize_base_url(&base_url),
+        briefing_id
+    );
+    let response = reqwest::Client::new()
+        .patch(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(token.trim())
+        .json(&json!({ "archived": archived }))
+        .send()
+        .await
+        .map_err(error_to_string)?;
+
+    let response_status = response.status();
+    let text = response.text().await.map_err(error_to_string)?;
+    if !response_status.is_success() {
+        return Err(format!(
+            "MCP Briefing konnte nicht archiviert werden ({response_status}): {text}"
+        ));
+    }
+    serde_json::from_str(&text).map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn delete_remote_briefing(
+    base_url: String,
+    briefing_id: String,
+) -> Result<serde_json::Value, String> {
+    let token = load_mcp_connector_token().map_err(error_to_string)?;
+    let url = format!(
+        "{}/api/briefings/{}",
+        normalize_base_url(&base_url),
+        briefing_id
+    );
+    let response = reqwest::Client::new()
+        .delete(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(token.trim())
+        .send()
+        .await
+        .map_err(error_to_string)?;
+
+    let response_status = response.status();
+    let text = response.text().await.map_err(error_to_string)?;
+    if !response_status.is_success() {
+        return Err(format!(
+            "MCP Briefing konnte nicht geloescht werden ({response_status}): {text}"
         ));
     }
     serde_json::from_str(&text).map_err(error_to_string)

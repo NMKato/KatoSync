@@ -171,7 +171,7 @@ function shortWhen(iso: string): string {
 
 export function newBriefingItems(briefings: Briefing[], t: TFunc, limit = 6): StatusItem[] {
   return briefings
-    .filter((briefing) => briefing.status === "new")
+    .filter((briefing) => !briefing.archivedAt && briefing.status === "new")
     .slice(0, limit)
     .map((briefing) => ({
       label: briefing.title || t("cockpit.newIn.untitled"),

@@ -3642,3 +3642,191 @@ pre {
     0 16px 40px rgba(15, 23, 42, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
+
+/* ===== Briefings: Eingang/Archiv-Umschalter + Archiv-Spalten ===== */
+.briefings-shell {
+  grid-column: span 12;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.briefing-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.briefing-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.briefing-tab:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.briefing-tab.active {
+  background: var(--accent-soft);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.briefing-archive {
+  display: block;
+}
+
+.archive-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.archive-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.archive-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.archive-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.archive-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.archive-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.archive-card .agent-name {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.archive-card strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.archive-card small {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.archive-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.archive-card-actions button {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.archive-empty {
+  grid-column: span 12;
+}
+
+.quit-icon.danger {
+  background: rgba(255, 116, 116, 0.16);
+  color: var(--danger);
+}
+
+.briefing-delete-name {
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* ===== Dashboard: schlanke, klickbare Action-Queue-Statuszeile (statt redundantem Panel) ===== */
+.dashboard-queue-link {
+  grid-column: span 12;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 15px 20px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.dashboard-queue-link:hover {
+  border-color: var(--accent);
+  background: var(--surface-raised);
+}
+
+.dashboard-queue-link > svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.dashboard-queue-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.dashboard-queue-text strong {
+  font-size: 22px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.dashboard-queue-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  flex-shrink: 0;
+}

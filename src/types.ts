@@ -208,6 +208,7 @@ export interface Briefing {
   summary: string;
   body: string;
   suggestedAction?: string | null;
+  archivedAt?: string | null;
 }
 
 export interface CodexRunRequest {
