@@ -1,5 +1,17 @@
 # KatoSync Project Statusflow
 
+## 2026-06-29 - UX Welle 10: Kopieren + Archiv + Dashboard + Allgemeine Dokumente + Security-Audit (DONE, Release beta.6)
+
+Projekt: KatoSync Desktop App + MCP Server
+Status: DONE — ausgeliefert als signiertes/notarisiertes GitHub-Release `v2.0.0-beta.6` (Latest, Tag auf `628d954`, Submission `566d67f8`).
+
+- **Briefing kopieren** (`src/lib/clipboard.ts` + `briefingExport.ts`): formatierter Markdown in die Zwischenablage (NotebookLM/LLMs). Committet `02a8a5d`.
+- **Briefing-Archiv** (Tab Eingang/Archiv, verschieben/wiederherstellen/loeschen mit Sicherheitsdialog; Spalten nach Status). Datenmodell `briefings.archived_at` (Server-Migration 0008), Endpunkte `PATCH /api/briefings/:id/archive` + `DELETE /api/briefings/:id` (nur archivierte loeschbar, Tenant-Guard). Lokaler Fallback ohne Deploy. Committet App `8cb4f32`, Server `9d99b5d`.
+- **Dashboard entschlackt**: redundante Action-Queue-Karte raus -> Cockpit-Fortschritt + klickbare Statuszeile.
+- **Security-Audit (Multi-Agent, 33 Funde, 4 high verifiziert)** -> Fixes: Race-Guard bei Archiv/Loeschen (busy), XSS-Schutz `safeHttpUrl` fuer pr_url/branchUrl, Tenant-Guard `actionTaskId` (Server), doppelter Kopier-Inhalt, toter Code (getOverlapArea/splashSeenKey/PROTECTED_BRANCHES/Metric-Reste/._*-Server-Dateien). Committet App `628d954`, Server `cf6e6f0`.
+- **Allgemeine Dokumente (Teil A)**: Sync-Regel `includeDocuments` -> PDF/Text/Bilder werden gescannt (Kategorie `document`) + binaer in die Mistral-Library geladen (`upload_document` mit `fs::read` + application/pdf|image/*). Secret-Schutz: Dateiname-Marker (auch Binaer) + Ordner-Ausschluss + Inhalts-Scan fuer Text. Hover-Erklaerungen an allen Sync-Toggles, Warnhinweis bei Aktivierung, Onboarding-Schritt-4-Hinweis.
+- OFFEN: Server-Deploy (User: `supabase db push --linked` + `npm run deploy`) fuer Archiv-Persistenz + Tenant-Guard + Dokument-Endpunkte. Teil B (Datei-Modus + Ergebnis-Ordner + erledigt-Status, GitHub vs. lokal). Audit-Restthemen zur Entscheidung: Codex-Bridge Auto-Push/Prompt-Injection-Haertung, base_url-Allowlist (Token-Exfiltration), strikte CSP.
+
 ## 2026-06-29 - UX Welle 9: Erklaerungs-Tooltips + Hinweis-Fix (DONE)
 
 Projekt: KatoSync Desktop App
