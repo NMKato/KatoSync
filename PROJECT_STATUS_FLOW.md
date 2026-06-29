@@ -11,7 +11,8 @@ Status: DONE — Kernflaechen mehrsprachig; signiert + notarisiert als GitHub Pr
 - Speicher-Hinweis (Nutzerwunsch): ViewModel-`dirty`-Flag (gesetzt bei `updateConfig`/`updateNested`, geleert bei `persist`). Topbar-Speichern-Button bekommt Markierung + Punkt; bei ungespeicherten Aenderungen erscheint ein Hinweis-Banner „… mit ‚Einstellungen speichern‘ uebernehmen" (lokalisiert).
 - Diagramm-Auto-Layout-Fix: Rich-Komponenten (KPI-Cards/Balken) liefen in den Briefings ueber den rechten Rand. Ursache: Grid-Items mit `min-width:auto`. Fix: `.briefing-reader-panel`/`.markdown-body` + `.katosync-block` + `.ks-kpi-grid`/`.ks-bars`/`.ks-bar-row` auf `min-width:0`/`max-width:100%`; KPI-`auto-fit` umbricht jetzt sauber; lange `pre`-Zeilen scrollen.
 - Adversariale Review (4 Dim + Verify): behoben — Beenden-Button vergessen, `scanBars`/`newBriefingItems` deutsche Fallbacks, initiales `document.lang`; es/ru-Politur. tsc + Vite gruen.
-- Release: signiert (Developer ID MK Heartbeat UG T8SB89JPX7) + notarisiert + gestapelt, GitHub Pre-Release `v2.0.0-beta.2`.
+- UI-Politur (Nutzerwunsch): Buttons global luftiger (Innenabstand 14->18px, Hoehe 42->44px, Icon-Gap 8->9px, Topbar-Theme-Switch mitgezogen); Briefing-Aktionen + Button-Reihen/-Stacks groessere Gaps (12px).
+- Release: signiert (Developer ID MK Heartbeat UG T8SB89JPX7) + notarisiert + gestapelt. Auslieferung als GitHub Pre-Releases `v2.0.0-beta.1` (Cockpit) -> `v2.0.0-beta.2` (i18n + Speicher-Hinweis + Overflow-Fix) -> `v2.0.0-beta.3` (Button-Politur + README/Doku). Aktuelle Version fuers Team: beta.3.
 
 
 ## 2026-06-28 - UX Welle 5: Dashboard-Cockpit + Release 2.0 Beta (DONE)

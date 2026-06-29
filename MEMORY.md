@@ -4,6 +4,13 @@
 
 - In Git-Commits NUR NMKato als Autor. KEIN `Co-Authored-By: Claude` o.ä. anhängen.
 
+## Stand 2026-06-29 (2.0 Beta ausgeliefert)
+
+- UX-Redesign „Lotse" komplett: Foundation/Token, geführtes Onboarding, Settings-Konsolidierung, Token-Maskierung + Präsentationsmodus, Briefings Rich-Komponenten (`src/components/RichMarkdown.tsx` + `DiagramComponents.tsx`), **Dashboard-Cockpit** (Live-Status + echte Diagramme, Adapter in `src/lib/cockpit.ts`, Run-Ring `src/lib/runHistory.ts` — kein Mock), **i18n De/En/Es/Ru** (`src/i18n/`, Sprachschalter Sidebar; Kernflächen übersetzt, Rest folgt), Speicher-Hinweis (VM-`dirty`), Diagramm-Auto-Layout-Fix, Button-Politur.
+- Version **2.0.0**; ausgeliefert als signierte + notarisierte GitHub Pre-Releases (zuletzt `v2.0.0-beta.3`). Signieren/Notarisieren manuell auf APFS, da Tauri auf exFAT an `xattr` scheitert; notarytool-Keychain-Profil `katosync` (ASC-API-Key, Team T8SB89JPX7).
+- Locale-Dateien (`src/i18n/locales/*.ts`) bewusst OHNE Autoren-Header; neue Code-Dateien-Header lauten „Created by NMKato on …".
+- OFFEN: i18n-Rest (Setup-Strip, Einstellungen, Projekt-Board, Briefings-Chrome, Onboarding, Login).
+
 ## Stand 2026-06-27 (Session-Ende)
 
 - LIVE & funktionierend: (1) Briefings live aus dem MCP-Server (Markdown-Rendering), (2) Self-Service-Login (eigenes Supabase-Projekt, E-Mail-Registrierung) + „Connector-Token generieren", (3) Codex-Bridge v1 — Briefing/Action-Task → `run_codex_task` (Rust) → Preflight → eigener Branch → `codex exec` (Sandbox, ChatGPT-Login = keine API-Kosten) → Auto-Commit auf Branch (kein Merge) → Rückkanal `POST /api/execution-results`. Echter GUI-Lauf verifiziert (Commit c13e711, 5 Dateien).
