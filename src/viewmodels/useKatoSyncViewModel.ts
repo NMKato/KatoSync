@@ -376,6 +376,11 @@ export function useKatoSyncViewModel() {
   const handleRun = useCallback(
     async (dryRun: boolean) => {
       if (!config) return;
+      // Ohne verbundenen Quellordner gar nicht erst starten -> klarer Fehler statt ewigem Spinner.
+      if (!config.sourceRoots.some((root) => root.trim().length > 0)) {
+        show("error", "Kein Quellordner verbunden. Bitte zuerst in den Einstellungen einen Ordner hinzufügen.");
+        return;
+      }
       setBusy(dryRun ? "dry-run" : "sync");
       show(
         "info",

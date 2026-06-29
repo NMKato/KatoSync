@@ -1559,6 +1559,12 @@ async fn scan_project(config: AppConfig) -> Result<ScanSummary, String> {
 #[tauri::command]
 async fn run_sync(config: AppConfig, dry_run: Option<bool>) -> Result<SyncReport, String> {
     let effective_dry_run = dry_run.unwrap_or(config.safety.dry_run_default);
+    if config.source_roots.iter().all(|root| root.trim().is_empty()) {
+        return Err(
+            "Kein Quellordner verbunden. Bitte zuerst in den Einstellungen einen Ordner hinzufuegen."
+                .to_string(),
+        );
+    }
     save_config_inner(&config).map_err(error_to_string)?;
     sync_once(&config, effective_dry_run)
         .await
@@ -2160,12 +2166,24 @@ fn slugify(value: &str) -> String {
     output.trim_matches('-').to_string()
 }
 
+// Mistral-HTTP-Client MIT Timeouts. Ohne das kann ein haengender Request (Mistral nimmt den
+// Upload an, haelt die Antwort beim serverseitigen Verarbeiten aber offen) den Sync endlos
+// blockieren -> der Sync-Button dreht ewig. connect_timeout fuer tote Verbindungen, timeout
+// als harte Obergrenze fuer die Gesamtdauer (inkl. Response-Body). Fallback auf Default-Client.
+fn mistral_client(timeout_secs: u64) -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 async fn prune_existing_document_versions(
     api_key: &str,
     library_id: &str,
     file_name: &str,
 ) -> Result<usize> {
-    let client = reqwest::Client::new();
+    let client = mistral_client(60);
     let mut deleted = 0;
     for page in 0..20 {
         let url = format!("https://api.mistral.ai/v1/libraries/{library_id}/documents");
@@ -2241,25 +2259,37 @@ async fn upload_with_backoff(
     library_id: &str,
     file_path: &Path,
 ) -> Result<UploadResult> {
-    let waits = [30_u64, 60, 120];
+    // Kuerzerer, interaktiv-tauglicher Backoff (statt 30/60/120 = bis 3,5 Min stumm): 10/30/60s,
+    // gibt dem Minuten-Limit eine Chance zu resetten, blockiert den Sync-Button aber nicht ewig.
+    let waits = [10_u64, 30, 60];
     for attempt in 0..=waits.len() {
         match upload_document(api_key, library_id, file_path).await {
             Ok(result) => return Ok(result),
-            Err(error) if error.to_string().contains("HTTP 429") && attempt < waits.len() => {
-                write_log(
-                    "sync",
-                    &format!(
-                        "Rate-Limit für {}. Retry in {}s.",
-                        file_path.display(),
-                        waits[attempt]
-                    ),
-                )?;
-                sleep(Duration::from_secs(waits[attempt])).await;
+            Err(error) if error.to_string().contains("HTTP 429") => {
+                if attempt < waits.len() {
+                    write_log(
+                        "sync",
+                        &format!(
+                            "Mistral-Rate-Limit für {}. Neuer Versuch in {}s ({}/{}).",
+                            file_path.display(),
+                            waits[attempt],
+                            attempt + 2,
+                            waits.len() + 1
+                        ),
+                    )?;
+                    sleep(Duration::from_secs(waits[attempt])).await;
+                } else {
+                    return Err(anyhow!(
+                        "Mistral-Rate-Limit (HTTP 429) erreicht. Bitte kurz warten und erneut synchronisieren."
+                    ));
+                }
             }
             Err(error) => return Err(error),
         }
     }
-    Err(anyhow!("Upload nach Backoff abgebrochen."))
+    Err(anyhow!(
+        "Mistral-Rate-Limit (HTTP 429) erreicht. Bitte kurz warten und erneut synchronisieren."
+    ))
 }
 
 async fn upload_document(
@@ -2333,7 +2363,9 @@ async fn upload_document(
         .file_name(file_name.clone())
         .mime_str(mime)?;
     let form = Form::new().part("file", part);
-    let response = reqwest::Client::new()
+    // Grosszuegiger Upload-Timeout (180s) -> erlaubt langsame, aber fortschreitende Uploads,
+    // bricht aber einen echten Haenger ab, statt den Sync-Button ewig drehen zu lassen.
+    let response = mistral_client(180)
         .post(url)
         .bearer_auth(api_key.trim())
         .header("User-Agent", USER_AGENT)

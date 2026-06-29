@@ -1,5 +1,14 @@
 # KatoSync Project Statusflow
 
+## 2026-06-29 - Sync-Haertung: Timeouts + Rate-Limit-UX + Kein-Ordner-Guard (committet, NICHT released)
+
+Projekt: KatoSync Desktop App. Status: committet auf main, NICHT released. Aus dem Live-Test gemeldet: Sync-Button drehte minutenlang, danach Diagnose "HTTP 429 Rate-Limit". Build gruen, App gebaut + installiert.
+
+- **Ursache:** Der Backoff bei Mistral-429 wartete 30/60/120s (= bis 3,5 Min) STUMM, bevor er den 429-Fehler zeigte -> wirkte wie eingefroren (war aber begrenzt + korrekt). Zusaetzlich nutzten alle Mistral-Requests `reqwest::Client::new()` OHNE Timeout (latente Gefahr eines echten Endlos-Haengers, falls Mistral die Antwort offen haelt).
+- **Fix Timeouts:** neuer Helfer `mistral_client(timeout_secs)` (connect_timeout 20s + harte Gesamtobergrenze); genutzt in `prune_existing_document_versions` (60s) und `upload_document`-POST (180s). Ein haengender Request blockiert den Sync jetzt nicht mehr endlos.
+- **Fix Rate-Limit-UX:** Backoff von 30/60/120s auf 10/30/60s (max ~100s statt 210s), klare Endmeldung "Mistral-Rate-Limit (HTTP 429) erreicht. Bitte kurz warten und erneut synchronisieren." + besseres Log ("Neuer Versuch in Ns (2/4)"). OFFEN/optional: Live-Retry-Anzeige am Button (Event-Streaming wie beim Codex-Feed), damit die Wartezeit sichtbar ist statt nur kuerzer.
+- **Fix Kein-Ordner-Guard:** Sync ohne verbundenen Quellordner bricht jetzt sofort mit klarem Fehler ab statt zu laufen/drehen — Client-seitig (`handleRun` prueft `sourceRoots`) UND Rust-seitig (`run_sync` Guard).
+
 ## 2026-06-29 - Welle 11b: Datei-Modus-Haertung (adversarialer Multi-Agent-Review) (committet, NICHT released)
 
 Projekt: KatoSync Desktop App. Status: committet auf main, NICHT released. Vor dem echten Codex-Datei-Modus-Lauf wurde der Welle-11-Diff adversarial reviewed (3 Dimensionen x Verify, 5 Funde bestaetigt, 1 widerlegt). Build gruen (tsc+vite+cargo check), App gebaut + nach /Applications installiert.
