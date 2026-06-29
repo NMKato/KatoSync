@@ -1,5 +1,14 @@
 # KatoSync Project Statusflow
 
+## 2026-06-29 - Welle 11: Codex Coding-/Datei-Modus (Option B) (committet, NICHT released)
+
+Projekt: KatoSync Desktop App. Status: committet `483b95b` auf main, NICHT in beta.6. Echter Codex-Datei-Modus-Lauf noch NICHT End-to-End verifiziert (Codex-Login/Limit) -> vor Release testen.
+
+- **Coding-/Datei-Modus** (`codex_coding_mode` Rust / `codexCodingMode` TS, Default false = Datei-Modus). Toggle "Coding-Modus (GitHub)" im Codex-Bridge-Panel: AN = wie bisher (Branch/Push/PR), AUS = Datei-Modus (Standard). In `run_codex_task` (lib.rs) ist `file_mode = !codex_coding_mode`. Datei-Modus: auto `git init` (+ lokale Identitaet katosync@local) nur bei frischem Repo, Baseline-Commit, eigener Branch, Codex schreibt per Prompt-Leitplanke NUR in `_KatoSync_Ergebnisse/task-<slug>/`, kein Push/PR, am Ende `git merge --ff-only` in den Default-Branch (Ergebnis lokal sichtbar), Task direkt "completed". Loop-Schutz: `_katosync_ergebnisse` auf der should_enter-Blockliste.
+- **Review-Fixes (adversarialer Agent):** (1) bestehendes Repo: KEIN WIP-Mitcommit, sauberer-Tree-Check bleibt; (2) Baseline-Fehler -> klare Meldung + lokale git-Identitaet; (3) Null-Output -> nicht faelschlich "erledigt"; (4) Codex-Schreibzugriff ausserhalb Ergebnis-Ordner -> Lauf verworfen (reset --hard + clean). Status-Setzung in Rust UND TS (handleRunCodexForTask + Board-Queue) konsistent invertiert.
+- **UI-Politur:** HoverTip-Wrapper im switch-grid auf width:fit-content (Hover-Text sitzt am Toggle, nicht am Spaltenrand); Toggle bekam `disabled`-Prop -> Push/PR im Datei-Modus ausgegraut; Beschreibung beider Modi + Datei-Modus-Hinweis im Panel; codingMode-i18n (De/En/Es/Ru).
+- OFFEN: Echter Datei-Modus-Lauf verifizieren; dann ggf. beta.7 releasen. Multi-Runner (Codex/Claude) als naechste grosse Welle. Audit-Restthemen (Codex-Auto-Push-Haertung, base_url-Allowlist, CSP). Server-Deploy (User) fuer Archiv/Dokument-Endpunkte weiterhin offen.
+
 ## 2026-06-29 - UX Welle 10: Kopieren + Archiv + Dashboard + Allgemeine Dokumente + Security-Audit (DONE, Release beta.6)
 
 Projekt: KatoSync Desktop App + MCP Server
