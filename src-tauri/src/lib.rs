@@ -58,6 +58,10 @@ pub struct AppConfig {
     codex_auto_push: bool,
     #[serde(default = "default_true")]
     codex_create_pr: bool,
+    // Coding-Modus: an = Ergebnis nach GitHub (Branch/Push/PR), aus = Datei-Modus (lokal im
+    // Ergebnis-Ordner, Git unsichtbar im Hintergrund). Standard: aus (Datei-Modus).
+    #[serde(default)]
+    codex_coding_mode: bool,
     // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectExternalId -> Pfad).
     #[serde(default)]
     project_repos: std::collections::HashMap<String, String>,
@@ -991,6 +995,8 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         return Err(format!("Projektordner nicht gefunden: {repo_path}"));
     }
     let config = load_config_inner().map_err(error_to_string)?;
+    // Coding-Modus an = GitHub (Branch/Push/PR), aus = Datei-Modus (lokal). Datei-Modus ist Standard.
+    let file_mode = !config.codex_coding_mode;
     // Keine sourceRoots-Allowlist mehr: der Nutzer waehlt den Ordner bewusst im
     // Datei-Dialog (= explizite Freigabe). Schutz kommt aus Git-Repo-Pflicht,
     // sauberem Arbeitsbaum, eigenem Branch, Sandbox und critical-Abbruch.
@@ -1002,11 +1008,35 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     if !login.status.success() {
         return Err("Bitte zuerst in Codex per ChatGPT einloggen (codex login).".to_string());
     }
-    if git_capture(&repo_path, &["rev-parse", "--is-inside-work-tree"]).unwrap_or_default() != "true"
-    {
-        return Err("Der Projektordner ist kein Git-Repository.".to_string());
+    let is_git = git_capture(&repo_path, &["rev-parse", "--is-inside-work-tree"]).unwrap_or_default()
+        == "true";
+    if !is_git {
+        if file_mode {
+            // Datei-Modus: Git unsichtbar einrichten, damit Branch/Commit/Diff den Lauf
+            // schuetzen (sauberer Ausgangszustand, klar erkennbare neue Dateien). Kein Push.
+            git_capture(&repo_path, &["init"])
+                .map_err(|e| format!("git init im Datei-Modus fehlgeschlagen: {e}"))?;
+            // Lokale Identitaet als Fallback (nur dieser frisch angelegte Ordner), damit der
+            // Baseline-Commit auch ohne globale git-Identitaet gelingt.
+            let _ = git_capture(&repo_path, &["config", "user.email", "katosync@local"]);
+            let _ = git_capture(&repo_path, &["config", "user.name", "KatoSync"]);
+        } else {
+            return Err("Der Projektordner ist kein Git-Repository.".to_string());
+        }
     }
-    if !git_capture(&repo_path, &["status", "--porcelain", "--", ":!.katosync"])?.is_empty() {
+    if file_mode && !is_git {
+        // NUR ein frisch angelegtes Repo: aktuellen Inhalt als Ausgangszustand committen, damit
+        // ein HEAD existiert und der spaetere Diff nur Codex' neue Dateien zeigt. Lokal, ohne Push.
+        let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync"]);
+        git_capture(
+            &repo_path,
+            &["commit", "-m", "katosync: Ausgangszustand", "--allow-empty"],
+        )
+        .map_err(|e| {
+            format!("Git-Baseline im Datei-Modus fehlgeschlagen (fehlt eine git-Identitaet?): {e}")
+        })?;
+    } else if !git_capture(&repo_path, &["status", "--porcelain", "--", ":!.katosync"])?.is_empty() {
+        // Bestehendes Repo (auch im Datei-Modus): KEINE fremden Aenderungen mitcommitten.
         return Err("Der Arbeitsbaum ist nicht sauber. Bitte erst committen oder stashen.".to_string());
     }
 
@@ -1051,6 +1081,19 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     .map_err(error_to_string)?;
     fs::write(format!("{run_dir}/prompt.md"), sanitize_log(&req.prompt)).map_err(error_to_string)?;
 
+    // Datei-Modus: Ergebnis-Ordner anlegen und Codex anweisen, NUR dorthin zu schreiben.
+    let result_rel = format!("_KatoSync_Ergebnisse/task-{task_slug}");
+    let effective_prompt = if file_mode {
+        let result_dir = format!("{repo_path}/{result_rel}");
+        fs::create_dir_all(&result_dir).map_err(error_to_string)?;
+        format!(
+            "{}\n\n## Datei-Modus (verbindlich)\nSchreibe dein Ergebnis als fertige Datei(en) AUSSCHLIESSLICH in den Ordner `{result_rel}/`. Aendere, verschiebe oder loesche KEINE anderen Dateien. Erstelle keinen Code ausserhalb dieses Ergebnis-Ordners.",
+            req.prompt
+        )
+    } else {
+        req.prompt.clone()
+    };
+
     // Immer von main/Default abzweigen (nicht vom aktuellen HEAD -> kein Codex-auf-Codex-Stapeln).
     let _ = git_capture(&repo_path, &["fetch", "origin", &default_branch]); // best effort
     git_capture(&repo_path, &["checkout", &default_branch])
@@ -1087,7 +1130,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     let mut exit_code: Option<i32> = None;
     match TokioCommand::new(codex_bin())
         .arg("exec")
-        .arg(&req.prompt)
+        .arg(&effective_prompt)
         .arg("--cd")
         .arg(&repo_path)
         .arg("--sandbox")
@@ -1194,6 +1237,25 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         .filter(|l| !l.trim().is_empty())
         .map(|l| l.to_string())
         .collect();
+
+    // Datei-Modus: Codex darf nur in den Ergebnis-Ordner geschrieben haben. Aenderungen
+    // ausserhalb -> Lauf verwerfen (kein blindes Mergen ins Projekt).
+    if file_mode && codex_error.is_none() {
+        let out_of_scope: Vec<&str> = changed_files
+            .iter()
+            .filter(|f| !f.starts_with(&result_rel))
+            .map(|f| f.as_str())
+            .collect();
+        if !out_of_scope.is_empty() {
+            codex_error = Some(format!(
+                "Datei-Modus: Codex hat ausserhalb von {result_rel}/ geschrieben ({}). Lauf verworfen.",
+                out_of_scope.join(", ")
+            ));
+            let _ = git_capture(&repo_path, &["reset", "--hard"]);
+            let _ = git_capture(&repo_path, &["clean", "-fd", "-e", ".katosync"]);
+        }
+    }
+
     let result_summary = fs::read_to_string(&output_path)
         .unwrap_or_default()
         .trim()
@@ -1206,6 +1268,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             Ok(_) => commit = git_capture(&repo_path, &["rev-parse", "HEAD"]).ok(),
             Err(e) => codex_error = Some(format!("Commit fehlgeschlagen: {e}")),
         }
+    }
+    // Datei-Modus: ohne erzeugte Ergebnisdatei (kein Commit) gilt der Lauf nicht als erfolgreich.
+    if file_mode && codex_error.is_none() && commit.is_none() {
+        codex_error = Some("Datei-Modus: Codex hat keine Ergebnisdatei erzeugt.".to_string());
     }
     let final_status = if codex_error.is_none() { "completed" } else { "failed" };
 
@@ -1228,7 +1294,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     let mut branch_url: Option<String> = None;
     let mut pr_url: Option<String> = None;
     let repo_web = git_remote_https_url(&repo_path);
-    if final_status == "completed" && commit.is_some() && config.codex_auto_push {
+    if !file_mode && final_status == "completed" && commit.is_some() && config.codex_auto_push {
         match git_capture(&repo_path, &["push", "-u", "origin", &branch]) {
             Ok(_) => {
                 pushed = true;
@@ -1325,7 +1391,12 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     }
     // Task-Status: Erfolg = 'executed' (ausgefuehrt, wartet auf Merge/Verifikation), inkl. PR/Branch.
     if let Some(task_id) = &req.action_task_id {
-        let task_status = if final_status == "completed" { "executed" } else { final_status };
+        // Datei-Modus: kein PR/Merge-Check -> Task direkt als erledigt. Sonst "executed" (wartet auf Merge).
+        let task_status = if final_status == "completed" {
+            if file_mode { "completed" } else { "executed" }
+        } else {
+            final_status
+        };
         if let Err(e) =
             patch_action_task_status_inner(&req.base_url, task_id, task_status, pr_url.as_deref(), Some(&branch))
                 .await
@@ -1336,7 +1407,12 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
 
     // Zurueck auf den Default-Branch -> Arbeitskopie bleibt sauber; Codex-Aenderungen leben auf dem Branch.
     let _ = git_capture(&repo_path, &["checkout", &default_branch]);
-    if commit.is_none() {
+    if file_mode && commit.is_some() {
+        // Datei-Modus: Ergebnis in den Default-Branch mergen, damit es lokal im Ordner sichtbar ist
+        // (kein GitHub-Push). Danach den temporaeren Branch entfernen.
+        let _ = git_capture(&repo_path, &["merge", "--ff-only", &branch]);
+        let _ = git_capture(&repo_path, &["branch", "-D", &branch]);
+    } else if commit.is_none() {
         // Fehlgeschlagener Lauf ohne Commit -> leeren Codex-Branch wieder entfernen.
         let _ = git_capture(&repo_path, &["branch", "-D", &branch]);
     }
@@ -2303,6 +2379,7 @@ fn should_enter(entry: &DirEntry, config: &AppConfig) -> bool {
     let name = entry.file_name().to_string_lossy().to_lowercase();
     let blocked_names = [
         ".git",
+        "_katosync_ergebnisse",
         "node_modules",
         ".env",
         "secrets",
@@ -2536,6 +2613,7 @@ fn default_config() -> Result<AppConfig> {
         },
         codex_auto_push: true,
         codex_create_pr: true,
+        codex_coding_mode: false,
         project_repos: std::collections::HashMap::new(),
     })
 }

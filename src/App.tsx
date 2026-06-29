@@ -2121,17 +2121,32 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
       <p>{t("codex.intro.description")}</p>
       {vm.config ? (
         <div className="switch-grid" style={{ marginBottom: 6 }}>
+          <HoverTip title={t("codex.toggle.codingMode")} description={t("codex.toggle.codingModeDesc")}>
+            <Toggle
+              checked={vm.config.codexCodingMode}
+              label={t("codex.toggle.codingMode")}
+              onChange={(checked) => vm.updateConfig("codexCodingMode", checked)}
+            />
+          </HoverTip>
           <Toggle
             checked={vm.config.codexAutoPush}
+            disabled={!vm.config.codexCodingMode}
             label={t("codex.toggle.pushBranch")}
             onChange={(checked) => vm.updateConfig("codexAutoPush", checked)}
           />
           <Toggle
             checked={vm.config.codexCreatePr}
+            disabled={!vm.config.codexCodingMode}
             label={t("codex.toggle.createPr")}
             onChange={(checked) => vm.updateConfig("codexCreatePr", checked)}
           />
         </div>
+      ) : null}
+      {vm.config ? (
+        <p className="field-hint" style={{ marginTop: 2 }}>{t("codex.mode.description")}</p>
+      ) : null}
+      {vm.config && !vm.config.codexCodingMode ? (
+        <p className="documents-warning" style={{ marginTop: 4 }}>{t("codex.fileMode.hint")}</p>
       ) : null}
       <p className="field-hint" style={{ marginTop: -2 }}>
         {t("codex.toggle.saveHint")}

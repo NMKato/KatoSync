@@ -573,8 +573,8 @@ export function useKatoSyncViewModel() {
         await updateActionTaskStatus(config, task.taskId, "running");
         const result = await runCodexForTaskWithRepo(plan, task, repoPath);
         const ok = result.status === "completed";
-        // Erfolg = 'executed' (ausgefuehrt) inkl. PR/Branch; 'completed' folgt erst beim Merge/Verifikation.
-        const finalStatus = ok ? "executed" : "failed";
+        // Coding-Modus: 'executed' (wartet auf PR-Merge). Datei-Modus: direkt 'completed' (kein Push/Merge).
+        const finalStatus = ok ? (config.codexCodingMode ? "executed" : "completed") : "failed";
         setActionPlans(
           await updateActionTaskStatus(config, task.taskId, finalStatus, {
             prUrl: result.prUrl ?? null,
@@ -861,8 +861,8 @@ export function useKatoSyncViewModel() {
             await updateActionTaskStatus(config, task.taskId, "running");
             const result = await runCodexForTaskWithRepo(plan, task, repoPath);
             if (result.status === "completed") {
-              // Erfolg = 'executed' (wartet auf Merge/Verifikation), inkl. PR/Branch.
-              await updateActionTaskStatus(config, task.taskId, "executed", {
+              // Coding-Modus: 'executed' (wartet auf Merge). Datei-Modus: direkt 'completed'.
+              await updateActionTaskStatus(config, task.taskId, config.codexCodingMode ? "executed" : "completed", {
                 prUrl: result.prUrl ?? null,
                 branch: result.branch ?? null
               });

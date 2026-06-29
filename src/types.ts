@@ -37,6 +37,7 @@ export interface AppConfig {
   // Codex-Bridge v2: Branch nach erfolgreichem Lauf pushen / PR erstellen.
   codexAutoPush: boolean;
   codexCreatePr: boolean;
+  codexCodingMode: boolean;
   // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectId -> Pfad).
   projectRepos: Record<string, string>;
 }

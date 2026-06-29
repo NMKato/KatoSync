@@ -111,17 +111,20 @@ export function Metric({
 export function Toggle({
   checked,
   label,
-  onChange
+  onChange,
+  disabled = false
 }: {
   checked: boolean;
   label: string;
   onChange: (checked: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="toggle">
+    <label className={disabled ? "toggle disabled" : "toggle"}>
       <button
         aria-pressed={checked}
         className={checked ? "switch on" : "switch"}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
         type="button"
       >

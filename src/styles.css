@@ -3831,6 +3831,18 @@ pre {
   flex-shrink: 0;
 }
 
+/* HoverTip an Toggles: Wrapper nur so breit wie der Toggle, damit der Hover-Text direkt
+   am Toggle erscheint und nicht am rechten Rand der Grid-Spalte. */
+.switch-grid .hovertip-wrap {
+  width: fit-content;
+}
+
+/* Deaktivierter Toggle (z. B. Push/PR im Datei-Modus): ausgegraut, nicht klickbar. */
+.toggle.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 /* ===== Sync-Regeln: Warnhinweis bei aktiver allgemeiner Datenverarbeitung ===== */
 .documents-warning {
   margin: 12px 0 0;

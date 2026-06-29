@@ -35,6 +35,7 @@ export const defaultConfig: AppConfig = {
   },
   codexAutoPush: true,
   codexCreatePr: true,
+  codexCodingMode: false,
   projectRepos: {}
 };
 
