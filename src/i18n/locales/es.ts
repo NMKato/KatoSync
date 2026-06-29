@@ -390,7 +390,16 @@ const es: Record<TKey, string> = {
   "skill.copied": "Copiado ✓",
   "skill.empty": "Pega una persona y pulsa «Generar»: el resultado aparece aquí para copiar.",
   "skill.meta": "Contract v{version} · MCP: {mcp}",
-  "skill.tokenNote": "Nota: tu token del connector va en la configuración del connector de Mistral (Bearer), NO en esta persona."
+  "skill.tokenNote": "Nota: tu token del connector va en la configuración del connector de Mistral (Bearer), NO en esta persona.",
+  "nav.dashboard.desc": "Vista en vivo: qué se está ejecutando, último proceso e historial.",
+  "nav.actionQueue.desc": "Revisa, aprueba o rechaza los planes del agente en local — nada se ejecuta solo.",
+  "nav.projectBoard.desc": "Planifica las tareas aprobadas por proyecto y entrégalas a Codex.",
+  "nav.briefings.desc": "Lee los resultados de Mistral, priorízalos y entrégalos a Codex.",
+  "nav.settings.desc": "Acceso a Mistral, MCP, reglas de sync, plan de subidas y generador de skills.",
+  "nav.logs.desc": "Registros, avisos y últimas decisiones en un solo lugar.",
+  "sidebar.presentationDesc": "Enmascara tokens, IDs y correo para capturas y streams.",
+  "sidebar.licenseDesc": "Mostrar la licencia y el acuerdo de uso.",
+  "sidebar.quitDesc": "Cierra KatoSync por completo — sin sync en segundo plano."
 };
 
 export default es;

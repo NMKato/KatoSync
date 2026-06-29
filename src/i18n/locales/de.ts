@@ -407,7 +407,16 @@ const de = {
   "skill.copied": "Kopiert ✓",
   "skill.empty": "Persona einfügen und auf „Generieren“ drücken — das Ergebnis erscheint hier zum Kopieren.",
   "skill.meta": "Contract v{version} · MCP: {mcp}",
-  "skill.tokenNote": "Hinweis: Dein Connector-Token gehört in die Mistral-Connector-Konfiguration (Bearer), NICHT in diese Persona."
+  "skill.tokenNote": "Hinweis: Dein Connector-Token gehört in die Mistral-Connector-Konfiguration (Bearer), NICHT in diese Persona.",
+  "nav.dashboard.desc": "Live-Überblick: was läuft gerade, letzter Lauf und Verlauf.",
+  "nav.actionQueue.desc": "Agent-Pläne lokal prüfen, freigeben oder ablehnen — nichts läuft automatisch.",
+  "nav.projectBoard.desc": "Freigegebene Aufgaben pro Projekt einplanen und an Codex übergeben.",
+  "nav.briefings.desc": "Mistral-Ergebnisse lesen, priorisieren und an Codex übergeben.",
+  "nav.settings.desc": "Mistral-Zugang, MCP, Sync-Regeln, Uploadplan und Skill-Generator.",
+  "nav.logs.desc": "Protokolle, Hinweise und letzte Entscheidungen an einem Ort.",
+  "sidebar.presentationDesc": "Maskiert Token, IDs und E-Mail für Screenshots und Streams.",
+  "sidebar.licenseDesc": "Lizenz- und Nutzungsvereinbarung anzeigen.",
+  "sidebar.quitDesc": "Beendet KatoSync komplett — kein Hintergrund-Sync mehr."
 } as const;
 
 export type TKey = keyof typeof de;

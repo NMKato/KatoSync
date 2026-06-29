@@ -390,7 +390,16 @@ const en: Record<TKey, string> = {
   "skill.copied": "Copied ✓",
   "skill.empty": "Paste a persona and press “Generate” — the result appears here to copy.",
   "skill.meta": "Contract v{version} · MCP: {mcp}",
-  "skill.tokenNote": "Note: your connector token belongs in the Mistral connector configuration (Bearer), NOT in this persona."
+  "skill.tokenNote": "Note: your connector token belongs in the Mistral connector configuration (Bearer), NOT in this persona.",
+  "nav.dashboard.desc": "Live overview: what's running, last run and history.",
+  "nav.actionQueue.desc": "Review, approve or reject agent plans locally — nothing runs automatically.",
+  "nav.projectBoard.desc": "Schedule approved tasks per project and hand them to Codex.",
+  "nav.briefings.desc": "Read Mistral results, prioritize them and hand them to Codex.",
+  "nav.settings.desc": "Mistral access, MCP, sync rules, upload plan and skill generator.",
+  "nav.logs.desc": "Logs, notes and recent decisions in one place.",
+  "sidebar.presentationDesc": "Masks tokens, IDs and email for screenshots and streams.",
+  "sidebar.licenseDesc": "Show the license and terms of use.",
+  "sidebar.quitDesc": "Quits KatoSync completely — no more background sync."
 };
 
 export default en;

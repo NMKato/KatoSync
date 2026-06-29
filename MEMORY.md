@@ -4,6 +4,14 @@
 
 - In Git-Commits NUR NMKato als Autor. KEIN `Co-Authored-By: Claude` o.ä. anhängen.
 
+## Stand 2026-06-29 (2.0 Beta — Nachzügler)
+
+- **Skill-Generator** (`src/lib/skillTemplate.ts` + SkillGeneratorPanel in Settings + Onboarding-Schritt 6, weiches Gate `skillSeen`): Persona einfügen → KatoSync hängt kanonische Integrations-Anweisungen an (katosync:* Diagramme + Action-Plan-Pflichtfelder als wenn-dann + Few-Shot + Token-Hygiene), echte MCP-URL/Projekte; kopieren → in Mistral-Skill.
+- **Erklaerungs-Tooltips** (`HoverTip` in Primitives.tsx, Portal+fixed wegen `.app-shell overflow:hidden`): Nav + Fusszeile, i18n. Bug-Fix: Hinweis-Dialog „Gefundene Dateien anzeigen" sprang auf `folders` (Settings) statt `dashboard` → `section-findings` fehlte.
+- **Lizenz** um EU-AI-Act-Punkt 9 erweitert (Version 2.0.0 → erneute Zustimmung). i18n-Locales je ~399 Keys (De/En/Es/Ru), alle identisch.
+- **OFFEN/diskutiert:** „API-Kontingent"-Karte zeigt nichts, weil Verbindungs-/Library-Test + Upload die **Libraries-API** treffen (keine token-`x-ratelimit-*`-Header); „verbleibendes Plan-Budget" gibt Mistral NICHT per Header raus → Karte ehrlich auf eigene Nutzungsdaten (Run-Ring) umbauen statt raten.
+- Letztes ausgeliefertes Release: `v2.0.0-beta.4` (Latest). Skill-Generator/Tooltips/Findings-Fix noch nicht released (sammeln für beta.5).
+
 ## Stand 2026-06-29 (2.0 Beta ausgeliefert)
 
 - UX-Redesign „Lotse" komplett: Foundation/Token, geführtes Onboarding, Settings-Konsolidierung, Token-Maskierung + Präsentationsmodus, Briefings Rich-Komponenten (`src/components/RichMarkdown.tsx` + `DiagramComponents.tsx`), **Dashboard-Cockpit** (Live-Status + echte Diagramme, Adapter in `src/lib/cockpit.ts`, Run-Ring `src/lib/runHistory.ts` — kein Mock), **i18n De/En/Es/Ru** (`src/i18n/`, Sprachschalter Sidebar; Kernflächen übersetzt, Rest folgt), Speicher-Hinweis (VM-`dirty`), Diagramm-Auto-Layout-Fix, Button-Politur.

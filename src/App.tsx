@@ -45,6 +45,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   FindingsTable,
+  HoverTip,
   NoticeBar,
   Panel,
   StatusLine,
@@ -456,6 +457,7 @@ export default function App() {
           {steps.map((step) => (
             <StepButton
               active={visibleStep === step.id}
+              description={t(`nav.${step.id}.desc` as TKey)}
               icon={step.icon}
               key={step.id}
               label={t(`nav.${step.id}` as TKey)}
@@ -465,15 +467,19 @@ export default function App() {
         </nav>
 
         <div className="sidebar-footer">
-          <button
-            className={`ghost license-link${presentation ? " is-active" : ""}`}
-            onClick={togglePresentation}
-            title={presentation ? t("sidebar.presentationTitleOn") : t("sidebar.presentationTitleOff")}
-            type="button"
+          <HoverTip
+            description={presentation ? t("sidebar.presentationTitleOn") : t("sidebar.presentationDesc")}
+            title={presentation ? t("sidebar.presentationOn") : t("sidebar.presentation")}
           >
-            {presentation ? <EyeOff size={16} /> : <Eye size={16} />}
-            <span>{presentation ? t("sidebar.presentationOn") : t("sidebar.presentation")}</span>
-          </button>
+            <button
+              className={`ghost license-link${presentation ? " is-active" : ""}`}
+              onClick={togglePresentation}
+              type="button"
+            >
+              {presentation ? <EyeOff size={16} /> : <Eye size={16} />}
+              <span>{presentation ? t("sidebar.presentationOn") : t("sidebar.presentation")}</span>
+            </button>
+          </HoverTip>
           <label className="ghost license-link lang-switch" title={t("sidebar.languageTitle")}>
             <Languages size={16} />
             <select
@@ -487,14 +493,18 @@ export default function App() {
               <option value="ru">{t("lang.ru")}</option>
             </select>
           </label>
-          <button className="ghost license-link" onClick={() => setLicenseOpen(true)} title={t("sidebar.license")} type="button">
-            <FileText size={16} />
-            <span>{t("sidebar.license")}</span>
-          </button>
-          <button className="ghost danger compact-danger" onClick={() => setQuitConfirmOpen(true)} title={t("sidebar.quit")} type="button">
-            <Power size={16} />
-            <span>{t("sidebar.quit")}</span>
-          </button>
+          <HoverTip description={t("sidebar.licenseDesc")} title={t("sidebar.license")}>
+            <button className="ghost license-link" onClick={() => setLicenseOpen(true)} type="button">
+              <FileText size={16} />
+              <span>{t("sidebar.license")}</span>
+            </button>
+          </HoverTip>
+          <HoverTip description={t("sidebar.quitDesc")} title={t("sidebar.quit")}>
+            <button className="ghost danger compact-danger" onClick={() => setQuitConfirmOpen(true)} type="button">
+              <Power size={16} />
+              <span>{t("sidebar.quit")}</span>
+            </button>
+          </HoverTip>
         </div>
       </aside>
 

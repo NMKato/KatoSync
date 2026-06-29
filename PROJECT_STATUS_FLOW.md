@@ -1,5 +1,16 @@
 # KatoSync Project Statusflow
 
+## 2026-06-29 - UX Welle 9: Erklaerungs-Tooltips + Hinweis-Fix (DONE)
+
+Projekt: KatoSync Desktop App
+Status: DONE — Nav/Fusszeile mit erklaerenden Tooltips; Bug im Sicherheitshinweis-Dialog behoben.
+
+- Erklaerungs-Tooltips (Nutzerwunsch): `HoverTip` in `src/components/Primitives.tsx` — erscheint nach ~650 ms Hover als gestyltes Overlay (Titel + ein Satz Erklaerung) rechts neben dem Element. Portal an `document.body` + `position:fixed`, weil `.app-shell` `overflow:hidden` hat (CSS-Tooltip wuerde clippen). `StepButton` bekommt optionales `description`; nativer `title` entfernt (kein Doppel-Tooltip), `aria-label` fuer Screenreader.
+- Verdrahtet: alle 6 Nav-Buttons (`nav.<id>.desc`) + Fusszeile (Praesentation/Lizenz/Beenden). i18n in allen 4 Sprachen (`nav.*.desc`, `sidebar.*Desc`). Locales je 399 Keys.
+- Fix (vorher, Commit 349671c): Hinweis-Dialog „Gefundene Dateien anzeigen" sprang auf `folders`->Einstellungen, aber `section-findings` existiert nur im Dashboard -> nichts sichtbar. Jetzt Sprung auf `dashboard` + Scroll per rAF/Timeout nach dem Mount (Panel ist dann gerendert).
+- tsc + Vite gruen. App gebaut + installiert. (Noch nicht als Release ausgeliefert — sammeln fuer beta.5.)
+
+
 ## 2026-06-29 - UX Welle 8: Skill-Generator (Persona -> KatoSync-Skill) (DONE)
 
 Projekt: KatoSync Desktop App

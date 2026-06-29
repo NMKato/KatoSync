@@ -3580,3 +3580,51 @@ pre {
 .skill-token-note {
   color: var(--warn, #ffc857);
 }
+
+/* ===== Erklaerungs-Tooltips (Nav + Fusszeile) ===== */
+.hovertip-wrap {
+  display: block;
+  min-width: 0;
+}
+.hovertip-wrap > button {
+  width: 100%;
+}
+.hovertip {
+  position: fixed;
+  transform: translateY(-50%);
+  z-index: 2000;
+  max-width: 264px;
+  padding: 9px 12px;
+  border-radius: var(--r-md, 10px);
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, 0.14));
+  background: var(--surface-raised, rgba(20, 24, 31, 0.98));
+  box-shadow: var(--e-2, 0 18px 42px rgba(0, 0, 0, 0.34));
+  color: var(--text, #f4f5f6);
+  pointer-events: none;
+  animation: hovertipIn 120ms ease both;
+}
+.hovertip strong {
+  display: block;
+  margin-bottom: 2px;
+  font-size: var(--fs-sm, 13px);
+}
+.hovertip span {
+  display: block;
+  font-size: var(--fs-label, 12px);
+  line-height: 1.4;
+  color: var(--text-muted, #9da7b3);
+}
+@keyframes hovertipIn {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+}
+:root[data-theme="light"] .hovertip {
+  background: #ffffff;
+  border-color: rgba(15, 23, 32, 0.14);
+}

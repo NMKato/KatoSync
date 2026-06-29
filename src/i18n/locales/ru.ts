@@ -390,7 +390,16 @@ const ru: Record<TKey, string> = {
   "skill.copied": "Скопировано ✓",
   "skill.empty": "Вставьте персону и нажмите «Сгенерировать» — результат появится здесь для копирования.",
   "skill.meta": "Contract v{version} · MCP: {mcp}",
-  "skill.tokenNote": "Примечание: токен connector помещается в конфигурацию connector в Mistral (Bearer), а НЕ в эту персону."
+  "skill.tokenNote": "Примечание: токен connector помещается в конфигурацию connector в Mistral (Bearer), а НЕ в эту персону.",
+  "nav.dashboard.desc": "Живой обзор: что выполняется сейчас, последний запуск и история.",
+  "nav.actionQueue.desc": "Планы агента проверяются локально, утверждаются или отклоняются — ничего не запускается автоматически.",
+  "nav.projectBoard.desc": "Планируйте утверждённые задачи по проектам и передавайте их в Codex.",
+  "nav.briefings.desc": "Читайте результаты Mistral, приоритизируйте и передавайте в Codex.",
+  "nav.settings.desc": "Доступ к Mistral, MCP, правила sync, план загрузок и генератор скиллов.",
+  "nav.logs.desc": "Журналы, подсказки и последние решения в одном месте.",
+  "sidebar.presentationDesc": "Маскирует токены, ID и e-mail для скриншотов и стримов.",
+  "sidebar.licenseDesc": "Показать лицензию и условия использования.",
+  "sidebar.quitDesc": "Полностью завершает KatoSync — без фоновой синхронизации."
 };
 
 export default ru;
