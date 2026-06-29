@@ -1,6 +1,6 @@
 export const licenseAgreement = {
-  version: "1.0.1",
-  updatedAt: "24. Juni 2026",
+  version: "2.0.0",
+  updatedAt: "29. Juni 2026",
   provider: "MK Heartbeat UG (haftungsbeschränkt)",
   contact: "info@mkheartbeat.de",
   title: "Lizenz- und Nutzungsvereinbarung für KatoSync",
@@ -46,6 +46,11 @@ export const licenseAgreement = {
       title: "8. Gewährleistung und Haftung",
       body:
         "KatoSync wird als Arbeitswerkzeug bereitgestellt. Erstelle eigene Backups und prüfe wichtige Ergebnisse selbst. Soweit gesetzlich zulässig, haftet MK Heartbeat nicht für Datenverlust, falsch konfigurierte Uploads, Drittanbieter-Ausfälle oder indirekte Schäden."
+    },
+    {
+      title: "9. KI-Assistenz und Transparenz (EU AI Act)",
+      body:
+        "Diese Software wurde teilweise mit Unterstützung von KI-Assistenz entwickelt. Zudem können von der App aufbereitete Briefings, Vorschläge und Code-Änderungen auf KI-generierten Inhalten beruhen. KI kann Fehler machen: Bitte überprüfe wichtige Ergebnisse, Code-Änderungen und Entscheidungen eigenständig, bevor du sie übernimmst oder weiterverwendest."
     }
   ],
   acceptance:

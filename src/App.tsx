@@ -211,11 +211,11 @@ export default function App() {
   const { t, lang, setLang } = useT();
   const workState = getWorkState(vm.busy, t);
   const WorkIcon = workState?.icon;
-  const activities = buildActivities(vm);
+  const activities = buildActivities(vm, t);
   const visibleStep = toVisibleStep(vm.activeStep);
   const page = pageCopy(visibleStep, t);
   const issueCount = getIssueCount(vm);
-  const hints = buildHints(vm);
+  const hints = buildHints(vm, t);
   const hintSignature = useMemo(() => buildHintSignature(hints), [hints]);
   const hasNewHints = issueCount > 0 && hintSignature !== acknowledgedHintSignature;
   // Eine Quelle der Wahrheit: identisch zur Setup-%-Berechnung im ViewModel (vm.setupGates).
@@ -390,7 +390,7 @@ export default function App() {
 
   if (showSplash) {
     return (
-      <div className="startup-splash" aria-label="KatoSync startet">
+      <div className="startup-splash" aria-label={t("shell.preparing")}>
         <img alt="" src="/katoos_icon_logo_trans.png" />
         <strong>KatoSync</strong>
         <span className="startup-tagline">Project Memory Uploader</span>
@@ -476,32 +476,32 @@ export default function App() {
             <h1>{page.title}</h1>
             <p>{page.text}</p>
           </div>
-          <div className="setup-strip" aria-label="Setup-Fortschritt">
+          <div className="setup-strip" aria-label={t("setup.progressAria")}>
             <div className="completion-head">
-              <span>Setup</span>
+              <span>{t("setup.title")}</span>
               <strong>{vm.completion}%</strong>
             </div>
             <div className="progress-track">
               <span style={{ width: `${vm.completion}%` }} />
             </div>
             <p>
-              Key {vm.keyStatus.exists ? "gespeichert" : "fehlt"} ·{" "}
-              {vm.launchStatus?.installed ? "Uploadplan aktiv" : "Uploadplan offen"}
+              {t("setup.keyLabel")} {vm.keyStatus.exists ? t("setup.keySaved") : t("setup.keyMissing")} ·{" "}
+              {vm.launchStatus?.installed ? t("setup.planActive") : t("setup.planOpen")}
             </p>
             {hasNewHints ? (
               <button className="issue-badge" onClick={() => setHintsOpen(true)} type="button">
                 <span className="issue-count">{issueCount}</span>
-                <span className="issue-label">Sicherheitshinweise</span>
+                <span className="issue-label">{t("setup.securityHints")}</span>
               </button>
             ) : null}
           </div>
           <div className="top-actions">
             <button
-              aria-label={theme === "dark" ? "Light-Mode aktivieren" : "Dark-Mode aktivieren"}
+              aria-label={theme === "dark" ? t("topbar.themeLight") : t("topbar.themeDark")}
               aria-pressed={theme === "light"}
               className={`theme-switch ${theme}`}
               onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-              title={theme === "dark" ? "Light-Mode aktivieren" : "Dark-Mode aktivieren"}
+              title={theme === "dark" ? t("topbar.themeLight") : t("topbar.themeDark")}
               type="button"
             >
               <Sun size={15} />
@@ -555,11 +555,11 @@ export default function App() {
             <section aria-labelledby="hint-title" aria-modal="true" className="hint-dialog" role="dialog">
               <header>
                 <div>
-                  <span className="section-label">Diagnose</span>
-                  <h2 id="hint-title">Sicherheitshinweise</h2>
-                  <p>Diese Hinweise bedeuten nicht, dass das Setup offen ist. KatoSync zeigt hier übersprungene Secret-Dateien oder Upload-Fehler.</p>
+                  <span className="section-label">{t("hint.sectionLabel")}</span>
+                  <h2 id="hint-title">{t("hint.title")}</h2>
+                  <p>{t("hint.intro")}</p>
                 </div>
-                <button aria-label="Hinweise schließen" className="icon-button" onClick={acknowledgeHints} type="button">
+                <button aria-label={t("hint.close")} className="icon-button" onClick={acknowledgeHints} type="button">
                   <X size={18} />
                 </button>
               </header>
@@ -583,7 +583,7 @@ export default function App() {
                   }}
                   type="button"
                 >
-                  Gefundene Dateien anzeigen
+                  {t("hint.showFiles")}
                 </button>
                 <button
                   className="secondary"
@@ -593,10 +593,10 @@ export default function App() {
                   }}
                   type="button"
                 >
-                  Sync-Regeln prüfen
+                  {t("hint.checkRules")}
                 </button>
                 <button className="ghost" onClick={acknowledgeHints} type="button">
-                  Schließen
+                  {t("hint.dismiss")}
                 </button>
               </footer>
             </section>
@@ -607,7 +607,7 @@ export default function App() {
           {visibleStep === "dashboard" ? <CockpitPanel vm={vm} runHistory={runHistory} /> : null}
 
           {visibleStep === "settings" ? (
-          <Panel className="settings-main-panel" id="section-api" title="Mistral Zugang" icon={<KeyRound size={18} />}>
+          <Panel className="settings-main-panel" id="section-api" title={t("settings.api.title")} icon={<KeyRound size={18} />}>
             <div
               className={`form-grid ${spotlightId === "section-api-fields" ? "spotlight-target spotlight-pad" : ""}`}
               id="section-api-fields"
@@ -616,7 +616,7 @@ export default function App() {
                 id="section-api-key"
                 className={spotlightId === "section-api-key" ? "spotlight-target spotlight-pad" : ""}
               >
-                API-Key
+                {t("settings.api.keyLabel")}
                 <div className="inline-input">
                   <input
                     onChange={(event) => vm.setKeyInput(event.target.value)}
@@ -624,7 +624,7 @@ export default function App() {
                     type="password"
                     value={vm.keyInput}
                   />
-                  <button disabled={Boolean(vm.busy)} onClick={vm.handleSaveKey} type="button" title="API-Key speichern">
+                  <button disabled={Boolean(vm.busy)} onClick={vm.handleSaveKey} type="button" title={t("settings.api.saveKeyTitle")}>
                     {vm.busy === "key" ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
                   </button>
                 </div>
@@ -633,7 +633,7 @@ export default function App() {
                 id="section-api-library"
                 className={spotlightId === "section-api-library" ? "spotlight-target spotlight-pad" : ""}
               >
-                Library ID
+                {t("settings.api.libraryIdLabel")}
                 <input
                   onChange={(event) => vm.updateConfig("libraryId", event.target.value)}
                   placeholder="mistral-library-id"
@@ -642,7 +642,7 @@ export default function App() {
                 />
               </label>
               <label>
-                Gerätename
+                {t("settings.api.deviceNameLabel")}
                 <input
                   onChange={(event) =>
                     vm.updateConfig("device", {
@@ -650,20 +650,20 @@ export default function App() {
                       deviceName: event.target.value
                     })
                   }
-                  placeholder="Arbeitslaptop"
+                  placeholder={t("settings.api.deviceNamePlaceholder")}
                   value={config.device.deviceName}
                 />
                 <span className="field-hint">
-                  Geräte-ID:{" "}
+                  {t("settings.api.deviceIdLabel")}{" "}
                   {config.device.deviceId
                     ? presentation
                       ? maskId(config.device.deviceId)
                       : config.device.deviceId
-                    : "wird automatisch erstellt"}
+                    : t("settings.api.deviceIdAuto")}
                 </span>
               </label>
               <label>
-                MCP Server
+                {t("settings.api.mcpServerLabel")}
                 <input
                   onChange={(event) =>
                     vm.updateConfig("mcp", {
@@ -675,23 +675,22 @@ export default function App() {
                   value={config.mcp.baseUrl}
                 />
                 <span className="field-hint">
-                  Basis-URL des Rückkanals — die App nutzt <code>/api</code>, deshalb hier OHNE <code>/mcp</code>.
-                  In Mistral denselben Server MIT <code>/mcp</code> eintragen: {config.mcp.baseUrl.replace(/\/+$/, "")}/mcp
+                  {t("settings.api.mcpServerHint", { url: config.mcp.baseUrl.replace(/\/+$/, "") })}
                 </span>
               </label>
               <label>
-                MCP Connector Token (manuell)
+                {t("settings.api.mcpTokenLabel")}
                 <div className="inline-input">
                   <input
                     onChange={(event) => vm.setMcpTokenInput(event.target.value)}
-                    placeholder={vm.mcpTokenStatus.masked || "Connector Token"}
+                    placeholder={vm.mcpTokenStatus.masked || t("settings.api.mcpTokenPlaceholder")}
                     type="password"
                     value={vm.mcpTokenInput}
                   />
                   <button
                     disabled={Boolean(vm.busy)}
                     onClick={vm.handleSaveMcpConnectorToken}
-                    title="MCP Token speichern"
+                    title={t("settings.api.saveMcpTokenTitle")}
                     type="button"
                   >
                     {vm.busy === "mcp-token" ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
@@ -702,15 +701,15 @@ export default function App() {
                 id="section-mcp-token"
                 className={spotlightId === "section-mcp-token" ? "spotlight-target spotlight-pad" : ""}
               >
-                KatoSync Login (Token automatisch erzeugen)
+                {t("settings.api.loginLabel")}
                 {vm.sessionStatus.loggedIn ? (
                   <div style={{ display: "grid", gap: 8 }}>
                     <span className="field-hint">
-                      Angemeldet als{" "}
-                      {presentation
-                        ? maskEmail(vm.sessionStatus.email)
-                        : vm.sessionStatus.email || "KatoOS-Konto"}
-                      .
+                      {t("settings.api.loggedInAs", {
+                        email: presentation
+                          ? maskEmail(vm.sessionStatus.email)
+                          : vm.sessionStatus.email || t("settings.api.accountFallback")
+                      })}
                     </span>
                     <div className="button-row">
                       <button
@@ -720,17 +719,16 @@ export default function App() {
                         type="button"
                       >
                         {vm.busy === "mint-token" ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}
-                        {vm.busy === "mint-token" ? "Generiere…" : "Connector-Token generieren"}
+                        {vm.busy === "mint-token" ? t("settings.api.generating") : t("settings.api.generateToken")}
                       </button>
                       <button className="ghost" disabled={Boolean(vm.busy)} onClick={vm.handleLogout} type="button">
-                        Abmelden
+                        {t("settings.api.logout")}
                       </button>
                     </div>
                     {vm.generatedToken ? (
                       <div style={{ display: "grid", gap: 6 }}>
                         <span className="field-hint" style={{ color: "#f59e0b" }}>
-                          Dein neuer Connector-Token — nur JETZT sichtbar. Kopieren und in Mistral eintragen
-                          (wird beim Minimieren/Tab-Wechsel ausgeblendet):
+                          {t("settings.api.newTokenWarning")}
                         </span>
                         <TokenReveal
                           token={vm.generatedToken}
@@ -738,7 +736,7 @@ export default function App() {
                           onCopy={vm.handleCopyToken}
                         />
                         <span className="field-hint">
-                          In Mistral Studio: MCP-Server {config.mcp.baseUrl.replace(/\/+$/, "")}/mcp manuell hinzufügen und diesen Token als Bearer hinterlegen.
+                          {t("settings.api.studioHint", { url: config.mcp.baseUrl.replace(/\/+$/, "") })}
                         </span>
                       </div>
                     ) : null}
@@ -748,7 +746,7 @@ export default function App() {
                     <input
                       autoComplete="username"
                       onChange={(event) => vm.setLoginEmail(event.target.value)}
-                      placeholder="E-Mail"
+                      placeholder={t("settings.api.emailPlaceholder")}
                       type="email"
                       value={vm.loginEmail}
                     />
@@ -758,7 +756,7 @@ export default function App() {
                       onKeyDown={(event) => {
                         if (event.key === "Enter") vm.handleLogin();
                       }}
-                      placeholder="Passwort"
+                      placeholder={t("settings.api.passwordPlaceholder")}
                       type="password"
                       value={vm.loginPassword}
                     />
@@ -770,7 +768,7 @@ export default function App() {
                         type="button"
                       >
                         {vm.busy === "login" ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}
-                        Anmelden
+                        {t("settings.api.login")}
                       </button>
                       <button
                         className="ghost"
@@ -779,14 +777,12 @@ export default function App() {
                         type="button"
                       >
                         {vm.busy === "register" ? <Loader2 className="spin" size={15} /> : null}
-                        Registrieren
+                        {t("settings.api.register")}
                       </button>
                     </div>
                   </div>
                 )}
-                <span className="field-hint">
-                  Mit E-Mail registrieren oder anmelden, dann Connector-Token automatisch erzeugen. Google folgt. Das Feld oben bleibt als manueller Fallback.
-                </span>
+                <span className="field-hint">{t("settings.api.loginHint")}</span>
               </label>
             </div>
             <div
@@ -795,15 +791,15 @@ export default function App() {
             >
               <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleTestConnection} type="button">
                 {vm.busy === "connection" ? <Loader2 className="spin" size={15} /> : null}
-                {vm.busy === "connection" ? "Test läuft" : "Verbindung testen"}
+                {vm.busy === "connection" ? t("settings.api.testRunning") : t("settings.api.testConnection")}
               </button>
               <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleTestLibrary} type="button">
                 {vm.busy === "library" ? <Loader2 className="spin" size={15} /> : null}
-                {vm.busy === "library" ? "Test läuft" : "Library testen"}
+                {vm.busy === "library" ? t("settings.api.testRunning") : t("settings.api.testLibrary")}
               </button>
               <button className="ghost danger" disabled={Boolean(vm.busy)} onClick={vm.handleDeleteKey} type="button">
                 <Trash2 size={15} />
-                Key löschen
+                {t("settings.api.deleteKey")}
               </button>
               <button
                 className="ghost danger"
@@ -812,7 +808,7 @@ export default function App() {
                 type="button"
               >
                 <Trash2 size={15} />
-                MCP Token löschen
+                {t("settings.api.deleteMcpToken")}
               </button>
             </div>
           </Panel>
@@ -831,7 +827,10 @@ export default function App() {
                     <div>
                       <strong>{metric.label}</strong>
                       <span>
-                        {metric.remaining ?? "unbekannt"} von {metric.limit ?? "unbekannt"} übrig
+                        {t("settings.quota.remaining", {
+                          remaining: metric.remaining ?? t("settings.quota.unknown"),
+                          limit: metric.limit ?? t("settings.quota.unknown")
+                        })}
                       </span>
                     </div>
                     <div className="quota-bar">
@@ -842,17 +841,11 @@ export default function App() {
               </div>
             ) : (
               <div className="quota-empty">
-                <strong>Noch nicht gemessen</strong>
-                <span>
-                  Nach Verbindungstest, Library-Test oder Upload zeigt KatoSync die von Mistral
-                  gelieferten Rate-Limit-Werte an.
-                </span>
+                <strong>{t("settings.quota.emptyTitle")}</strong>
+                <span>{t("settings.quota.emptyText")}</span>
               </div>
             )}
-            <p className="field-hint">
-              Free- und Scale-Limits ändern sich je Plan, Modell und Organisation. Deshalb liest
-              KatoSync Live-Header statt feste Zahlen zu raten.
-            </p>
+            <p className="field-hint">{t("settings.quota.hint")}</p>
           </Panel>
           ) : null}
 
@@ -860,7 +853,7 @@ export default function App() {
           <Panel
             className={spotlightId === "section-folders" ? "spotlight-target" : ""}
             id="section-folders"
-            title="Projektordner"
+            title={t("settings.folders.title")}
             icon={<FolderOpen size={18} />}
           >
             <div className="folder-list">
@@ -877,7 +870,7 @@ export default function App() {
                           config.sourceRoots.filter((item) => item !== root)
                         )
                       }
-                      title="Ordner entfernen"
+                      title={t("settings.folders.removeTitle")}
                       type="button"
                     >
                       <Trash2 size={14} />
@@ -885,16 +878,14 @@ export default function App() {
                   </div>
                 ))
               ) : (
-                <div className="empty-state">Noch kein Projektordner ausgewählt.</div>
+                <div className="empty-state">{t("settings.folders.empty")}</div>
               )}
             </div>
-            <p className="field-hint">
-              Browser-Demo: Pfad manuell eintragen. Desktop-App: Finder-Auswahl.
-            </p>
+            <p className="field-hint">{t("settings.folders.hint")}</p>
             <div className="button-row">
               <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleChooseFolders} type="button">
                 <FolderOpen size={15} />
-                Ordner auswählen
+                {t("settings.folders.choose")}
               </button>
               <button
                 className={vm.busy === "scan" ? "secondary busy-action" : "secondary"}
@@ -903,7 +894,7 @@ export default function App() {
                 type="button"
               >
                 <RefreshCcw className={vm.busy === "scan" ? "spin" : undefined} size={15} />
-                {vm.busy === "scan" ? "Scan läuft" : "Scan testen"}
+                {vm.busy === "scan" ? t("settings.folders.scanRunning") : t("settings.folders.scanTest")}
               </button>
             </div>
           </Panel>
@@ -913,39 +904,39 @@ export default function App() {
           <Panel
             className={spotlightId === "section-rules" ? "spotlight-target" : ""}
             id="section-rules"
-            title="Sync-Regeln"
+            title={t("settings.rules.title")}
             icon={<ListChecks size={18} />}
           >
             <div className="switch-grid">
               <Toggle
                 checked={config.scanRules.includeMemory}
-                label="Memory-Dateien"
+                label={t("settings.rules.includeMemory")}
                 onChange={(checked) => vm.updateNested("scanRules", { includeMemory: checked })}
               />
               <Toggle
                 checked={config.scanRules.includeRoadmaps}
-                label="Roadmaps"
+                label={t("settings.rules.includeRoadmaps")}
                 onChange={(checked) => vm.updateNested("scanRules", { includeRoadmaps: checked })}
               />
               <Toggle
                 checked={config.scanRules.includeTasks}
-                label="Tasks/Todos"
+                label={t("settings.rules.includeTasks")}
                 onChange={(checked) => vm.updateNested("scanRules", { includeTasks: checked })}
               />
               <Toggle
                 checked={config.safety.secretScanEnabled}
-                label="Secret-Scanner"
+                label={t("settings.rules.secretScanner")}
                 onChange={(checked) => vm.updateNested("safety", { secretScanEnabled: checked })}
               />
               <Toggle
                 checked={config.scanRules.uploadIndividualStatusFiles}
-                label="Einzeldateien optional"
+                label={t("settings.rules.individualOptional")}
                 onChange={(checked) => vm.updateNested("scanRules", { uploadIndividualStatusFiles: checked })}
               />
             </div>
             <div className="range-row">
               <label>
-                Max. Dateigröße
+                {t("settings.rules.maxFileSize")}
                 <input
                   max={50}
                   min={1}
@@ -958,7 +949,7 @@ export default function App() {
                 <span>{config.scanRules.maxFileSizeMb} MB</span>
               </label>
               <label>
-                Einzel-Uploads
+                {t("settings.rules.individualUploads")}
                 <input
                   max={20}
                   min={0}
@@ -977,17 +968,17 @@ export default function App() {
           <Panel
             className={spotlightId === "section-schedule" ? "spotlight-target" : ""}
             id="section-schedule"
-            title="Lokaler Uploadplan"
+            title={t("settings.schedule.title")}
             icon={<Clock3 size={18} />}
           >
             <div className="schedule-row">
               <Toggle
                 checked={config.schedule.enabled}
-                label="Automatischer Upload"
+                label={t("settings.schedule.autoUpload")}
                 onChange={(checked) => vm.updateNested("schedule", { enabled: checked })}
               />
               <label>
-                Uhrzeit
+                {t("settings.schedule.time")}
                 <input
                   onChange={(event) => {
                     const [hour, minute] = event.target.value.split(":").map(Number);
@@ -1024,15 +1015,15 @@ export default function App() {
             <div className="button-row">
               <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleLaunchInstall} type="button">
                 {vm.busy === "launch" ? <Loader2 className="spin" size={15} /> : null}
-                {vm.busy === "launch" ? "Wird installiert" : "LaunchAgent installieren"}
+                {vm.busy === "launch" ? t("settings.schedule.installing") : t("settings.schedule.installAgent")}
               </button>
               <button className="ghost" disabled={Boolean(vm.busy)} onClick={vm.handleLaunchRemove} type="button">
-                LaunchAgent entfernen
+                {t("settings.schedule.removeAgent")}
               </button>
             </div>
             <StatusLine
               good={Boolean(vm.launchStatus?.installed && vm.launchStatus.loaded)}
-              text={vm.launchStatus?.message || "Status unbekannt"}
+              text={vm.launchStatus?.message || t("settings.schedule.statusUnknown")}
             />
           </Panel>
           ) : null}
@@ -1041,7 +1032,7 @@ export default function App() {
           <Panel
             className={`table-panel ${spotlightId === "section-findings" ? "spotlight-target" : ""}`}
             id="section-findings"
-            title="Gefundene Dateien"
+            title={t("dashboard.findings.title")}
             icon={<Database size={18} />}
           >
             <FindingsTable scan={vm.scan ?? vm.report?.scan ?? null} />
@@ -1049,11 +1040,9 @@ export default function App() {
           ) : null}
 
           {visibleStep === "dashboard" ? (
-          <Panel className="run-panel" id="section-sync" title="Sync ausführen" icon={<UploadCloud size={18} />}>
+          <Panel className="run-panel" id="section-sync" title={t("dashboard.sync.title")} icon={<UploadCloud size={18} />}>
             <p className="field-hint">
-              {config.schedule.enabled
-                ? "Automatischer Upload ist aktiv. Dieser Button startet nur einen zusätzlichen Sofortlauf."
-                : "Ohne Uploadplan startest du den Sync manuell. Mit aktivem Uploadplan läuft KatoSync zur gewählten Zeit automatisch."}
+              {config.schedule.enabled ? t("dashboard.sync.hintAuto") : t("dashboard.sync.hintManual")}
             </p>
             <div
               className={`button-stack ${spotlightId === "section-sync-actions" ? "spotlight-target spotlight-pad" : ""}`}
@@ -1067,10 +1056,10 @@ export default function App() {
               >
                 {vm.busy === "sync" ? <Loader2 className="spin" size={16} /> : <UploadCloud size={16} />}
                 {vm.busy === "sync"
-                  ? "Sync läuft"
+                  ? t("dashboard.sync.running")
                   : config.schedule.enabled
-                    ? "Jetzt zusätzlich synchronisieren"
-                    : "Jetzt synchronisieren"}
+                    ? t("dashboard.sync.runNowAdditional")
+                    : t("dashboard.sync.runNow")}
               </button>
               <button
                 className={vm.busy === "dry-run" ? "secondary busy-action" : "secondary"}
@@ -1079,21 +1068,25 @@ export default function App() {
                 type="button"
               >
                 {vm.busy === "dry-run" ? <Loader2 className="spin" size={16} /> : <FileCheck2 size={16} />}
-                {vm.busy === "dry-run" ? "Testlauf läuft" : "Testlauf ohne Upload"}
+                {vm.busy === "dry-run" ? t("dashboard.sync.dryRunning") : t("dashboard.sync.dryRun")}
               </button>
               <button className="secondary" disabled={Boolean(vm.busy)} onClick={() => void vm.openOutputDir()} type="button">
-                Output öffnen
+                {t("dashboard.sync.openOutput")}
               </button>
             </div>
             <StatusLine
               good={!vm.report?.errors.length}
-              text={vm.report ? `${vm.report.currentFiles.length} CURRENT-Dateien erzeugt` : "Noch kein Lauf"}
+              text={
+                vm.report
+                  ? t("dashboard.sync.currentFilesCreated", { count: vm.report.currentFiles.length })
+                  : t("dashboard.sync.noRun")
+              }
             />
           </Panel>
           ) : null}
 
           {visibleStep === "logs" ? (
-          <Panel id="section-activities" className="logs-panel" title="Aktivitäten" icon={<TerminalSquare size={18} />}>
+          <Panel id="section-activities" className="logs-panel" title={t("logs.title")} icon={<TerminalSquare size={18} />}>
             <div className="activity-list">
               {activities.map((item) => (
                 <div className={`activity-item ${item.kind}`} key={item.text}>
@@ -1108,10 +1101,10 @@ export default function App() {
             <div className="button-row">
               <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleLogs} type="button">
                 {vm.busy === "logs" ? <Loader2 className="spin" size={15} /> : null}
-                {vm.busy === "logs" ? "Logs werden geladen" : "Logs laden"}
+                {vm.busy === "logs" ? t("logs.loading") : t("logs.load")}
               </button>
             </div>
-            <pre>{vm.logs || "Noch keine Logs geladen."}</pre>
+            <pre>{vm.logs || t("logs.empty")}</pre>
           </Panel>
           ) : null}
 
@@ -1172,7 +1165,7 @@ export default function App() {
         >
           <section aria-labelledby="quit-title" aria-modal="true" className="quit-dialog" role="dialog">
             <button
-              aria-label="Dialog schließen"
+              aria-label={t("app.quit.closeAria")}
               className="icon-button quit-close"
               onClick={() => setQuitConfirmOpen(false)}
               type="button"
@@ -1182,23 +1175,17 @@ export default function App() {
             <div className="quit-icon">
               <Power size={22} />
             </div>
-            <span className="section-label">Programm beenden</span>
-            <h2 id="quit-title">KatoSync wirklich komplett beenden?</h2>
-            <p>
-              Wenn du hier beendest, läuft KatoSync nicht mehr im Hintergrund und es werden keine
-              automatischen Uploads aus dieser App gestartet.
-            </p>
-            <p>
-              Wenn KatoSync weiter automatisch synchronisieren soll, schließe lieber das Fenster mit
-              dem X oben. Dann wird die App nur ausgeblendet und bleibt im Hintergrund aktiv.
-            </p>
+            <span className="section-label">{t("app.quit.label")}</span>
+            <h2 id="quit-title">{t("app.quit.confirmTitle")}</h2>
+            <p>{t("app.quit.body1")}</p>
+            <p>{t("app.quit.body2")}</p>
             <footer>
               <button className="secondary" onClick={() => setQuitConfirmOpen(false)} type="button">
-                Abbrechen
+                {t("app.quit.cancel")}
               </button>
               <button className="ghost danger quit-confirm" onClick={vm.handleQuitApp} type="button">
                 <Power size={16} />
-                Trotzdem beenden
+                {t("app.quit.confirm")}
               </button>
             </footer>
           </section>
@@ -1364,6 +1351,7 @@ function ActionQueuePanel({
   vm: ReturnType<typeof useKatoSyncViewModel>;
   expanded?: boolean;
 }) {
+  const { t } = useT();
   const visiblePlans = vm.actionPlans.filter(isOpenActionPlan);
   const pendingCount = visiblePlans.length;
 
@@ -1371,17 +1359,17 @@ function ActionQueuePanel({
     <Panel
       className={expanded ? "queue-panel action-queue-full" : "queue-panel"}
       id="section-action-queue"
-      title="Action Queue"
+      title={t("queue.title")}
       icon={<ClipboardList size={18} />}
     >
       <div className="queue-summary">
         <div>
           <strong>{pendingCount}</strong>
-          <span>Pläne warten auf lokale Prüfung</span>
+          <span>{t("queue.pendingLabel")}</span>
         </div>
         <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleRefreshActionPlans} type="button">
           {vm.busy === "action-plans" ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
-          Aktualisieren
+          {t("queue.refresh")}
         </button>
       </div>
 
@@ -1394,10 +1382,13 @@ function ActionQueuePanel({
                   <span className="agent-name">{plan.agentName}</span>
                   <strong>{formatPlanTitle(plan)}</strong>
                   <small>
-                    {plan.createdAt} · {plan.executionMode === "sequential" ? "sequenziell" : "manuell"}
+                    {plan.createdAt} ·{" "}
+                    {plan.executionMode === "sequential"
+                      ? t("queue.executionSequential")
+                      : t("queue.executionManual")}
                   </small>
                 </div>
-                <span className={`risk-pill ${plan.riskLevel}`}>{riskLabel(plan.riskLevel)}</span>
+                <span className={`risk-pill ${plan.riskLevel}`}>{riskLabel(plan.riskLevel, t)}</span>
               </header>
               <ol>
                 {plan.tasks
@@ -1410,7 +1401,7 @@ function ActionQueuePanel({
                       <div>
                         <strong>{task.title}</strong>
                         <small>
-                          {runnerLabel(task.targetRunner)} · {task.projectId}
+                          {runnerLabel(task.targetRunner, t)} · {task.projectId}
                         </small>
                       </div>
                       {task.targetRunner === "codex_cli" ? (
@@ -1418,7 +1409,7 @@ function ActionQueuePanel({
                           className="ghost"
                           disabled={Boolean(vm.busy)}
                           onClick={() => void vm.handleRunCodexForTask(plan, task)}
-                          title="An Codex übergeben"
+                          title={t("queue.handToCodex")}
                           type="button"
                         >
                           {vm.busy === "codex-run" ? (
@@ -1439,7 +1430,7 @@ function ActionQueuePanel({
                   onClick={() => void vm.handleReviewActionPlan(plan.planId)}
                   type="button"
                 >
-                  Prüfen
+                  {t("queue.review")}
                 </button>
                 <button
                   className="secondary"
@@ -1448,7 +1439,7 @@ function ActionQueuePanel({
                   type="button"
                 >
                   <PlayCircle size={15} />
-                  Tagesplan freigeben
+                  {t("queue.releaseDayPlan")}
                 </button>
                 <button
                   className="ghost danger"
@@ -1456,10 +1447,10 @@ function ActionQueuePanel({
                   onClick={() => void vm.handleRejectActionPlan(plan.planId)}
                   type="button"
                 >
-                  Ablehnen
+                  {t("queue.reject")}
                 </button>
               </footer>
-              <StatusLine good={plan.status === "approved"} text={planStatusLabel(plan.status)} />
+              <StatusLine good={plan.status === "approved"} text={planStatusLabel(plan.status, t)} />
             </article>
           ))}
         </div>
@@ -1467,11 +1458,8 @@ function ActionQueuePanel({
         <div className="queue-empty">
           <CheckCircle2 size={18} />
           <div>
-            <strong>Keine offenen Action Plans</strong>
-            <span>
-              Freigegebene oder abgelehnte Pläne findest du in den Aktivitäten. Neue Pläne
-              erscheinen hier nach dem nächsten Mistral-Run.
-            </span>
+            <strong>{t("queue.emptyTitle")}</strong>
+            <span>{t("queue.emptyText")}</span>
           </div>
         </div>
       )}
@@ -1480,6 +1468,7 @@ function ActionQueuePanel({
 }
 
 function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const { t } = useT();
   const groups = vm.boardGroups;
   const totalTasks = groups.reduce((sum, group) => sum + group.tasks.length, 0);
   const hasExecuted = groups.some((group) => group.tasks.some((task) => task.status === "executed"));
@@ -1488,15 +1477,13 @@ function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel>
     <Panel
       className="queue-panel board-panel"
       id="section-project-board"
-      title="Projekt-Board"
+      title={t("board.title")}
       icon={<LayoutGrid size={18} />}
     >
       <div className="queue-summary">
         <div>
-          <strong>
-            {vm.dailyCount} von {vm.boardDailyLimit}
-          </strong>
-          <span>Codex-Läufe heute · {vm.boardSelection.length} ausgewählt</span>
+          <strong>{t("board.runsCounter", { count: vm.dailyCount, limit: vm.boardDailyLimit })}</strong>
+          <span>{t("board.runsToday", { count: vm.boardSelection.length })}</span>
         </div>
         <div className="board-head-actions">
           {hasExecuted ? (
@@ -1504,11 +1491,11 @@ function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel>
               className="secondary"
               disabled={Boolean(vm.busy) || vm.queueRunning}
               onClick={() => void vm.handleCheckCompletions(true)}
-              title="Ausgeführte Aufgaben gegen GitHub prüfen (gemerged → erledigt)"
+              title={t("board.checkMergeStatusTitle")}
               type="button"
             >
               {vm.busy === "check-completions" ? <Loader2 className="spin" size={15} /> : <CheckCircle2 size={15} />}
-              Merge-Status prüfen
+              {t("board.checkMergeStatus")}
             </button>
           ) : null}
           <button
@@ -1518,7 +1505,7 @@ function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel>
             type="button"
           >
             {vm.busy === "action-plans" ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
-            Aktualisieren
+            {t("board.refresh")}
           </button>
         </div>
       </div>
@@ -1526,9 +1513,9 @@ function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel>
       {vm.queueRunning ? (
         <div className="board-running">
           <Loader2 className="spin" size={15} />
-          <span>Codex-Queue läuft. Aufgaben werden nacheinander ausgeführt.</span>
+          <span>{t("board.queueRunning")}</span>
           <button className="ghost" onClick={vm.handleStopBoardQueue} type="button">
-            <StopCircle size={14} /> Stoppen
+            <StopCircle size={14} /> {t("board.stop")}
           </button>
         </div>
       ) : null}
@@ -1548,8 +1535,8 @@ function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel>
               <section className="board-column" key={group.projectId}>
                 <header className="board-column-head">
                   <div>
-                    <strong>{projectLabel(group.projectId)}</strong>
-                    <small>{group.tasks.length} Aufgabe(n)</small>
+                    <strong>{projectLabel(group.projectId, t)}</strong>
+                    <small>{t("board.taskCount", { count: group.tasks.length })}</small>
                   </div>
                   <button
                     className="secondary"
@@ -1560,10 +1547,10 @@ function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel>
                       vm.dailyCount >= vm.boardDailyLimit
                     }
                     onClick={() => void vm.handleStartBoardQueue(group.projectId)}
-                    title="Ausgewählte Codex-Aufgaben dieses Projekts sequenziell ausführen"
+                    title={t("board.startQueueTitle")}
                     type="button"
                   >
-                    <PlayCircle size={14} /> Queue starten
+                    <PlayCircle size={14} /> {t("board.startQueue")}
                   </button>
                 </header>
                 <div className="board-column-body">
@@ -1579,11 +1566,8 @@ function ProjectBoardPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel>
         <div className="queue-empty">
           <CheckCircle2 size={18} />
           <div>
-            <strong>Keine offenen Aufgaben</strong>
-            <span>
-              Gib in der Action Queue einen Plan frei – seine Aufgaben erscheinen dann hier nach
-              Projekt gruppiert und lassen sich einplanen.
-            </span>
+            <strong>{t("board.emptyTitle")}</strong>
+            <span>{t("board.emptyHint")}</span>
           </div>
         </div>
       )}
@@ -1598,6 +1582,7 @@ function BoardTaskCard({
   vm: ReturnType<typeof useKatoSyncViewModel>;
   task: BoardTask;
 }) {
+  const { t } = useT();
   const disabled = Boolean(vm.busy) || vm.queueRunning;
   const isCurrent = vm.currentQueueTaskId === task.taskId;
   const canCodex = task.approved && task.targetRunner === "codex_cli" && task.riskLevel !== "critical";
@@ -1611,35 +1596,31 @@ function BoardTaskCard({
           <strong>{task.title}</strong>
           <small>{task.source}</small>
         </div>
-        <span className={`status-pill ${task.status}`}>{taskStatusLabel(task.status)}</span>
+        <span className={`status-pill ${task.status}`}>{taskStatusLabel(task.status, t)}</span>
       </header>
       <div className="board-pills">
-        <span className={`risk-pill ${task.riskLevel}`}>{riskLabel(task.riskLevel)}</span>
-        <span className="status-pill neutral">{runnerLabel(task.targetRunner)}</span>
+        <span className={`risk-pill ${task.riskLevel}`}>{riskLabel(task.riskLevel, t)}</span>
+        <span className="status-pill neutral">{runnerLabel(task.targetRunner, t)}</span>
         {isCurrent ? (
           <span className="status-pill running">
-            <Loader2 className="spin" size={12} /> Läuft
+            <Loader2 className="spin" size={12} /> {t("board.running")}
           </span>
         ) : null}
       </div>
       {task.summary ? <p className="board-summary">{task.summary}</p> : null}
 
-      {!task.approved ? (
-        <StatusLine good={false} text="Plan in der Action Queue freigeben, um diese Aufgabe auszuführen." />
-      ) : null}
-      {task.riskLevel === "critical" ? (
-        <StatusLine good={false} text="Kritische Aufgabe – nur manuelle Bearbeitung, kein automatischer Codex-Lauf." />
-      ) : null}
+      {!task.approved ? <StatusLine good={false} text={t("board.statusNeedApproval")} /> : null}
+      {task.riskLevel === "critical" ? <StatusLine good={false} text={t("board.statusCritical")} /> : null}
       {task.status === "executed" ? (
         <StatusLine
           good={false}
-          text={task.prUrl ? "Ausgeführt – PR offen, wartet auf Merge." : "Ausgeführt – wartet auf Verifikation."}
+          text={task.prUrl ? t("board.statusExecutedPrOpen") : t("board.statusExecutedWaiting")}
         />
       ) : null}
       {task.status === "executed" && task.prUrl ? (
         <div className="board-pr">
           <a href={task.prUrl} target="_blank" rel="noreferrer">
-            Pull Request ansehen
+            {t("board.viewPullRequest")}
           </a>
         </div>
       ) : null}
@@ -1651,20 +1632,20 @@ function BoardTaskCard({
               className="secondary"
               disabled={disabled}
               onClick={() => void vm.handleCheckTaskCompletion(task)}
-              title="PR-/Merge-Status prüfen"
+              title={t("board.checkStatusTitle")}
               type="button"
             >
               {vm.busy === "check-completions" ? <Loader2 className="spin" size={14} /> : <RefreshCcw size={14} />}
-              Status prüfen
+              {t("board.checkStatus")}
             </button>
             <button
               className="secondary"
               disabled={disabled}
               onClick={() => void vm.handleMarkTaskDone(task.taskId)}
-              title="Manuell als erledigt markieren"
+              title={t("board.markDoneTitle")}
               type="button"
             >
-              <CheckCircle2 size={14} /> Erledigt
+              <CheckCircle2 size={14} /> {t("board.done")}
             </button>
             <button
               className="ghost danger"
@@ -1672,7 +1653,7 @@ function BoardTaskCard({
               onClick={() => void vm.handleRejectTask(task.taskId)}
               type="button"
             >
-              Verworfen
+              {t("board.discarded")}
             </button>
           </>
         ) : task.status === "deferred" ? (
@@ -1682,7 +1663,7 @@ function BoardTaskCard({
             onClick={() => void vm.handleResumeTask(task.taskId)}
             type="button"
           >
-            <RotateCcw size={14} /> Wieder einplanen
+            <RotateCcw size={14} /> {t("board.reschedule")}
           </button>
         ) : (
           <>
@@ -1693,7 +1674,7 @@ function BoardTaskCard({
               type="button"
             >
               {task.selected ? <CheckSquare size={14} /> : <Square size={14} />}
-              {task.selected ? "Ausgewählt" : "Auswählen"}
+              {task.selected ? t("board.selected") : t("board.select")}
             </button>
             {task.selected ? (
               <>
@@ -1701,7 +1682,7 @@ function BoardTaskCard({
                   className="ghost"
                   disabled={disabled}
                   onClick={() => vm.handleReorderTask(task.taskId, "up")}
-                  title="Nach oben"
+                  title={t("board.moveUp")}
                   type="button"
                 >
                   <ChevronUp size={14} />
@@ -1710,7 +1691,7 @@ function BoardTaskCard({
                   className="ghost"
                   disabled={disabled}
                   onClick={() => vm.handleReorderTask(task.taskId, "down")}
-                  title="Nach unten"
+                  title={t("board.moveDown")}
                   type="button"
                 >
                   <ChevronDown size={14} />
@@ -1723,18 +1704,18 @@ function BoardTaskCard({
               onClick={() => void vm.handleDeferTask(task.taskId)}
               type="button"
             >
-              Aufschieben
+              {t("board.defer")}
             </button>
             {canCodex && plan ? (
               <button
                 className="secondary"
                 disabled={disabled}
                 onClick={() => void vm.handleRunCodexForTask(plan, task)}
-                title="An Codex übergeben"
+                title={t("board.handToCodexTitle")}
                 type="button"
               >
                 {vm.busy === "codex-run" ? <Loader2 className="spin" size={14} /> : <PlayCircle size={14} />}
-                An Codex übergeben
+                {t("board.handToCodex")}
               </button>
             ) : null}
             <button
@@ -1743,7 +1724,7 @@ function BoardTaskCard({
               onClick={() => void vm.handleRejectTask(task.taskId)}
               type="button"
             >
-              Ablehnen
+              {t("board.reject")}
             </button>
           </>
         )}
@@ -1753,6 +1734,7 @@ function BoardTaskCard({
 }
 
 function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const { t } = useT();
   const visibleBriefings = useMemo(
     () => vm.briefings.filter((briefing) => briefing.status !== "archived"),
     [vm.briefings]
@@ -1769,15 +1751,15 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
 
   return (
     <div className="briefings-page" id="section-briefings">
-      <Panel className="briefing-list-panel" title="Briefing-Eingang" icon={<BookOpenText size={18} />}>
+      <Panel className="briefing-list-panel" title={t("briefings.inbox.title")} icon={<BookOpenText size={18} />}>
         <div className="queue-summary">
           <div>
             <strong>{visibleBriefings.filter((briefing) => briefing.status === "new").length}</strong>
-            <span>neue Briefings</span>
+            <span>{t("briefings.inbox.newCount")}</span>
           </div>
           <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleRefreshBriefings} type="button">
             {vm.busy === "briefings" ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
-            Aktualisieren
+            {t("briefings.inbox.refresh")}
           </button>
         </div>
 
@@ -1794,8 +1776,8 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
                 <strong>{briefing.title}</strong>
                 <small>{briefing.createdAt}</small>
                 <div>
-                  <span className={`priority-pill ${briefing.priority}`}>{briefingPriorityLabel(briefing.priority)}</span>
-                  <span className={`status-pill ${briefing.status}`}>{briefingStatusLabel(briefing.status)}</span>
+                  <span className={`priority-pill ${briefing.priority}`}>{briefingPriorityLabel(briefing.priority, t)}</span>
+                  <span className={`status-pill ${briefing.status}`}>{briefingStatusLabel(briefing.status, t)}</span>
                 </div>
               </button>
             ))
@@ -1803,8 +1785,8 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
             <div className="queue-empty">
               <CheckCircle2 size={18} />
               <div>
-                <strong>Keine Briefings</strong>
-                <span>Neue Mistral-Ergebnisse erscheinen hier, sobald der MCP-Rückkanal sie liefert.</span>
+                <strong>{t("briefings.empty.title")}</strong>
+                <span>{t("briefings.empty.hint")}</span>
               </div>
             </div>
           )}
@@ -1820,7 +1802,7 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
                 <h2>{selected.title}</h2>
                 <p>{selected.createdAt} · {selected.source}</p>
               </div>
-              <span className={`priority-pill ${selected.priority}`}>{briefingPriorityLabel(selected.priority)}</span>
+              <span className={`priority-pill ${selected.priority}`}>{briefingPriorityLabel(selected.priority, t)}</span>
             </header>
             <p className="briefing-summary">{selected.summary}</p>
             <div className="briefing-body markdown-body">
@@ -1828,7 +1810,7 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
             </div>
             {selected.suggestedAction ? (
               <div className="suggested-action">
-                <span className="section-label">Vorgeschlagene Aktion</span>
+                <span className="section-label">{t("briefings.reader.suggestedAction")}</span>
                 <p>{selected.suggestedAction}</p>
               </div>
             ) : null}
@@ -1840,7 +1822,7 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
                 type="button"
               >
                 <CheckCircle2 size={15} />
-                Annehmen
+                {t("briefings.reader.accept")}
               </button>
               <button
                 className="primary"
@@ -1849,7 +1831,7 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
                 type="button"
               >
                 {vm.busy === "codex-run" ? <Loader2 className="spin" size={15} /> : <PlayCircle size={15} />}
-                An Codex übergeben
+                {t("briefings.reader.handToCodex")}
               </button>
               <button
                 className="ghost danger"
@@ -1857,19 +1839,19 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
                 onClick={() => void vm.handleRejectBriefing(selected.briefingId)}
                 type="button"
               >
-                Ablehnen
+                {t("briefings.reader.reject")}
               </button>
             </footer>
             {vm.busy === "codex-run" ? (
               <div className="codex-running">
                 <Loader2 className="spin" size={16} />
-                <span>Codex läuft …</span>
+                <span>{t("briefings.reader.codexRunning")}</span>
                 <div className="codex-bar" />
               </div>
             ) : null}
           </article>
         ) : (
-          <div className="empty-state">Wähle ein Briefing aus der Liste.</div>
+          <div className="empty-state">{t("briefings.reader.emptyState")}</div>
         )}
       </Panel>
     </div>
@@ -1877,39 +1859,36 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
 }
 
 function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const { t } = useT();
   const run = vm.codexRun;
   const result = run.result;
   return (
     <Panel className="codex-panel" title="Codex Bridge" icon={<TerminalSquare size={18} />}>
-      <p>
-        Freigegebene Aufgaben werden lokal von der Codex-CLI ausgeführt — auf einem eigenen Branch
-        (von main abgezweigt), mit Auto-Commit. Nichts wird automatisch in main gemergt; du prüfst den
-        Branch bzw. Pull Request und mergst selbst.
-      </p>
+      <p>{t("codex.intro.description")}</p>
       {vm.config ? (
         <div className="switch-grid" style={{ marginBottom: 6 }}>
           <Toggle
             checked={vm.config.codexAutoPush}
-            label="Branch nach Lauf pushen"
+            label={t("codex.toggle.pushBranch")}
             onChange={(checked) => vm.updateConfig("codexAutoPush", checked)}
           />
           <Toggle
             checked={vm.config.codexCreatePr}
-            label="Pull Request erstellen"
+            label={t("codex.toggle.createPr")}
             onChange={(checked) => vm.updateConfig("codexCreatePr", checked)}
           />
         </div>
       ) : null}
       <p className="field-hint" style={{ marginTop: -2 }}>
-        Änderungen an diesen Schaltern erst mit „Einstellungen speichern" übernehmen.
+        {t("codex.toggle.saveHint")}
       </p>
       {vm.config && Object.keys(vm.config.projectRepos ?? {}).length ? (
         <div className="project-repo-list">
-          <strong className="section-label">Gemerkte Projekt-Ordner</strong>
+          <strong className="section-label">{t("codex.projectRepos.title")}</strong>
           {Object.entries(vm.config.projectRepos).map(([projectId, path]) => (
             <div className="project-repo-row" key={projectId}>
               <div>
-                <strong>{projectLabel(projectId)}</strong>
+                <strong>{projectLabel(projectId, t)}</strong>
                 <span className="field-hint">{path}</span>
               </div>
               <button
@@ -1918,7 +1897,7 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
                 onClick={() => void vm.handleForgetProjectRepo(projectId)}
                 type="button"
               >
-                Ordner vergessen
+                {t("codex.projectRepos.forget")}
               </button>
             </div>
           ))}
@@ -1927,16 +1906,16 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
       {run.status === "idle" ? (
         <div className="codex-bridge-list">
           <div>
-            <strong>So startest du</strong>
-            <span>In der Action Queue „Codex" pro Task, oder in einem Briefing „An Codex übergeben".</span>
+            <strong>{t("codex.howto.title")}</strong>
+            <span>{t("codex.howto.text")}</span>
           </div>
           <div>
-            <strong>Sicherheit</strong>
-            <span>Eigener Branch, Sandbox, Audit. Kritische Aufgaben werden nicht automatisch ausgeführt.</span>
+            <strong>{t("codex.safety.title")}</strong>
+            <span>{t("codex.safety.text")}</span>
           </div>
           <div>
-            <strong>Wirtschaftlich</strong>
-            <span>Läuft über deinen Codex/ChatGPT-Login — keine zusätzlichen API-Kosten.</span>
+            <strong>{t("codex.economy.title")}</strong>
+            <span>{t("codex.economy.text")}</span>
           </div>
         </div>
       ) : (
@@ -1945,10 +1924,10 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
             good={run.status === "completed"}
             text={
               run.status === "running"
-                ? "Codex läuft … (kann 1–2 Minuten dauern)"
+                ? t("codex.status.running")
                 : run.status === "completed"
-                  ? "Codex-Lauf abgeschlossen."
-                  : `Codex-Lauf fehlgeschlagen${run.error ? `: ${run.error}` : ""}.`
+                  ? t("codex.status.completed")
+                  : t("codex.status.failed", { error: run.error ? `: ${run.error}` : "" })
             }
           />
           {run.status === "running" ? <div className="codex-bar" style={{ marginTop: 12 }} /> : null}
@@ -1965,37 +1944,37 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
           {result ? (
             <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
               <div>
-                <strong>Branch:</strong> {result.branch}
+                <strong>{t("codex.result.branch")}</strong> {result.branch}
               </div>
               {result.commit ? (
                 <div>
-                  <strong>Commit:</strong> {result.commit.slice(0, 12)}
+                  <strong>{t("codex.result.commit")}</strong> {result.commit.slice(0, 12)}
                 </div>
               ) : null}
               <div>
-                <strong>Push:</strong>{" "}
-                {result.pushed ? "Branch auf GitHub gepusht ✓" : "nicht gepusht (lokal)"}
+                <strong>{t("codex.result.push")}</strong>{" "}
+                {result.pushed ? t("codex.result.pushed") : t("codex.result.notPushed")}
               </div>
               {result.prUrl ? (
                 <div>
-                  <strong>Pull Request:</strong>{" "}
+                  <strong>{t("codex.result.pullRequest")}</strong>{" "}
                   <a href={result.prUrl} target="_blank" rel="noreferrer">
                     {result.prUrl}
                   </a>
                 </div>
               ) : result.branchUrl ? (
                 <div>
-                  <strong>Branch:</strong>{" "}
+                  <strong>{t("codex.result.branch")}</strong>{" "}
                   <a href={result.branchUrl} target="_blank" rel="noreferrer">
-                    auf GitHub ansehen
+                    {t("codex.result.viewOnGithub")}
                   </a>
                 </div>
               ) : null}
               <div>
-                <strong>Run-Ordner:</strong> <span className="field-hint">{result.runDir}</span>
+                <strong>{t("codex.result.runDir")}</strong> <span className="field-hint">{result.runDir}</span>
               </div>
               <div>
-                <strong>Geänderte Dateien ({result.changedFiles.length}):</strong>
+                <strong>{t("codex.result.changedFiles", { count: result.changedFiles.length })}</strong>
               </div>
               {result.changedFiles.length ? (
                 <ul style={{ margin: 0, paddingLeft: 18 }}>
@@ -2004,7 +1983,7 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
                   ))}
                 </ul>
               ) : (
-                <span className="field-hint">Keine Dateiänderungen.</span>
+                <span className="field-hint">{t("codex.result.noChanges")}</span>
               )}
               {result.resultSummary ? (
                 <div className="markdown-body" style={{ marginTop: 8 }}>
@@ -2020,6 +1999,7 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
 }
 
 function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const { t } = useT();
   const [mode, setMode] = useState<"login" | "register">("login");
   const busy = vm.busy === "login" || vm.busy === "register";
   const submit = () => {
@@ -2033,7 +2013,7 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
           <img alt="" src="/katoos_icon_logo_trans.png" />
           <div>
             <strong>KatoSync</strong>
-            <span>Bei deinem KatoOS-Konto anmelden</span>
+            <span>{t("login.subtitle")}</span>
           </div>
         </div>
         <div className="login-tabs">
@@ -2042,29 +2022,29 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
             onClick={() => setMode("login")}
             type="button"
           >
-            Anmelden
+            {t("login.signIn")}
           </button>
           <button
             className={mode === "register" ? "active" : ""}
             onClick={() => setMode("register")}
             type="button"
           >
-            Registrieren
+            {t("login.signUp")}
           </button>
         </div>
         {vm.notice ? <NoticeBar notice={vm.notice} onClose={() => vm.setNotice(null)} /> : null}
         <label>
-          E-Mail
+          {t("login.emailLabel")}
           <input
             autoComplete="email"
             onChange={(event) => vm.setLoginEmail(event.target.value)}
-            placeholder="du@example.com"
+            placeholder={t("login.emailPlaceholder")}
             type="email"
             value={vm.loginEmail}
           />
         </label>
         <label>
-          Passwort
+          {t("login.passwordLabel")}
           <input
             autoComplete={mode === "login" ? "current-password" : "new-password"}
             onChange={(event) => vm.setLoginPassword(event.target.value)}
@@ -2083,12 +2063,9 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
           type="button"
         >
           {busy ? <Loader2 className="spin" size={16} /> : null}
-          {mode === "login" ? "Anmelden" : "Registrieren"}
+          {mode === "login" ? t("login.signIn") : t("login.signUp")}
         </button>
-        <p className="login-hint">
-          Mit deinem KatoOS-Konto (SSO mit Website/KSP/KAI). Nach der Anmeldung führt dich KatoSync
-          durch die Einrichtung.
-        </p>
+        <p className="login-hint">{t("login.hint")}</p>
       </div>
     </div>
   );
@@ -2109,11 +2086,12 @@ function LicenseDialog({
   onClose: () => void;
   onQuit: () => void;
 }) {
+  const { t } = useT();
   return (
     <div className="modal-backdrop license-backdrop" role="presentation">
       <section aria-labelledby="license-title" aria-modal="true" className="license-dialog" role="dialog">
         {accepted ? (
-          <button aria-label="Nutzungsvereinbarung schließen" className="icon-button license-close" onClick={onClose} type="button">
+          <button aria-label={t("license.closeAria")} className="icon-button license-close" onClick={onClose} type="button">
             <X size={18} />
           </button>
         ) : null}
@@ -2123,7 +2101,11 @@ function LicenseDialog({
             <span className="section-label">KatoSync</span>
             <h2 id="license-title">{licenseAgreement.title}</h2>
             <p>
-              {licenseAgreement.provider} · Version {licenseAgreement.version} · Stand {licenseAgreement.updatedAt}
+              {t("license.meta", {
+                provider: licenseAgreement.provider,
+                version: licenseAgreement.version,
+                updatedAt: licenseAgreement.updatedAt
+              })}
             </p>
           </div>
         </header>
@@ -2135,12 +2117,12 @@ function LicenseDialog({
               <p>{section.body}</p>
             </article>
           ))}
-          <p className="license-contact">Kontakt: {licenseAgreement.contact}</p>
+          <p className="license-contact">{t("license.contact")}: {licenseAgreement.contact}</p>
         </div>
         <footer>
           {accepted ? (
             <button className="secondary" onClick={onClose} type="button">
-              Schließen
+              {t("license.close")}
             </button>
           ) : (
             <>
@@ -2150,10 +2132,10 @@ function LicenseDialog({
               </label>
               <div className="license-actions">
                 <button className="ghost danger" onClick={onQuit} type="button">
-                  App beenden
+                  {t("license.quit")}
                 </button>
                 <button className="primary" disabled={!checked} onClick={onAccept} type="button">
-                  Akzeptieren und starten
+                  {t("license.accept")}
                 </button>
               </div>
             </>
@@ -2169,45 +2151,45 @@ function formatPlanTitle(plan: ActionPlan) {
   return `${plan.tasks.length} Aufgaben aus ${plan.source}`;
 }
 
-function planStatusLabel(status: ActionPlan["status"]) {
+function planStatusLabel(status: ActionPlan["status"], t: TFunc) {
   switch (status) {
     case "pending_user_review":
-      return "Wartet auf lokale Freigabe. Es wird nichts automatisch ausgeführt.";
+      return t("label.planStatus.pendingUserReview");
     case "in_review":
-      return "Zur Prüfung markiert. Bitte Aufgaben und Risiko prüfen.";
+      return t("label.planStatus.inReview");
     case "approved":
-      return "Freigegeben. Tasks mit Codex-Runner kannst du an Codex übergeben.";
+      return t("label.planStatus.approved");
     case "running":
-      return "Codex läuft …";
+      return t("label.planStatus.running");
     case "rejected":
-      return "Abgelehnt. Keine lokale Aktion gestartet.";
+      return t("label.planStatus.rejected");
     case "blocked":
-      return "Blockiert. Menschliche Prüfung erforderlich.";
+      return t("label.planStatus.blocked");
     case "failed":
-      return "Fehlgeschlagen. Bitte den Branch prüfen.";
+      return t("label.planStatus.failed");
     case "completed":
-      return "Abgeschlossen.";
+      return t("label.planStatus.completed");
     default:
       return status;
   }
 }
 
-function riskLabel(risk: ActionPlan["riskLevel"]) {
+function riskLabel(risk: ActionPlan["riskLevel"], t: TFunc) {
   switch (risk) {
     case "low":
-      return "Niedrig";
+      return t("label.risk.low");
     case "medium":
-      return "Mittel";
+      return t("label.risk.medium");
     case "high":
-      return "Hoch";
+      return t("label.risk.high");
     case "critical":
-      return "Kritisch";
+      return t("label.risk.critical");
     default:
       return risk;
   }
 }
 
-function runnerLabel(runner: ActionPlan["tasks"][number]["targetRunner"]) {
+function runnerLabel(runner: ActionPlan["tasks"][number]["targetRunner"], t: TFunc) {
   switch (runner) {
     case "codex_cli":
       return "Codex CLI";
@@ -2216,54 +2198,54 @@ function runnerLabel(runner: ActionPlan["tasks"][number]["targetRunner"]) {
     case "kai_desktop":
       return "KAI Desktop";
     case "manual_review":
-      return "Manuelle Prüfung";
+      return t("label.runner.manualReview");
     default:
       return runner;
   }
 }
 
-function briefingStatusLabel(status: Briefing["status"]) {
+function briefingStatusLabel(status: Briefing["status"], t: TFunc) {
   switch (status) {
     case "new":
-      return "Neu";
+      return t("label.briefingStatus.new");
     case "accepted":
-      return "Angenommen";
+      return t("label.briefingStatus.accepted");
     case "queued":
-      return "Vorbereitet";
+      return t("label.briefingStatus.queued");
     case "rejected":
-      return "Abgelehnt";
+      return t("label.briefingStatus.rejected");
     case "archived":
-      return "Archiviert";
+      return t("label.briefingStatus.archived");
     default:
       return status;
   }
 }
 
-function taskStatusLabel(status: ActionTaskStatus) {
+function taskStatusLabel(status: ActionTaskStatus, t: TFunc) {
   switch (status) {
     case "pending":
-      return "Offen";
+      return t("label.taskStatus.pending");
     case "queued":
-      return "Eingeplant";
+      return t("label.taskStatus.queued");
     case "running":
-      return "Läuft";
+      return t("label.taskStatus.running");
     case "executed":
-      return "Ausgeführt";
+      return t("label.taskStatus.executed");
     case "completed":
-      return "Erledigt";
+      return t("label.taskStatus.completed");
     case "rejected":
-      return "Abgelehnt";
+      return t("label.briefingStatus.rejected");
     case "failed":
-      return "Fehlgeschlagen";
+      return t("label.taskStatus.failed");
     case "deferred":
-      return "Aufgeschoben";
+      return t("label.taskStatus.deferred");
     default:
       return status;
   }
 }
 
-function projectLabel(projectId: string) {
-  if (projectId === NO_PROJECT_ID) return "Ohne Projekt";
+function projectLabel(projectId: string, t: TFunc) {
+  if (projectId === NO_PROJECT_ID) return t("label.project.none");
   switch (projectId) {
     case "katosync":
       return "KatoSync";
@@ -2310,6 +2292,7 @@ function TokenReveal({
   presentation: boolean;
   onCopy: () => void;
 }) {
+  const { t } = useT();
   const [revealed, setRevealed] = useState(true);
   useEffect(() => {
     const hide = () => setRevealed(false);
@@ -2337,28 +2320,28 @@ function TokenReveal({
       <button
         className="icon-button"
         onClick={() => setRevealed((current) => !current)}
-        title={show ? "Verbergen" : "Anzeigen"}
+        title={show ? t("label.token.hide") : t("label.token.show")}
         type="button"
       >
         {show ? <EyeOff size={16} /> : <Eye size={16} />}
       </button>
       <button className="secondary" onClick={onCopy} type="button">
-        Kopieren
+        {t("label.token.copy")}
       </button>
     </div>
   );
 }
 
-function briefingPriorityLabel(priority: Briefing["priority"]) {
+function briefingPriorityLabel(priority: Briefing["priority"], t: TFunc) {
   switch (priority) {
     case "low":
-      return "Niedrig";
+      return t("label.priority.low");
     case "medium":
-      return "Mittel";
+      return t("label.priority.medium");
     case "high":
-      return "Hoch";
+      return t("label.priority.high");
     case "critical":
-      return "Kritisch";
+      return t("label.priority.critical");
     default:
       return priority;
   }
@@ -2381,7 +2364,7 @@ function OnboardingDialog({
   onNext: () => void;
   position: OnboardingPosition | null;
 }) {
-  const step = onboardingSteps[currentIndex];
+  const { t } = useT();
   const isLast = currentIndex === onboardingSteps.length - 1;
   // Karte erst zeigen, wenn die Position berechnet ist -> kein Teleport-Sprung von rechts/unten.
   const style: CSSProperties = position ? { left: `${position.left}px`, top: `${position.top}px` } : {};
@@ -2396,25 +2379,28 @@ function OnboardingDialog({
         role="dialog"
         style={style}
       >
-        <button aria-label="Onboarding schließen" className="icon-button onboarding-close" onClick={onClose} type="button">
+        <button aria-label={t("onboarding.close")} className="icon-button onboarding-close" onClick={onClose} type="button">
           <X size={17} />
         </button>
         <div className="onboarding-brand">
           <img alt="" src="/katoos_icon_logo_trans.png" />
-          <span>Erster Start</span>
+          <span>{t("onboarding.brand")}</span>
         </div>
-        <div className="onboarding-progress" aria-label={`Schritt ${currentIndex + 1} von ${onboardingSteps.length}`}>
+        <div
+          className="onboarding-progress"
+          aria-label={t("onboarding.progress", { current: currentIndex + 1, total: onboardingSteps.length })}
+        >
           {onboardingSteps.map((item, index) => (
             <span className={index <= currentIndex ? "active" : ""} key={item.title} />
           ))}
         </div>
-        <h2 id="onboarding-title">{step.title}</h2>
-        <p>{step.text}</p>
+        <h2 id="onboarding-title">{t(`onboarding.step.${currentIndex + 1}.title` as TKey)}</h2>
+        <p>{t(`onboarding.step.${currentIndex + 1}.text` as TKey)}</p>
         {done ? (
           <div className="onboarding-done" key={currentIndex}>
             <span className="onboarding-done-row">
               <CheckCircle2 className="onboarding-done-check" size={16} />
-              {isLast ? "Bereits eingerichtet — fertig" : "Bereits eingerichtet — weiter …"}
+              {isLast ? t("onboarding.doneLast") : t("onboarding.doneNext")}
             </span>
             <span className="onboarding-advance">
               <span className="onboarding-advance-fill" />
@@ -2423,14 +2409,14 @@ function OnboardingDialog({
         ) : null}
         <footer>
           <button className="ghost" onClick={onDone} type="button">
-            Später
+            {t("onboarding.later")}
           </button>
           <div>
             <button className="secondary" disabled={currentIndex === 0} onClick={onBack} type="button">
-              Zurück
+              {t("onboarding.back")}
             </button>
             <button className="primary" onClick={onNext} type="button">
-              {isLast ? "Fertig" : "Weiter"}
+              {isLast ? t("onboarding.finish") : t("onboarding.next")}
             </button>
           </div>
         </footer>
@@ -2481,7 +2467,7 @@ function getWorkState(busy: string | null, t: TFunc) {
   };
 }
 
-function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>) {
+function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>, t: TFunc) {
   const items: Array<{ kind: "ok" | "warn" | "error" | "info"; title: string; text: string }> = [];
   const pendingPlans = vm.actionPlans.filter(isOpenActionPlan).length;
   const approvedPlans = vm.actionPlans.filter((plan) => plan.status === "approved").length;
@@ -2491,70 +2477,73 @@ function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>) {
   if (pendingPlans) {
     items.push({
       kind: "info",
-      title: "Action Queue",
-      text: `${pendingPlans} Plan/Pläne warten auf lokale Freigabe.`
+      title: t("activity.actionQueue.title"),
+      text: t("activity.actionQueue.text", { count: pendingPlans })
     });
   }
   if (approvedPlans) {
     items.push({
       kind: "ok",
-      title: "Freigegebene Pläne",
-      text: `${approvedPlans} Plan/Pläne freigegeben. Runner-Anbindung folgt im nächsten 2.0-Schnitt.`
+      title: t("activity.approvedPlans.title"),
+      text: t("activity.approvedPlans.text", { count: approvedPlans })
     });
   }
   if (rejectedPlans) {
     items.push({
       kind: "warn",
-      title: "Abgelehnte Pläne",
-      text: `${rejectedPlans} Plan/Pläne abgelehnt. Keine lokale Aktion gestartet.`
+      title: t("activity.rejectedPlans.title"),
+      text: t("activity.rejectedPlans.text", { count: rejectedPlans })
     });
   }
   if (newBriefings) {
     items.push({
       kind: "info",
-      title: "Neue Briefings",
-      text: `${newBriefings} Briefing(s) warten im Rückkanal.`
+      title: t("activity.newBriefings.title"),
+      text: t("activity.newBriefings.text", { count: newBriefings })
     });
   }
   if (queuedBriefings) {
     items.push({
       kind: "ok",
-      title: "Briefings vorbereitet",
-      text: `${queuedBriefings} Briefing(s) sind für die spätere Runner-Übergabe vorbereitet.`
+      title: t("activity.queuedBriefings.title"),
+      text: t("activity.queuedBriefings.text", { count: queuedBriefings })
     });
   }
   if (vm.report) {
     items.push({
       kind: vm.report.errors.length ? "error" : "ok",
-      title: vm.report.dryRun ? "Testlauf abgeschlossen" : "Synchronisierung abgeschlossen",
-      text: `${vm.report.currentFiles.length} CURRENT-Dateien erzeugt, ${vm.report.uploaded.length} Uploads.`
+      title: vm.report.dryRun ? t("activity.reportDone.dryRun") : t("activity.reportDone.sync"),
+      text: t("activity.reportDone.text", {
+        currentCount: vm.report.currentFiles.length,
+        uploadCount: vm.report.uploaded.length
+      })
     });
     if (vm.report.errors.length) {
-      items.push({ kind: "error", title: "Fehler erkannt", text: vm.report.errors[0] });
+      items.push({ kind: "error", title: t("activity.errorDetected.title"), text: vm.report.errors[0] });
     }
     if (vm.report.warnings.length) {
-      items.push({ kind: "warn", title: "Warnung", text: vm.report.warnings[0] });
+      items.push({ kind: "warn", title: t("activity.warning.title"), text: vm.report.warnings[0] });
     }
   }
   if (vm.scan) {
     items.push({
       kind: vm.scan.secretWarnings ? "warn" : "ok",
-      title: "Letzter Scan",
-      text: `${vm.scan.relevantFiles} relevante Dateien, ${vm.scan.secretWarnings} Secret-Warnungen.`
+      title: t("activity.lastScan.title"),
+      text: t("activity.lastScan.text", { fileCount: vm.scan.relevantFiles, secretCount: vm.scan.secretWarnings })
     });
   }
   if (vm.launchStatus) {
     items.push({
       kind: vm.launchStatus.installed ? "ok" : "info",
-      title: "Uploadplan",
+      title: t("activity.uploadPlan.title"),
       text: vm.launchStatus.message
     });
   }
   if (!items.length) {
     items.push({
       kind: "info",
-      title: "Noch keine Aktivität",
-      text: "Starte einen Scan oder eine Synchronisierung, um Ereignisse zu sehen."
+      title: t("activity.empty.title"),
+      text: t("activity.empty.text")
     });
   }
   return items.slice(0, 5);
@@ -2576,7 +2565,7 @@ function buildHintSignature(hints: Array<{ kind: "warn" | "error" | "info"; titl
     .join("|");
 }
 
-function buildHints(vm: ReturnType<typeof useKatoSyncViewModel>) {
+function buildHints(vm: ReturnType<typeof useKatoSyncViewModel>, t: TFunc) {
   const scan = vm.scan ?? vm.report?.scan ?? null;
   const hints: Array<{ kind: "warn" | "error" | "info"; title: string; text: string }> = [];
   const secretFiles = scan?.findings.filter(isSecretHint) ?? [];
@@ -2584,23 +2573,23 @@ function buildHints(vm: ReturnType<typeof useKatoSyncViewModel>) {
   secretFiles.slice(0, 8).forEach((finding) => {
     hints.push({
       kind: "warn",
-      title: "Secret-Datei übersprungen",
-      text: `${finding.relativePath}: ${finding.reason || "vom Secret-Scanner geschützt"}`
+      title: t("hintmsg.secretSkipped.title"),
+      text: `${finding.relativePath}: ${finding.reason || t("hintmsg.secretSkipped.fallback")}`
     });
   });
 
   if (scan && scan.secretWarnings > secretFiles.length) {
     hints.push({
       kind: "warn",
-      title: "Weitere Secret-Hinweise",
-      text: `${scan.secretWarnings - secretFiles.length} weitere Datei(en) wurden geschützt übersprungen.`
+      title: t("hintmsg.moreSecrets.title"),
+      text: t("hintmsg.moreSecrets.text", { count: scan.secretWarnings - secretFiles.length })
     });
   }
 
   vm.report?.errors.forEach((error) => {
     hints.push({
       kind: "error",
-      title: "Upload-Fehler",
+      title: t("hintmsg.uploadError.title"),
       text: error
     });
   });
@@ -2608,8 +2597,8 @@ function buildHints(vm: ReturnType<typeof useKatoSyncViewModel>) {
   if (!hints.length) {
     hints.push({
       kind: "info",
-      title: "Alles sauber",
-      text: "Es gibt aktuell keine offenen Sicherheits- oder Upload-Hinweise."
+      title: t("hintmsg.allClean.title"),
+      text: t("hintmsg.allClean.text")
     });
   }
 

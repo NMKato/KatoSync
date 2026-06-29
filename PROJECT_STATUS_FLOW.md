@@ -1,5 +1,17 @@
 # KatoSync Project Statusflow
 
+## 2026-06-29 - UX Welle 7: i18n vollstaendig + Lizenz KI-Transparenz (EU AI Act) (DONE)
+
+Projekt: KatoSync Desktop App
+Status: DONE — gesamte UI mehrsprachig (De/En/Es/Ru); Lizenz um KI-Transparenzpunkt erweitert (Version 2.0.0, erneute Zustimmung).
+
+- i18n-Rest verdrahtet (ueber die Kernflaechen hinaus): Setup-Strip, Hinweis-/Beenden-Dialog, KOMPLETTE Einstellungen (Mistral-Zugang, API-Kontingent, Ordner, Sync-Regeln, Uploadplan), ActionQueue, Projekt-Board + BoardTaskCard, Briefings, Codex-Bridge, Login, Onboarding (5 Schritte + Chrome), Aktivitaeten + Sicherheitshinweise, Dashboard-Findings/Sync/Logs, Lizenz-Dialog-Chrome. Geteilte Label-Funktionen (planStatus/risk/runner/briefingStatus/taskStatus/project/priority) nehmen jetzt `t`.
+- Workflow-gestuetzt: parallele String-Extraktion (266 neue Keys) -> parallele Uebersetzung En/Es/Ru -> manuelle `t()`-Verdrahtung. Locales je **377 Keys**, lueckenlos identisch (tsc `Record<TKey,string>` erzwingt Vollstaendigkeit). Russisch count-agnostisch, Spanisch ohne Calques, Produktbegriffe unuebersetzt. Locale-Dateien ohne Autoren-Header.
+- Lizenz (`src/lib/license.ts`): neuer Abschnitt „9. KI-Assistenz und Transparenz (EU AI Act)" — Hinweis, dass die Software teils mit KI-Assistenz entstand und KI-Ergebnisse/Code zu pruefen sind (ohne Prozentzahl). Version 1.0.1 -> 2.0.0 + updatedAt, loest erneute Zustimmung aus.
+- tsc + Vite gruen. App gebaut + installiert.
+- OFFEN: ggf. neues signiertes Release (beta.4) fuer das Team, sobald visuell bestaetigt.
+
+
 ## 2026-06-29 - UX Welle 6: i18n (De/En/Es/Ru) + Speicher-Hinweis + Diagramm-Auto-Layout (DONE)
 
 Projekt: KatoSync Desktop App
