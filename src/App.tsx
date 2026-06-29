@@ -2120,6 +2120,25 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
     <Panel className="codex-panel" title="Codex Bridge" icon={<TerminalSquare size={18} />}>
       <p>{t("codex.intro.description")}</p>
       {vm.config ? (
+        <div className="runner-picker" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+          <strong className="section-label">{t("codex.runner.label")}</strong>
+          <button
+            type="button"
+            className={vm.config.codexPreferredRunner !== "claude_cli" ? "primary" : "ghost"}
+            onClick={() => vm.updateConfig("codexPreferredRunner", "codex_cli")}
+          >
+            {t("codex.runner.codex")}
+          </button>
+          <button
+            type="button"
+            className={vm.config.codexPreferredRunner === "claude_cli" ? "primary" : "ghost"}
+            onClick={() => vm.updateConfig("codexPreferredRunner", "claude_cli")}
+          >
+            {t("codex.runner.claude")}
+          </button>
+        </div>
+      ) : null}
+      {vm.config ? (
         <div className="switch-grid" style={{ marginBottom: 6 }}>
           <HoverTip title={t("codex.toggle.codingMode")} description={t("codex.toggle.codingModeDesc")}>
             <Toggle

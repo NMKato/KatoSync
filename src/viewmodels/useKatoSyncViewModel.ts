@@ -560,7 +560,8 @@ export function useKatoSyncViewModel() {
           taskType: task.taskType,
           projectId: task.projectId,
           riskLevel: task.riskLevel
-        }
+        },
+        runner: config.codexPreferredRunner
       });
       setCodexRun({ status: result.status === "completed" ? "completed" : "failed", result });
       return result;
@@ -633,7 +634,8 @@ export function useKatoSyncViewModel() {
             title: briefing.title,
             summary: briefing.summary,
             suggestedAction: briefing.suggestedAction
-          }
+          },
+          runner: config.codexPreferredRunner
         });
         setCodexRun({ status: result.status === "completed" ? "completed" : "failed", result });
         show(

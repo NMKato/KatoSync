@@ -38,6 +38,8 @@ export interface AppConfig {
   codexAutoPush: boolean;
   codexCreatePr: boolean;
   codexCodingMode: boolean;
+  // Multi-Runner: bevorzugter lokaler Runner.
+  codexPreferredRunner: "codex_cli" | "claude_cli";
   // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectId -> Pfad).
   projectRepos: Record<string, string>;
 }
@@ -228,6 +230,8 @@ export interface CodexRunRequest {
   inputPlan: unknown;
   dryRun?: boolean;
   timeoutSecs?: number;
+  // Multi-Runner: welcher lokale Runner ausfuehrt ("codex_cli" | "claude_cli").
+  runner?: string;
 }
 
 export interface CodexRunResult {

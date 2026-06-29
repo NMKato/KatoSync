@@ -1,5 +1,16 @@
 # KatoSync Project Statusflow
 
+## 2026-06-30 - Welle A: Multi-Runner (Claude Code CLI) (committet, NICHT released)
+
+Projekt: KatoSync Desktop App. Status: committet auf main, NICHT released. Build gruen (tsc+vite+cargo check), adversarialer Review (7 Funde, alle eingearbeitet), App gebaut + installiert. NOCH NICHT mit echtem Claude-Lauf verifiziert.
+
+- **Zweiter lokaler Runner: Claude Code CLI** neben Codex. Nur der exec-Teil in `run_codex_task` (lib.rs) ist runner-spezifisch; Preflight/Branch/Datei-Modus/Commit/Merge/Live-Feed + die Welle-11b-Schutzleitplanken bleiben geteilt (gelten automatisch auch fuer Claude — wichtig, da Claude KEINE OS-Sandbox hat: der Git-Out-of-Scope-Schutz f+ reset faengt Fehlschreibungen ab).
+- **Rust:** `claude_bin()`-Resolver (~/.local/bin/claude, homebrew, usr-local), `runner`-Feld im `CodexRunRequest`, Preflight-Verzweigung (Codex `login status` / Claude `--version`), exec-Verzweigung (`claude -p <prompt> --output-format stream-json --verbose --permission-mode acceptEdits|plan --add-dir <repo>`, current_dir=repo), `summarize_claude_event` (stream-json: assistant/content[]-Iteration mit Text/tool_use-name, result mit is_error), Claude-Ergebnis-Extraktion aus dem result-Event nach output_path (Claude hat kein -o), runner-bewusste Meldungen (`runner_label`).
+- **TS/UI:** Config `codexPreferredRunner` (codex_cli|claude_cli, round-trip Rust<->TS), `runner` in beiden Run-Requests (kein Stale-Problem: Rust liest req.runner direkt), **Runner-Picker** (Codex/Claude) im Codex-Bridge-Panel, i18n codex.runner.* in allen 4 Locales.
+- **Kosten/Auth:** Claude laeuft ueber das **Abo-Login** (claude login), kein API-Key -> keine API-Kosten (Codex-Paritaet). Preflight prueft nur das Binary; fehlende Auth/Limit zeigt sich als Lauf-Fehler.
+- **Review-Fixes:** Live-Feed-Parser (content[]-Bloecke statt nicht-existentem Top-Level tool_use), runner_label statt hartem "Codex" in 6 User-Strings, ehrlicher Auth-Kommentar, Fehler-Marker bei result-Event ohne result-Text, acceptEdits/Bash-Limit dokumentiert (Code-Aufgaben mit Build/Test sind mit Claude derzeit eingeschraenkt — Datei-Modus/Dokumente voll ok).
+- OFFEN: echter Claude-Datei-Modus-Lauf verifizieren (analog Codex-Live-Test). MVP ist Client-Picker (kein Server-Deploy); spaeter optional `claude_cli` als gueltiger Server-`target_runner` (Migration + Deploy), damit Mistral ihn vorgeben kann.
+
 ## 2026-06-29 - Sync-Haertung: Timeouts + Rate-Limit-UX + Kein-Ordner-Guard (committet, NICHT released)
 
 Projekt: KatoSync Desktop App. Status: committet auf main, NICHT released. Aus dem Live-Test gemeldet: Sync-Button drehte minutenlang, danach Diagnose "HTTP 429 Rate-Limit". Build gruen, App gebaut + installiert.

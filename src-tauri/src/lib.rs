@@ -62,6 +62,9 @@ pub struct AppConfig {
     // Ergebnis-Ordner, Git unsichtbar im Hintergrund). Standard: aus (Datei-Modus).
     #[serde(default)]
     codex_coding_mode: bool,
+    // Multi-Runner: bevorzugter lokaler Runner ("codex_cli" Default | "claude_cli").
+    #[serde(default)]
+    codex_preferred_runner: String,
     // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectExternalId -> Pfad).
     #[serde(default)]
     project_repos: std::collections::HashMap<String, String>,
@@ -726,6 +729,9 @@ pub struct CodexRunRequest {
     dry_run: bool,
     #[serde(default)]
     timeout_secs: Option<u64>,
+    // Multi-Runner: welcher lokale Runner ausfuehrt ("codex_cli" Default, "claude_cli" = Claude Code CLI).
+    #[serde(default)]
+    runner: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -755,6 +761,24 @@ fn codex_bin() -> String {
     } else {
         "codex".to_string()
     }
+}
+
+// Claude Code CLI (Multi-Runner). GUI-Prozess erbt den Shell-PATH nicht -> absolute Pfade probieren
+// (Native-Installer legt das Binary in ~/.local/bin/claude). Auth = Claude-Abo-Login (claude login),
+// keine API-Kosten — analog zu Codex' ChatGPT-Login.
+fn claude_bin() -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        let p = format!("{home}/.local/bin/claude");
+        if Path::new(&p).exists() {
+            return p;
+        }
+    }
+    for p in ["/opt/homebrew/bin/claude", "/usr/local/bin/claude"] {
+        if Path::new(p).exists() {
+            return p.to_string();
+        }
+    }
+    "claude".to_string()
 }
 
 // Codex-Bridge v2: gh-CLI (GUI-Prozess erbt den Shell-PATH nicht -> absolute Pfade probieren).
@@ -816,6 +840,60 @@ fn summarize_codex_event(line: &str) -> (String, String) {
             .unwrap_or("");
         let text: String = sanitize_log(text).chars().take(160).collect();
         return (sanitize_log(&label), text);
+    }
+    let raw: String = sanitize_log(trimmed).chars().take(160).collect();
+    ("log".to_string(), raw)
+}
+
+// Claude Code --output-format stream-json -> (Label, Kurztext) fuer denselben Live-Feed.
+// Event-Typen: system/init, assistant (message.content[].text), tool_use, tool_result, result.
+fn summarize_claude_event(line: &str) -> (String, String) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return ("event".to_string(), String::new());
+    }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("event");
+        let text: String = match typ {
+            "assistant" => {
+                // content[] enthaelt Text- UND tool_use-Bloecke (Feld "name", nicht "tool_name").
+                // Ersten Text-Block nehmen, sonst den Tool-Namen — sonst bliebe der Feed bei
+                // Tool-Schritten leer.
+                let mut out = String::new();
+                if let Some(blocks) = v.pointer("/message/content").and_then(|c| c.as_array()) {
+                    for b in blocks {
+                        match b.get("type").and_then(|t| t.as_str()) {
+                            Some("text") => {
+                                if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
+                                    out = t.to_string();
+                                    break;
+                                }
+                            }
+                            Some("tool_use") => {
+                                if let Some(n) = b.get("name").and_then(|n| n.as_str()) {
+                                    out = format!("Tool: {n}");
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                out
+            }
+            "result" => {
+                let is_err = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false)
+                    || v.get("subtype").and_then(|s| s.as_str()) == Some("error");
+                let fallback = if is_err { "fehlgeschlagen" } else { "fertig" };
+                v.get("result")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or(fallback)
+                    .to_string()
+            }
+            _ => String::new(),
+        };
+        let text: String = sanitize_log(&text).chars().take(160).collect();
+        return (sanitize_log(typ), text);
     }
     let raw: String = sanitize_log(trimmed).chars().take(160).collect();
     ("log".to_string(), raw)
@@ -1008,7 +1086,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     // ---- Preflight (hart) ----
     if req.risk_level.to_lowercase() == "critical" {
         return Err(
-            "Kritische Aufgaben muessen manuell bearbeitet werden. Kein automatischer Codex-Lauf."
+            "Kritische Aufgaben muessen manuell bearbeitet werden. Kein automatischer Lauf."
                 .to_string(),
         );
     }
@@ -1019,16 +1097,34 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     let config = load_config_inner().map_err(error_to_string)?;
     // Coding-Modus an = GitHub (Branch/Push/PR), aus = Datei-Modus (lokal). Datei-Modus ist Standard.
     let file_mode = !config.codex_coding_mode;
+    // Multi-Runner: Codex (Default) oder Claude Code CLI.
+    let is_claude = req.runner.as_deref() == Some("claude_cli");
+    let runner_label = if is_claude { "Claude" } else { "Codex" };
     // Keine sourceRoots-Allowlist mehr: der Nutzer waehlt den Ordner bewusst im
     // Datei-Dialog (= explizite Freigabe). Schutz kommt aus Git-Repo-Pflicht,
     // sauberem Arbeitsbaum, eigenem Branch, Sandbox und critical-Abbruch.
-    let login = Command::new(codex_bin())
-        .arg("login")
-        .arg("status")
-        .output()
-        .map_err(error_to_string)?;
-    if !login.status.success() {
-        return Err("Bitte zuerst in Codex per ChatGPT einloggen (codex login).".to_string());
+    if is_claude {
+        // Claude Code CLI: nur Binary/PATH pruefen (claude --version). Die Auth (Claude-Abo-Login,
+        // keine API-Kosten) wird NICHT vorab geprueft -> fehlende Auth/Limit zeigt sich als Lauf-Fehler.
+        let probe = Command::new(claude_bin())
+            .arg("--version")
+            .output()
+            .map_err(error_to_string)?;
+        if !probe.status.success() {
+            return Err(
+                "Claude Code CLI nicht gefunden. Bitte installieren und mit 'claude login' anmelden."
+                    .to_string(),
+            );
+        }
+    } else {
+        let login = Command::new(codex_bin())
+            .arg("login")
+            .arg("status")
+            .output()
+            .map_err(error_to_string)?;
+        if !login.status.success() {
+            return Err("Bitte zuerst in Codex per ChatGPT einloggen (codex login).".to_string());
+        }
     }
     let is_git = git_capture(&repo_path, &["rev-parse", "--is-inside-work-tree"]).unwrap_or_default()
         == "true";
@@ -1124,7 +1220,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         .map_err(|e| format!("Branch konnte nicht angelegt werden ({branch}): {e}"))?;
     let _ = write_log(
         "codex",
-        &format!("Codex-Lauf gestartet: {} (Branch {branch} von {default_branch})", sanitize_log(&req.title)),
+        &format!("{runner_label}-Lauf gestartet: {} (Branch {branch} von {default_branch})", sanitize_log(&req.title)),
     );
 
     if let Some(plan_id) = &req.action_plan_id {
@@ -1150,23 +1246,45 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
 
     let mut codex_error: Option<String> = None;
     let mut exit_code: Option<i32> = None;
-    match TokioCommand::new(codex_bin())
-        .arg("exec")
-        .arg(&effective_prompt)
-        .arg("--cd")
-        .arg(&repo_path)
-        .arg("--sandbox")
-        .arg(sandbox)
-        .arg("--json")
-        .arg("-o")
-        .arg(&output_path)
-        .arg("--color")
-        .arg("never")
-        .arg("-c")
-        .arg("approval_policy=\"never\"")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::from(stderr_file))
-        .spawn()
+    // Nur der exec-Aufruf ist runner-spezifisch; spawn/Reader/Timeout teilen sich beide.
+    let mut command = if is_claude {
+        // Claude Code CLI: headless, ordnergebunden, schreibend, stream-json Live-Feed.
+        // permission-mode plan = read-only (Dry-Run), acceptEdits = Datei-Edits/Writes im Ordner.
+        // Hinweis: acceptEdits genehmigt NUR Datei-Edits (ideal fuer Datei-Modus/Dokumente);
+        // Bash/Shell wird headless nicht auto-genehmigt -> Code-Aufgaben mit Build/Test sind
+        // mit dem Claude-Runner derzeit eingeschraenkt. Hat kein -o: finaler Ergebnis-Text
+        // wird unten aus dem result-Event gezogen.
+        let mut c = TokioCommand::new(claude_bin());
+        c.arg("-p")
+            .arg(&effective_prompt)
+            .arg("--output-format")
+            .arg("stream-json")
+            .arg("--verbose")
+            .arg("--permission-mode")
+            .arg(if req.dry_run { "plan" } else { "acceptEdits" })
+            .arg("--add-dir")
+            .arg(&repo_path)
+            .current_dir(&repo_path);
+        c
+    } else {
+        let mut c = TokioCommand::new(codex_bin());
+        c.arg("exec")
+            .arg(&effective_prompt)
+            .arg("--cd")
+            .arg(&repo_path)
+            .arg("--sandbox")
+            .arg(sandbox)
+            .arg("--json")
+            .arg("-o")
+            .arg(&output_path)
+            .arg("--color")
+            .arg("never")
+            .arg("-c")
+            .arg("approval_policy=\"never\"");
+        c
+    };
+    command.stdout(Stdio::piped()).stderr(Stdio::from(stderr_file));
+    match command.spawn()
     {
         Ok(mut child) => {
             // Live-Feed: codex-stdout (JSONL) zeilenweise -> in execution_log.jsonl schreiben
@@ -1188,7 +1306,11 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                             let _ = writeln!(f, "{line}");
                         }
                         seq += 1;
-                        let (label, text) = summarize_codex_event(&line);
+                        let (label, text) = if is_claude {
+                            summarize_claude_event(&line)
+                        } else {
+                            summarize_codex_event(&line)
+                        };
                         let _ = app.emit(
                             "codex-event",
                             json!({
@@ -1206,13 +1328,13 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 Ok(Ok(status)) => {
                     exit_code = status.code();
                     if !status.success() {
-                        codex_error = Some(format!("Codex Exit-Code {:?}", status.code()));
+                        codex_error = Some(format!("{runner_label} Exit-Code {:?}", status.code()));
                     }
                 }
                 Ok(Err(e)) => codex_error = Some(error_to_string(e)),
                 Err(_) => {
                     let _ = child.kill().await;
-                    codex_error = Some(format!("Codex-Timeout nach {timeout_secs}s"));
+                    codex_error = Some(format!("{runner_label}-Timeout nach {timeout_secs}s"));
                 }
             }
             // Restliche Zeilen flushen lassen — aber nie unbegrenzt warten: falls ein
@@ -1225,7 +1347,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 }
             }
         }
-        Err(e) => codex_error = Some(format!("Codex-Start fehlgeschlagen: {}", error_to_string(e))),
+        Err(e) => codex_error = Some(format!("{runner_label}-Start fehlgeschlagen: {}", error_to_string(e))),
     }
 
     // Bei Fehler: aussagekraeftige Meldung aus den JSONL-Events ziehen (z.B. Usage-Limit).
@@ -1245,6 +1367,39 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                         break;
                     }
                 }
+            }
+        }
+    }
+
+    // Claude stream-json hat kein -o: finalen result-Text aus den Events ziehen -> output_path
+    // (fuer result_summary), und Fehler aus dem result-Event erkennen (is_error/subtype=error).
+    if is_claude {
+        if let Ok(events) = fs::read_to_string(&events_path) {
+            for line in events.lines().rev() {
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                    continue;
+                };
+                if v.get("type").and_then(|t| t.as_str()) != Some("result") {
+                    continue;
+                }
+                let is_err = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false)
+                    || v.get("subtype").and_then(|s| s.as_str()) == Some("error");
+                if let Some(text) = v.get("result").and_then(|r| r.as_str()) {
+                    let _ = fs::write(&output_path, text);
+                    if is_err && codex_error.is_none() {
+                        codex_error = Some(sanitize_log(text));
+                    }
+                } else if is_err {
+                    // Fehler-result ohne result-Text (z.B. error_max_turns): Marker in output_path
+                    // schreiben, damit result_summary nicht leer bleibt.
+                    let sub = v.get("subtype").and_then(|s| s.as_str()).unwrap_or("error");
+                    let m = format!("Claude-Lauf fehlgeschlagen ({sub}).");
+                    let _ = fs::write(&output_path, &m);
+                    if codex_error.is_none() {
+                        codex_error = Some(m);
+                    }
+                }
+                break;
             }
         }
     }
@@ -1279,7 +1434,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             .collect();
         if !out_of_scope.is_empty() {
             codex_error = Some(format!(
-                "Datei-Modus: Codex hat ausserhalb von {result_rel}/ geschrieben ({}). Lauf verworfen.",
+                "Datei-Modus: {runner_label} hat ausserhalb von {result_rel}/ geschrieben ({}). Lauf verworfen.",
                 out_of_scope.join(", ")
             ));
             let _ = git_capture(&repo_path, &["reset", "--hard"]);
@@ -1302,7 +1457,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     }
     // Datei-Modus: ohne erzeugte Ergebnisdatei (kein Commit) gilt der Lauf nicht als erfolgreich.
     if file_mode && codex_error.is_none() && commit.is_none() {
-        codex_error = Some("Datei-Modus: Codex hat keine Ergebnisdatei erzeugt.".to_string());
+        codex_error = Some(format!("Datei-Modus: {runner_label} hat keine Ergebnisdatei erzeugt."));
     }
     let final_status = if codex_error.is_none() { "completed" } else { "failed" };
 
@@ -1400,7 +1555,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     let mut body = json!({
         "idempotencyKey": format!("codex-{task_slug}-{run_stamp}"),
         "status": final_status,
-        "message": codex_error.clone().unwrap_or_else(|| "Codex-Lauf abgeschlossen".to_string()),
+        "message": codex_error.clone().unwrap_or_else(|| format!("{runner_label}-Lauf abgeschlossen")),
         "artifacts": artifacts,
     });
     if let Some(id) = &req.action_plan_id {
@@ -1467,7 +1622,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
 
     let _ = write_log(
         "codex",
-        &format!("Codex-Lauf {final_status}: {} (Branch {branch})", sanitize_log(&req.title)),
+        &format!("{runner_label}-Lauf {final_status}: {} (Branch {branch})", sanitize_log(&req.title)),
     );
 
     Ok(CodexRunResult {
@@ -2695,6 +2850,7 @@ fn default_config() -> Result<AppConfig> {
         codex_auto_push: true,
         codex_create_pr: true,
         codex_coding_mode: false,
+        codex_preferred_runner: "codex_cli".to_string(),
         project_repos: std::collections::HashMap::new(),
     })
 }
