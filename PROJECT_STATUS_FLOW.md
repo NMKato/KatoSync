@@ -9,7 +9,8 @@ Status: DONE — Nav/Fusszeile mit erklaerenden Tooltips; Bug im Sicherheitshinw
 - Verdrahtet: alle 6 Nav-Buttons (`nav.<id>.desc`) + Fusszeile (Praesentation/Lizenz/Beenden). i18n in allen 4 Sprachen (`nav.*.desc`, `sidebar.*Desc`). Locales je 399 Keys.
 - Fix (vorher, Commit 349671c): Hinweis-Dialog „Gefundene Dateien anzeigen" sprang auf `folders`->Einstellungen, aber `section-findings` existiert nur im Dashboard -> nichts sichtbar. Jetzt Sprung auf `dashboard` + Scroll per rAF/Timeout nach dem Mount (Panel ist dann gerendert).
 - Politur-Fixes (Nutzer-Feedback): Tooltip-Hintergrund war zu transparent/ohne Blur -> `rgba(17,20,26,0.94)` + `backdrop-filter: blur(18px)` (Light analog) -> Text klar lesbar. Findings-Tabelle wurde bei `max-height:310px` abgeschnitten + Leerraum -> `.table-panel` als Flex-Spalte, `.table-wrap` `flex:1` fuellt die Card und scrollt; Zeilen-Limit 12 -> 50.
-- tsc + Vite gruen. App gebaut + installiert. (Noch nicht als Release ausgeliefert — sammeln fuer beta.5.)
+- tsc + Vite gruen. App gebaut + installiert.
+- Release (DONE): signiert (Developer ID `MK Heartbeat UG (T8SB89JPX7)`, Hardened Runtime + Timestamp) + Apple-notarisiert (Submission `73c0c01b-38db-46b1-8e44-de77e46280c4`, Accepted) + gestapelt; `spctl` = „Notarized Developer ID". GitHub-Release „KatoSync 2.0 Beta (beta.5)" (Tag `v2.0.0-beta.5` auf `af0809a`, Latest) mit Asset `KatoSync-2.0.0-beta.5-macos.zip`: https://github.com/NMKato/KatoSync/releases/tag/v2.0.0-beta.5 — liefert die 3 Commits seit beta.4 aus (Tooltips, Hinweis-Fix, Tooltip-/Tabellen-Politur).
 
 
 ## 2026-06-29 - UX Welle 8: Skill-Generator (Persona -> KatoSync-Skill) (DONE)
