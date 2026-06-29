@@ -8,6 +8,7 @@ Status: DONE — Nav/Fusszeile mit erklaerenden Tooltips; Bug im Sicherheitshinw
 - Erklaerungs-Tooltips (Nutzerwunsch): `HoverTip` in `src/components/Primitives.tsx` — erscheint nach ~650 ms Hover als gestyltes Overlay (Titel + ein Satz Erklaerung) rechts neben dem Element. Portal an `document.body` + `position:fixed`, weil `.app-shell` `overflow:hidden` hat (CSS-Tooltip wuerde clippen). `StepButton` bekommt optionales `description`; nativer `title` entfernt (kein Doppel-Tooltip), `aria-label` fuer Screenreader.
 - Verdrahtet: alle 6 Nav-Buttons (`nav.<id>.desc`) + Fusszeile (Praesentation/Lizenz/Beenden). i18n in allen 4 Sprachen (`nav.*.desc`, `sidebar.*Desc`). Locales je 399 Keys.
 - Fix (vorher, Commit 349671c): Hinweis-Dialog „Gefundene Dateien anzeigen" sprang auf `folders`->Einstellungen, aber `section-findings` existiert nur im Dashboard -> nichts sichtbar. Jetzt Sprung auf `dashboard` + Scroll per rAF/Timeout nach dem Mount (Panel ist dann gerendert).
+- Politur-Fixes (Nutzer-Feedback): Tooltip-Hintergrund war zu transparent/ohne Blur -> `rgba(17,20,26,0.94)` + `backdrop-filter: blur(18px)` (Light analog) -> Text klar lesbar. Findings-Tabelle wurde bei `max-height:310px` abgeschnitten + Leerraum -> `.table-panel` als Flex-Spalte, `.table-wrap` `flex:1` fuellt die Card und scrollt; Zeilen-Limit 12 -> 50.
 - tsc + Vite gruen. App gebaut + installiert. (Noch nicht als Release ausgeliefert — sammeln fuer beta.5.)
 
 

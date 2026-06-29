@@ -178,7 +178,7 @@ export function FindingsTable({ scan }: { scan: ScanSummary | null }) {
           </tr>
         </thead>
         <tbody>
-          {visibleFindings.slice(0, 12).map((finding) => (
+          {visibleFindings.slice(0, 50).map((finding) => (
             <tr key={`${finding.path}-${finding.reason || "ok"}`} className={finding.skipped ? "muted" : ""}>
               <td>{finding.relativePath}</td>
               <td>{finding.category}</td>
