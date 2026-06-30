@@ -1366,15 +1366,52 @@ fn pdftotext_bin() -> Option<String> {
 // zusaetzlich best-effort als .txt-Zwilling (pdftotext/poppler, falls installiert -> auch Codex
 // liest sie; Claude liest PDFs ohnehin nativ). KatoContext bleibt LOKAL: nie in die Mistral-
 // Library, nie committet/gescannt (von allen git-Pathspecs + der Scan-Blockliste ausgeschlossen).
-fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usize {
+// KatoContext/ und .katosync/ dauerhaft in .git/info/exclude eintragen (idempotent). Schuetzt die
+// privaten Faktenbasis-Daten + Lauf-Artefakte gegen JEDE git-Operation, nicht nur KatoSyncs eigene
+// ":!"-Pathspecs (Nutzer, IDE-"Stage All", Hook, autonomer Agent).
+fn ensure_git_excludes(repo_path: &str) {
+    let git_dir = git_capture(repo_path, &["rev-parse", "--git-dir"])
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| ".git".to_string());
+    let git_dir = if Path::new(&git_dir).is_absolute() {
+        git_dir
+    } else {
+        format!("{repo_path}/{git_dir}")
+    };
+    let info_dir = format!("{git_dir}/info");
+    if fs::create_dir_all(&info_dir).is_err() {
+        return;
+    }
+    let exclude_path = format!("{info_dir}/exclude");
+    let existing = fs::read_to_string(&exclude_path).unwrap_or_default();
+    let mut content = existing.clone();
+    let mut changed = false;
+    for entry in ["KatoContext/", ".katosync/"] {
+        if !existing.lines().any(|l| l.trim() == entry) {
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(entry);
+            content.push('\n');
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = fs::write(&exclude_path, content);
+    }
+}
+
+async fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usize {
     let dst = format!("{repo_path}/KatoContext");
     let _ = fs::remove_dir_all(&dst); // frisch: Referenzordner koennte sich geaendert haben
     if fs::create_dir_all(&dst).is_err() {
+        let _ = write_log("codex", "KatoContext konnte nicht angelegt werden.");
         return 0;
     }
     let pdftotext = pdftotext_bin();
     let mut count = 0usize;
     let Ok(entries) = fs::read_dir(reference_root) else {
+        let _ = write_log("codex", "KatoContext: Referenzordner nicht lesbar.");
         return 0;
     };
     for entry in entries.flatten() {
@@ -1389,17 +1426,36 @@ fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usize {
             continue; // versteckte/AppleDouble-Sidecars ueberspringen
         }
         let target = format!("{dst}/{name}");
-        if fs::copy(&path, &target).is_err() {
+        if let Err(e) = fs::copy(&path, &target) {
+            // Nicht still verschlucken: der Runner behandelt KatoContext als verbindliche Faktenbasis.
+            let _ = write_log("codex", &format!("KatoContext: Datei uebersprungen ({name}): {e}"));
             continue;
         }
         count += 1;
         if name.to_lowercase().ends_with(".pdf") {
             if let Some(ref bin) = pdftotext {
-                let _ = Command::new(bin)
-                    .arg("-layout")
-                    .arg(&target)
-                    .arg(format!("{dst}/{name}.txt"))
-                    .output();
+                // Kollisionsschutz: hat der Nutzer im Referenzordner bereits eine kuratierte "<name>.txt",
+                // den maschinellen Extrakt als "<name>.extracted.txt" ablegen statt sie zu ueberschreiben.
+                let twin = if Path::new(reference_root).join(format!("{name}.txt")).exists() {
+                    format!("{dst}/{name}.extracted.txt")
+                } else {
+                    format!("{dst}/{name}.txt")
+                };
+                // pdftotext mit Timeout + kill_on_drop: eine kaputte/pathologische PDF (poppler-Hang)
+                // darf den ganzen Lauf nicht einfrieren.
+                let extract = timeout(
+                    Duration::from_secs(30),
+                    TokioCommand::new(bin)
+                        .arg("-layout")
+                        .arg(&target)
+                        .arg(&twin)
+                        .kill_on_drop(true)
+                        .output(),
+                )
+                .await;
+                if extract.is_err() {
+                    let _ = write_log("codex", &format!("KatoContext: pdftotext-Timeout fuer {name}."));
+                }
             }
         }
     }
@@ -1757,6 +1813,13 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             return Err("Der Projektordner ist kein Git-Repository.".to_string());
         }
     }
+    // KatoContext/ + .katosync/ dauerhaft auf Repo-Ebene ignorieren (.git/info/exclude) -> schuetzt die
+    // privaten Faktenbasis-Daten (CV/Zeugnisse) + Lauf-Artefakte gegen JEDEN git-Befehl (Nutzer, IDE,
+    // Hook, autonomer Agent), nicht nur gegen KatoSyncs eigene ":!"-Pathspecs.
+    ensure_git_excludes(&repo_path);
+    // Stale KatoContext eines frueheren Laufs IMMER entfernen (auch wenn jetzt kein/ein anderer
+    // Referenzordner gesetzt ist oder im Coding-Modus) -> private Daten ueberleben ihre Quelle nicht.
+    let _ = fs::remove_dir_all(format!("{repo_path}/KatoContext"));
     if file_mode && !is_git {
         // NUR ein frisch angelegtes Repo: aktuellen Inhalt als Ausgangszustand committen, damit
         // ein HEAD existiert und der spaetere Diff nur Codex' neue Dateien zeigt. Lokal, ohne Push.
@@ -1823,7 +1886,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         let context_files = if !config.reference_root.trim().is_empty()
             && Path::new(config.reference_root.trim()).is_dir()
         {
-            materialize_kato_context(&repo_path, config.reference_root.trim())
+            materialize_kato_context(&repo_path, config.reference_root.trim()).await
         } else {
             0
         };
@@ -2075,6 +2138,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         .trim()
         .to_string();
 
+    // Defensiv: KatoContext/.katosync NIE mitcommitten (auch im Coding-Modus, der keinen Scope-Check
+    // hat) - selbst wenn ein autonomer Runner sie vorab gestaged hat; der ":!"-add oben entfernt
+    // bereits Gestagetes nicht.
+    let _ = git_capture(&repo_path, &["reset", "-q", "--", "KatoContext", ".katosync"]);
     let mut commit: Option<String> = None;
     if codex_error.is_none() && !changed_files.is_empty() {
         let msg = format!("katosync: {} (task {})", req.title.replace('\n', " "), task_id);
@@ -3365,6 +3432,7 @@ fn should_enter(entry: &DirEntry, config: &AppConfig) -> bool {
     let name = entry.file_name().to_string_lossy().to_lowercase();
     let blocked_names = [
         ".git",
+        ".katosync",
         "katoresults",
         "katocontext",
         "node_modules",
@@ -3398,6 +3466,12 @@ fn should_enter(entry: &DirEntry, config: &AppConfig) -> bool {
         "old",
     ];
     if blocked_names.iter().any(|blocked| name.contains(blocked)) {
+        return false;
+    }
+    // Referenzordner (KatoContext-Quelle: CV/Zeugnisse) NIE in die Mistral-Library scannen, auch wenn
+    // er (oder ein Elternordner) zugleich als Quellordner gewaehlt ist.
+    let reference = config.reference_root.trim().trim_end_matches('/');
+    if !reference.is_empty() && entry.path().starts_with(reference) {
         return false;
     }
     let output = PathBuf::from(&config.output_dir);
