@@ -1154,6 +1154,9 @@ export default function App() {
                 {t("dashboard.sync.openOutput")}
               </button>
             </div>
+            {vm.busy === "sync" && vm.syncStatus ? (
+              <p className="field-hint" style={{ marginTop: 6 }}>{vm.syncStatus}</p>
+            ) : null}
             <StatusLine
               good={!vm.report?.errors.length}
               text={

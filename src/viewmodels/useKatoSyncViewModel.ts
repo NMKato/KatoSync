@@ -7,6 +7,7 @@ import {
   checkCodexTask,
   dirExists,
   listenCodexEvents,
+  listenSyncEvents,
   NO_PROJECT_ID,
   runCodexTask,
   deleteApiKey,
@@ -101,6 +102,7 @@ export function useKatoSyncViewModel() {
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
   const [codexRun, setCodexRun] = useState<CodexRunState>({ status: "idle" });
   const [codexEvents, setCodexEvents] = useState<CodexEvent[]>([]);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [scan, setScan] = useState<ScanSummary | null>(null);
   const [report, setReport] = useState<SyncReport | null>(null);
   const [launchStatus, setLaunchStatus] = useState<LaunchAgentStatus | null>(null);
@@ -155,6 +157,7 @@ export function useKatoSyncViewModel() {
   useEffect(() => {
     let active = true;
     let unlisten: (() => void) | undefined;
+    let unlistenSync: (() => void) | undefined;
     void (async () => {
       const un = await listenCodexEvents((event) => {
         setCodexEvents((prev) => {
@@ -162,12 +165,27 @@ export function useKatoSyncViewModel() {
           return next.length > 300 ? next.slice(next.length - 300) : next;
         });
       });
-      if (active) unlisten = un;
-      else un();
+      const unSync = await listenSyncEvents((event) => {
+        if (event.phase === "rate_limit") {
+          setSyncStatus(
+            `Rate-Limit erreicht – neuer Versuch in ${event.waitSecs ?? 0}s (${event.attempt ?? 0}/${event.total ?? 0})`
+          );
+        } else {
+          setSyncStatus(`Lädt hoch: ${event.file} (${event.index ?? 0}/${event.total ?? 0})`);
+        }
+      });
+      if (active) {
+        unlisten = un;
+        unlistenSync = unSync;
+      } else {
+        un();
+        unSync();
+      }
     })();
     return () => {
       active = false;
       unlisten?.();
+      unlistenSync?.();
     };
   }, []);
 
@@ -382,6 +400,7 @@ export function useKatoSyncViewModel() {
         return;
       }
       setBusy(dryRun ? "dry-run" : "sync");
+      setSyncStatus(null);
       show(
         "info",
         dryRun
@@ -403,6 +422,7 @@ export function useKatoSyncViewModel() {
         show("error", getMessage(error));
       } finally {
         setBusy(null);
+        setSyncStatus(null);
       }
     },
     [config, saveDraftKeyIfNeeded, show]
@@ -1023,6 +1043,7 @@ export function useKatoSyncViewModel() {
     generatedToken,
     codexRun,
     codexEvents,
+    syncStatus,
     rateLimits,
     report,
     scan,

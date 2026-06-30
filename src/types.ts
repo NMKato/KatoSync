@@ -266,6 +266,16 @@ export interface CodexEvent {
   text: string;
 }
 
+// Live-Status des Sync-Laufs (Upload-Fortschritt + sichtbarer Rate-Limit-Backoff).
+export interface SyncEvent {
+  phase: "uploading" | "rate_limit";
+  file: string;
+  index?: number;
+  total?: number;
+  attempt?: number;
+  waitSecs?: number;
+}
+
 export interface LaunchAgentStatus {
   installed: boolean;
   loaded: boolean;

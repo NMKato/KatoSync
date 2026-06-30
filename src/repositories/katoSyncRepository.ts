@@ -11,6 +11,7 @@ import type {
   ActionTaskStatus,
   AppConfig,
   CodexEvent,
+  SyncEvent,
   ApiCheckResponse,
   Briefing,
   BriefingPriority,
@@ -176,6 +177,17 @@ export async function listenCodexEvents(cb: (event: CodexEvent) => void): Promis
   if (!isTauri()) return () => {};
   try {
     const unlisten = await listen<CodexEvent>("codex-event", (evt) => cb(evt.payload));
+    return unlisten;
+  } catch {
+    return () => {};
+  }
+}
+
+// Live-Status des Sync-Laufs (Upload-Fortschritt + Rate-Limit-Backoff). Unsubscribe zurueck.
+export async function listenSyncEvents(cb: (event: SyncEvent) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const unlisten = await listen<SyncEvent>("sync-event", (evt) => cb(evt.payload));
     return unlisten;
   } catch {
     return () => {};

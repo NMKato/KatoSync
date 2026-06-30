@@ -1712,7 +1712,7 @@ async fn scan_project(config: AppConfig) -> Result<ScanSummary, String> {
 }
 
 #[tauri::command]
-async fn run_sync(config: AppConfig, dry_run: Option<bool>) -> Result<SyncReport, String> {
+async fn run_sync(config: AppConfig, dry_run: Option<bool>, app: tauri::AppHandle) -> Result<SyncReport, String> {
     let effective_dry_run = dry_run.unwrap_or(config.safety.dry_run_default);
     if config.source_roots.iter().all(|root| root.trim().is_empty()) {
         return Err(
@@ -1721,7 +1721,7 @@ async fn run_sync(config: AppConfig, dry_run: Option<bool>) -> Result<SyncReport
         );
     }
     save_config_inner(&config).map_err(error_to_string)?;
-    sync_once(&config, effective_dry_run)
+    sync_once(&config, effective_dry_run, Some(&app))
         .await
         .map_err(error_to_string)
 }
@@ -1835,11 +1835,11 @@ async fn run_headless_sync() -> Result<()> {
         )?;
         return Ok(());
     }
-    let _ = sync_once(&config, false).await?;
+    let _ = sync_once(&config, false, None).await?;
     Ok(())
 }
 
-async fn sync_once(config: &AppConfig, dry_run: bool) -> Result<SyncReport> {
+async fn sync_once(config: &AppConfig, dry_run: bool, app: Option<&AppHandle>) -> Result<SyncReport> {
     let started_at = now_string();
     write_log("sync", &format!("Sync gestartet dry_run={dry_run}"))?;
     let scan = scan_roots(config)?;
@@ -1863,7 +1863,20 @@ async fn sync_once(config: &AppConfig, dry_run: bool) -> Result<SyncReport> {
         if config.library_id.trim().is_empty() {
             errors.push("Library ID fehlt.".to_string());
         } else {
-            for file_path in upload_order(&output_dir, config, &scan) {
+            let files = upload_order(&output_dir, config, &scan);
+            let total = files.len();
+            for (idx, file_path) in files.into_iter().enumerate() {
+                if let Some(app) = app {
+                    let _ = app.emit(
+                        "sync-event",
+                        json!({
+                            "phase": "uploading",
+                            "file": file_path.file_name().and_then(OsStr::to_str).unwrap_or(""),
+                            "index": idx + 1,
+                            "total": total,
+                        }),
+                    );
+                }
                 if let Some(file_name) = file_path.file_name().and_then(OsStr::to_str) {
                     match prune_existing_document_versions(&key, &config.library_id, file_name)
                         .await
@@ -1885,7 +1898,7 @@ async fn sync_once(config: &AppConfig, dry_run: bool) -> Result<SyncReport> {
                         }
                     }
                 }
-                match upload_with_backoff(&key, &config.library_id, &file_path).await {
+                match upload_with_backoff(&key, &config.library_id, &file_path, app).await {
                     Ok(result) => uploaded.push(result),
                     Err(error) => {
                         let message = format!(
@@ -2413,10 +2426,12 @@ async fn upload_with_backoff(
     api_key: &str,
     library_id: &str,
     file_path: &Path,
+    app: Option<&AppHandle>,
 ) -> Result<UploadResult> {
     // Kuerzerer, interaktiv-tauglicher Backoff (statt 30/60/120 = bis 3,5 Min stumm): 10/30/60s,
     // gibt dem Minuten-Limit eine Chance zu resetten, blockiert den Sync-Button aber nicht ewig.
     let waits = [10_u64, 30, 60];
+    let file_name = file_path.file_name().and_then(OsStr::to_str).unwrap_or("");
     for attempt in 0..=waits.len() {
         match upload_document(api_key, library_id, file_path).await {
             Ok(result) => return Ok(result),
@@ -2432,6 +2447,19 @@ async fn upload_with_backoff(
                             waits.len() + 1
                         ),
                     )?;
+                    // Sichtbar machen, dass der Sync NICHT haengt, sondern auf das Rate-Limit wartet.
+                    if let Some(app) = app {
+                        let _ = app.emit(
+                            "sync-event",
+                            json!({
+                                "phase": "rate_limit",
+                                "file": file_name,
+                                "attempt": attempt + 2,
+                                "total": waits.len() + 1,
+                                "waitSecs": waits[attempt],
+                            }),
+                        );
+                    }
                     sleep(Duration::from_secs(waits[attempt])).await;
                 } else {
                     return Err(anyhow!(

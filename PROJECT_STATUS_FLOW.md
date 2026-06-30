@@ -1,5 +1,13 @@
 # KatoSync Project Statusflow
 
+## 2026-06-30 - Welle B: Sync-Live-Status (Rate-Limit-Countdown sichtbar) (committet, NICHT released)
+
+Projekt: KatoSync Desktop App. Status: committet auf main, NICHT released. Build gruen, App gebaut + installiert. Loest die Verwirrung aus dem Live-Test (Sync-Button schien einzufrieren, war aber im stummen 429-Backoff).
+
+- **Rust:** `AppHandle` durch `run_sync` -> `sync_once` (Option<&AppHandle>) -> `upload_with_backoff` gefaedelt (Headless-Sync uebergibt None). Emittiert `sync-event`: phase "uploading" (file, index/total) pro Datei und phase "rate_limit" (attempt/total, waitSecs) VOR jedem Backoff-Sleep -> sichtbar, dass der Sync auf das Mistral-Rate-Limit wartet, nicht haengt.
+- **TS/UI:** `SyncEvent`-Typ, `listenSyncEvents` (Event "sync-event"), ViewModel `syncStatus` (gesetzt aus dem Event, geleert bei Sync-Start/Ende). Unter den Sync-Buttons erscheint waehrend des Laufs eine Live-Zeile ("Laedt hoch: X (2/5)" bzw. "Rate-Limit erreicht - neuer Versuch in 30s (2/4)").
+- Ergaenzt die Sync-Haertung vom 29.06. (Timeouts + kuerzerer Backoff): jetzt ist die Wartezeit nicht nur kuerzer, sondern auch sichtbar.
+
 ## 2026-06-30 - Welle A: Multi-Runner (Claude Code CLI) (committet, NICHT released)
 
 Projekt: KatoSync Desktop App. Status: committet auf main, NICHT released. Build gruen (tsc+vite+cargo check), adversarialer Review (7 Funde, alle eingearbeitet), App gebaut + installiert. NOCH NICHT mit echtem Claude-Lauf verifiziert.
