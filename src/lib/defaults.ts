@@ -24,6 +24,7 @@ export const defaultConfig: AppConfig = {
     includeTasks: true,
     includeCsv: false,
     includeDocuments: false,
+    dedupeUploads: false,
     maxFileSizeMb: 5,
     uploadIndividualStatusFiles: false,
     maxIndividualUploads: 5

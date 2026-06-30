@@ -178,6 +178,8 @@ const ru: Record<TKey, string> = {
   "settings.rules.includeRoadmapsDesc": "Файлы roadmap включаются в загрузку.",
   "settings.rules.includeTasksDesc": "Списки задач и todo также синхронизируются.",
   "settings.rules.includeDocuments": "Общие документы",
+  "settings.rules.dedupeUploads": "Избегать дубликатов",
+  "settings.rules.dedupeUploadsDesc": "Удаляет старые версии тех же файлов в Mistral перед загрузкой. Выключено (по умолчанию) = меньше запросов, щадит лимит 429; включено = чистая библиотека, но больше запросов на файл.",
   "settings.rules.includeDocumentsDesc": "Загружать также PDF, текст и изображения (например, резюме, вакансии) — не только файлы проекта. Секреты, .env и ключи всегда исключаются.",
   "settings.rules.secretScannerDesc": "Распознаёт секреты (API-ключи, пароли, .env) и исключает такие файлы из загрузки.",
   "settings.rules.individualOptionalDesc": "Загружает отдельные файлы статуса/roadmap дополнительно к сводному документу.",

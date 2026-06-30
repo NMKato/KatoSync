@@ -109,6 +109,10 @@ pub struct ScanRules {
     include_csv: bool,
     #[serde(default)]
     include_documents: bool,
+    // Alte Mistral-Dokumentversionen vor dem Upload loeschen. Default AUS (spart Requests gegen
+    // das 429-Rate-Limit; an = saubere Library ohne Dubletten, aber mehr Requests pro Datei).
+    #[serde(default)]
+    dedupe_uploads: bool,
     max_file_size_mb: u64,
     upload_individual_status_files: bool,
     max_individual_uploads: usize,
@@ -1948,24 +1952,30 @@ async fn sync_once(config: &AppConfig, dry_run: bool, app: Option<&AppHandle>) -
                         }),
                     );
                 }
-                if let Some(file_name) = file_path.file_name().and_then(OsStr::to_str) {
-                    match prune_existing_document_versions(&key, &config.library_id, file_name)
-                        .await
-                    {
-                        Ok(deleted) if deleted > 0 => {
-                            let message = format!(
-                                "{deleted} alte Mistral-Dokumentversion(en) für {file_name} entfernt."
-                            );
-                            write_log("sync", &message)?;
-                            warnings.push(message);
-                        }
-                        Ok(_) => {}
-                        Err(error) => {
-                            let message = format!(
-                                "Vorhandene Versionen für {file_name} konnten nicht bereinigt werden: {error:#}"
-                            );
-                            write_log("warn", &message)?;
-                            warnings.push(message);
+                // Prune (alte Versionen loeschen) nur wenn ausdruecklich gewuenscht: es macht pro
+                // Datei einen Extra-Request und treibt das Mistral-Rate-Limit (429) hoch. Default
+                // AUS -> weniger Requests, die Uploads (v.a. die Quelldokumente) gehen zuerst durch.
+                // Nachteil ohne Prune: erneuter Sync derselben Datei kann eine Dublette anlegen.
+                if config.scan_rules.dedupe_uploads {
+                    if let Some(file_name) = file_path.file_name().and_then(OsStr::to_str) {
+                        match prune_existing_document_versions(&key, &config.library_id, file_name)
+                            .await
+                        {
+                            Ok(deleted) if deleted > 0 => {
+                                let message = format!(
+                                    "{deleted} alte Mistral-Dokumentversion(en) für {file_name} entfernt."
+                                );
+                                write_log("sync", &message)?;
+                                warnings.push(message);
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                let message = format!(
+                                    "Vorhandene Versionen für {file_name} konnten nicht bereinigt werden: {error:#}"
+                                );
+                                write_log("warn", &message)?;
+                                warnings.push(message);
+                            }
                         }
                     }
                 }
@@ -2963,6 +2973,7 @@ fn default_config() -> Result<AppConfig> {
             include_tasks: true,
             include_csv: false,
             include_documents: false,
+            dedupe_uploads: false,
             max_file_size_mb: 5,
             upload_individual_status_files: false,
             max_individual_uploads: 5,

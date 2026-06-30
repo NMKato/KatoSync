@@ -178,6 +178,8 @@ const es: Record<TKey, string> = {
   "settings.rules.includeRoadmapsDesc": "Los archivos de roadmap se incluyen en la subida.",
   "settings.rules.includeTasksDesc": "Las listas de tareas y pendientes también se sincronizan.",
   "settings.rules.includeDocuments": "Documentos generales",
+  "settings.rules.dedupeUploads": "Evitar duplicados",
+  "settings.rules.dedupeUploadsDesc": "Elimina versiones antiguas de los mismos archivos en Mistral antes de subir. Desactivado (predeterminado) = menos solicitudes, alivia el límite 429; activado = biblioteca limpia pero más solicitudes por archivo.",
   "settings.rules.includeDocumentsDesc": "Sube también PDF, texto e imágenes (p. ej. candidaturas, ofertas de empleo), no solo archivos de proyecto. Los secretos, .env y claves quedan siempre excluidos.",
   "settings.rules.secretScannerDesc": "Detecta secretos (claves de API, contraseñas, .env) y excluye los archivos afectados de la subida.",
   "settings.rules.individualOptionalDesc": "Sube archivos de estado/roadmap individuales además del documento combinado.",

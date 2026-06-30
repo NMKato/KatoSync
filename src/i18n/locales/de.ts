@@ -195,6 +195,8 @@ const de = {
   "settings.rules.includeRoadmapsDesc": "Roadmap-Dateien werden in den Upload aufgenommen.",
   "settings.rules.includeTasksDesc": "Aufgaben- und Todo-Listen werden mit synchronisiert.",
   "settings.rules.includeDocuments": "Allgemeine Dokumente",
+  "settings.rules.dedupeUploads": "Dubletten vermeiden",
+  "settings.rules.dedupeUploadsDesc": "Loescht vor dem Upload alte Versionen gleicher Dateien in Mistral. Aus (Standard) = weniger Requests, schont das 429-Rate-Limit; an = saubere Library, aber mehr Requests pro Datei.",
   "settings.rules.includeDocumentsDesc": "Zusätzlich PDF, Text und Bilder (z. B. Bewerbungen, Stellenanzeigen) hochladen – nicht nur Projektdateien. Secrets, .env und Schlüssel bleiben immer ausgeschlossen.",
   "settings.rules.secretScannerDesc": "Erkennt Secrets (API-Keys, Passwörter, .env) und schließt betroffene Dateien vom Upload aus.",
   "settings.rules.individualOptionalDesc": "Lädt einzelne Status-/Roadmap-Dateien zusätzlich zum Sammeldokument hoch.",

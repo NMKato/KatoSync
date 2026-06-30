@@ -996,6 +996,13 @@ export default function App() {
                   onChange={(checked) => vm.updateNested("scanRules", { includeDocuments: checked })}
                 />
               </HoverTip>
+              <HoverTip title={t("settings.rules.dedupeUploads")} description={t("settings.rules.dedupeUploadsDesc")}>
+                <Toggle
+                  checked={config.scanRules.dedupeUploads}
+                  label={t("settings.rules.dedupeUploads")}
+                  onChange={(checked) => vm.updateNested("scanRules", { dedupeUploads: checked })}
+                />
+              </HoverTip>
               <HoverTip title={t("settings.rules.secretScanner")} description={t("settings.rules.secretScannerDesc")}>
                 <Toggle
                   checked={config.safety.secretScanEnabled}

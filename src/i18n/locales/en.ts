@@ -178,6 +178,8 @@ const en: Record<TKey, string> = {
   "settings.rules.includeRoadmapsDesc": "Roadmap files are included in the upload.",
   "settings.rules.includeTasksDesc": "Task and todo lists are synced too.",
   "settings.rules.includeDocuments": "General documents",
+  "settings.rules.dedupeUploads": "Avoid duplicates",
+  "settings.rules.dedupeUploadsDesc": "Deletes old versions of the same files in Mistral before upload. Off (default) = fewer requests, eases the 429 rate limit; on = clean library but more requests per file.",
   "settings.rules.includeDocumentsDesc": "Also upload PDF, text and images (e.g. applications, job ads) – not just project files. Secrets, .env and keys always stay excluded.",
   "settings.rules.secretScannerDesc": "Detects secrets (API keys, passwords, .env) and excludes affected files from the upload.",
   "settings.rules.individualOptionalDesc": "Uploads single status/roadmap files in addition to the combined document.",

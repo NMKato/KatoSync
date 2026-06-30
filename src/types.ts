@@ -13,6 +13,7 @@ export interface ScanRules {
   includeTasks: boolean;
   includeCsv: boolean;
   includeDocuments: boolean;
+  dedupeUploads: boolean;
   maxFileSizeMb: number;
   uploadIndividualStatusFiles: boolean;
   maxIndividualUploads: number;
