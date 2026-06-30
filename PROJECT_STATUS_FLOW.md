@@ -1,5 +1,18 @@
 # KatoSync Project Statusflow
 
+## 2026-06-30 - Auth-Flows live + beta.7 released + Rate-Limit/Umlaute/Modus-Picker + KatoContext-Haertung -> beta.8
+
+Projekt: KatoSync App + MCP Server. Grosse Session-Fortsetzung nach dem Cloud-Profil. App HEAD `b37bf58` (alles committet+gepusht). **Release: v2.0.0-beta.7 (Latest, signiert+notarisiert)**; beta.8 in Vorbereitung (APP_VERSION_LABEL = "2.0.0 Beta 8").
+
+- **Auth-Config (#1/#2/#7a) ERLEDIGT (Claude via Supabase-Management-API):** Site URL weg von `http://localhost:3000` auf `https://mcp.katoos.de/auth`; `uri_allow_list` gesetzt; `password_min_length` 6 -> 8. „Confirm email" war schon an (mailer_autoconfirm=false) und funktioniert jetzt, weil die Site URL stimmt. **Neue Worker-Auth-Landeseite** `/auth` (Server-Repo `src/auth-page.ts`, KatoOS-gebrandet, echtes Logo als data-URI): `type=recovery` -> Neu-Passwort-Formular (GoTrue PUT /auth/v1/user); sonst „E-Mail bestaetigt". Worker-Version `aaeb8fc1`. **Management-Token (`sbp_...`) muss der Nutzer noch widerrufen.**
+- **beta.7 RELEASED:** signiert + Apple-notarisiert (Submission `9eba3e56`, Accepted), als Latest. Liefert den ganzen Berg seit beta.6 (Cloud-Profil, Multi-Runner, Audit-Haertung, Sync-Robustheit, Tester-Feedback).
+- **Rate-Limit definitiv diagnostiziert (Live-Test + Multi-Agent):** Das anhaltende 429 ist Mistrals **Tageslimit fuer Dokument-Verarbeitung (10/Tag, eigene Kategorie)** — NICHT Minuten-Takt, Monats-Token oder die PDF. `x-ratelimit-remaining-document-day=0` bei `-minute=9`. Reset ~24h (rollend). Mehr nur via Scale/Pay-as-you-go (Tier steigt durch abgerechneten Umsatz, NICHT durch Guthaben). **App-Fixes:** upload_document erkennt `document-day=0` -> sofort permanent scheitern mit klarer Meldung; upload_with_backoff bricht beim Tageslimit ab (kein 4x-Grinden); sync_once-Meldung + sync-event `rate_limit_abort_day` differenziert; Dokumente/Minute + Dokumente/Tag im Verbindungstest sichtbar.
+- **Umlaute:** alle deutschen Fehlermeldungen dieser Session auf echte Ä/Ü/Ö (Rate-Limit + Cloud-Profil-Krypto).
+- **Modus-Picker UX:** der einzelne „Coding-Modus"-Toggle ist jetzt ein Zwei-Pillen-Umschalter „Datei-Modus | Coding-Modus" (wie der Runner-Picker); aktiver Modus hervorgehoben, Push/PR nur im Coding-Modus. i18n 4 Sprachen.
+- **Welle-C-Review (KatoContext) DONE + GEHAERTET (9 Funde, adversarial):** KatoContext materialisiert private Faktenbasis (CV/Zeugnisse) in den Repo -> Leak-Vektoren geschlossen: `ensure_git_excludes` schreibt `KatoContext/`+`.katosync/` in `.git/info/exclude` (schuetzt gegen JEDEN git-Befehl, nicht nur KatoSyncs Pathspecs); defensiver `git reset` vor jedem Commit; KatoContext zu Lauf-Beginn IMMER frisch geraeumt; `.katosync` + der Referenzordner vom Mistral-Scan ausgeschlossen; pdftotext async mit Timeout+kill_on_drop; .txt-Zwilling kollisionssicher; Fehler werden geloggt.
+- **Promo-Video-Prompts** als `docs/KATOSYNC_PROMO_VIDEO_PROMPTS.md` (Master-Prompt, 7-Shot-Storyboard, Style-Bibel, Titel + Beschreibungen).
+- **OFFEN:** **Datei-Modus + Claude-Runner LIVE-TEST** (Nutzer, braucht Quota — morgen, sobald Mistral-Tageslimit zurueck ist; Mistral-Limit blockiert den Runner-Test NICHT, ist aber die aktuelle Wartebremse). Danach ggf. beta.9 fuer Test-Fixes. Nutzer: Management-Token widerrufen, ggf. Scale aktivieren.
+
 ## 2026-06-30 - Cloud-Profil App-Seite LIVE getestet + Supabase deployt (committet 039309b, NICHT released)
 
 Projekt: KatoSync App + MCP Server. Status: App-Commit `039309b` auf main (NICHT gepusht, NICHT released); Server 0008+0009 + Worker `8f3cf6dc` LIVE deployt. Cloud-Profil end-to-end vom Nutzer live verifiziert (Backup beim Logout -> Restore beim Login).
