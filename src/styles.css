@@ -364,6 +364,48 @@ button:disabled {
   line-height: 1.45;
 }
 
+/* Setup-Checkliste: erledigte Schritte gedaempft (gruener Punkt), FEHLENDE in Akzentfarbe hervorgehoben. */
+.setup-gates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-gates li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.setup-gates .gate-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.setup-gates li.gate-done {
+  color: #8b95a3;
+}
+
+.setup-gates li.gate-done .gate-dot {
+  background: #34d399;
+}
+
+.setup-gates li.gate-missing {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.setup-gates li.gate-missing .gate-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+
 .issue-badge {
   display: inline-flex;
   align-items: center;
@@ -831,6 +873,26 @@ input:focus {
   border-radius: 7px;
   color: #f4f5f6;
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* Manueller Token: beschrifteter "Übernehmen"-Button (vorhandenen Token bestaetigen, kein neuer noetig). */
+.inline-input:has(.inline-save-labeled) {
+  grid-template-columns: 1fr auto;
+}
+
+.inline-input button.inline-save-labeled {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 15px;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.inline-input button.inline-save-labeled:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .button-stack {
@@ -2106,6 +2168,65 @@ input[type="range"] {
 
 .quit-confirm {
   min-width: 180px;
+}
+
+/* Cloud-Profil: Logout-/Konto-Wechsel-Dialog + Passwort-Abfrage */
+.quit-icon.cloudpw-icon {
+  color: var(--accent, #f59e0b);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.logout-saving {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  color: #b5bec9;
+}
+
+.logout-saving p {
+  margin: 0;
+}
+
+.logout-password {
+  width: 100%;
+  margin-top: 14px;
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(8, 10, 13, 0.6);
+  color: inherit;
+  font-size: 15px;
+}
+
+.logout-password:focus {
+  outline: none;
+  border-color: rgba(245, 158, 11, 0.6);
+}
+
+.logout-error {
+  color: #ff8c8c;
+}
+
+.logout-error-actions {
+  flex-wrap: wrap;
+}
+
+/* Sidebar-Fußzeile: angemeldetes Konto + Abmelden */
+.sidebar-account {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-account-email {
+  font-size: 12px;
+  color: #8b95a3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .license-backdrop {

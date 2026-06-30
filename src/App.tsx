@@ -26,6 +26,7 @@ import {
   Library,
   ListChecks,
   Loader2,
+  LogOut,
   Moon,
   Power,
   PlayCircle,
@@ -268,6 +269,16 @@ export default function App() {
     }
   }, [vm.report?.finishedAt]);
 
+  // Konto-Wechsel: Lauf-Verlauf NUR beim echten Logout-Uebergang (eingeloggt -> abgemeldet) leeren,
+  // nicht beim Start (wo loggedIn erst false ist, bis boot() ihn setzt) -> sonst ginge der per
+  // loadRunHistory() wiederhergestellte Verlauf bei jedem Start verloren. localStorage raeumt
+  // clearLocalTenantCaches separat.
+  const wasLoggedInRef = useRef(false);
+  useEffect(() => {
+    if (wasLoggedInRef.current && !vm.sessionStatus.loggedIn) setRunHistory([]);
+    wasLoggedInRef.current = vm.sessionStatus.loggedIn;
+  }, [vm.sessionStatus.loggedIn]);
+
   // Splash: animiertes Logo bei JEDEM Start, dann ausblenden.
   useEffect(() => {
     const timer = window.setTimeout(() => setShowSplash(false), 1200);
@@ -506,6 +517,21 @@ export default function App() {
               <span>{t("sidebar.license")}</span>
             </button>
           </HoverTip>
+          {vm.sessionStatus.loggedIn ? (
+            <div className="sidebar-account">
+              <span className="sidebar-account-email" title={t("sidebar.account")}>
+                {presentation
+                  ? maskEmail(vm.sessionStatus.email)
+                  : vm.sessionStatus.email || t("settings.api.accountFallback")}
+              </span>
+              <HoverTip description={t("sidebar.logoutDesc")} title={t("sidebar.logout")}>
+                <button className="ghost license-link" onClick={vm.requestLogout} type="button">
+                  <LogOut size={16} />
+                  <span>{t("sidebar.logout")}</span>
+                </button>
+              </HoverTip>
+            </div>
+          ) : null}
           <HoverTip description={t("sidebar.quitDesc")} title={t("sidebar.quit")}>
             <button className="ghost danger compact-danger" onClick={() => setQuitConfirmOpen(true)} type="button">
               <Power size={16} />
@@ -530,10 +556,22 @@ export default function App() {
             <div className="progress-track">
               <span style={{ width: `${vm.completion}%` }} />
             </div>
-            <p>
-              {t("setup.keyLabel")} {vm.keyStatus.exists ? t("setup.keySaved") : t("setup.keyMissing")} ·{" "}
-              {vm.launchStatus?.installed ? t("setup.planActive") : t("setup.planOpen")}
-            </p>
+            <ul className="setup-gates">
+              {(
+                [
+                  [t("setup.gateKey"), vm.setupGates[0]],
+                  [t("setup.gateLibrary"), vm.setupGates[1]],
+                  [t("setup.gateToken"), vm.setupGates[2]],
+                  [t("setup.gateFolder"), vm.setupGates[3]],
+                  [t("setup.gatePlan"), vm.setupGates[4]]
+                ] as [string, boolean][]
+              ).map(([label, done]) => (
+                <li className={done ? "gate-done" : "gate-missing"} key={label}>
+                  <span className="gate-dot" />
+                  <span>{label}</span>
+                </li>
+              ))}
+            </ul>
             {hasNewHints ? (
               <button className="issue-badge" onClick={() => setHintsOpen(true)} type="button">
                 <span className="issue-count">{issueCount}</span>
@@ -734,14 +772,17 @@ export default function App() {
                     value={vm.mcpTokenInput}
                   />
                   <button
-                    disabled={Boolean(vm.busy)}
+                    className="inline-save-labeled"
+                    disabled={Boolean(vm.busy) || !vm.mcpTokenInput.trim()}
                     onClick={vm.handleSaveMcpConnectorToken}
                     title={t("settings.api.saveMcpTokenTitle")}
                     type="button"
                   >
                     {vm.busy === "mcp-token" ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+                    <span>{t("settings.api.mcpTokenConfirm")}</span>
                   </button>
                 </div>
+                <span className="field-hint">{t("settings.api.mcpTokenExistingHint")}</span>
               </label>
               <label
                 id="section-mcp-token"
@@ -767,7 +808,8 @@ export default function App() {
                         {vm.busy === "mint-token" ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}
                         {vm.busy === "mint-token" ? t("settings.api.generating") : t("settings.api.generateToken")}
                       </button>
-                      <button className="ghost" disabled={Boolean(vm.busy)} onClick={vm.handleLogout} type="button">
+                      <button className="ghost" disabled={Boolean(vm.busy)} onClick={vm.requestLogout} type="button">
+                        <LogOut size={15} />
                         {t("settings.api.logout")}
                       </button>
                     </div>
@@ -1292,6 +1334,159 @@ export default function App() {
           </section>
         </div>
       ) : null}
+
+      {vm.logoutFlow ? <LogoutDialog vm={vm} /> : null}
+      {vm.cloudPasswordPrompt ? <CloudPasswordDialog vm={vm} /> : null}
+    </div>
+  );
+}
+
+// Sicherer Logout/Konto-Wechsel: ERST in die Cloud sichern (Spinner), DANN raeumen. Bei fehlendem
+// RAM-Schluessel Passwort-Abfrage; bei Fehler bleibt man eingeloggt (mit Notausgang "Trotzdem abmelden").
+function LogoutDialog({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const { t } = useT();
+  const [password, setPassword] = useState("");
+  const flow = vm.logoutFlow;
+  if (!flow) return null;
+  const saving = flow.stage === "saving";
+  return (
+    <div
+      className="modal-backdrop quit-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !saving) vm.cancelLogout();
+      }}
+      role="presentation"
+    >
+      <section aria-labelledby="logout-title" aria-modal="true" className="quit-dialog" role="dialog">
+        <div className="quit-icon">
+          <LogOut size={22} />
+        </div>
+        <span className="section-label">{t("logout.label")}</span>
+        <h2 id="logout-title">{t("logout.title")}</h2>
+
+        {flow.stage === "confirm" ? (
+          <>
+            <p>{t("logout.confirmBody")}</p>
+            <footer>
+              <button className="secondary" onClick={vm.cancelLogout} type="button">
+                {t("logout.cancel")}
+              </button>
+              <button className="ghost danger quit-confirm" onClick={vm.confirmLogout} type="button">
+                <LogOut size={16} />
+                {t("logout.confirm")}
+              </button>
+            </footer>
+          </>
+        ) : null}
+
+        {flow.stage === "saving" ? (
+          <div className="logout-saving">
+            <Loader2 className="spin" size={24} />
+            <p>{t("logout.saving")}</p>
+          </div>
+        ) : null}
+
+        {flow.stage === "password" ? (
+          <>
+            <p>{t("logout.passwordBody")}</p>
+            <input
+              autoFocus
+              className="logout-password"
+              onChange={(event) => setPassword(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && password.trim()) vm.submitLogoutPassword(password);
+              }}
+              placeholder={t("logout.passwordPlaceholder")}
+              type="password"
+              value={password}
+            />
+            <footer>
+              <button className="secondary" onClick={vm.cancelLogout} type="button">
+                {t("logout.cancel")}
+              </button>
+              <button
+                className="ghost danger quit-confirm"
+                disabled={!password.trim()}
+                onClick={() => vm.submitLogoutPassword(password)}
+                type="button"
+              >
+                <LogOut size={16} />
+                {t("logout.saveAndLogout")}
+              </button>
+            </footer>
+          </>
+        ) : null}
+
+        {flow.stage === "error" ? (
+          <>
+            <p className="logout-error">{t("logout.errorBody")}</p>
+            {flow.error ? <p className="field-hint">{flow.error}</p> : null}
+            <footer className="logout-error-actions">
+              <button className="secondary" onClick={vm.cancelLogout} type="button">
+                {t("logout.stayLoggedIn")}
+              </button>
+              <button className="secondary" onClick={vm.confirmLogout} type="button">
+                {t("logout.retry")}
+              </button>
+              <button className="ghost danger" onClick={vm.forceLogout} type="button">
+                {t("logout.forceLogout")}
+              </button>
+            </footer>
+          </>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+// Einmalige Passwort-Abfrage, wenn ein Speichern den RAM-Schluessel nicht hat (still-wieder-eingeloggt).
+function CloudPasswordDialog({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
+  const { t } = useT();
+  const [password, setPassword] = useState("");
+  const prompt = vm.cloudPasswordPrompt;
+  if (!prompt) return null;
+  return (
+    <div
+      className="modal-backdrop quit-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !prompt.busy) vm.cancelCloudPassword();
+      }}
+      role="presentation"
+    >
+      <section aria-labelledby="cloudpw-title" aria-modal="true" className="quit-dialog" role="dialog">
+        <div className="quit-icon cloudpw-icon">
+          <ShieldCheck size={22} />
+        </div>
+        <span className="section-label">{t("cloudpw.label")}</span>
+        <h2 id="cloudpw-title">{t("cloudpw.title")}</h2>
+        <p>{t("cloudpw.body")}</p>
+        <input
+          autoFocus
+          className="logout-password"
+          onChange={(event) => setPassword(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && password.trim() && !prompt.busy) vm.submitCloudPassword(password);
+          }}
+          placeholder={t("cloudpw.placeholder")}
+          type="password"
+          value={password}
+        />
+        {prompt.error ? <p className="field-hint logout-error">{prompt.error}</p> : null}
+        <footer>
+          <button className="secondary" disabled={prompt.busy} onClick={vm.cancelCloudPassword} type="button">
+            {t("cloudpw.skip")}
+          </button>
+          <button
+            className="ghost quit-confirm"
+            disabled={prompt.busy || !password.trim()}
+            onClick={() => vm.submitCloudPassword(password)}
+            type="button"
+          >
+            {prompt.busy ? <Loader2 className="spin" size={16} /> : <ShieldCheck size={16} />}
+            {t("cloudpw.save")}
+          </button>
+        </footer>
+      </section>
     </div>
   );
 }

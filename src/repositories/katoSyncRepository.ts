@@ -152,6 +152,91 @@ export async function logoutSupabase(): Promise<SupabaseSessionStatus> {
   return { loggedIn: false, email: null };
 }
 
+// ── Cloud-Profil (Zero-Knowledge): Zugangsdaten folgen dem KatoOS-Konto ──────────────
+
+export interface CloudProfileSyncResult {
+  status: "restored" | "created" | "empty" | "unreadable";
+  libraryId: string | null;
+}
+
+export interface CloudProfilePushResult {
+  pushed: boolean;
+  needsPassword: boolean;
+}
+
+export interface CloudProfileLogoutResult {
+  status: "logged_out" | "needs_password";
+}
+
+// Beim Login (Passwort liegt vor): konto-gebundene Zugangsdaten holen + entschluesseln + lokal
+// anwenden, oder neu anlegen. Nur Desktop-App; im Browser-Demo no-op.
+export async function cloudProfileSyncAfterLogin(
+  baseUrl: string,
+  password: string
+): Promise<CloudProfileSyncResult> {
+  if (!isTauri()) return { status: "empty", libraryId: null };
+  return invoke<CloudProfileSyncResult>("cloud_profile_sync_after_login", { baseUrl, password });
+}
+
+// Nach einer Zugangsdaten-Aenderung sichern. needsPassword=true -> UI fragt einmalig nach.
+export async function cloudProfilePush(baseUrl: string): Promise<CloudProfilePushResult> {
+  if (!isTauri()) return { pushed: false, needsPassword: false };
+  try {
+    return await invoke<CloudProfilePushResult>("cloud_profile_push", { baseUrl });
+  } catch (error) {
+    console.warn("Cloud-Profil konnte nicht gesichert werden.", error);
+    return { pushed: false, needsPassword: false };
+  }
+}
+
+export async function cloudProfileUnlockAndPush(baseUrl: string, password: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("cloud_profile_unlock_and_push", { baseUrl, password });
+}
+
+export async function cloudProfileKeyPresent(): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    return await invoke<boolean>("cloud_profile_key_present");
+  } catch {
+    return false;
+  }
+}
+
+// Sicherer Logout/Konto-Wechsel: ERST in die Cloud sichern, DANN raeumen. needs_password ->
+// UI fragt das Passwort ab und ruft erneut auf; force=true ueberspringt die Cloud-Sicherung.
+export async function cloudProfileLogout(
+  baseUrl: string,
+  password?: string,
+  force = false
+): Promise<CloudProfileLogoutResult> {
+  if (!isTauri()) return { status: "logged_out" };
+  return invoke<CloudProfileLogoutResult>("cloud_profile_logout", {
+    baseUrl,
+    password: password ?? null,
+    force
+  });
+}
+
+// Tenant-Isolierung: lokale Tenant-Daten-Caches im localStorage leeren (Logout/Konto-Wechsel).
+// UI-Praeferenzen (Theme/Sprache/Praesentation/Onboarding/Lizenz) bleiben bewusst erhalten.
+export function clearLocalTenantCaches(): void {
+  try {
+    localStorage.removeItem(mockActionPlansKey);
+    localStorage.removeItem(mockBriefingsKey);
+    localStorage.removeItem(mockMcpConnectorTokenKey);
+    localStorage.removeItem(mockConfigKey);
+    localStorage.removeItem("katosync.runHistory.v1"); // spiegelt STORAGE_KEY in lib/runHistory.ts
+    // Tages-Zaehler ALLER Tage entfernen (Codex-Quota nicht vom Vortenant erben; Key in
+    // useKatoSyncViewModel.dailyCountKey = katosync.board.completed.<datum>).
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("katosync.board.completed.")) localStorage.removeItem(key);
+    }
+  } catch {
+    // localStorage nicht verfuegbar -> ignorieren
+  }
+}
+
 export async function generateConnectorToken(config: AppConfig): Promise<GeneratedConnectorToken> {
   if (!isTauri()) {
     throw new Error("Token-Generierung ist nur in der Desktop-App verfügbar.");

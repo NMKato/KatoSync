@@ -39,6 +39,10 @@ const KATOSYNC_AUTH_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc
 static API_KEY_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static MCP_CONNECTOR_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static SUPABASE_ACCESS_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+// Cloud-Profil (Zero-Knowledge): der aus dem Passwort abgeleitete 32-Byte-Schluessel + das zugehoerige
+// kdf_salt liegen NUR im RAM (nie auf Platte/Keychain) und nur fuer die laufende Sitzung. Wird beim Login
+// gesetzt und beim Logout geraeumt. Ohne ihn kann das Cloud-Profil weder ent- noch verschluesselt werden.
+static CLOUD_PROFILE_KEY: OnceLock<Mutex<Option<CloudKeyMaterial>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -262,6 +266,11 @@ pub fn run() {
             supabase_session_status,
             logout_supabase,
             mint_connector_token,
+            cloud_profile_sync_after_login,
+            cloud_profile_push,
+            cloud_profile_unlock_and_push,
+            cloud_profile_key_present,
+            cloud_profile_logout,
             run_codex_task,
             dir_exists,
             check_codex_task,
@@ -503,6 +512,539 @@ async fn mint_connector_token(base_url: String) -> Result<serde_json::Value, Str
         return Err(format!("Token-Generierung fehlgeschlagen ({status}): {text}"));
     }
     serde_json::from_str(&text).map_err(error_to_string)
+}
+
+// ============================================================================
+// Cloud-Profil (Zero-Knowledge): Zugangsdaten folgen dem KatoOS-Konto.
+//
+// Beim Login wird aus Passwort + kdf_salt via Argon2id ein 32-Byte-Schluessel abgeleitet
+// (nur im RAM, siehe CLOUD_PROFILE_KEY). Damit wird EIN Blob {apiKey, connectorToken} per
+// AES-256-GCM ent-/verschluesselt. Der Server (/api/me/settings) speichert nur den opaken
+// Cipher + Nonce + Salt + die nicht-geheime library_id und kann NICHTS entschluesseln.
+// Geraete-Pfade (Quellordner/Zeitplan/Referenzordner) werden bewusst NICHT gesynct.
+// ============================================================================
+
+#[derive(Clone)]
+struct CloudKeyMaterial {
+    key: [u8; 32],
+    salt_b64: String,
+}
+
+// Schluesselbytes beim Wegwerfen NULLEN (auch fuer Klone + set_cloud_key(None) beim Logout) ->
+// der AES-Schluessel bleibt nicht als Klartext im RAM/Swap zurueck.
+impl Drop for CloudKeyMaterial {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
+    }
+}
+
+fn cloud_profile_key_store() -> &'static Mutex<Option<CloudKeyMaterial>> {
+    CLOUD_PROFILE_KEY.get_or_init(|| Mutex::new(None))
+}
+
+fn cached_cloud_key() -> Option<CloudKeyMaterial> {
+    cloud_profile_key_store()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+fn set_cloud_key(value: Option<CloudKeyMaterial>) {
+    if let Ok(mut guard) = cloud_profile_key_store().lock() {
+        *guard = value;
+    }
+}
+
+fn b64_encode(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn b64_decode(value: &str) -> Result<Vec<u8>> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(value.trim())
+        .map_err(|e| anyhow!("Base64-Dekodierung fehlgeschlagen: {e}"))
+}
+
+fn random_bytes<const N: usize>() -> [u8; N] {
+    use rand::RngCore;
+    let mut buf = [0u8; N];
+    rand::rngs::OsRng.fill_bytes(&mut buf);
+    buf
+}
+
+// Argon2id -> 32-Byte-Schluessel. Parameter (m=19 MiB, t=2, p=1) EXPLIZIT gepinnt, NICHT der
+// Crate-Default: ein spaeteres argon2-Update koennte Params::default() aendern und damit bei
+// identischem Passwort+Salt einen anderen Schluessel liefern -> alle bestehenden Profile waeren
+// still unlesbar. Diese Pinnung haelt die Ableitung versionsstabil.
+fn derive_cloud_key(password: &str, salt: &[u8]) -> Result<[u8; 32]> {
+    use argon2::{Algorithm, Argon2, Params, Version};
+    let params = Params::new(19_456, 2, 1, Some(32))
+        .map_err(|e| anyhow!("Argon2-Parameter ungueltig: {e}"))?;
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut out = [0u8; 32];
+    argon
+        .hash_password_into(password.as_bytes(), salt, &mut out)
+        .map_err(|e| anyhow!("Schluesselableitung fehlgeschlagen: {e}"))?;
+    Ok(out)
+}
+
+fn encrypt_cloud_blob(key: &[u8; 32], plaintext: &[u8]) -> Result<(String, String)> {
+    use aes_gcm::aead::Aead;
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| anyhow!("AES-Schluessel ungueltig: {e}"))?;
+    let nonce_bytes = random_bytes::<12>();
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext)
+        .map_err(|_| anyhow!("Verschluesselung fehlgeschlagen."))?;
+    Ok((b64_encode(&ciphertext), b64_encode(&nonce_bytes)))
+}
+
+fn decrypt_cloud_blob(key: &[u8; 32], cipher_b64: &str, nonce_b64: &str) -> Result<Vec<u8>> {
+    use aes_gcm::aead::Aead;
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+    let ciphertext = b64_decode(cipher_b64)?;
+    let nonce_bytes = b64_decode(nonce_b64)?;
+    if nonce_bytes.len() != 12 {
+        return Err(anyhow!("Cloud-Profil beschaedigt (Nonce-Laenge)."));
+    }
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| anyhow!("AES-Schluessel ungueltig: {e}"))?;
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|_| {
+        anyhow!("Entschluesselung fehlgeschlagen (falsches Passwort oder beschaedigtes Profil).")
+    })
+}
+
+// Klartext-Blob, der verschluesselt in der Cloud liegt.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudSecretBlob {
+    #[serde(default)]
+    api_key: String,
+    #[serde(default)]
+    connector_token: String,
+}
+
+// Antwort von GET /api/me/settings (Feld `settings`, sonst null).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteUserSettings {
+    #[serde(default)]
+    library_id: Option<String>,
+    #[serde(default)]
+    secret_cipher: Option<String>,
+    #[serde(default)]
+    secret_nonce: Option<String>,
+    #[serde(default)]
+    kdf_salt: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserSettingsEnvelope {
+    #[serde(default)]
+    settings: Option<RemoteUserSettings>,
+}
+
+async fn fetch_user_settings(base_url: &str) -> Result<Option<RemoteUserSettings>> {
+    let access_token = ensure_supabase_access_token().await?;
+    let url = format!("{}/api/me/settings", normalize_base_url(base_url));
+    let response = reqwest::Client::new()
+        .get(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(access_token.trim())
+        .send()
+        .await?;
+    let status = response.status();
+    let text = response.text().await?;
+    if !status.is_success() {
+        return Err(anyhow!("Cloud-Profil nicht erreichbar ({status}): {text}"));
+    }
+    let envelope: UserSettingsEnvelope = serde_json::from_str(&text)?;
+    Ok(envelope.settings)
+}
+
+async fn put_user_settings(
+    base_url: &str,
+    library_id: &str,
+    cipher_b64: &str,
+    nonce_b64: &str,
+    salt_b64: &str,
+) -> Result<()> {
+    let access_token = ensure_supabase_access_token().await?;
+    let url = format!("{}/api/me/settings", normalize_base_url(base_url));
+    let response = reqwest::Client::new()
+        .put(url)
+        .header("User-Agent", USER_AGENT)
+        .bearer_auth(access_token.trim())
+        .json(&json!({
+            "libraryId": library_id,
+            "secretCipher": cipher_b64,
+            "secretNonce": nonce_b64,
+            "kdfSalt": salt_b64,
+        }))
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(anyhow!(
+            "Cloud-Profil speichern fehlgeschlagen ({status}): {text}"
+        ));
+    }
+    Ok(())
+}
+
+// Aktuelle lokale Zugangsdaten einsammeln (leer = nicht gesetzt).
+fn collect_local_secrets() -> (String, String, String) {
+    let api_key = load_api_key().unwrap_or_default();
+    let connector_token = load_mcp_connector_token().unwrap_or_default();
+    let library_id = load_config_inner().map(|c| c.library_id).unwrap_or_default();
+    (api_key, connector_token, library_id)
+}
+
+// Lokale Zugangsdaten mit dem RAM-Schluessel verschluesseln und in die Cloud schreiben.
+async fn push_local_secrets_to_cloud(base_url: &str, material: &CloudKeyMaterial) -> Result<()> {
+    let (api_key, connector_token, library_id) = collect_local_secrets();
+    let blob = CloudSecretBlob {
+        api_key,
+        connector_token,
+    };
+    let mut plaintext = serde_json::to_vec(&blob)?;
+    let (cipher_b64, nonce_b64) = encrypt_cloud_blob(&material.key, &plaintext)?;
+    {
+        use zeroize::Zeroize;
+        plaintext.zeroize(); // Klartext-Geheimnisse nicht im RAM zuruecklassen
+    }
+    put_user_settings(
+        base_url,
+        &library_id,
+        &cipher_b64,
+        &nonce_b64,
+        &material.salt_b64,
+    )
+    .await
+}
+
+// Entschluesselte Zugangsdaten lokal anwenden (Keychain + Config) -> "auf neuem Geraet alles wieder da".
+fn apply_cloud_secrets(blob: &CloudSecretBlob, library_id: &str) -> Result<()> {
+    let api_key = blob.api_key.trim();
+    if !api_key.is_empty() {
+        keychain_entry()?.set_password(api_key)?;
+        cache_api_key(Some(api_key.to_string()));
+        let _ = write_api_key_marker();
+    }
+    let connector_token = blob.connector_token.trim();
+    if !connector_token.is_empty() {
+        mcp_connector_keychain_entry()?.set_password(connector_token)?;
+        cache_mcp_connector_token(Some(connector_token.to_string()));
+        let _ = write_mcp_connector_token_marker();
+    }
+    let library = library_id.trim();
+    if !library.is_empty() {
+        let mut config = load_config_inner()?;
+        config.library_id = library.to_string();
+        save_config_inner(&config)?;
+    }
+    Ok(())
+}
+
+// Versucht ein vorhandenes Cloud-Profil mit dem Passwort zu entschluesseln. Liefert (Schluessel, Blob)
+// NUR bei Erfolg; JEDER Fehler (kaputtes/zu kurzes Salt, Ableitungsfehler, falsches Passwort, Parse-
+// Fehler) -> None, damit Aufrufer sauber selbstheilen statt hart abzubrechen.
+fn try_unlock_profile(
+    password: &str,
+    salt_b64: &str,
+    cipher_b64: &str,
+    nonce_b64: &str,
+) -> Option<([u8; 32], CloudSecretBlob)> {
+    let salt = b64_decode(salt_b64).ok()?;
+    if salt.len() < 8 {
+        return None;
+    }
+    let key = derive_cloud_key(password, &salt).ok()?;
+    let plaintext = decrypt_cloud_blob(&key, cipher_b64, nonce_b64).ok()?;
+    let blob: CloudSecretBlob = serde_json::from_slice(&plaintext).ok()?;
+    Some((key, blob))
+}
+
+// Ist das gespeicherte Salt grundsaetzlich brauchbar (dekodierbar + lang genug)? Unterscheidet ein
+// echtes Profil (falsches Passwort -> NICHT ueberschreiben) von einem korrupten (frisch anlegen ok).
+fn profile_salt_usable(salt_b64: &str) -> bool {
+    b64_decode(salt_b64).map(|s| s.len() >= 8).unwrap_or(false)
+}
+
+// Passwort gegen das KatoOS-Konto verifizieren (GoTrue-Re-Login). Genutzt, wenn KEIN entschluesselbares
+// Profil zum Gegenpruefen existiert -> verhindert, dass ein falsch getipptes Passwort ein Cloud-Profil
+// unter falschem Schluessel anlegt (sonst waere der spaetere Login mit dem RICHTIGEN Passwort dauerhaft
+// "unreadable" und die Zugangsdaten verloren).
+async fn verify_account_password(password: &str) -> Result<()> {
+    let email =
+        read_supabase_session_email().ok_or_else(|| anyhow!("Keine aktive Sitzung gefunden."))?;
+    supabase_password_login(&email, password)
+        .await
+        .map_err(|_| anyhow!("Falsches Passwort (oder Server nicht erreichbar)."))?;
+    Ok(())
+}
+
+// Frisches Schluesselmaterial -- ABER nur nach erfolgreicher Konto-Verifikation des Passworts.
+async fn verified_fresh_material(password: &str) -> Result<CloudKeyMaterial> {
+    verify_account_password(password).await?;
+    let new_salt = random_bytes::<16>();
+    let new_salt_b64 = b64_encode(&new_salt);
+    let key = derive_cloud_key(password, &new_salt)?;
+    Ok(CloudKeyMaterial {
+        key,
+        salt_b64: new_salt_b64,
+    })
+}
+
+// Schluessel aus dem Passwort ableiten (gegen das vorhandene Profil ODER das Konto verifizieren) und
+// dann pushen. Schuetzt davor, das Cloud-Profil mit einem falschen Passwort zu ueberschreiben/anzulegen.
+async fn cloud_profile_unlock_and_push_inner(base_url: &str, password: &str) -> Result<()> {
+    if password.trim().is_empty() {
+        return Err(anyhow!("Bitte Passwort eingeben."));
+    }
+    let settings = fetch_user_settings(base_url).await?;
+    let has_profile = settings.as_ref().map_or(false, |s| {
+        s.secret_cipher
+            .as_deref()
+            .map_or(false, |c| !c.trim().is_empty())
+    });
+    let material = if has_profile {
+        let s = settings.unwrap();
+        let salt_b64 = s.kdf_salt.clone().unwrap_or_default();
+        let cipher = s.secret_cipher.clone().unwrap_or_default();
+        let nonce = s.secret_nonce.clone().unwrap_or_default();
+        if profile_salt_usable(&salt_b64) {
+            // Echtes Profil -> Passwort MUSS es entschluesseln koennen, sonst NICHT ueberschreiben.
+            match try_unlock_profile(password, &salt_b64, &cipher, &nonce) {
+                Some((key, _)) => CloudKeyMaterial { key, salt_b64 },
+                None => return Err(anyhow!("Falsches Passwort.")),
+            }
+        } else {
+            // Korruptes/unbrauchbares Salt -> frisch, aber Passwort gegen das Konto verifizieren.
+            verified_fresh_material(password).await?
+        }
+    } else {
+        // Kein Profil zum Gegenpruefen -> Passwort gegen das Konto verifizieren, bevor wir es anlegen.
+        verified_fresh_material(password).await?
+    };
+    push_local_secrets_to_cloud(base_url, &material).await?;
+    set_cloud_key(Some(material));
+    Ok(())
+}
+
+// Tenant-Isolierung: alle konto-/tenant-bezogenen lokalen Daten loeschen. Geraete-Identitaet
+// (device_id/name), Server-URL und reine App-Praeferenzen (Scan-Regeln/Codex) bleiben erhalten.
+fn wipe_local_account_data() -> Result<()> {
+    // 1) Zugangsdaten aus der Keychain.
+    if let Ok(entry) = keychain_entry() {
+        let _ = entry.delete_credential();
+    }
+    cache_api_key(None);
+    let _ = remove_api_key_marker();
+    if let Ok(entry) = mcp_connector_keychain_entry() {
+        let _ = entry.delete_credential();
+    }
+    cache_mcp_connector_token(None);
+    let _ = remove_mcp_connector_token_marker();
+
+    // 2) Tenant-/geraetebezogene Config-Felder zuruecksetzen (nichts vom vorigen Tenant bleibt).
+    if let Ok(mut config) = load_config_inner() {
+        config.library_id = String::new();
+        config.source_roots = Vec::new();
+        config.reference_root = String::new();
+        config.project_repos = std::collections::HashMap::new();
+        config.schedule.enabled = false;
+        let _ = save_config_inner(&config);
+    }
+
+    // 3) Cloud-Schluessel + Supabase-Session.
+    set_cloud_key(None);
+    if let Ok(entry) = supabase_session_keychain_entry() {
+        let _ = entry.delete_credential();
+    }
+    cache_supabase_access_token(None);
+    let _ = remove_supabase_session_email();
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudProfileSyncResult {
+    // "restored"   = Profil vorhanden + entschluesselt + lokal angewandt
+    // "created"    = kein Profil -> aus vorhandenen lokalen Daten neu angelegt
+    // "empty"      = kein Profil + keine lokalen Daten -> Schluessel bereit, noch nichts zu sichern
+    // "unreadable" = Profil vorhanden, aber nicht entschluesselbar (Passwort-Reset) -> API-Key neu eingeben
+    status: String,
+    library_id: Option<String>,
+}
+
+// Beim Login (Passwort liegt vor): Cloud-Profil holen + entschluesseln + lokal anwenden, ODER neu anlegen.
+#[tauri::command]
+async fn cloud_profile_sync_after_login(
+    base_url: String,
+    password: String,
+) -> Result<CloudProfileSyncResult, String> {
+    if password.trim().is_empty() {
+        return Err("Passwort fehlt fuer die Cloud-Profil-Synchronisierung.".to_string());
+    }
+    let settings = fetch_user_settings(&base_url).await.map_err(error_to_string)?;
+    let has_profile = settings.as_ref().map_or(false, |s| {
+        s.secret_cipher
+            .as_deref()
+            .map_or(false, |c| !c.trim().is_empty())
+    });
+
+    if has_profile {
+        let s = settings.unwrap();
+        let salt_b64 = s.kdf_salt.clone().unwrap_or_default();
+        let cipher = s.secret_cipher.clone().unwrap_or_default();
+        let nonce = s.secret_nonce.clone().unwrap_or_default();
+        // Erfolgreich entschluesselt -> lokal anwenden. JEDER Fehler (falsches Passwort nach Reset,
+        // kaputtes/zu kurzes Salt) faellt sauber in den Selbstheilungs-Zweig statt hart abzubrechen.
+        if let Some((key, blob)) = try_unlock_profile(&password, &salt_b64, &cipher, &nonce) {
+            let library_id = s.library_id.clone().unwrap_or_default();
+            apply_cloud_secrets(&blob, &library_id).map_err(error_to_string)?;
+            set_cloud_key(Some(CloudKeyMaterial { key, salt_b64 }));
+            return Ok(CloudProfileSyncResult {
+                status: "restored".to_string(),
+                library_id: Some(library_id),
+            });
+        }
+        // Nicht entschluesselbar: mit neuem Salt neu schluesseln, damit das naechste Speichern ein
+        // frisches Profil unter dem aktuellen Passwort anlegt (API-Key einmal neu eingeben).
+        let new_salt = random_bytes::<16>();
+        let new_salt_b64 = b64_encode(&new_salt);
+        let new_key = derive_cloud_key(&password, &new_salt).map_err(error_to_string)?;
+        set_cloud_key(Some(CloudKeyMaterial {
+            key: new_key,
+            salt_b64: new_salt_b64,
+        }));
+        return Ok(CloudProfileSyncResult {
+            status: "unreadable".to_string(),
+            library_id: None,
+        });
+    }
+
+    // Kein nutzbares Profil -> neues Salt + Schluessel; vorhandene lokale Daten sofort sichern.
+    let new_salt = random_bytes::<16>();
+    let new_salt_b64 = b64_encode(&new_salt);
+    let new_key = derive_cloud_key(&password, &new_salt).map_err(error_to_string)?;
+    let material = CloudKeyMaterial {
+        key: new_key,
+        salt_b64: new_salt_b64,
+    };
+    let (api_key, connector_token, _) = collect_local_secrets();
+    let has_local = !api_key.trim().is_empty() || !connector_token.trim().is_empty();
+    if has_local {
+        push_local_secrets_to_cloud(&base_url, &material)
+            .await
+            .map_err(error_to_string)?;
+    }
+    set_cloud_key(Some(material));
+    Ok(CloudProfileSyncResult {
+        status: if has_local { "created" } else { "empty" }.to_string(),
+        library_id: None,
+    })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudProfilePushResult {
+    pushed: bool,
+    needs_password: bool,
+}
+
+// Nach einer Zugangsdaten-Aenderung den aktuellen Stand sichern. Schluessel im RAM -> still pushen.
+// Sonst -> needs_password (die UI fragt einmalig nach). Ohne Sitzung: stillschweigend nichts tun.
+#[tauri::command]
+async fn cloud_profile_push(base_url: String) -> Result<CloudProfilePushResult, String> {
+    if load_supabase_refresh_token().is_err() {
+        return Ok(CloudProfilePushResult {
+            pushed: false,
+            needs_password: false,
+        });
+    }
+    match cached_cloud_key() {
+        Some(material) => {
+            push_local_secrets_to_cloud(&base_url, &material)
+                .await
+                .map_err(error_to_string)?;
+            Ok(CloudProfilePushResult {
+                pushed: true,
+                needs_password: false,
+            })
+        }
+        None => Ok(CloudProfilePushResult {
+            pushed: false,
+            needs_password: true,
+        }),
+    }
+}
+
+// Einmalige Passwort-Abfrage (still-wieder-eingeloggte Sitzung): Schluessel ableiten + pushen.
+#[tauri::command]
+async fn cloud_profile_unlock_and_push(base_url: String, password: String) -> Result<(), String> {
+    cloud_profile_unlock_and_push_inner(&base_url, &password)
+        .await
+        .map_err(error_to_string)
+}
+
+#[tauri::command]
+fn cloud_profile_key_present() -> bool {
+    cached_cloud_key().is_some()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudProfileLogoutResult {
+    // "logged_out" = gesichert + geraeumt; "needs_password" = Schluessel fehlt, Passwort noetig.
+    status: String,
+}
+
+// Sicherer Logout/Konto-Wechsel: ERST den aktuellen Stand in die Cloud sichern, DANN alles raeumen.
+// force = Notausgang (ohne Cloud-Sicherung raeumen). password = optional fuer den Sicherungs-Schritt.
+#[tauri::command]
+async fn cloud_profile_logout(
+    base_url: String,
+    password: Option<String>,
+    force: bool,
+) -> Result<CloudProfileLogoutResult, String> {
+    if !force {
+        let (api_key, connector_token, _) = collect_local_secrets();
+        let has_local = !api_key.trim().is_empty() || !connector_token.trim().is_empty();
+        if has_local {
+            match cached_cloud_key() {
+                Some(material) => {
+                    push_local_secrets_to_cloud(&base_url, &material)
+                        .await
+                        .map_err(error_to_string)?;
+                }
+                None => match password.as_deref() {
+                    Some(pw) if !pw.trim().is_empty() => {
+                        cloud_profile_unlock_and_push_inner(&base_url, pw)
+                            .await
+                            .map_err(error_to_string)?;
+                    }
+                    _ => {
+                        return Ok(CloudProfileLogoutResult {
+                            status: "needs_password".to_string(),
+                        });
+                    }
+                },
+            }
+        }
+    }
+    wipe_local_account_data().map_err(error_to_string)?;
+    Ok(CloudProfileLogoutResult {
+        status: "logged_out".to_string(),
+    })
 }
 
 #[tauri::command]
@@ -2975,6 +3517,9 @@ fn normalize_config(config: &mut AppConfig) {
     if config.mcp.base_url.trim().is_empty() {
         config.mcp = default_mcp_config();
     }
+    // REST-Basis dauerhaft auf scheme://host normalisieren -> ein versehentlich gespeicherter Pfad
+    // (z.B. ".../mcp") heilt sich beim naechsten Speichern, statt "/api/..."-Aufrufe zu brechen.
+    config.mcp.base_url = normalize_base_url(&config.mcp.base_url);
 }
 
 fn default_config() -> Result<AppConfig> {
@@ -3424,30 +3969,38 @@ const DEFAULT_BASE_URL: &str = "https://mcp.katoos.de";
 // Token-Exfiltration verhindern: der Connector-Token darf NUR an bekannte KatoOS-Hosts gehen
 // (https, mcp.katoos.de / *.katoos.de / der katoos-Worker). Sonst koennte eine manipulierte
 // base_url-Config (oder ein Webview-Skript) den Bearer-Token an einen fremden Host schicken.
-fn base_url_host_allowed(url: &str) -> bool {
+// Validierten Host extrahieren (userinfo/Port-sicher), NUR der reine Host ohne Pfad/Query/Port.
+// Authority = bis zum ersten /, ?, #. Danach userinfo (alles vor dem letzten @) und Port abtrennen,
+// sonst koennte "mcp.katoos.de@evil.com" oder "...:8080@evil.com" die Pruefung austricksen
+// (echter Host steht nach dem @).
+fn extract_allowed_host(url: &str) -> Option<String> {
     let lower = url.trim().to_lowercase();
-    let Some(rest) = lower.strip_prefix("https://") else {
-        return false;
-    };
-    // Authority = bis zum ersten /, ?, #. Danach userinfo (alles vor dem letzten @) und Port
-    // abtrennen, sonst koennte "mcp.katoos.de@evil.com" oder "...:8080@evil.com" die Pruefung
-    // austricksen (echter Host steht nach dem @).
+    let rest = lower.strip_prefix("https://")?;
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
     let host_port = authority.rsplit('@').next().unwrap_or("");
     let host = host_port.split(':').next().unwrap_or("");
-    host == "mcp.katoos.de"
+    if host == "mcp.katoos.de"
         || host.ends_with(".katoos.de")
         || host == "katoos-mcp-server.nmkato.workers.dev"
+    {
+        Some(host.to_string())
+    } else {
+        None
+    }
 }
 
+fn base_url_host_allowed(url: &str) -> bool {
+    extract_allowed_host(url).is_some()
+}
+
+// REST-Basis: IMMER nur scheme://host (Pfad/Query/Port verworfen). Sonst landet ein in der base_url
+// versehentlich enthaltener Pfad (z.B. ".../mcp", der MCP-JSON-RPC-Endpunkt) VOR "/api/..." -> 404.
+// Nicht-allowlisteter (oder nicht-https) Host -> sicherer Default, damit der Token nie an einen
+// fremden Host geht.
 fn normalize_base_url(base_url: &str) -> String {
-    let trimmed = base_url.trim().trim_end_matches('/');
-    if base_url_host_allowed(trimmed) {
-        trimmed.to_string()
-    } else {
-        // Nicht-allowlisteter (oder nicht-https) Host -> auf den sicheren Default zurueckfallen,
-        // damit der Token niemals an einen fremden Host geht.
-        DEFAULT_BASE_URL.to_string()
+    match extract_allowed_host(base_url) {
+        Some(host) => format!("https://{host}"),
+        None => DEFAULT_BASE_URL.to_string(),
     }
 }
 

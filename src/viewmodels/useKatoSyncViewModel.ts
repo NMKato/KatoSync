@@ -23,8 +23,12 @@ import {
   loadConfig,
   loginSupabase,
   recoverSupabase,
-  logoutSupabase,
   signupSupabase,
+  cloudProfileSyncAfterLogin,
+  cloudProfilePush,
+  cloudProfileUnlockAndPush,
+  cloudProfileLogout,
+  clearLocalTenantCaches,
   openOutputDir,
   quitApp,
   readLogs,
@@ -101,6 +105,14 @@ export function useKatoSyncViewModel() {
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
+  // Cloud-Profil: sicherer Logout/Konto-Wechsel (confirm -> saving -> ggf. password -> ggf. error)
+  // und die einmalige Passwort-Abfrage, wenn ein Speichern den RAM-Schluessel nicht hat.
+  const [logoutFlow, setLogoutFlow] = useState<
+    { stage: "confirm" | "saving" | "password" | "error"; error?: string } | null
+  >(null);
+  const [cloudPasswordPrompt, setCloudPasswordPrompt] = useState<
+    { error: string | null; busy: boolean } | null
+  >(null);
   const [codexRun, setCodexRun] = useState<CodexRunState>({ status: "idle" });
   const [codexEvents, setCodexEvents] = useState<CodexEvent[]>([]);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
@@ -122,6 +134,8 @@ export function useKatoSyncViewModel() {
   const [currentQueueTaskId, setCurrentQueueTaskId] = useState<string | null>(null);
   const [dailyCount, setDailyCount] = useState<number>(() => readDailyCount());
   const stopRef = useRef(false);
+  // Letzte in die Cloud gesicherte library_id -> Push beim Speichern nur, wenn sie sich aenderte.
+  const lastLibraryRef = useRef<string>("");
 
   const show = useCallback((kind: Notice["kind"], text: string) => setNotice({ kind, text }), []);
 
@@ -139,6 +153,7 @@ export function useKatoSyncViewModel() {
         loadBriefings(loadedConfig)
       ]);
       setConfig(loadedConfig);
+      lastLibraryRef.current = loadedConfig.libraryId ?? "";
       setKeyStatus(loadedKey);
       setMcpTokenStatus(loadedMcpToken);
       setLaunchStatus(loadedLaunch);
@@ -209,19 +224,133 @@ export function useKatoSyncViewModel() {
     []
   );
 
+  // ── Cloud-Profil (Zero-Knowledge) ──────────────────────────────────────────────────
+  const baseUrlOf = useCallback(
+    () => config?.mcp.baseUrl ?? "https://mcp.katoos.de",
+    [config]
+  );
+
+  // Nach einer Zugangsdaten-Aenderung den Stand sichern. Fehlt der RAM-Schluessel
+  // (still-wieder-eingeloggte Sitzung), oeffnet sich die einmalige Passwort-Abfrage.
+  const pushCloudProfile = useCallback(async () => {
+    const result = await cloudProfilePush(baseUrlOf());
+    if (result.needsPassword) {
+      setCloudPasswordPrompt({ error: null, busy: false });
+    }
+  }, [baseUrlOf]);
+
+  const submitCloudPassword = useCallback(
+    async (password: string) => {
+      setCloudPasswordPrompt({ error: null, busy: true });
+      try {
+        await cloudProfileUnlockAndPush(baseUrlOf(), password);
+        setCloudPasswordPrompt(null);
+        show("ok", "Cloud-Profil aktualisiert.");
+      } catch (error) {
+        setCloudPasswordPrompt({ error: getMessage(error), busy: false });
+      }
+    },
+    [baseUrlOf, show]
+  );
+
+  const cancelCloudPassword = useCallback(() => {
+    setCloudPasswordPrompt(null);
+    show("info", "Lokal gespeichert. Dein Cloud-Profil wird beim nächsten Login aktualisiert.");
+  }, [show]);
+
+  // Tenant-Isolierung: nach erfolgreicher Cloud-Sicherung alles Konto-Bezogene lokal raeumen.
+  const finalizeLogout = useCallback(() => {
+    clearLocalTenantCaches();
+    lastLibraryRef.current = "";
+    setSessionStatus({ loggedIn: false, email: null });
+    setGeneratedToken(null);
+    setActionPlans([]);
+    setBriefings([]);
+    setKeyStatus({ exists: false });
+    setMcpTokenStatus({ exists: false });
+    setKeyInput("");
+    setMcpTokenInput("");
+    setLoginEmail("");
+    setConnectionOk(false);
+    setLibraryOk(false);
+    setReport(null);
+    setScan(null);
+    setRateLimits([]);
+    // Tenant-spezifische Live-/Lauf-States leeren -> der naechste Login sieht NICHTS vom Vortenant
+    // (Codex-Feed mit Aufgabentext/Dateipfaden, Status, Tageszaehler, Logs).
+    setCodexRun({ status: "idle" });
+    setCodexEvents([]);
+    setSyncStatus(null);
+    setQueueRunning(false);
+    setCurrentQueueTaskId(null);
+    setDailyCount(0);
+    setLogs("");
+    stopRef.current = false;
+    // Tageszaehler-Schluessel des heutigen Tages entfernen, damit das Quota nicht "geerbt" wird.
+    try {
+      localStorage.removeItem(dailyCountKey());
+    } catch {
+      // localStorage nicht verfuegbar -> ignorieren
+    }
+    // Rust hat die Config tenant-bereinigt -> frisch laden (Ordner/Library/Zeitplan jetzt leer).
+    void loadConfig().then(setConfig).catch(() => undefined);
+  }, []);
+
+  // Sicherer Logout/Konto-Wechsel: ERST in die Cloud sichern, DANN raeumen. needs_password ->
+  // Passwort-Stufe; Fehler -> Fehler-Stufe (NICHT ausgeloggt). force=true ueberspringt die Sicherung.
+  const runCloudLogout = useCallback(
+    async (password?: string, force = false) => {
+      setLogoutFlow({ stage: "saving" });
+      try {
+        const result = await cloudProfileLogout(baseUrlOf(), password, force);
+        if (result.status === "needs_password") {
+          setLogoutFlow({ stage: "password" });
+          return;
+        }
+        finalizeLogout();
+        setLogoutFlow(null);
+        show("info", "Abgemeldet. Dein Cloud-Profil ist gesichert.");
+      } catch (error) {
+        setLogoutFlow({ stage: "error", error: getMessage(error) });
+      }
+    },
+    [baseUrlOf, finalizeLogout, show]
+  );
+
+  const requestLogout = useCallback(() => setLogoutFlow({ stage: "confirm" }), []);
+  const cancelLogout = useCallback(() => setLogoutFlow(null), []);
+  const confirmLogout = useCallback(() => {
+    void runCloudLogout();
+  }, [runCloudLogout]);
+  const submitLogoutPassword = useCallback(
+    (password: string) => {
+      void runCloudLogout(password, false);
+    },
+    [runCloudLogout]
+  );
+  const forceLogout = useCallback(() => {
+    void runCloudLogout(undefined, true);
+  }, [runCloudLogout]);
+
   const persist = useCallback(async () => {
     if (!config) return;
     setBusy("save");
     try {
-      setConfig(await saveConfig(config));
+      const saved = await saveConfig(config);
+      setConfig(saved);
       setDirty(false);
       show("ok", "Konfiguration gespeichert.");
+      // library_id ist Teil des Cloud-Profils -> nur bei echter Aenderung pushen.
+      if ((saved.libraryId ?? "") !== lastLibraryRef.current) {
+        lastLibraryRef.current = saved.libraryId ?? "";
+        void pushCloudProfile();
+      }
     } catch (error) {
       show("error", getMessage(error));
     } finally {
       setBusy(null);
     }
-  }, [config, show]);
+  }, [config, pushCloudProfile, show]);
 
   const saveDraftKeyIfNeeded = useCallback(async () => {
     const draft = keyInput.trim();
@@ -229,7 +358,8 @@ export function useKatoSyncViewModel() {
     const nextStatus = await saveApiKey(draft);
     setKeyStatus(nextStatus);
     setKeyInput("");
-  }, [keyInput]);
+    void pushCloudProfile();
+  }, [keyInput, pushCloudProfile]);
 
   const handleChooseFolders = useCallback(async () => {
     if (!config) return;
@@ -245,12 +375,13 @@ export function useKatoSyncViewModel() {
       setKeyStatus(await saveApiKey(keyInput));
       setKeyInput("");
       show("ok", "API-Key sicher gespeichert.");
+      void pushCloudProfile();
     } catch (error) {
       show("error", getMessage(error));
     } finally {
       setBusy(null);
     }
-  }, [keyInput, show]);
+  }, [keyInput, pushCloudProfile, show]);
 
   const handleDeleteKey = useCallback(async () => {
     setKeyStatus(await deleteApiKey());
@@ -266,12 +397,13 @@ export function useKatoSyncViewModel() {
       setMcpTokenInput("");
       show("ok", "MCP Connector Token sicher gespeichert.");
       if (config) setActionPlans(await loadActionPlans(config));
+      void pushCloudProfile();
     } catch (error) {
       show("error", getMessage(error));
     } finally {
       setBusy(null);
     }
-  }, [config, mcpTokenInput, show]);
+  }, [config, mcpTokenInput, pushCloudProfile, show]);
 
   const handleDeleteMcpConnectorToken = useCallback(async () => {
     setMcpTokenStatus(await deleteMcpConnectorToken());
@@ -284,25 +416,60 @@ export function useKatoSyncViewModel() {
     setBusy("login");
     try {
       const status = await loginSupabase(loginEmail, loginPassword);
-      setSessionStatus(status);
-      setLoginPassword("");
-      show("ok", `Angemeldet als ${status.email ?? loginEmail}.`);
+      if (!status.loggedIn) {
+        setSessionStatus(status);
+        return;
+      }
+      {
+        // Passwort liegt NUR hier vor -> Cloud-Profil holen/entschluesseln/anwenden (oder anlegen).
+        try {
+          const sync = await cloudProfileSyncAfterLogin(baseUrlOf(), loginPassword);
+          if (sync.status === "restored") {
+            show(
+              "ok",
+              "Angemeldet. Cloud-Profil wiederhergestellt — falls der MCP-Connector nicht verbindet, generiere den Token neu."
+            );
+          } else if (sync.status === "unreadable") {
+            show(
+              "warn",
+              "Angemeldet. Dein Cloud-Profil ließ sich nicht entschlüsseln (z. B. nach Passwort-Reset) — bitte API-Key neu eingeben, er wird dann neu gesichert."
+            );
+          } else {
+            show("ok", `Angemeldet als ${status.email ?? loginEmail}.`);
+          }
+        } catch (error) {
+          show("warn", `Angemeldet, aber das Cloud-Profil konnte nicht geladen werden: ${getMessage(error)}`);
+        }
+        setLoginPassword("");
+        await boot();
+        // Robust: Session garantiert auf eingeloggt setzen, AUCH falls boot() (z.B. Platten-/Keychain-
+        // Fehler) scheitert -> der authentifizierte Nutzer landet nie faelschlich wieder auf dem LoginGate.
+        setSessionStatus(status);
+      }
     } catch (error) {
       show("error", getMessage(error));
     } finally {
       setBusy(null);
     }
-  }, [loginEmail, loginPassword, show]);
+  }, [baseUrlOf, boot, loginEmail, loginPassword, show]);
 
   const handleRegister = useCallback(async () => {
     setBusy("register");
     try {
       const status = await signupSupabase(loginEmail, loginPassword);
-      setSessionStatus(status);
       if (status.loggedIn) {
+        // Direkt angemeldet (Projekt ohne E-Mail-Bestaetigung) -> Cloud-Profil anlegen/holen.
+        try {
+          await cloudProfileSyncAfterLogin(baseUrlOf(), loginPassword);
+        } catch (error) {
+          show("warn", `Registriert, aber die Cloud-Profil-Initialisierung schlug fehl: ${getMessage(error)}`);
+        }
         setLoginPassword("");
+        await boot();
+        setSessionStatus(status); // robust gegen boot()-Fehler (siehe handleLogin)
         show("ok", `Registriert und angemeldet als ${status.email ?? loginEmail}.`);
       } else {
+        setSessionStatus(status);
         show(
           "info",
           "Falls die Adresse neu ist, haben wir dir eine Bestätigungs-Mail geschickt. Hast du bereits ein Konto, melde dich einfach an."
@@ -313,7 +480,7 @@ export function useKatoSyncViewModel() {
     } finally {
       setBusy(null);
     }
-  }, [loginEmail, loginPassword, show]);
+  }, [baseUrlOf, boot, loginEmail, loginPassword, show]);
 
   const handleRecoverPassword = useCallback(async () => {
     if (!loginEmail.trim()) {
@@ -341,12 +508,13 @@ export function useKatoSyncViewModel() {
       show("ok", "Connector-Token generiert. Jetzt kopieren und in Mistral eintragen.");
       setActionPlans(await loadActionPlans(config));
       setBriefings(await loadBriefings(config));
+      void pushCloudProfile();
     } catch (error) {
       show("error", getMessage(error));
     } finally {
       setBusy(null);
     }
-  }, [config, show]);
+  }, [config, pushCloudProfile, show]);
 
   const handleCopyToken = useCallback(async () => {
     if (!generatedToken) return;
@@ -357,12 +525,6 @@ export function useKatoSyncViewModel() {
       show("info", "Bitte den Token im Feld markieren und manuell kopieren.");
     }
   }, [generatedToken, show]);
-
-  const handleLogout = useCallback(async () => {
-    setSessionStatus(await logoutSupabase());
-    setGeneratedToken(null);
-    show("info", "Von KatoSync abgemeldet.");
-  }, [show]);
 
   const handleTestConnection = useCallback(async () => {
     setBusy("connection");
@@ -1094,8 +1256,16 @@ export function useKatoSyncViewModel() {
     handleStartBoardQueue,
     handleStopBoardQueue,
     handleLogin,
-    handleLogout,
     handleRegister,
+    logoutFlow,
+    requestLogout,
+    cancelLogout,
+    confirmLogout,
+    submitLogoutPassword,
+    forceLogout,
+    cloudPasswordPrompt,
+    submitCloudPassword,
+    cancelCloudPassword,
     handleRecoverPassword,
     handleLaunchInstall,
     handleLaunchRemove,
