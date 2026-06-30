@@ -3260,8 +3260,36 @@ async fn ensure_supabase_access_token() -> Result<String> {
     Ok(session.access_token)
 }
 
+const DEFAULT_BASE_URL: &str = "https://mcp.katoos.de";
+
+// Token-Exfiltration verhindern: der Connector-Token darf NUR an bekannte KatoOS-Hosts gehen
+// (https, mcp.katoos.de / *.katoos.de / der katoos-Worker). Sonst koennte eine manipulierte
+// base_url-Config (oder ein Webview-Skript) den Bearer-Token an einen fremden Host schicken.
+fn base_url_host_allowed(url: &str) -> bool {
+    let lower = url.trim().to_lowercase();
+    let Some(rest) = lower.strip_prefix("https://") else {
+        return false;
+    };
+    // Authority = bis zum ersten /, ?, #. Danach userinfo (alles vor dem letzten @) und Port
+    // abtrennen, sonst koennte "mcp.katoos.de@evil.com" oder "...:8080@evil.com" die Pruefung
+    // austricksen (echter Host steht nach dem @).
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host_port = authority.rsplit('@').next().unwrap_or("");
+    let host = host_port.split(':').next().unwrap_or("");
+    host == "mcp.katoos.de"
+        || host.ends_with(".katoos.de")
+        || host == "katoos-mcp-server.nmkato.workers.dev"
+}
+
 fn normalize_base_url(base_url: &str) -> String {
-    base_url.trim().trim_end_matches('/').to_string()
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if base_url_host_allowed(trimmed) {
+        trimmed.to_string()
+    } else {
+        // Nicht-allowlisteter (oder nicht-https) Host -> auf den sicheren Default zurueckfallen,
+        // damit der Token niemals an einen fremden Host geht.
+        DEFAULT_BASE_URL.to_string()
+    }
 }
 
 fn mask_key(key: &str) -> String {
