@@ -582,12 +582,12 @@ fn random_bytes<const N: usize>() -> [u8; N] {
 fn derive_cloud_key(password: &str, salt: &[u8]) -> Result<[u8; 32]> {
     use argon2::{Algorithm, Argon2, Params, Version};
     let params = Params::new(19_456, 2, 1, Some(32))
-        .map_err(|e| anyhow!("Argon2-Parameter ungueltig: {e}"))?;
+        .map_err(|e| anyhow!("Argon2-Parameter ungültig: {e}"))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut out = [0u8; 32];
     argon
         .hash_password_into(password.as_bytes(), salt, &mut out)
-        .map_err(|e| anyhow!("Schluesselableitung fehlgeschlagen: {e}"))?;
+        .map_err(|e| anyhow!("Schlüsselableitung fehlgeschlagen: {e}"))?;
     Ok(out)
 }
 
@@ -595,12 +595,12 @@ fn encrypt_cloud_blob(key: &[u8; 32], plaintext: &[u8]) -> Result<(String, Strin
     use aes_gcm::aead::Aead;
     use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
     let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| anyhow!("AES-Schluessel ungueltig: {e}"))?;
+        Aes256Gcm::new_from_slice(key).map_err(|e| anyhow!("AES-Schlüssel ungültig: {e}"))?;
     let nonce_bytes = random_bytes::<12>();
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, plaintext)
-        .map_err(|_| anyhow!("Verschluesselung fehlgeschlagen."))?;
+        .map_err(|_| anyhow!("Verschlüsselung fehlgeschlagen."))?;
     Ok((b64_encode(&ciphertext), b64_encode(&nonce_bytes)))
 }
 
@@ -610,13 +610,13 @@ fn decrypt_cloud_blob(key: &[u8; 32], cipher_b64: &str, nonce_b64: &str) -> Resu
     let ciphertext = b64_decode(cipher_b64)?;
     let nonce_bytes = b64_decode(nonce_b64)?;
     if nonce_bytes.len() != 12 {
-        return Err(anyhow!("Cloud-Profil beschaedigt (Nonce-Laenge)."));
+        return Err(anyhow!("Cloud-Profil beschädigt (Nonce-Länge)."));
     }
     let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| anyhow!("AES-Schluessel ungueltig: {e}"))?;
+        Aes256Gcm::new_from_slice(key).map_err(|e| anyhow!("AES-Schlüssel ungültig: {e}"))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|_| {
-        anyhow!("Entschluesselung fehlgeschlagen (falsches Passwort oder beschaedigtes Profil).")
+        anyhow!("Entschlüsselung fehlgeschlagen (falsches Passwort oder beschädigtes Profil).")
     })
 }
 
@@ -892,7 +892,7 @@ async fn cloud_profile_sync_after_login(
     password: String,
 ) -> Result<CloudProfileSyncResult, String> {
     if password.trim().is_empty() {
-        return Err("Passwort fehlt fuer die Cloud-Profil-Synchronisierung.".to_string());
+        return Err("Passwort fehlt für die Cloud-Profil-Synchronisierung.".to_string());
     }
     let settings = fetch_user_settings(&base_url).await.map_err(error_to_string)?;
     let has_profile = settings.as_ref().map_or(false, |s| {
@@ -2553,7 +2553,7 @@ async fn sync_once(config: &AppConfig, dry_run: bool, app: Option<&AppHandle>) -
                             if remaining > 0 {
                                 errors.push(if is_day {
                                     format!(
-                                        "Tageslimit fuer Dokument-Verarbeitung erreicht - {remaining} weitere Datei(en) heute nicht hochladbar. Morgen erneut synchronisieren oder hoeheren Mistral-Plan (Scale) waehlen."
+                                        "Tageslimit für Dokument-Verarbeitung erreicht - {remaining} weitere Datei(en) heute nicht hochladbar. Morgen erneut synchronisieren oder höheren Mistral-Plan (Scale) wählen."
                                     )
                                 } else {
                                     format!(
@@ -3257,12 +3257,12 @@ async fn upload_document(
     if status == StatusCode::TOO_MANY_REQUESTS {
         if monthly_exhausted {
             return Err(anyhow!(
-                "HTTP 429 Rate-Limit: Mistral-Monats-Token-Budget erschoepft. Kurzes Warten hilft nicht - hoeheres Plan/Kontingent noetig oder bis zum Monatswechsel warten."
+                "HTTP 429 Rate-Limit: Mistral-Monats-Token-Budget erschöpft. Kurzes Warten hilft nicht - höheres Plan/Kontingent nötig oder bis zum Monatswechsel warten."
             ));
         }
         if document_day_exhausted {
             return Err(anyhow!(
-                "HTTP 429 Tageslimit: Mistrals Tageslimit fuer Dokument-Verarbeitung ist heute aufgebraucht. Warten hilft heute NICHT - es setzt erst nach ~24h zurueck; fuer mehr einen hoeheren Mistral-Plan (Scale/Pay-as-you-go) waehlen."
+                "HTTP 429 Tageslimit: Mistrals Tageslimit für Dokument-Verarbeitung ist heute aufgebraucht. Warten hilft heute NICHT - es setzt erst nach ~24h zurück; für mehr einen höheren Mistral-Plan (Scale/Pay-as-you-go) wählen."
             ));
         }
         let hint = retry_after
