@@ -396,6 +396,7 @@ const ru: Record<TKey, string> = {
   "activity.lastScan.title": "Последнее сканирование",
   "activity.lastScan.text": "Релевантных файлов: {fileCount}, предупреждений о секретах: {secretCount}.",
   "activity.uploadPlan.title": "Расписание upload",
+  "activity.uploadPlan.inactive": "Расписание upload неактивно — авто-загрузка выключена.",
   "activity.empty.title": "Активности пока нет",
   "activity.empty.text": "Запустите сканирование или синхронизацию, чтобы увидеть события.",
   "hintmsg.secretSkipped.title": "Файл с секретом пропущен",

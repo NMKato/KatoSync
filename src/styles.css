@@ -3854,3 +3854,13 @@ pre {
   font-size: 13px;
   line-height: 1.45;
 }
+
+.app-version-label {
+  display: block;
+  margin-top: 10px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+}

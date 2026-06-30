@@ -25,7 +25,8 @@ use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
-const APP_VERSION: &str = "1.0.1";
+// Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";

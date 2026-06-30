@@ -413,6 +413,7 @@ const de = {
   "activity.lastScan.title": "Letzter Scan",
   "activity.lastScan.text": "{fileCount} relevante Dateien, {secretCount} Secret-Warnungen.",
   "activity.uploadPlan.title": "Uploadplan",
+  "activity.uploadPlan.inactive": "Uploadplan inaktiv — Auto-Upload ist aus.",
   "activity.empty.title": "Noch keine Aktivität",
   "activity.empty.text": "Starte einen Scan oder eine Synchronisierung, um Ereignisse zu sehen.",
   "hintmsg.secretSkipped.title": "Secret-Datei übersprungen",

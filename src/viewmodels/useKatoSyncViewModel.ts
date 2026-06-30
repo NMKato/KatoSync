@@ -302,7 +302,10 @@ export function useKatoSyncViewModel() {
         setLoginPassword("");
         show("ok", `Registriert und angemeldet als ${status.email ?? loginEmail}.`);
       } else {
-        show("info", "Registrierung erstellt. Bitte bestätige deine E-Mail und melde dich dann an.");
+        show(
+          "info",
+          "Falls die Adresse neu ist, haben wir dir eine Bestätigungs-Mail geschickt. Hast du bereits ein Konto, melde dich einfach an."
+        );
       }
     } catch (error) {
       show("error", getMessage(error));

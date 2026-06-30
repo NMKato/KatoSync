@@ -396,6 +396,7 @@ const es: Record<TKey, string> = {
   "activity.lastScan.title": "Último escaneo",
   "activity.lastScan.text": "{fileCount} archivos relevantes, {secretCount} avisos de secrets.",
   "activity.uploadPlan.title": "Plan de subida",
+  "activity.uploadPlan.inactive": "Plan de subida inactivo — la subida automática está desactivada.",
   "activity.empty.title": "Aún sin actividad",
   "activity.empty.text": "Inicia un escaneo o una sincronización para ver eventos.",
   "hintmsg.secretSkipped.title": "Archivo secret omitido",

@@ -396,6 +396,7 @@ const en: Record<TKey, string> = {
   "activity.lastScan.title": "Last scan",
   "activity.lastScan.text": "{fileCount} relevant files, {secretCount} secret warnings.",
   "activity.uploadPlan.title": "Upload plan",
+  "activity.uploadPlan.inactive": "Upload plan inactive — auto-upload is off.",
   "activity.empty.title": "No activity yet",
   "activity.empty.text": "Start a scan or sync to see events.",
   "hintmsg.secretSkipped.title": "Secret file skipped",

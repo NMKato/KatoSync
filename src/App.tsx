@@ -74,7 +74,7 @@ import { briefingToMarkdown } from "./lib/briefingExport";
 import { safeHttpUrl } from "./lib/url";
 import { useT, type Lang, type TFunc, type TKey } from "./i18n";
 import { licenseAgreement } from "./lib/license";
-import { weekdayLabels } from "./lib/defaults";
+import { APP_VERSION_LABEL, weekdayLabels } from "./lib/defaults";
 import {
   useKatoSyncViewModel,
   type BoardTask,
@@ -410,6 +410,9 @@ export default function App() {
   // Auto-Advance: ist der aktuelle Schritt erfuellt, gehe strikt EINEN Schritt weiter (1->6, inkl. Skill).
   useEffect(() => {
     if (!onboardingOpen || vm.busy || !onboardingCompletion[onboardingIndex]) return undefined;
+    // Token-Schritt NICHT automatisch weiterschalten: der Connector-Token wird nur EINMAL angezeigt
+    // und muss erst in Mistral kopiert werden -> hier nur manuell weiter (Buttons im Tooltip).
+    if (onboardingSteps[onboardingIndex]?.sectionId === "section-mcp-token") return undefined;
     const timer = window.setTimeout(() => {
       if (onboardingIndex >= onboardingSteps.length - 1) {
         setOnboardingSnoozed(true);
@@ -509,6 +512,7 @@ export default function App() {
               <span>{t("sidebar.quit")}</span>
             </button>
           </HoverTip>
+          <span className="app-version-label">KatoSync {APP_VERSION_LABEL}</span>
         </div>
       </aside>
 
@@ -2928,10 +2932,13 @@ function buildActivities(vm: ReturnType<typeof useKatoSyncViewModel>, t: TFunc) 
     });
   }
   if (vm.launchStatus) {
+    // Plan gilt nur als aktiv, wenn LaunchAgent installiert UND Auto-Upload an ist -> passt dann
+    // zum Setup-Balken (sonst widersprachen sich 80%-Balken und "Uploadplan aktiv"-Text).
+    const planActive = vm.launchStatus.installed && Boolean(vm.config?.schedule.enabled);
     items.push({
-      kind: vm.launchStatus.installed ? "ok" : "info",
+      kind: planActive ? "ok" : "info",
       title: t("activity.uploadPlan.title"),
-      text: vm.launchStatus.message
+      text: planActive ? vm.launchStatus.message : t("activity.uploadPlan.inactive")
     });
   }
   if (!items.length) {
