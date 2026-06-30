@@ -258,6 +258,7 @@ pub fn run() {
             delete_remote_briefing,
             login_supabase,
             signup_supabase,
+            recover_supabase,
             supabase_session_status,
             logout_supabase,
             mint_connector_token,
@@ -417,6 +418,15 @@ async fn login_supabase(email: String, password: String) -> Result<SupabaseSessi
         logged_in: true,
         email: Some(user_email),
     })
+}
+
+#[tauri::command]
+async fn recover_supabase(email: String) -> Result<(), String> {
+    let email_trim = email.trim();
+    if email_trim.is_empty() {
+        return Err("Bitte E-Mail-Adresse eingeben.".to_string());
+    }
+    supabase_recover(email_trim).await.map_err(error_to_string)
 }
 
 #[tauri::command]
@@ -3358,6 +3368,25 @@ async fn supabase_signup(email: &str, password: &str) -> Result<SupabaseSignupRe
         return Err(anyhow!("Registrierung fehlgeschlagen ({status}): {text}"));
     }
     serde_json::from_str(&text).map_err(Into::into)
+}
+
+// Passwort-Reset anstossen: GoTrue schickt eine Reset-Mail. Der Link in der Mail nutzt die im
+// Supabase-Dashboard hinterlegte Site URL (siehe Tester-Punkt #1) - muss dort korrekt gesetzt sein.
+async fn supabase_recover(email: &str) -> Result<()> {
+    let url = format!("{KATOSYNC_AUTH_URL}/auth/v1/recover");
+    let response = reqwest::Client::new()
+        .post(url)
+        .header("apikey", KATOSYNC_AUTH_ANON_KEY)
+        .header("User-Agent", USER_AGENT)
+        .json(&json!({ "email": email }))
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(anyhow!("Passwort-Reset fehlgeschlagen ({status}): {text}"));
+    }
+    Ok(())
 }
 
 async fn supabase_refresh_session(refresh_token: &str) -> Result<SupabaseTokenResponse> {

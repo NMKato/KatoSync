@@ -2380,6 +2380,9 @@ function SkillGeneratorPanel({
         />
       </label>
       <div className="button-row">
+        <button className="secondary" onClick={() => setPersona(t("skill.exampleTemplate"))} type="button">
+          {t("skill.useExample")}
+        </button>
         <button className="primary" disabled={!persona.trim()} onClick={generate} type="button">
           <SlidersHorizontal size={15} />
           {t("skill.generate")}
@@ -2472,6 +2475,16 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
           {busy ? <Loader2 className="spin" size={16} /> : null}
           {mode === "login" ? t("login.signIn") : t("login.signUp")}
         </button>
+        {mode === "login" ? (
+          <button
+            className="ghost login-forgot"
+            disabled={busy || !vm.loginEmail}
+            onClick={() => void vm.handleRecoverPassword()}
+            type="button"
+          >
+            {t("login.forgot")}
+          </button>
+        ) : null}
         <p className="login-hint">{t("login.hint")}</p>
       </div>
     </div>

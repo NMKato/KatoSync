@@ -138,6 +138,13 @@ export async function signupSupabase(email: string, password: string): Promise<S
   throw new Error("Registrierung ist nur in der Desktop-App verfügbar.");
 }
 
+export async function recoverSupabase(email: string): Promise<void> {
+  if (isTauri()) {
+    return invoke<void>("recover_supabase", { email });
+  }
+  throw new Error("Passwort-Reset ist nur in der Desktop-App verfügbar.");
+}
+
 export async function logoutSupabase(): Promise<SupabaseSessionStatus> {
   if (isTauri()) {
     return invoke<SupabaseSessionStatus>("logout_supabase");

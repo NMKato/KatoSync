@@ -22,6 +22,7 @@ import {
   loadBriefings,
   loadConfig,
   loginSupabase,
+  recoverSupabase,
   logoutSupabase,
   signupSupabase,
   openOutputDir,
@@ -313,6 +314,22 @@ export function useKatoSyncViewModel() {
       setBusy(null);
     }
   }, [loginEmail, loginPassword, show]);
+
+  const handleRecoverPassword = useCallback(async () => {
+    if (!loginEmail.trim()) {
+      show("warn", "Bitte zuerst deine E-Mail-Adresse eingeben.");
+      return;
+    }
+    setBusy("recover");
+    try {
+      await recoverSupabase(loginEmail);
+      show("ok", "Falls ein Konto mit dieser Adresse existiert, haben wir dir eine E-Mail zum Zurücksetzen geschickt.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  }, [loginEmail, show]);
 
   const handleGenerateConnectorToken = useCallback(async () => {
     if (!config) return;
@@ -1079,6 +1096,7 @@ export function useKatoSyncViewModel() {
     handleLogin,
     handleLogout,
     handleRegister,
+    handleRecoverPassword,
     handleLaunchInstall,
     handleLaunchRemove,
     handleLogs,
