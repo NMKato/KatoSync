@@ -2541,6 +2541,8 @@ async fn upload_with_backoff(
     for attempt in 0..=waits.len() {
         match upload_document(api_key, library_id, file_path).await {
             Ok(result) => return Ok(result),
+            // Monats-Token-Budget leer: Retry/Backoff sinnlos -> sofort scheitern.
+            Err(error) if error.to_string().contains("Monats") => return Err(error),
             Err(error) if error.to_string().contains("HTTP 429") => {
                 if attempt < waits.len() {
                     write_log(
@@ -2663,10 +2665,28 @@ async fn upload_document(
         .await?;
 
     let status = response.status();
-    let rate_limits = rate_limits_from_headers(response.headers());
+    let headers = response.headers();
+    // 429 transparent machen: echte Reset-Zeit (retry-after) und ob das Monats-Token-Budget leer
+    // ist (dann hilft kurzes Warten NICHT) aus den Headern ziehen.
+    let retry_after = headers
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string());
+    let monthly_exhausted = header_string(headers, "x-ratelimit-remaining-tokens-month")
+        .map(|v| v.trim() == "0")
+        .unwrap_or(false);
+    let rate_limits = rate_limits_from_headers(headers);
     let value: serde_json::Value = response.json().await.unwrap_or_else(|_| json!({}));
     if status == StatusCode::TOO_MANY_REQUESTS {
-        return Err(anyhow!("HTTP 429 Rate-Limit"));
+        if monthly_exhausted {
+            return Err(anyhow!(
+                "HTTP 429 Rate-Limit: Mistral-Monats-Token-Budget erschoepft. Kurzes Warten hilft nicht - hoeheres Plan/Kontingent noetig oder bis zum Monatswechsel warten."
+            ));
+        }
+        let hint = retry_after
+            .map(|ra| format!(" (zuruecksetzen in ~{ra}s)"))
+            .unwrap_or_default();
+        return Err(anyhow!("HTTP 429 Rate-Limit{hint}"));
     }
     if !status.is_success() {
         return Err(anyhow!("HTTP {status}: {}", sanitize_json(&value)));
