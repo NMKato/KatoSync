@@ -2170,6 +2170,27 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
       {vm.config && !vm.config.codexCodingMode ? (
         <p className="documents-warning" style={{ marginTop: 4 }}>{t("codex.fileMode.hint")}</p>
       ) : null}
+      {vm.config && !vm.config.codexCodingMode ? (
+        <div className="reference-root" style={{ marginTop: 8 }}>
+          <strong className="section-label">{t("codex.reference.title")}</strong>
+          <p className="field-hint" style={{ marginTop: 2 }}>{t("codex.reference.desc")}</p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
+            <button type="button" className="secondary" onClick={() => void vm.handleChooseReferenceRoot()}>
+              {t("codex.reference.choose")}
+            </button>
+            {vm.config.referenceRoot ? (
+              <>
+                <span className="field-hint" style={{ wordBreak: "break-all" }}>{vm.config.referenceRoot}</span>
+                <button type="button" className="ghost" onClick={() => vm.updateConfig("referenceRoot", "")}>
+                  {t("codex.reference.forget")}
+                </button>
+              </>
+            ) : (
+              <span className="field-hint">{t("codex.reference.none")}</span>
+            )}
+          </div>
+        </div>
+      ) : null}
       <p className="field-hint" style={{ marginTop: -2 }}>
         {t("codex.toggle.saveHint")}
       </p>

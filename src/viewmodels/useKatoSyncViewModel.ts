@@ -170,6 +170,8 @@ export function useKatoSyncViewModel() {
           setSyncStatus(
             `Rate-Limit erreicht – neuer Versuch in ${event.waitSecs ?? 0}s (${event.attempt ?? 0}/${event.total ?? 0})`
           );
+        } else if (event.phase === "rate_limit_abort") {
+          setSyncStatus("Rate-Limit erreicht – Sync abgebrochen. Bitte in ~1 Minute erneut.");
         } else {
           setSyncStatus(`Lädt hoch: ${event.file} (${event.index ?? 0}/${event.total ?? 0})`);
         }
@@ -535,6 +537,12 @@ export function useKatoSyncViewModel() {
     },
     [config]
   );
+
+  const handleChooseReferenceRoot = useCallback(async () => {
+    if (!config) return;
+    const picked = await chooseRepoFolder(config.referenceRoot || config.sourceRoots[0]);
+    if (picked) updateConfig("referenceRoot", picked);
+  }, [config, updateConfig]);
 
   const handleForgetProjectRepo = useCallback(
     async (projectId: string) => {
@@ -1057,6 +1065,7 @@ export function useKatoSyncViewModel() {
     handleMarkTaskDone,
     handleDeleteMcpConnectorToken,
     handleForgetProjectRepo,
+    handleChooseReferenceRoot,
     handleGenerateConnectorToken,
     handleRejectTask,
     handleReorderTask,

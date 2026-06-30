@@ -37,6 +37,7 @@ export const defaultConfig: AppConfig = {
   codexCreatePr: true,
   codexCodingMode: false,
   codexPreferredRunner: "codex_cli",
+  referenceRoot: "",
   projectRepos: {}
 };
 

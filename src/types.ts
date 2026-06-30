@@ -40,6 +40,8 @@ export interface AppConfig {
   codexCodingMode: boolean;
   // Multi-Runner: bevorzugter lokaler Runner.
   codexPreferredRunner: "codex_cli" | "claude_cli";
+  // KatoContext: lokaler Referenzordner (Lebenslauf/Zeugnisse/Kontext) fuer den Datei-Modus.
+  referenceRoot: string;
   // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectId -> Pfad).
   projectRepos: Record<string, string>;
 }
@@ -268,12 +270,13 @@ export interface CodexEvent {
 
 // Live-Status des Sync-Laufs (Upload-Fortschritt + sichtbarer Rate-Limit-Backoff).
 export interface SyncEvent {
-  phase: "uploading" | "rate_limit";
-  file: string;
+  phase: "uploading" | "rate_limit" | "rate_limit_abort";
+  file?: string;
   index?: number;
   total?: number;
   attempt?: number;
   waitSecs?: number;
+  remaining?: number;
 }
 
 export interface LaunchAgentStatus {

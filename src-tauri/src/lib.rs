@@ -65,6 +65,10 @@ pub struct AppConfig {
     // Multi-Runner: bevorzugter lokaler Runner ("codex_cli" Default | "claude_cli").
     #[serde(default)]
     codex_preferred_runner: String,
+    // KatoContext: lokaler Referenzordner (Lebenslauf/Zeugnisse/Kontext). Wird im Datei-Modus vor
+    // dem Lauf nach <repo>/KatoContext/ materialisiert; bleibt lokal (nie in Mistral-Library).
+    #[serde(default)]
+    reference_root: String,
     // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectExternalId -> Pfad).
     #[serde(default)]
     project_repos: std::collections::HashMap<String, String>,
@@ -791,6 +795,60 @@ fn gh_bin() -> String {
     "gh".to_string()
 }
 
+fn pdftotext_bin() -> Option<String> {
+    for p in ["/opt/homebrew/bin/pdftotext", "/usr/local/bin/pdftotext"] {
+        if Path::new(p).exists() {
+            return Some(p.to_string());
+        }
+    }
+    None
+}
+
+// KatoContext (nur Datei-Modus): Top-Level-Dateien des Referenzordners (Lebenslauf/Zeugnisse/
+// Kontext) nach <repo>/KatoContext/ kopieren, damit der Runner sie als Faktenbasis liest. PDFs
+// zusaetzlich best-effort als .txt-Zwilling (pdftotext/poppler, falls installiert -> auch Codex
+// liest sie; Claude liest PDFs ohnehin nativ). KatoContext bleibt LOKAL: nie in die Mistral-
+// Library, nie committet/gescannt (von allen git-Pathspecs + der Scan-Blockliste ausgeschlossen).
+fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usize {
+    let dst = format!("{repo_path}/KatoContext");
+    let _ = fs::remove_dir_all(&dst); // frisch: Referenzordner koennte sich geaendert haben
+    if fs::create_dir_all(&dst).is_err() {
+        return 0;
+    }
+    let pdftotext = pdftotext_bin();
+    let mut count = 0usize;
+    let Ok(entries) = fs::read_dir(reference_root) else {
+        return 0;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue; // versteckte/AppleDouble-Sidecars ueberspringen
+        }
+        let target = format!("{dst}/{name}");
+        if fs::copy(&path, &target).is_err() {
+            continue;
+        }
+        count += 1;
+        if name.to_lowercase().ends_with(".pdf") {
+            if let Some(ref bin) = pdftotext {
+                let _ = Command::new(bin)
+                    .arg("-layout")
+                    .arg(&target)
+                    .arg(format!("{dst}/{name}.txt"))
+                    .output();
+            }
+        }
+    }
+    count
+}
+
 // Default-Branch offline ermitteln (origin/HEAD ist oft nicht gesetzt): main -> master -> aktueller.
 fn detect_default_branch(repo: &str) -> String {
     if git_capture(repo, &["show-ref", "--verify", "--quiet", "refs/heads/main"]).is_ok() {
@@ -1145,7 +1203,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     if file_mode && !is_git {
         // NUR ein frisch angelegtes Repo: aktuellen Inhalt als Ausgangszustand committen, damit
         // ein HEAD existiert und der spaetere Diff nur Codex' neue Dateien zeigt. Lokal, ohne Push.
-        let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync"]);
+        let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync", ":!KatoContext"]);
         git_capture(
             &repo_path,
             &["commit", "-m", "katosync: Ausgangszustand", "--allow-empty"],
@@ -1153,7 +1211,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         .map_err(|e| {
             format!("Git-Baseline im Datei-Modus fehlgeschlagen (fehlt eine git-Identitaet?): {e}")
         })?;
-    } else if !git_capture(&repo_path, &["status", "--porcelain", "--", ":!.katosync"])?.is_empty() {
+    } else if !git_capture(&repo_path, &["status", "--porcelain", "--", ":!.katosync", ":!KatoContext"])?.is_empty() {
         // Bestehendes Repo (auch im Datei-Modus): KEINE fremden Aenderungen mitcommitten.
         return Err("Der Arbeitsbaum ist nicht sauber. Bitte erst committen oder stashen.".to_string());
     }
@@ -1204,8 +1262,21 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     let effective_prompt = if file_mode {
         let result_dir = format!("{repo_path}/{result_rel}");
         fs::create_dir_all(&result_dir).map_err(error_to_string)?;
+        // KatoContext: lokalen Referenzordner als Faktenbasis bereitstellen (nur wenn gesetzt + da).
+        let context_files = if !config.reference_root.trim().is_empty()
+            && Path::new(config.reference_root.trim()).is_dir()
+        {
+            materialize_kato_context(&repo_path, config.reference_root.trim())
+        } else {
+            0
+        };
+        let context_block = if context_files > 0 {
+            "\n\n## Faktenbasis (verbindlich)\nDer Ordner `KatoContext/` enthaelt deine verbindlichen Quelldaten (z. B. Lebenslauf, Zeugnisse, Kontext). Nutze AUSSCHLIESSLICH belegte Fakten daraus. Erfinde nichts (keine Qualifikationen, Arbeitgeber, Abschluesse, Projekte, Adressen, Ansprechpartner, Zahlen). Fehlt eine Angabe, schreibe woertlich [bitte ergaenzen]. Wahrheit vor Vollstaendigkeit. `KatoContext/` ist NUR-LESEN."
+        } else {
+            ""
+        };
         format!(
-            "{}\n\n## Datei-Modus (verbindlich)\nSchreibe dein Ergebnis als fertige Datei(en) AUSSCHLIESSLICH in den Ordner `{result_rel}/`. Aendere, verschiebe oder loesche KEINE anderen Dateien. Erstelle keinen Code ausserhalb dieses Ergebnis-Ordners.",
+            "{}\n\n## Datei-Modus (verbindlich)\nSchreibe dein Ergebnis als fertige Datei(en) AUSSCHLIESSLICH in den Ordner `{result_rel}/`. Aendere, verschiebe oder loesche KEINE anderen Dateien. Erstelle keinen Code ausserhalb dieses Ergebnis-Ordners.{context_block}",
             req.prompt
         )
     } else {
@@ -1407,7 +1478,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     // ---- Diff + Auto-Commit (nur bei Erfolg) ----
     // Run-Ordner (.katosync) bewusst NICHT mitcommitten -> bleibt lokaler Audit-Trail,
     // die "geaenderte Dateien"-Liste zeigt nur die echten Aenderungen.
-    let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync"]);
+    let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync", ":!KatoContext"]);
     // -z + core.quotepath=false: NUL-getrennte, UNescapte UTF-8-Pfade. Ohne das quotet git
     // Umlaut-Namen (z.B. "Lebenslauf_Mueller.md" mit Ue) mit fuehrendem '"' -> der starts_with-
     // Scope-Check unten wuerde sie faelschlich als "ausserhalb" werten und den Lauf verwerfen.
@@ -1438,7 +1509,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 out_of_scope.join(", ")
             ));
             let _ = git_capture(&repo_path, &["reset", "--hard"]);
-            let _ = git_capture(&repo_path, &["clean", "-fd", "-e", ".katosync"]);
+            let _ = git_capture(&repo_path, &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"]);
         }
     }
 
@@ -1596,7 +1667,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     // jeder weitere Lauf scheiterte am sauberer-Baum-Check. Auf den Ausgangszustand zuruecksetzen.
     if file_mode && commit.is_none() {
         let _ = git_capture(&repo_path, &["reset", "--hard"]);
-        let _ = git_capture(&repo_path, &["clean", "-fd", "-e", ".katosync"]);
+        let _ = git_capture(&repo_path, &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"]);
     }
     // Zurueck auf den Default-Branch -> Arbeitskopie bleibt sauber; Codex-Aenderungen leben auf dem Branch.
     let _ = git_capture(&repo_path, &["checkout", &default_branch]);
@@ -1907,6 +1978,26 @@ async fn sync_once(config: &AppConfig, dry_run: bool, app: Option<&AppHandle>) -
                         );
                         write_log("error", &message)?;
                         errors.push(message);
+                        // Anhaltendes Rate-Limit: die naechsten Dateien wuerden ebenfalls 429 ->
+                        // den GANZEN Sync abbrechen, statt jede Datei einzeln durch den Backoff zu
+                        // schicken (sonst N x ~100s, das fuehlt sich wie "haengt ewig" an).
+                        if error.to_string().contains("429")
+                            || error.to_string().contains("Rate-Limit")
+                        {
+                            let remaining = total.saturating_sub(idx + 1);
+                            if remaining > 0 {
+                                errors.push(format!(
+                                    "Rate-Limit erreicht - {remaining} weitere Datei(en) nicht hochgeladen. Bitte in ~1 Minute erneut synchronisieren."
+                                ));
+                            }
+                            if let Some(app) = app {
+                                let _ = app.emit(
+                                    "sync-event",
+                                    json!({ "phase": "rate_limit_abort", "remaining": remaining }),
+                                );
+                            }
+                            break;
+                        }
                     }
                 }
             }
@@ -2353,7 +2444,9 @@ async fn prune_existing_document_versions(
 ) -> Result<usize> {
     let client = mistral_client(60);
     let mut deleted = 0;
-    for page in 0..20 {
+    // Wenige Seiten reichen (nach created_at desc sortiert -> neueste/relevante Versionen zuerst);
+    // 20 Seiten waeren unnoetig viele Requests und treiben das Rate-Limit hoch.
+    for page in 0..3 {
         let url = format!("https://api.mistral.ai/v1/libraries/{library_id}/documents");
         let response = client
             .get(&url)
@@ -2644,6 +2737,7 @@ fn should_enter(entry: &DirEntry, config: &AppConfig) -> bool {
     let blocked_names = [
         ".git",
         "katoresults",
+        "katocontext",
         "node_modules",
         ".env",
         "secrets",
@@ -2879,6 +2973,7 @@ fn default_config() -> Result<AppConfig> {
         codex_create_pr: true,
         codex_coding_mode: false,
         codex_preferred_runner: "codex_cli".to_string(),
+        reference_root: String::new(),
         project_repos: std::collections::HashMap::new(),
     })
 }

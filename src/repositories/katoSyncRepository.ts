@@ -1206,6 +1206,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
     codexCreatePr: config.codexCreatePr ?? defaultConfig.codexCreatePr,
     codexCodingMode: config.codexCodingMode ?? defaultConfig.codexCodingMode,
     codexPreferredRunner: config.codexPreferredRunner === "claude_cli" ? "claude_cli" : "codex_cli",
+    referenceRoot: config.referenceRoot ?? "",
     projectRepos: config.projectRepos ?? {}
   };
 }

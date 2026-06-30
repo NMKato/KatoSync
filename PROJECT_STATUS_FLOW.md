@@ -1,5 +1,23 @@
 # KatoSync Project Statusflow
 
+## 2026-06-30 - Sync-Fix: 429 nicht mehr pro Datei durchgrinden (Live-Test) (committet, NICHT released)
+
+Projekt: KatoSync Desktop App. Status: committet, App installiert. Aus dem Live-Test: "Upload hat kein Timeout / haengt ewig". Diagnose: war NIE ein fehlender Timeout (upload_document hat 180s, prune 60s) - sondern bei anhaltendem Mistral-429 lief JEDE der 5-6 Dateien einzeln durch ihren Backoff (10/30/60s = bis ~100s pro Datei x N = bis ~10 Min "Upload laeuft"). Fuehlte sich wie Endlos-Haenger an.
+
+- **Fix Global-Abbruch:** scheitert eine Datei nach dem Backoff am 429, bricht `sync_once` den GANZEN Upload-Lauf ab (die restlichen Dateien wuerden ohnehin 429), mit klarer Meldung "Rate-Limit erreicht - N weitere Datei(en) nicht hochgeladen, bitte in ~1 Min erneut" + sync-event phase "rate_limit_abort". Statt N x ~100s jetzt ~100s.
+- **Fix Request-Druck gesenkt:** `prune_existing_document_versions`-Seitenschleife 0..20 -> 0..3 (nach created_at desc; weniger GETs, die selbst das Rate-Limit hochtreiben).
+- Hintergrund: Der 429 kommt vom schnellen Wiederholungs-Testen (jeder Sync = prune + upload pro Datei). Eine Minute warten + erneut loest es; der Abbruch macht das jetzt schnell + klar sichtbar.
+- OFFEN/Bug gemeldet: referenzierte PDFs (z.B. angebot 1.pdf) sollen im Dokument-Modus mit in die Library - das passiert bereits, WENN includeDocuments an ist (upload_order nimmt category=document mit); im Screenshot wird angebot 1.pdf bereits hochgeladen (scheiterte nur am 429). Ggf. UX: Dokumente-Upload klarer / Default pruefen.
+
+## 2026-06-30 - Welle C: KatoContext / Referenzordner (committet, NICHT released)
+
+Projekt: KatoSync Desktop App. Status: committet, Build gruen, App installiert. NOCH NICHT mit echtem Datei-Modus-Lauf verifiziert (vor Verlass auf das Grounding testen).
+
+- **Referenzordner -> KatoContext/:** Config `reference_root`/`referenceRoot` (round-trip Rust<->TS). Im Datei-Modus (Coding-Modus aus) materialisiert `materialize_kato_context` vor dem Lauf die Top-Level-Dateien des Referenzordners nach `<repo>/KatoContext/`; PDFs zusaetzlich best-effort als .txt-Zwilling (pdftotext/poppler, falls installiert -> auch Codex; Claude liest PDFs nativ). Der Datei-Modus-Prompt bekommt einen Faktenbasis-Block ("nutze nur KatoContext-Fakten, sonst [bitte ergaenzen]") NUR wenn Dateien materialisiert wurden.
+- **KatoContext bleibt LOKAL:** wie `.katosync` ueberall von git ausgeschlossen (clean-tree-Check, git add, clean -e, sowie nicht in der out-of-scope-Pruefung) + Scan-Blockliste "katocontext" (nie in die Mistral-Library, nie committet/gescannt). Frisch pro Lauf (remove_dir_all + neu kopieren).
+- **UI:** im Codex-Bridge-Panel (nur Datei-Modus) Referenzordner waehlen/anzeigen/entfernen (`handleChooseReferenceRoot`), i18n codex.reference.* in allen 4 Locales.
+- Gehoert zu Model 2 (CV bleibt lokal, Runner generiert). Model 1 (Helena liest CV aus der Mistral-Library) braucht es nicht; gebaut als Fundament fuer den privaten Pfad / "KatoSync fuer alle".
+
 ## 2026-06-30 - Welle D: Audit-Haertung (Prompt-Injection + base_url-Allowlist + CSP) (committet, NICHT released)
 
 Projekt: KatoSync Desktop App. Status: committet auf main, NICHT released. Build gruen, App gebaut + installiert. **CSP visuell pruefen** (zu strikt = weisser Bildschirm).
