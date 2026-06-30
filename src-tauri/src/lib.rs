@@ -2339,39 +2339,42 @@ fn render_briefing(
 }
 
 fn upload_order(output_dir: &Path, config: &AppConfig, scan: &ScanSummary) -> Vec<PathBuf> {
-    let mut files = vec![
-        current_file_name(config, "CURRENT_MISTRAL_BRIEFING_SOURCE", "md"),
-        current_file_name(config, "CURRENT_MISTRAL_BRIEFING_SOURCE", "txt"),
-        current_file_name(config, "CURRENT_PROJECT_STATUS_ALL", "md"),
-        current_file_name(config, "CURRENT_MEMORY_ALL", "md"),
-        current_file_name(config, "CURRENT_SNAPSHOT_INDEX", "md"),
-        current_file_name(config, "CURRENT_MANIFEST", "md"),
-    ]
-    .into_iter()
-    .map(|name| output_dir.join(name))
-    .collect::<Vec<_>>();
-
-    if config.scan_rules.upload_individual_status_files {
-        let mut individual = scan
-            .findings
-            .iter()
-            .filter(|finding| {
-                !finding.skipped && (finding.category == "status" || finding.category == "roadmap")
-            })
-            .take(config.scan_rules.max_individual_uploads)
-            .map(|finding| PathBuf::from(&finding.path))
-            .collect::<Vec<_>>();
-        files.append(&mut individual);
-    }
+    let mut files: Vec<PathBuf> = Vec::new();
+    // ZUERST die echten Quelldokumente (PDF/Bilder/Text, z.B. die Stellenanzeige): das ist der
+    // wichtigste Inhalt fuer Mistral/Helena. Frueher standen sie ganz hinten und wurden von den
+    // CURRENT-Metadaten + einem einsetzenden Rate-Limit verdraengt -> die PDF kam nie in die Library.
     if config.scan_rules.include_documents {
-        // Allgemeine Dokumente (PDF/Bilder/Text) werden direkt als Datei hochgeladen.
-        let mut documents = scan
-            .findings
-            .iter()
-            .filter(|finding| !finding.skipped && finding.category == "document")
-            .map(|finding| PathBuf::from(&finding.path))
-            .collect::<Vec<_>>();
-        files.append(&mut documents);
+        files.extend(
+            scan.findings
+                .iter()
+                .filter(|finding| !finding.skipped && finding.category == "document")
+                .map(|finding| PathBuf::from(&finding.path)),
+        );
+    }
+    // Danach die CURRENT-Manifeste/Indizes (Metadaten/Briefing-Quelle).
+    files.extend(
+        [
+            current_file_name(config, "CURRENT_MISTRAL_BRIEFING_SOURCE", "md"),
+            current_file_name(config, "CURRENT_MISTRAL_BRIEFING_SOURCE", "txt"),
+            current_file_name(config, "CURRENT_PROJECT_STATUS_ALL", "md"),
+            current_file_name(config, "CURRENT_MEMORY_ALL", "md"),
+            current_file_name(config, "CURRENT_SNAPSHOT_INDEX", "md"),
+            current_file_name(config, "CURRENT_MANIFEST", "md"),
+        ]
+        .into_iter()
+        .map(|name| output_dir.join(name)),
+    );
+    if config.scan_rules.upload_individual_status_files {
+        files.extend(
+            scan.findings
+                .iter()
+                .filter(|finding| {
+                    !finding.skipped
+                        && (finding.category == "status" || finding.category == "roadmap")
+                })
+                .take(config.scan_rules.max_individual_uploads)
+                .map(|finding| PathBuf::from(&finding.path)),
+        );
     }
     files
 }
