@@ -2348,23 +2348,33 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
         </div>
       ) : null}
       {vm.config ? (
+        <div className="runner-picker" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+          <strong className="section-label">{t("codex.mode.label")}</strong>
+          <button
+            type="button"
+            className={!vm.config.codexCodingMode ? "primary" : "ghost"}
+            onClick={() => vm.updateConfig("codexCodingMode", false)}
+          >
+            {t("codex.mode.file")}
+          </button>
+          <button
+            type="button"
+            className={vm.config.codexCodingMode ? "primary" : "ghost"}
+            onClick={() => vm.updateConfig("codexCodingMode", true)}
+          >
+            {t("codex.mode.coding")}
+          </button>
+        </div>
+      ) : null}
+      {vm.config && vm.config.codexCodingMode ? (
         <div className="switch-grid" style={{ marginBottom: 6 }}>
-          <HoverTip title={t("codex.toggle.codingMode")} description={t("codex.toggle.codingModeDesc")}>
-            <Toggle
-              checked={vm.config.codexCodingMode}
-              label={t("codex.toggle.codingMode")}
-              onChange={(checked) => vm.updateConfig("codexCodingMode", checked)}
-            />
-          </HoverTip>
           <Toggle
             checked={vm.config.codexAutoPush}
-            disabled={!vm.config.codexCodingMode}
             label={t("codex.toggle.pushBranch")}
             onChange={(checked) => vm.updateConfig("codexAutoPush", checked)}
           />
           <Toggle
             checked={vm.config.codexCreatePr}
-            disabled={!vm.config.codexCodingMode}
             label={t("codex.toggle.createPr")}
             onChange={(checked) => vm.updateConfig("codexCreatePr", checked)}
           />
