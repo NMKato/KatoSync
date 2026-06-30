@@ -271,7 +271,7 @@ export interface CodexEvent {
 
 // Live-Status des Sync-Laufs (Upload-Fortschritt + sichtbarer Rate-Limit-Backoff).
 export interface SyncEvent {
-  phase: "uploading" | "rate_limit" | "rate_limit_abort";
+  phase: "uploading" | "rate_limit" | "rate_limit_abort" | "rate_limit_abort_day";
   file?: string;
   index?: number;
   total?: number;

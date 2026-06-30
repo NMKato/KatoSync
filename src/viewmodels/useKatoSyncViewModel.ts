@@ -186,6 +186,10 @@ export function useKatoSyncViewModel() {
           setSyncStatus(
             `Rate-Limit erreicht – neuer Versuch in ${event.waitSecs ?? 0}s (${event.attempt ?? 0}/${event.total ?? 0})`
           );
+        } else if (event.phase === "rate_limit_abort_day") {
+          setSyncStatus(
+            "Mistral-Tageslimit für Dokumente erreicht (heute aufgebraucht). Morgen erneut synchronisieren oder höheren Plan (Scale) wählen."
+          );
         } else if (event.phase === "rate_limit_abort") {
           setSyncStatus("Rate-Limit erreicht – Sync abgebrochen. Bitte in ~1 Minute erneut.");
         } else {

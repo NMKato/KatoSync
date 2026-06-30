@@ -2546,17 +2546,30 @@ async fn sync_once(config: &AppConfig, dry_run: bool, app: Option<&AppHandle>) -
                         // schicken (sonst N x ~100s, das fuehlt sich wie "haengt ewig" an).
                         if error.to_string().contains("429")
                             || error.to_string().contains("Rate-Limit")
+                            || error.to_string().contains("Tageslimit")
                         {
                             let remaining = total.saturating_sub(idx + 1);
+                            let is_day = error.to_string().contains("Tageslimit");
                             if remaining > 0 {
-                                errors.push(format!(
-                                    "Rate-Limit erreicht - {remaining} weitere Datei(en) nicht hochgeladen. Bitte in ~1 Minute erneut synchronisieren."
-                                ));
+                                errors.push(if is_day {
+                                    format!(
+                                        "Tageslimit fuer Dokument-Verarbeitung erreicht - {remaining} weitere Datei(en) heute nicht hochladbar. Morgen erneut synchronisieren oder hoeheren Mistral-Plan (Scale) waehlen."
+                                    )
+                                } else {
+                                    format!(
+                                        "Rate-Limit erreicht - {remaining} weitere Datei(en) nicht hochgeladen. Bitte in ~1 Minute erneut synchronisieren."
+                                    )
+                                });
                             }
                             if let Some(app) = app {
+                                let phase = if is_day {
+                                    "rate_limit_abort_day"
+                                } else {
+                                    "rate_limit_abort"
+                                };
                                 let _ = app.emit(
                                     "sync-event",
-                                    json!({ "phase": "rate_limit_abort", "remaining": remaining }),
+                                    json!({ "phase": phase, "remaining": remaining }),
                                 );
                             }
                             break;
@@ -3094,8 +3107,14 @@ async fn upload_with_backoff(
     for attempt in 0..=waits.len() {
         match upload_document(api_key, library_id, file_path).await {
             Ok(result) => return Ok(result),
-            // Monats-Token-Budget leer: Retry/Backoff sinnlos -> sofort scheitern.
-            Err(error) if error.to_string().contains("Monats") => return Err(error),
+            // Monats-Token-Budget ODER Tages-Dokumentlimit erschoepft: Backoff/Retry hilft heute NICHT
+            // -> sofort scheitern (statt 4x sinnlos zu grinden + das Minuten-Limit hochzutreiben).
+            Err(error)
+                if error.to_string().contains("Monats")
+                    || error.to_string().contains("Tageslimit") =>
+            {
+                return Err(error)
+            }
             Err(error) if error.to_string().contains("HTTP 429") => {
                 if attempt < waits.len() {
                     write_log(
@@ -3228,12 +3247,22 @@ async fn upload_document(
     let monthly_exhausted = header_string(headers, "x-ratelimit-remaining-tokens-month")
         .map(|v| v.trim() == "0")
         .unwrap_or(false);
+    // Tages-Dokumentlimit (eigene Mistral-Kategorie, getrennt von Minuten-Takt + Monats-Token):
+    // ist es 0, hilft Backoff/Warten HEUTE nicht -> wie beim Monat sofort permanent scheitern.
+    let document_day_exhausted = header_string(headers, "x-ratelimit-remaining-document-day")
+        .map(|v| v.trim() == "0")
+        .unwrap_or(false);
     let rate_limits = rate_limits_from_headers(headers);
     let value: serde_json::Value = response.json().await.unwrap_or_else(|_| json!({}));
     if status == StatusCode::TOO_MANY_REQUESTS {
         if monthly_exhausted {
             return Err(anyhow!(
                 "HTTP 429 Rate-Limit: Mistral-Monats-Token-Budget erschoepft. Kurzes Warten hilft nicht - hoeheres Plan/Kontingent noetig oder bis zum Monatswechsel warten."
+            ));
+        }
+        if document_day_exhausted {
+            return Err(anyhow!(
+                "HTTP 429 Tageslimit: Mistrals Tageslimit fuer Dokument-Verarbeitung ist heute aufgebraucht. Warten hilft heute NICHT - es setzt erst nach ~24h zurueck; fuer mehr einen hoeheren Mistral-Plan (Scale/Pay-as-you-go) waehlen."
             ));
         }
         let hint = retry_after
@@ -3286,6 +3315,20 @@ fn rate_limits_from_headers(headers: &reqwest::header::HeaderMap) -> Vec<RateLim
             "x-ratelimit-limit-tokens-month",
             "x-ratelimit-remaining-tokens-month",
             "x-ratelimit-reset-tokens-month",
+        ),
+        // Dokument-Verarbeitung (eigene Mistral-Kategorie) -> sonst sieht der Nutzer genau das Limit,
+        // das Uploads blockiert (Dokumente/Tag), nie. Erscheint zuverlaessig auf der POST-/documents-Antwort.
+        (
+            "Dokumente/Minute",
+            "x-ratelimit-limit-document-minute",
+            "x-ratelimit-remaining-document-minute",
+            "x-ratelimit-reset-document-minute",
+        ),
+        (
+            "Dokumente/Tag",
+            "x-ratelimit-limit-document-day",
+            "x-ratelimit-remaining-document-day",
+            "x-ratelimit-reset-document-day",
         ),
     ];
     pairs
