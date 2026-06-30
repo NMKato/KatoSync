@@ -1,5 +1,15 @@
 # KatoSync Project Statusflow
 
+## 2026-06-30 - Cloud-Profil (Server fertig, App offen) + Tester-Feedback + Sync-Finale + API-Key-Persistenz (committet, NICHT released)
+
+Projekt: KatoSync App + MCP Server. Status: alles committet+gepusht (App HEAD b958dc9, Server HEAD 9eb8fa6), KEIN Release. Detaillierter Uebergabe-Prompt: `/Users/nmk/.claude/plans/katosync-uebergabe-2026-06-30.md`.
+
+- **Cloud-Profil (Variante A Zero-Knowledge, NEUE WELLE):** Zugangsdaten folgen dem KatoOS-Konto. SERVER FERTIG (Server-Commit 9eb8fa6, NICHT deployed): Tabelle `user_settings` (Migration 0009) + `GET/PUT /api/me/settings` (User-JWT-Auth); Server speichert nur opake, clientseitig verschluesselte secret_*-Blobs + library_id, kann nicht entschluesseln (Typecheck+31 Tests gruen). APP-Seite NOCH ZU BAUEN: Rust-Krypto Argon2id(Passwort+kdf_salt)->AES-256-GCM (Key nur im RAM/Session), Fetch beim Login + Push beim Speichern, sichtbarer Logout/Konto-Wechsel in der Sidebar. Geraete-Pfade NICHT syncen. Passwort-Reset -> API-Key einmal neu (inhaerent, Nutzer ok).
+- **API-Key-Persistenz GEFIXT:** Dev-Builds werden jetzt MIT Developer-ID signiert (stabile Signatur) -> Keychain-Key bleibt ueber Rebuilds (vorher ad-hoc = nach jedem Build neu eingeben). Sign-Tanz exFAT->APFS im Uebergabe-Prompt.
+- **Tester-Feedback (16 Punkte, Multi-Agent triagiert):** GEBAUT #3 (Auto-Advance ueberspringt Token-Schritt nicht mehr), #4 (Lizenz mehrsprachig EN/ES/RU fachuebersetzt+reviewt, license.ts->Record<Lang>), #6 ("Beispiel einfuegen"-Button), #7b (Passwort-vergessen recover_supabase + Link), #8 (Uploadplan-Text an schedule.enabled), #12 (Version env!CARGO_PKG_VERSION statt 1.0.1 + In-App-Zeile "2.0.0 Beta 7"), #13 (neutrale Registrierungs-Meldung). UMBENANNT "Skill-Generator"->"Skill erweitern" (4 Sprachen). Schon gefixt #9/#15, beantwortet #5/#10/#16, gewollt #14, EXTERN (Supabase, Claude richtet ein) #1/#2/#7a.
+- **Sync-Finale:** Dokumente ZUERST in upload_order (sonst verdraengt das Rate-Limit die echte Stellenanzeige), dedupe-Prune default AUS (Toggle "Dubletten vermeiden", halbiert Requests), 429 transparent (retry-after + Monats-Limit aus Headern), Verlauf auf 7 Tage begrenzt. Diagnose 429: Mistrals Minuten-Request-Drossel (vom schnellen Testen), Token-Budget (26%/17h) ist NICHT der Blocker -> Pay-per-use oder 1 Min warten.
+- OFFEN: Cloud-Profil-App bauen; Claude richtet Supabase ein (db push 0008+0009 + npm run deploy via CLI - MCP sieht das Projekt NICHT; + Auth-Config #1/#2/#7a); Welle-C-Review; Datei-Modus + Claude-Runner Live-Test; beta.7.
+
 ## 2026-06-30 - Sync-Fix: 429 nicht mehr pro Datei durchgrinden (Live-Test) (committet, NICHT released)
 
 Projekt: KatoSync Desktop App. Status: committet, App installiert. Aus dem Live-Test: "Upload hat kein Timeout / haengt ewig". Diagnose: war NIE ein fehlender Timeout (upload_document hat 180s, prune 60s) - sondern bei anhaltendem Mistral-429 lief JEDE der 5-6 Dateien einzeln durch ihren Backoff (10/30/60s = bis ~100s pro Datei x N = bis ~10 Min "Upload laeuft"). Fuehlte sich wie Endlos-Haenger an.
