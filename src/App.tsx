@@ -73,7 +73,7 @@ import { copyText } from "./lib/clipboard";
 import { briefingToMarkdown } from "./lib/briefingExport";
 import { safeHttpUrl } from "./lib/url";
 import { useT, type Lang, type TFunc, type TKey } from "./i18n";
-import { licenseAgreement } from "./lib/license";
+import { licenseAgreement, licenseAgreements } from "./lib/license";
 import { APP_VERSION_LABEL, weekdayLabels } from "./lib/defaults";
 import {
   useKatoSyncViewModel,
@@ -2493,7 +2493,9 @@ function LicenseDialog({
   onClose: () => void;
   onQuit: () => void;
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  // Lizenztext in der aktuell gewaehlten Sprache (Akzeptanz-/Versions-Schluessel bleibt sprachneutral).
+  const license = licenseAgreements[lang] ?? licenseAgreement;
   return (
     <div className="modal-backdrop license-backdrop" role="presentation">
       <section aria-labelledby="license-title" aria-modal="true" className="license-dialog" role="dialog">
@@ -2506,25 +2508,25 @@ function LicenseDialog({
           <img alt="" src="/katoos_icon_logo_trans.png" />
           <div>
             <span className="section-label">KatoSync</span>
-            <h2 id="license-title">{licenseAgreement.title}</h2>
+            <h2 id="license-title">{license.title}</h2>
             <p>
               {t("license.meta", {
-                provider: licenseAgreement.provider,
-                version: licenseAgreement.version,
-                updatedAt: licenseAgreement.updatedAt
+                provider: license.provider,
+                version: license.version,
+                updatedAt: license.updatedAt
               })}
             </p>
           </div>
         </header>
         <div className="license-body">
-          <p className="license-intro">{licenseAgreement.intro}</p>
-          {licenseAgreement.sections.map((section) => (
+          <p className="license-intro">{license.intro}</p>
+          {license.sections.map((section) => (
             <article key={section.title}>
               <h3>{section.title}</h3>
               <p>{section.body}</p>
             </article>
           ))}
-          <p className="license-contact">{t("license.contact")}: {licenseAgreement.contact}</p>
+          <p className="license-contact">{t("license.contact")}: {license.contact}</p>
         </div>
         <footer>
           {accepted ? (
@@ -2535,7 +2537,7 @@ function LicenseDialog({
             <>
               <label className="license-accept">
                 <input checked={checked} onChange={(event) => onCheckedChange(event.target.checked)} type="checkbox" />
-                <span>{licenseAgreement.acceptance}</span>
+                <span>{license.acceptance}</span>
               </label>
               <div className="license-actions">
                 <button className="ghost danger" onClick={onQuit} type="button">
