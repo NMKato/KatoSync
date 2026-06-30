@@ -1306,7 +1306,7 @@ function CockpitPanel({
   const runKpis = lastRunKpis(vm.report, t);
   const upload = uploadDonut(vm.report, t);
   const scanByCategory = scanBars(vm.scan ?? vm.report?.scan ?? null, t);
-  const history = historyBars(runHistory, lang);
+  const history = historyBars(runHistory, lang, 7);
 
   let liveActive = false;
   let liveTitle = t("cockpit.live.idle.title");
