@@ -10,6 +10,7 @@ import {
   listenSyncEvents,
   NO_PROJECT_ID,
   runCodexTask,
+  resumeRunnerSession,
   deleteApiKey,
   deleteMcpConnectorToken,
   generateConnectorToken,
@@ -972,6 +973,20 @@ export function useKatoSyncViewModel() {
     [config, show]
   );
 
+  // Fortsetzbare Runner-Session: öffnet den letzten Lauf interaktiv im Terminal (voller Verlauf +
+  // die Connectoren des Nutzers). Rust schreibt die .command-Datei und startet Terminal.app.
+  const handleResumeRunnerSession = useCallback(
+    async (repoPath: string, runner: string, sessionId: string | null) => {
+      try {
+        await resumeRunnerSession(repoPath, runner, sessionId);
+        show("info", "Session wird im Terminal fortgesetzt.");
+      } catch (error) {
+        show("error", getMessage(error));
+      }
+    },
+    [show]
+  );
+
   const handleStopBoardQueue = useCallback(() => {
     stopRef.current = true;
     show("info", "Queue stoppt nach der laufenden Aufgabe.");
@@ -1284,6 +1299,7 @@ export function useKatoSyncViewModel() {
     handleRejectTask,
     handleReorderTask,
     handleResumeTask,
+    handleResumeRunnerSession,
     handleSelectTask,
     handleStartBoardQueue,
     handleStopBoardQueue,

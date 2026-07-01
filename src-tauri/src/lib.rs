@@ -296,6 +296,7 @@ pub fn run() {
             launch_agent_status,
             read_logs,
             open_output_dir,
+            resume_runner_session,
             quit_app
         ])
         .setup(|app| {
@@ -1327,6 +1328,12 @@ pub struct CodexRunResult {
     // Datei-Modus dieses Laufs (autoritativ aus der frisch von der Platte geladenen Config),
     // damit das Frontend den Task-Status nicht aus evtl. ungespeicherter In-Memory-Config ableitet.
     file_mode: bool,
+    // Fortsetzbare Session (Human-in-the-Loop): Session-ID aus dem Event-Log (Codex thread_id /
+    // Claude session_id), welcher Runner ausgefuehrt hat und in welchem Repo — damit das Frontend
+    // eine interaktive Terminal-Session mit voller History + den Connectoren des Nutzers starten kann.
+    session_id: Option<String>,
+    runner: String,
+    repo_path: String,
 }
 
 fn codex_bin() -> String {
@@ -1668,6 +1675,56 @@ fn summarize_claude_event(line: &str) -> (String, String) {
     }
     let raw: String = sanitize_log(trimmed).chars().take(160).collect();
     ("log".to_string(), raw)
+}
+
+/// POSIX-sichere Single-Quote-Umschliessung fuer die Verwendung in einem Shell-Skript.
+/// Ein enthaltenes ' wird als '\'' escaped. So sind Pfade mit Leerzeichen/Umlauten sicher.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Zieht die Session-/Thread-ID eines Laufs aus dem JSONL-Event-Log.
+/// Codex schreibt `{"type":"thread.started","thread_id":"…"}` als erste Zeile;
+/// Claude (stream-json) liefert `"session_id":"…"` im init-/result-Event.
+/// Wir durchsuchen jede Zeile (rekursiv) nach der ersten dieser Schluessel und
+/// geben den ersten nicht-leeren Treffer zurueck.
+fn extract_session_id(events: &str) -> Option<String> {
+    fn find_in(v: &serde_json::Value) -> Option<String> {
+        match v {
+            serde_json::Value::Object(map) => {
+                for key in [
+                    "session_id",
+                    "sessionId",
+                    "thread_id",
+                    "threadId",
+                    "conversation_id",
+                    "conversationId",
+                ] {
+                    if let Some(serde_json::Value::String(s)) = map.get(key) {
+                        let t = s.trim();
+                        if !t.is_empty() {
+                            return Some(t.to_string());
+                        }
+                    }
+                }
+                map.values().find_map(find_in)
+            }
+            serde_json::Value::Array(arr) => arr.iter().find_map(find_in),
+            _ => None,
+        }
+    }
+    for line in events.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+            if let Some(id) = find_in(&v) {
+                return Some(id);
+            }
+        }
+    }
+    None
 }
 
 fn git_capture(repo: &str, args: &[&str]) -> Result<String, String> {
@@ -2539,6 +2596,13 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         &format!("{runner_label}-Lauf {final_status}: {} (Branch {branch})", sanitize_log(&req.title)),
     );
 
+    // Session-ID des Laufs aus dem Event-Log ziehen (Codex: thread_id, Claude: session_id) —
+    // ermoeglicht spaeter das Fortsetzen als interaktive Terminal-Session mit voller History.
+    let session_id = fs::read_to_string(&events_path)
+        .ok()
+        .and_then(|c| extract_session_id(&c));
+    let runner = if is_claude { "claude_cli" } else { "codex_cli" }.to_string();
+
     Ok(CodexRunResult {
         status: final_status.to_string(),
         branch,
@@ -2553,7 +2617,85 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         branch_url,
         pr_url,
         file_mode,
+        session_id,
+        runner,
+        repo_path: repo_path.clone(),
     })
+}
+
+/// Setzt einen Runner-Lauf als interaktive Terminal-Session fort (Human-in-the-Loop):
+/// schreibt eine ausfuehrbare `.command`-Datei (cd ins Repo + `claude --resume <id>` bzw.
+/// `codex resume <id>`) und oeffnet sie mit `open` → Terminal.app startet die Session mit
+/// voller History UND den Connectoren des Nutzers (Gmail, Blender, …). Ohne bekannte
+/// Session-ID: `--continue` (Claude) bzw. `resume --last` (Codex).
+#[tauri::command]
+fn resume_runner_session(
+    repo_path: String,
+    runner: String,
+    session_id: Option<String>,
+) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo_path = repo_path.trim().to_string();
+    if !Path::new(&repo_path).is_dir() {
+        return Err(format!("Projektordner nicht gefunden: {repo_path}"));
+    }
+
+    let is_claude = runner == "claude_cli";
+    let bin = if is_claude { claude_bin() } else { codex_bin() };
+    let runner_label = if is_claude { "Claude" } else { "Codex" };
+    let sid = session_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    // Resume-Kommando je Runner (mit/ohne bekannte Session-ID). `exec` ersetzt die Shell,
+    // damit das Terminal die interaktive TUI sauber uebernimmt.
+    let resume_cmd = match (is_claude, sid) {
+        (true, Some(id)) => format!("exec {} --resume {}", shell_quote(&bin), shell_quote(id)),
+        (true, None) => format!("exec {} --continue", shell_quote(&bin)),
+        (false, Some(id)) => format!("exec {} resume {}", shell_quote(&bin), shell_quote(id)),
+        (false, None) => format!("exec {} resume --last", shell_quote(&bin)),
+    };
+
+    // Login-Shell (-l) laedt das PATH des Nutzers, damit vom Runner gestartete Werkzeuge gefunden
+    // werden. Der Runner selbst wird ueber seinen absoluten Pfad aufgerufen.
+    let script = format!(
+        "#!/bin/zsh -l\ncd {repo} || exit 1\nclear\necho 'KatoSync — {label}-Session wird fortgesetzt (volle History + deine Connectoren). Fenster schliessen zum Beenden.'\necho\n{cmd}\n",
+        repo = shell_quote(&repo_path),
+        label = runner_label,
+        cmd = resume_cmd,
+    );
+
+    // Eindeutiger, kollisionsarmer Dateiname: aus der Session-ID (falls vorhanden) sonst Zeitstempel.
+    let stamp = sid
+        .map(|s| s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos().to_string())
+                .unwrap_or_else(|_| "session".to_string())
+        });
+    let file = std::env::temp_dir().join(format!("katosync-resume-{stamp}.command"));
+
+    fs::write(&file, script).map_err(|e| format!("Konnte Resume-Skript nicht schreiben: {e}"))?;
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o755))
+        .map_err(|e| format!("Konnte Resume-Skript nicht ausfuehrbar machen: {e}"))?;
+
+    // Explizit Terminal.app oeffnen (nicht das generische `open`): sonst koennte eine abweichende
+    // Standard-Zuordnung fuer .command (z. B. ein Texteditor) die Datei falsch oeffnen, ohne dass
+    // wir es merken. Mit `-a Terminal` landet das Skript zuverlaessig im Terminal.
+    let status = Command::new("open")
+        .arg("-a")
+        .arg("Terminal")
+        .arg(&file)
+        .status()
+        .map_err(|e| format!("Konnte Terminal nicht oeffnen: {e}"))?;
+    if !status.success() {
+        return Err("Terminal konnte die Session nicht starten.".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]

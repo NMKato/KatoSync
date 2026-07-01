@@ -259,6 +259,11 @@ export interface CodexRunResult {
   prUrl?: string | null;
   // Datei-Modus dieses Laufs (autoritativ aus dem Rust-Lauf, nicht aus der UI-Config abgeleitet).
   fileMode?: boolean;
+  // Fortsetzbare Session (Human-in-the-Loop): ID aus dem Lauf (Codex thread_id / Claude session_id),
+  // welcher Runner + Repo — damit „Fortsetzen" eine interaktive Terminal-Session öffnen kann.
+  sessionId?: string | null;
+  runner?: string;
+  repoPath?: string;
 }
 
 export interface CodexRunState {

@@ -369,6 +369,8 @@ const ru: Record<TKey, string> = {
   "codex.result.runDir": "Папка прогона:",
   "codex.result.changedFiles": "Изменённые файлы ({count}):",
   "codex.result.noChanges": "Изменений в файлах нет.",
+  "codex.resume.label": "Продолжить",
+  "codex.resume.hint": "Открывает эту сессию интерактивно в Терминале — с полной историей и вашими коннекторами (Gmail, Blender …). Вы подтверждаете каждый шаг (human-in-the-loop).",
   "login.subtitle": "Войдите в свой аккаунт KatoOS",
   "login.signIn": "Войти",
   "login.forgot": "Забыли пароль?",

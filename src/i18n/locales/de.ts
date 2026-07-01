@@ -388,6 +388,8 @@ const de = {
   "codex.result.runDir": "Run-Ordner:",
   "codex.result.changedFiles": "Geänderte Dateien ({count}):",
   "codex.result.noChanges": "Keine Dateiänderungen.",
+  "codex.resume.label": "Fortsetzen",
+  "codex.resume.hint": "Öffnet diese Session interaktiv im Terminal — mit voller History und deinen Connectoren (Gmail, Blender …). Du bestätigst jeden Schritt selbst (Human-in-the-Loop).",
   "login.subtitle": "Bei deinem KatoOS-Konto anmelden",
   "login.signIn": "Anmelden",
   "login.forgot": "Passwort vergessen?",

@@ -2567,6 +2567,24 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.resultSummary}</ReactMarkdown>
                 </div>
               ) : null}
+              {result.sessionId ? (
+                <div className="codex-resume" style={{ marginTop: 10, display: "grid", gap: 4 }}>
+                  <button
+                    className="secondary"
+                    type="button"
+                    onClick={() =>
+                      void vm.handleResumeRunnerSession(
+                        result.repoPath ?? "",
+                        result.runner ?? "codex_cli",
+                        result.sessionId ?? null
+                      )
+                    }
+                  >
+                    <TerminalSquare size={14} /> {t("codex.resume.label")}
+                  </button>
+                  <span className="field-hint">{t("codex.resume.hint")}</span>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

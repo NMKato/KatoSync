@@ -369,6 +369,8 @@ const en: Record<TKey, string> = {
   "codex.result.runDir": "Run folder:",
   "codex.result.changedFiles": "Changed files ({count}):",
   "codex.result.noChanges": "No file changes.",
+  "codex.resume.label": "Continue",
+  "codex.resume.hint": "Opens this session interactively in the Terminal — with full history and your connectors (Gmail, Blender …). You approve every step yourself (human-in-the-loop).",
   "login.subtitle": "Sign in to your KatoOS account",
   "login.signIn": "Sign in",
   "login.forgot": "Forgot password?",
