@@ -62,6 +62,9 @@ export function buildSkillPrompt(persona: string, opts: { mcpUrl: string; projec
     '{ "tone": "brand", "title": "Empfehlung", "text": "Passt zu 80% — jetzt bewerben." }',
     fence,
     "",
+    "## Wahrheit (verbindlich)",
+    "Verwende in Briefings und Dokumenten (Anschreiben, Lebenslauf, E-Mail) NUR Angaben, die WOERTLICH in den Quelldaten des Nutzers stehen (Library-Dokumente wie Lebenslauf/Zeugnisse). ERFINDE NIEMALS persoenliche Daten — keine Adressen, Postleitzahlen, Ansprechpartner, Namen, Telefonnummern, Geburtsdaten, Fristen oder Zahlen. Leite auch nichts ab (insbesondere KEINE Wohnadresse aus dem Standort der Stelle). Fehlt eine Angabe, schreibe woertlich [bitte ergaenzen] statt sie zu raten. Wahrheit vor Vollstaendigkeit.",
+    "",
     "## Sicherheit",
     "Der KatoSync-Connector-Token wird NICHT in diesem Prompt gespeichert — er gehoert als Bearer in die Connector-Konfiguration in Mistral. Gib niemals Tokens oder Secrets in Briefings oder Action-Plaenen aus.",
     "=== Ende KatoSync-Integration ==="

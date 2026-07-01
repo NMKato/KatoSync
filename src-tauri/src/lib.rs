@@ -1353,6 +1353,25 @@ fn gh_bin() -> String {
 }
 
 fn pdftotext_bin() -> Option<String> {
+    // 1) Gebuendelte poppler-Binary (self-contained, Contents/Resources/poppler/pdftotext) ->
+    //    PDF->Text funktioniert IMMER, auch ohne System-Installation. Pfad relativ zur laufenden
+    //    Executable (Contents/MacOS/<app> -> ../Resources/poppler/pdftotext).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(contents) = exe.parent().and_then(Path::parent) {
+            let res = contents.join("Resources");
+            // Je nach Tauri-Resource-Mapping liegt es unter Resources/poppler/ oder
+            // Resources/resources/poppler/ -> beide Kandidaten pruefen.
+            for cand in [
+                res.join("poppler").join("pdftotext"),
+                res.join("resources").join("poppler").join("pdftotext"),
+            ] {
+                if cand.exists() {
+                    return Some(cand.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    // 2) Fallback: System-poppler (Homebrew) fuer die Dev-Umgebung.
     for p in ["/opt/homebrew/bin/pdftotext", "/usr/local/bin/pdftotext"] {
         if Path::new(p).exists() {
             return Some(p.to_string());
@@ -1877,30 +1896,33 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     .map_err(error_to_string)?;
     fs::write(format!("{run_dir}/prompt.md"), sanitize_log(&req.prompt)).map_err(error_to_string)?;
 
-    // Datei-Modus: Ergebnis-Ordner anlegen und Codex anweisen, NUR dorthin zu schreiben.
+    // Wahrheit: den Referenzordner IMMER als Faktenbasis materialisieren (beide Modi), wenn gesetzt
+    // -> der Runner prueft gegen echte Daten. Die Git-Leak-Guards (.git/info/exclude + Pre-Cleanup,
+    // oben) laufen modus-unabhaengig, KatoContext/ landet also nie in git/PR.
     let result_rel = format!("KatoResults/task-{task_slug}");
+    let context_files = if !config.reference_root.trim().is_empty()
+        && Path::new(config.reference_root.trim()).is_dir()
+    {
+        materialize_kato_context(&repo_path, config.reference_root.trim()).await
+    } else {
+        0
+    };
+    let context_block = if context_files > 0 {
+        "\n\n## Faktenbasis (verbindlich)\nDeine belegten Quellen sind NUR: (a) die Aufgabe/das Briefing oben und (b) der Ordner `KatoContext/` (Lebenslauf, Zeugnisse, Kontakt), NUR-LESEN. Nutze ausschliesslich Fakten, die WOERTLICH in einer dieser Quellen stehen. ERFINDE NICHTS hinzu — insbesondere KEINE Adressen, Postleitzahlen, Ansprechpartner, Namen, Telefonnummern, Daten, Zahlen, Arbeitgeber oder Qualifikationen. Leite auch nichts ab (z. B. eine Wohnadresse aus dem Standort der Stelle). Fehlt eine Angabe in BEIDEN Quellen, schreibe woertlich [bitte ergaenzen]. Wahrheit vor Vollstaendigkeit."
+    } else {
+        "\n\n## Faktenbasis (verbindlich)\nNutze ausschliesslich Angaben, die woertlich in der Aufgabe oben stehen. ERFINDE NICHTS hinzu (keine Adressen, Ansprechpartner, Namen, Daten, Zahlen). Fehlt eine Angabe, schreibe woertlich [bitte ergaenzen]."
+    };
     let effective_prompt = if file_mode {
         let result_dir = format!("{repo_path}/{result_rel}");
         fs::create_dir_all(&result_dir).map_err(error_to_string)?;
-        // KatoContext: lokalen Referenzordner als Faktenbasis bereitstellen (nur wenn gesetzt + da).
-        let context_files = if !config.reference_root.trim().is_empty()
-            && Path::new(config.reference_root.trim()).is_dir()
-        {
-            materialize_kato_context(&repo_path, config.reference_root.trim()).await
-        } else {
-            0
-        };
-        let context_block = if context_files > 0 {
-            "\n\n## Faktenbasis (verbindlich)\nDu hast ZWEI belegte Quellen: (a) die Aufgabe/das Briefing oben — es enthaelt bereits recherchierte Angaben (z. B. Stelle, Unternehmen, Adresse, Anforderungen). Uebernimm diese Angaben und verwirf KEINE davon. (b) der Ordner `KatoContext/` (Lebenslauf, Zeugnisse, Kontext), NUR-LESEN. Nutze Fakten aus BEIDEN Quellen. Erfinde nichts hinzu, was in keiner der beiden Quellen belegt ist (keine Qualifikationen, Arbeitgeber, Abschluesse, Zahlen). Fehlt eine Angabe in BEIDEN Quellen, schreibe woertlich [bitte ergaenzen]. Wahrheit vor Vollstaendigkeit."
-        } else {
-            "\n\n## Faktenbasis (verbindlich)\nDeine belegte Quelle ist die Aufgabe/das Briefing oben — uebernimm die dort genannten Angaben (z. B. Stelle, Unternehmen, Adresse, Anforderungen) und verwirf KEINE davon. Erfinde nichts hinzu. Fehlt eine Angabe, schreibe woertlich [bitte ergaenzen]."
-        };
         format!(
             "{}\n\n## Datei-Modus (verbindlich)\nSchreibe dein Ergebnis als fertige Datei(en) AUSSCHLIESSLICH in den Ordner `{result_rel}/`. Aendere, verschiebe oder loesche KEINE anderen Dateien. Erstelle keinen Code ausserhalb dieses Ergebnis-Ordners.{context_block}",
             req.prompt
         )
     } else {
-        req.prompt.clone()
+        // Coding-Modus: dieselbe Faktenbasis anhaengen -> auch bei Code wird gegen echte Daten
+        // geprueft (Wahrheit); keine Datei-Modus-Schreibbeschraenkung.
+        format!("{}{context_block}", req.prompt)
     };
 
     // Immer von main/Default abzweigen (nicht vom aktuellen HEAD -> kein Codex-auf-Codex-Stapeln).
