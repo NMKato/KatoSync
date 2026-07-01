@@ -17,3 +17,17 @@ src-tauri/target/
 
 # Rohe Screenshot-Originale (die README nutzt die verkleinerten Kopien in docs/images/)
 Screenshots/
+
+# Intern — nicht im oeffentlichen Repo (lokal behalten, aus Git-Verfolgung genommen)
+# Oeffentlich bleiben nur README.md, docs/ARCHITECTURE.md und docs/images/.
+/MEMORY.md
+/PROJECT_STATUS_FLOW.md
+/docs/KATOSYNC_2_0_ACTION_HUB_PLAN.md
+/docs/KATOSYNC_ERKLAERVIDEO_NOTEBOOKLM.md
+/docs/KATOSYNC_PRESENTATION.md
+/docs/KATOSYNC_PRAESENTATION_PROBLEM.md
+/docs/KATOSYNC_PROMO_VIDEO_PROMPTS.md
+/docs/MISTRAL_API_NOTES.md
+/docs/MISTRAL_WORK_SCHEDULER.md
+/docs/RELEASE_OWNER_RUNBOOK.md
+/docs/release-env.example.sh

@@ -148,8 +148,8 @@ npm run build        # tsc + Vite (Frontend)
 npm run tauri build  # Desktop-Bundle
 ```
 
-Signierte/notarisierte Release-Builds: siehe `docs/RELEASE_OWNER_RUNBOOK.md`.
-Hinweis: Auf exFAT-Volumes scheitert Tauris Signier-Schritt an `xattr` → manuell auf einer APFS-Kopie signieren/notarisieren (siehe Runbook).
+Release-Builds werden auf einer APFS-Kopie signiert (Developer ID, MK Heartbeat UG) und von Apple notarisiert.
+Hinweis: Auf exFAT-Volumes scheitert Tauris Signier-Schritt an `xattr` → daher die APFS-Kopie.
 
 </details>
 

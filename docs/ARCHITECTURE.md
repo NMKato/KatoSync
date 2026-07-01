@@ -51,5 +51,5 @@ Dann sollten Gmail/Outlook als eigene Repositories mit OAuth und klar getrennten
 
 ## Mistral Work Scheduler
 
-Der lokale Uploadplan ist nicht dasselbe wie der Mistral Work Scheduler.
-Die Analyse dazu liegt in `docs/MISTRAL_WORK_SCHEDULER.md`.
+Der lokale Uploadplan (LaunchAgent, steuert den Datei-Upload) ist nicht dasselbe wie der
+serverseitige Mistral Work Scheduler (steuert, wann die Agenten laufen).
