@@ -355,6 +355,7 @@ const de = {
   "codex.output.pdfHint": "Ausgabe: schön formatiertes PDF (Word/ODT/PowerPoint folgen).",
   "codex.model.label": "Modell",
   "codex.model.placeholder": "leer = Standard (z. B. opus, sonnet, gpt-5-codex)",
+  "codex.model.default": "Standard",
   "codex.effort.default": "Effort: Standard",
   "codex.effort.low": "schnell",
   "codex.effort.medium": "mittel",

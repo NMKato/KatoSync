@@ -336,6 +336,7 @@ const ru: Record<TKey, string> = {
   "codex.output.pdfHint": "Вывод: красиво оформленный PDF (Word/ODT/PowerPoint скоро).",
   "codex.model.label": "Модель",
   "codex.model.placeholder": "пусто = по умолчанию (напр. opus, sonnet, gpt-5-codex)",
+  "codex.model.default": "По умолчанию",
   "codex.effort.default": "Effort: по умолчанию",
   "codex.effort.low": "быстро",
   "codex.effort.medium": "средне",

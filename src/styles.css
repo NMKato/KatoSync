@@ -1006,6 +1006,19 @@ button:focus-visible {
   line-height: 1.4;
 }
 
+/* Codex-Panel: mehr Luft, damit Picker/Text nicht zusammengeklatscht wirken */
+.codex-panel .runner-picker {
+  margin-bottom: 14px;
+}
+.codex-panel > p,
+.codex-panel .field-hint {
+  margin: 10px 0;
+  line-height: 1.55;
+}
+.codex-panel .section-label {
+  min-width: 66px;
+}
+
 .quota-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));

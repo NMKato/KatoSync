@@ -2351,8 +2351,7 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
       {vm.config ? (
         <div className="runner-picker" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
           <strong className="section-label">{t("codex.model.label")}</strong>
-          <input
-            type="text"
+          <select
             value={vm.config.codexPreferredRunner === "claude_cli" ? vm.config.claudeModel : vm.config.codexModel}
             onChange={(e) =>
               vm.updateConfig(
@@ -2360,9 +2359,18 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
                 e.target.value
               )
             }
-            placeholder={t("codex.model.placeholder")}
-            style={{ flex: "1 1 160px", minWidth: 120 }}
-          />
+            style={{ flex: "1 1 180px", minWidth: 150 }}
+          >
+            <option value="">{t("codex.model.default")}</option>
+            {(vm.config.codexPreferredRunner === "claude_cli"
+              ? ["opus", "sonnet", "haiku", "fable"]
+              : ["gpt-5-codex", "gpt-5"]
+            ).map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
           {vm.config.codexPreferredRunner === "claude_cli" ? (
             <select value={vm.config.claudeEffort} onChange={(e) => vm.updateConfig("claudeEffort", e.target.value)}>
               <option value="">{t("codex.effort.default")}</option>

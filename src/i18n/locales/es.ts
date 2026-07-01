@@ -336,6 +336,7 @@ const es: Record<TKey, string> = {
   "codex.output.pdfHint": "Salida: PDF con buen formato (Word/ODT/PowerPoint en camino).",
   "codex.model.label": "Modelo",
   "codex.model.placeholder": "vacío = predeterminado (p. ej. opus, sonnet, gpt-5-codex)",
+  "codex.model.default": "Predeterminado",
   "codex.effort.default": "Effort: predeterminado",
   "codex.effort.low": "rápido",
   "codex.effort.medium": "medio",
