@@ -1927,7 +1927,22 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     // Wahrheit: den Referenzordner IMMER als Faktenbasis materialisieren (beide Modi), wenn gesetzt
     // -> der Runner prueft gegen echte Daten. Die Git-Leak-Guards (.git/info/exclude + Pre-Cleanup,
     // oben) laufen modus-unabhaengig, KatoContext/ landet also nie in git/PR.
-    let result_rel = format!("KatoResults/task-{task_slug}");
+    // Nutzerfreundlicher Ordnername aus dem Titel (statt kryptischem task-<UUID>). Path-unsichere
+    // Zeichen -> Leerzeichen, Whitespace zusammenfassen, auf 70 Zeichen begrenzen; Fallback task_slug.
+    let result_folder = {
+        let cleaned: String = req
+            .title
+            .chars()
+            .map(|c| match c {
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\n' | '\r' | '\t' => ' ',
+                other => other,
+            })
+            .collect();
+        let capped: String = cleaned.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(70).collect();
+        let name = capped.trim().trim_end_matches('.').trim().to_string();
+        if name.is_empty() { format!("task-{task_slug}") } else { name }
+    };
+    let result_rel = format!("KatoResults/{result_folder}");
     let context_files = if !config.reference_root.trim().is_empty()
         && Path::new(config.reference_root.trim()).is_dir()
     {
