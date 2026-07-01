@@ -1594,30 +1594,119 @@ fn git_remote_https_url(repo: &str) -> Option<String> {
     Some(url.trim_end_matches(".git").trim_end_matches('/').to_string())
 }
 
-// Codex --json Event -> (Label, Kurztext) fuer den Live-Feed. Defensiv ueber unbekannte Schemata.
+// Entfernt den Shell-Wrapper (`/bin/zsh -lc '…'`) aus einem Codex-Befehl, damit der Live-Feed
+// den echten Befehl zeigt ("find …") statt der Aufruf-Huelle. Unbekannte Formen bleiben unveraendert.
+fn clean_shell_command(cmd: &str) -> String {
+    let c = cmd.trim();
+    for prefix in [
+        "/bin/zsh -lc ",
+        "/bin/bash -lc ",
+        "/bin/sh -lc ",
+        "/bin/sh -c ",
+        "zsh -lc ",
+        "bash -lc ",
+        "sh -c ",
+    ] {
+        if let Some(rest) = c.strip_prefix(prefix) {
+            let r = rest.trim();
+            let r = r
+                .strip_prefix('\'')
+                .and_then(|x| x.strip_suffix('\''))
+                .or_else(|| r.strip_prefix('"').and_then(|x| x.strip_suffix('"')))
+                .unwrap_or(r);
+            return r.trim().to_string();
+        }
+    }
+    c.to_string()
+}
+
+// file_change-Item -> "+ Anschreiben.typ, ~ Lebenslauf.typ" (Basenamen + Art add/update/delete).
+fn summarize_file_changes(item: &serde_json::Value) -> String {
+    let changes = match item.get("changes").and_then(|c| c.as_array()) {
+        Some(c) => c,
+        None => return "Datei geändert".to_string(),
+    };
+    let names: Vec<String> = changes
+        .iter()
+        .filter_map(|ch| {
+            let path = ch.get("path").and_then(|p| p.as_str())?;
+            let base = path.rsplit('/').next().unwrap_or(path);
+            let sym = match ch.get("kind").and_then(|k| k.as_str()) {
+                Some("add") => "+",
+                Some("delete") => "−",
+                _ => "~",
+            };
+            Some(format!("{sym} {base}"))
+        })
+        .collect();
+    if names.is_empty() {
+        return "Datei geändert".to_string();
+    }
+    let shown = names.iter().take(4).cloned().collect::<Vec<_>>().join(", ");
+    if names.len() > 4 {
+        format!("{shown} (+{})", names.len() - 4)
+    } else {
+        shown
+    }
+}
+
+// Codex --json Event -> (Label, Kurztext) fuer den Live-Feed. Das Label ist der ECHTE Schritt-Typ
+// (command_execution/file_change/agent_message/web_search/… aus /item/type), damit das Frontend
+// benannte Schritte zeigt statt nur "item.started/completed". Defensiv ueber unbekannte Schemata.
 fn summarize_codex_event(line: &str) -> (String, String) {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return ("event".to_string(), String::new());
     }
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        let label = v
+        let top = v
             .get("type")
             .and_then(|t| t.as_str())
             .or_else(|| v.pointer("/msg/type").and_then(|t| t.as_str()))
-            .or_else(|| v.pointer("/item/type").and_then(|t| t.as_str()))
-            .unwrap_or("event")
-            .to_string();
-        let text = v
-            .pointer("/msg/message")
-            .and_then(|t| t.as_str())
-            .or_else(|| v.pointer("/msg/text").and_then(|t| t.as_str()))
-            .or_else(|| v.get("message").and_then(|t| t.as_str()))
-            .or_else(|| v.pointer("/item/text").and_then(|t| t.as_str()))
-            .or_else(|| v.pointer("/item/title").and_then(|t| t.as_str()))
-            .unwrap_or("");
-        let text: String = sanitize_log(text).chars().take(160).collect();
-        return (sanitize_log(&label), text);
+            .unwrap_or("event");
+        let item = v.get("item");
+        let item_type = item.and_then(|i| i.get("type")).and_then(|t| t.as_str());
+        // Label = echter Schritt-Typ (Item), sonst der Top-Level-Typ (thread.*/turn.*).
+        let label = item_type.unwrap_or(top);
+        let text: String = match item_type {
+            Some("command_execution") => item
+                .and_then(|i| i.get("command"))
+                .and_then(|c| c.as_str())
+                .map(clean_shell_command)
+                .unwrap_or_default(),
+            Some("file_change") => item.map(summarize_file_changes).unwrap_or_default(),
+            Some("web_search") => {
+                // Beim Start ist die Query noch leer -> kein Detailtext (Feed zeigt nur "Websuche"),
+                // beim Abschluss die echte Suchanfrage.
+                item.and_then(|i| i.get("query"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            }
+            Some("agent_message") | Some("reasoning") => item
+                .and_then(|i| i.get("text"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string(),
+            Some("mcp_tool_call") => item
+                .and_then(|i| i.get("tool").or_else(|| i.get("name")))
+                .and_then(|t| t.as_str())
+                .unwrap_or("Connector")
+                .to_string(),
+            // Fallback (unbekannte Item-Typen / Nicht-Item-Events): bekannte Textfelder abklappern.
+            _ => v
+                .pointer("/msg/message")
+                .and_then(|t| t.as_str())
+                .or_else(|| v.pointer("/msg/text").and_then(|t| t.as_str()))
+                .or_else(|| v.get("message").and_then(|t| t.as_str()))
+                .or_else(|| v.pointer("/item/text").and_then(|t| t.as_str()))
+                .or_else(|| v.pointer("/item/title").and_then(|t| t.as_str()))
+                .unwrap_or("")
+                .to_string(),
+        };
+        let text: String = sanitize_log(&text).chars().take(160).collect();
+        return (sanitize_log(label), text);
     }
     let raw: String = sanitize_log(trimmed).chars().take(160).collect();
     ("log".to_string(), raw)
@@ -1649,7 +1738,31 @@ fn summarize_claude_event(line: &str) -> (String, String) {
                             }
                             Some("tool_use") => {
                                 if let Some(n) = b.get("name").and_then(|n| n.as_str()) {
-                                    out = format!("Tool: {n}");
+                                    // Wichtigstes Argument zeigen: Befehl roh (Wrapper strippen),
+                                    // Pfade auf Basenamen kuerzen, sonst Muster/URL.
+                                    let input = b.get("input");
+                                    let cmd = input
+                                        .and_then(|i| i.get("command"))
+                                        .and_then(|a| a.as_str());
+                                    let path = input
+                                        .and_then(|i| {
+                                            i.get("file_path").or_else(|| i.get("path"))
+                                        })
+                                        .and_then(|a| a.as_str());
+                                    let other = input
+                                        .and_then(|i| {
+                                            i.get("pattern").or_else(|| i.get("url"))
+                                        })
+                                        .and_then(|a| a.as_str());
+                                    out = if let Some(c) = cmd {
+                                        format!("{n}: {}", clean_shell_command(c))
+                                    } else if let Some(p) = path {
+                                        format!("{n}: {}", p.rsplit('/').next().unwrap_or(p))
+                                    } else if let Some(o) = other {
+                                        format!("{n}: {o}")
+                                    } else {
+                                        format!("Tool: {n}")
+                                    };
                                     break;
                                 }
                             }

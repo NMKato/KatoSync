@@ -142,9 +142,12 @@ export function codexPhaseLabel(label: string): string {
   if (/(error|fail|abbruch)/.test(l)) return "Fehler";
   if (l.includes("turn.completed") || l === "result") return "Fertig";
   if (/(thread\.started|turn\.started|task_started)/.test(l) || l === "system") return "Startet";
-  if (/(patch|apply)/.test(l)) return "Ändert Dateien";
-  if (/(exec|command|tool)/.test(l)) return "Führt Schritt aus";
-  if (/(assistant|agent_message|message)/.test(l)) return "Denkt & schreibt";
+  if (l.includes("file_change") || /(patch|apply)/.test(l)) return "Datei geändert";
+  if (l.includes("command_execution") || /(exec|command)/.test(l)) return "Befehl";
+  if (l.includes("web_search") || l.includes("search")) return "Websuche";
+  if (l.includes("reasoning")) return "Denkt nach";
+  if (/(mcp|tool_use|tool_call|tool)/.test(l)) return "Connector/Tool";
+  if (/(assistant|agent_message|message)/.test(l)) return "Überlegt";
   if (l.includes("item.completed")) return "Schritt fertig";
   if (l.includes("item.started")) return "Arbeitet …";
   return "Schritt";
