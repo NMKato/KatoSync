@@ -3998,6 +3998,14 @@ fn normalize_config(config: &mut AppConfig) {
     // REST-Basis dauerhaft auf scheme://host normalisieren -> ein versehentlich gespeicherter Pfad
     // (z.B. ".../mcp") heilt sich beim naechsten Speichern, statt "/api/..."-Aufrufe zu brechen.
     config.mcp.base_url = normalize_base_url(&config.mcp.base_url);
+    // Codex laeuft in KatoSync ueber den ChatGPT-Login (keine API-Kosten). Dabei sind App-seitige
+    // Modell-Overrides wie "gpt-5-codex" NICHT erlaubt (Codex antwortet mit HTTP 400). Das Modell
+    // kommt aus dem Codex-Konto bzw. ~/.codex/config.toml. Darum gespeicherte Codex-Overrides leeren
+    // (Selbstheilung alter Configs) -> der Lauf nutzt das Konto-Standardmodell. Claude behaelt seine
+    // Alias-Auswahl (opus/sonnet/haiku/fable sind gueltige Abo-Aliase).
+    if !config.codex_model.trim().is_empty() {
+        config.codex_model = String::new();
+    }
 }
 
 fn default_config() -> Result<AppConfig> {

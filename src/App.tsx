@@ -2364,7 +2364,7 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
             <option value="">{t("codex.model.default")}</option>
             {(vm.config.codexPreferredRunner === "claude_cli"
               ? ["opus", "sonnet", "haiku", "fable"]
-              : ["gpt-5-codex", "gpt-5"]
+              : []
             ).map((m) => (
               <option key={m} value={m}>
                 {m}
@@ -2378,7 +2378,9 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
               <option value="medium">{t("codex.effort.medium")}</option>
               <option value="high">{t("codex.effort.high")}</option>
             </select>
-          ) : null}
+          ) : (
+            <span className="field-hint" style={{ flexBasis: "100%" }}>{t("codex.model.codexHint")}</span>
+          )}
         </div>
       ) : null}
       {vm.config ? (
