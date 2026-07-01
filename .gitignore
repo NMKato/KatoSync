@@ -14,3 +14,6 @@ src-tauri/target/
 
 # Lokale Codex-Run-Artefakte (nie committen)
 .katosync/
+
+# Rohe Screenshot-Originale (die README nutzt die verkleinerten Kopien in docs/images/)
+Screenshots/
