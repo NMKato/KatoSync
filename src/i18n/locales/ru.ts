@@ -319,7 +319,7 @@ const ru: Record<TKey, string> = {
   "briefings.delete.confirm": "Удалить навсегда",
   "briefings.reader.codexRunning": "Codex выполняется …",
   "briefings.reader.emptyState": "Выберите Briefing из списка.",
-  "codex.intro.description": "Утверждённые задачи выполняются локально через Codex-CLI — в отдельном branch (ответвлённом от main), с автокоммитом. Ничего не мерджится в main автоматически; вы проверяете branch или Pull Request и мерджите сами.",
+  "codex.intro.description": "Одобренные задачи выполняются локально выбранным runner (Codex или Claude). В режиме кода — в отдельном branch (ответвлённом от main) с автокоммитом: ничего не мерджится в main автоматически, вы проверяете и мерджите сами. В режиме файлов результат сохраняется локально в папке KatoResults.",
   "codex.toggle.pushBranch": "Запушить branch после прогона",
   "codex.runner.label": "Runner",
   "codex.runner.codex": "Codex",

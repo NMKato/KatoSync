@@ -319,7 +319,7 @@ const en: Record<TKey, string> = {
   "briefings.delete.confirm": "Delete forever",
   "briefings.reader.codexRunning": "Codex running …",
   "briefings.reader.emptyState": "Pick a Briefing from the list.",
-  "codex.intro.description": "Released tasks run locally via the Codex CLI — on a dedicated branch (forked from main), with auto-commit. Nothing is merged into main automatically; you review the branch or pull request and merge it yourself.",
+  "codex.intro.description": "Approved tasks run locally via your chosen runner (Codex or Claude). In coding mode on a dedicated branch (forked from main) with auto-commit — nothing is merged into main automatically, you review and merge yourself. In file mode the result lands locally in the KatoResults folder.",
   "codex.toggle.pushBranch": "Push branch after run",
   "codex.runner.label": "Runner",
   "codex.runner.codex": "Codex",

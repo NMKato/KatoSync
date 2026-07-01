@@ -2,7 +2,31 @@
 // Gemeinsame SVG/CSS-Diagramm-Bausteine (Theme-Token, Light/Dark).
 // Genutzt von RichMarkdown.tsx (Briefing-Format-Contract katosync:*) UND dem Dashboard-Cockpit.
 
+import {
+  Terminal,
+  FileText,
+  Search,
+  Brain,
+  Plug,
+  CheckCircle2,
+  AlertTriangle,
+  Play,
+  type LucideIcon
+} from "lucide-react";
+
 export type Tone = "brand" | "ok" | "warn" | "danger" | "info";
+
+// Live-Feed: Schritt-Typ-Icons (nur genutzt, wenn TimelineItem.icon gesetzt ist -> Briefings unberührt).
+const TL_ICONS: Record<string, LucideIcon> = {
+  command: Terminal,
+  file: FileText,
+  search: Search,
+  think: Brain,
+  connector: Plug,
+  done: CheckCircle2,
+  error: AlertTriangle,
+  start: Play
+};
 
 export interface KpiItem {
   label?: string;
@@ -29,6 +53,7 @@ export interface TimelineItem {
   time?: string;
   label?: string;
   state?: Tone;
+  icon?: string;
 }
 
 export const tone = (t?: string): Tone => {
@@ -145,15 +170,23 @@ export function Timeline({ title, items }: { title?: string; items?: TimelineIte
     <div className="katosync-block ks-timeline">
       {title ? <div className="ks-title">{title}</div> : null}
       <ul>
-        {rows.map((it, i) => (
-          <li className={`tone-${tone(it.state)}`} key={i}>
-            <span className="ks-tl-dot" />
-            <div className="ks-tl-body">
-              {it.time ? <span className="ks-tl-time">{it.time}</span> : null}
-              <span className="ks-tl-label">{it.label ?? ""}</span>
-            </div>
-          </li>
-        ))}
+        {rows.map((it, i) => {
+          const Ico = it.icon ? TL_ICONS[it.icon] : undefined;
+          return (
+            <li className={`tone-${tone(it.state)}`} key={i}>
+              <span className="ks-tl-dot" />
+              <div className="ks-tl-body">
+                {it.time ? <span className="ks-tl-time">{it.time}</span> : null}
+                <span className="ks-tl-label">
+                  {Ico ? (
+                    <Ico size={13} style={{ verticalAlign: "-2px", marginRight: 6, opacity: 0.75 }} />
+                  ) : null}
+                  {it.label ?? ""}
+                </span>
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

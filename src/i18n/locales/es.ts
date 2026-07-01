@@ -319,7 +319,7 @@ const es: Record<TKey, string> = {
   "briefings.delete.confirm": "Eliminar definitivamente",
   "briefings.reader.codexRunning": "Codex en curso …",
   "briefings.reader.emptyState": "Selecciona un Briefing de la lista.",
-  "codex.intro.description": "Las tareas liberadas las ejecuta localmente la CLI de Codex, en su propio branch (derivado de main) y con auto-commit. Nada se mergea automáticamente en main; tú revisas el branch o el Pull Request y mergeas tú mismo.",
+  "codex.intro.description": "Las tareas aprobadas se ejecutan localmente con el runner elegido (Codex o Claude). En modo código, en su propio branch (derivado de main) y con auto-commit: nada se mergea automáticamente en main, tú revisas y mergeas. En modo archivo, el resultado queda localmente en la carpeta KatoResults.",
   "codex.toggle.pushBranch": "Hacer push del branch tras la ejecución",
   "codex.runner.label": "Runner",
   "codex.runner.codex": "Codex",

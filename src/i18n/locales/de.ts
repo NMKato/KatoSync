@@ -338,7 +338,7 @@ const de = {
   "briefings.delete.confirm": "Endgültig löschen",
   "briefings.reader.codexRunning": "Codex läuft …",
   "briefings.reader.emptyState": "Wähle ein Briefing aus der Liste.",
-  "codex.intro.description": "Freigegebene Aufgaben werden lokal von der Codex-CLI ausgeführt — auf einem eigenen Branch (von main abgezweigt), mit Auto-Commit. Nichts wird automatisch in main gemergt; du prüfst den Branch bzw. Pull Request und mergst selbst.",
+  "codex.intro.description": "Freigegebene Aufgaben werden lokal vom gewählten Runner (Codex oder Claude) ausgeführt. Im Coding-Modus auf einem eigenen Branch (von main abgezweigt) mit Auto-Commit — nichts wird automatisch in main gemergt, du prüfst und mergst selbst. Im Datei-Modus landet das Ergebnis lokal im Ordner KatoResults.",
   "codex.toggle.pushBranch": "Branch nach Lauf pushen",
   "codex.runner.label": "Runner",
   "codex.runner.codex": "Codex",

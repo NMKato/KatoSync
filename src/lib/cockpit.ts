@@ -163,12 +163,27 @@ export function codexCurrentStep(events: CodexEvent[]): string {
   return last ? codexPhaseLabel(last.label) : "";
 }
 
+// Schritt-Typ -> Icon-Schluessel fuer den Live-Feed (von der Timeline-Komponente aufgeloest).
+export function codexPhaseIcon(label: string): string {
+  const l = (label || "").toLowerCase();
+  if (/(error|fail|abbruch)/.test(l)) return "error";
+  if (l.includes("turn.completed") || l === "result") return "done";
+  if (/(thread\.started|turn\.started|task_started)/.test(l) || l === "system") return "start";
+  if (l.includes("file_change") || /(patch|apply)/.test(l)) return "file";
+  if (l.includes("command_execution") || /(exec|command)/.test(l)) return "command";
+  if (l.includes("web_search") || l.includes("search")) return "search";
+  if (l.includes("reasoning")) return "think";
+  if (/(mcp|tool_use|tool_call|tool)/.test(l)) return "connector";
+  if (/(assistant|agent_message|message)/.test(l)) return "think";
+  return "step";
+}
+
 export function codexTimeline(events: CodexEvent[], limit = 6): TimelineItem[] {
   return events.slice(-limit).map((event) => {
     const text = (event.text ?? "").trim();
     const phase = codexPhaseLabel(event.label);
     const label = text ? `${phase} — ${text.slice(0, 80)}` : phase;
-    return { time: `#${event.seq}`, label, state: codexEventTone(event) };
+    return { time: `#${event.seq}`, label, state: codexEventTone(event), icon: codexPhaseIcon(event.label) };
   });
 }
 
