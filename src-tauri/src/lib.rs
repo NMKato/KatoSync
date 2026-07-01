@@ -1403,6 +1403,51 @@ fn typst_bin() -> Option<String> {
     None
 }
 
+// Leere Folgeseiten aus einem PDF entfernen (Typst erzeugt bei Ueberlauf manchmal eine leere letzte
+// Seite). "Leer" = pdftotext extrahiert keinen Text. Speichert ueber eine Temp-Datei; bei jedem
+// Fehler bleibt das Original unveraendert.
+fn strip_trailing_blank_pages(pdf: &Path, pdftotext: &str) {
+    let mut doc = match lopdf::Document::load(pdf) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let total = doc.get_pages().len() as u32;
+    if total <= 1 {
+        return;
+    }
+    let Some(pdf_str) = pdf.to_str() else { return };
+    let mut last_with_content = 0u32;
+    for pageno in 1..=total {
+        let has_text = std::process::Command::new(pdftotext)
+            .args(["-f", &pageno.to_string(), "-l", &pageno.to_string(), pdf_str, "-"])
+            .output()
+            .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+            .unwrap_or(true);
+        if has_text {
+            last_with_content = pageno;
+        }
+    }
+    if last_with_content == 0 || last_with_content >= total {
+        return; // nichts (oder alles) leer -> nicht anfassen
+    }
+    let to_delete: Vec<u32> = ((last_with_content + 1)..=total).collect();
+    doc.delete_pages(&to_delete);
+    let tmp = pdf.with_extension("tmp");
+    if doc.save(&tmp).is_ok() {
+        // Verifizieren: laedt das Ergebnis wieder + hat es die erwartete Seitenzahl? Sonst Original behalten.
+        let ok = lopdf::Document::load(&tmp)
+            .map(|d| d.get_pages().len() as u32 == last_with_content)
+            .unwrap_or(false);
+        if ok {
+            let _ = fs::rename(&tmp, pdf);
+        } else {
+            let _ = fs::remove_file(&tmp);
+        }
+    } else {
+        let _ = fs::remove_file(&tmp);
+    }
+}
+
 // KatoContext (nur Datei-Modus): Top-Level-Dateien des Referenzordners (Lebenslauf/Zeugnisse/
 // Kontext) nach <repo>/KatoContext/ kopieren, damit der Runner sie als Faktenbasis liest. PDFs
 // zusaetzlich best-effort als .txt-Zwilling (pdftotext/poppler, falls installiert -> auch Codex
@@ -1959,7 +2004,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         let result_dir = format!("{repo_path}/{result_rel}");
         fs::create_dir_all(&result_dir).map_err(error_to_string)?;
         format!(
-            "{}\n\n## Datei-Modus (verbindlich)\nErzeuge die fertigen Dokumente als **Typst-Quelldateien (.typ)** — je Dokument eine (z. B. `anschreiben.typ`, `lebenslauf.typ`) — AUSSCHLIESSLICH im Ordner `{result_rel}/`. KEIN Markdown, kein Klartext. Aendere/loesche keine Dateien ausserhalb dieses Ordners. KatoSync kompiliert deine .typ-Dateien danach automatisch zu schoenen PDFs.\n\nDESIGN: modern und stilvoll. Farbiges Header-Band mit Name + Rolle in einer Akzentfarbe, klare Sans-Serif-Typografie, grosszuegige Abstaende; beim Lebenslauf ein modernes, gern zweispaltiges Layout mit farbiger Sidebar (Kontakt/Skills/Sprachen) und Hauptspalte (Profil/Erfahrung/Ausbildung). Passe Akzentfarbe und Look an die Branche/Rolle an (Tech-Rolle: modern, reduziert, eine kraeftige Akzentfarbe).\n\nNutze GUELTIGES Typst 0.15. Baue auf dieser Struktur auf (anpassen, aber lauffaehig halten):\n```typ\n#let accent = rgb(\"#E4572E\")\n#set page(paper: \"a4\", margin: 0pt)\n#set text(font: (\"Helvetica Neue\", \"Arial\"), size: 10.5pt, fill: rgb(\"#1b1b1f\"))\n#set par(justify: true, leading: 0.72em)\n#block(width: 100%, fill: accent, inset: (x: 2.3cm, top: 1.6cm, bottom: 1.3cm))[\n  #text(size: 28pt, weight: \"bold\", fill: white)[VOLLER NAME]\n  #v(4pt)\n  #text(size: 11.5pt, fill: rgb(\"#ffdccd\"))[ROLLE / KURZPROFIL]\n]\n#pad(x: 2.3cm, top: 1cm)[\n  // Inhalt: Kontaktzeile, Empfaenger, Betreff in #text(fill: accent), Anrede, Text, Gruss\n]\n```{context_block}",
+            "{}\n\n## Datei-Modus (verbindlich)\nErzeuge die fertigen Dokumente als **Typst-Quelldateien (.typ)** — je Dokument eine (z. B. `anschreiben.typ`, `lebenslauf.typ`) — AUSSCHLIESSLICH im Ordner `{result_rel}/`. KEIN Markdown, kein Klartext. Aendere/loesche keine Dateien ausserhalb dieses Ordners. KatoSync kompiliert deine .typ-Dateien danach automatisch zu schoenen PDFs. Die Bewerbungs-E-Mail ist KEIN PDF/Typst: schreibe sie als reine Textdatei `email.txt` (Betreff-Zeile + Text) — zum Kopieren in ein Mailprogramm.\n\nDESIGN: modern und stilvoll. Farbiges Header-Band mit Name + Rolle in einer Akzentfarbe, klare Sans-Serif-Typografie, grosszuegige Abstaende; beim Lebenslauf ein modernes, gern zweispaltiges Layout mit farbiger Sidebar (Kontakt/Skills/Sprachen) und Hauptspalte (Profil/Erfahrung/Ausbildung). Passe Akzentfarbe und Look an die Branche/Rolle an (Tech-Rolle: modern, reduziert, eine kraeftige Akzentfarbe). WICHTIG zum Lebenslauf: KEINE leere Folgeseite — passe Schriftgroesse, Abstaende und Inhalt so an, dass er sauber auf EINE Seite passt (bei viel Inhalt vollstaendig auf zwei), und setze KEINE manuellen Seitenumbrueche am Ende.\n\nNutze GUELTIGES Typst 0.15. Baue auf dieser Struktur auf (anpassen, aber lauffaehig halten):\n```typ\n#let accent = rgb(\"#E4572E\")\n#set page(paper: \"a4\", margin: 0pt)\n#set text(font: (\"Helvetica Neue\", \"Arial\"), size: 10.5pt, fill: rgb(\"#1b1b1f\"))\n#set par(justify: true, leading: 0.72em)\n#block(width: 100%, fill: accent, inset: (x: 2.3cm, top: 1.6cm, bottom: 1.3cm))[\n  #text(size: 28pt, weight: \"bold\", fill: white)[VOLLER NAME]\n  #v(4pt)\n  #text(size: 11.5pt, fill: rgb(\"#ffdccd\"))[ROLLE / KURZPROFIL]\n]\n#pad(x: 2.3cm, top: 1cm)[\n  // Inhalt: Kontaktzeile, Empfaenger, Betreff in #text(fill: accent), Anrede, Text, Gruss\n]\n```{context_block}",
             req.prompt
         )
     } else {
@@ -2181,11 +2226,14 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     // der Lauf wird nicht hart abgebrochen. Muss VOR dem Staging laufen, damit die PDFs mitcommittet werden.
     if file_mode && codex_error.is_none() {
         if let Some(typst) = typst_bin() {
+            let pdftotext = pdftotext_bin();
             let result_dir_abs = format!("{repo_path}/{result_rel}");
+            let mut typ_files: Vec<std::path::PathBuf> = Vec::new();
             if let Ok(entries) = fs::read_dir(&result_dir_abs) {
                 for entry in entries.flatten() {
                     let p = entry.path();
                     if p.extension().and_then(|e| e.to_str()) == Some("typ") {
+                        typ_files.push(p.clone());
                         let pdf = p.with_extension("pdf");
                         match std::process::Command::new(&typst)
                             .arg("compile")
@@ -2195,7 +2243,11 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                             .arg(&pdf)
                             .output()
                         {
-                            Ok(o) if o.status.success() => {}
+                            Ok(o) if o.status.success() => {
+                                if let Some(ref pt) = pdftotext {
+                                    strip_trailing_blank_pages(&pdf, pt);
+                                }
+                            }
                             Ok(o) => {
                                 let _ = write_log(
                                     "codex",
@@ -2205,6 +2257,18 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                             Err(e) => {
                                 let _ = write_log("codex", &format!("typst-Aufruf fehlgeschlagen: {e}"));
                             }
+                        }
+                    }
+                }
+            }
+            // .typ-Quellen in Unterordner "Quelldateien" verschieben -> der Hauptordner zeigt nur
+            // die fertigen PDFs + email.txt; die editierbaren Quellen bleiben erhalten, aber aufgeraeumt.
+            if !typ_files.is_empty() {
+                let src_dir = format!("{result_dir_abs}/Quelldateien");
+                if fs::create_dir_all(&src_dir).is_ok() {
+                    for tf in &typ_files {
+                        if let Some(name) = tf.file_name() {
+                            let _ = fs::rename(tf, format!("{src_dir}/{}", name.to_string_lossy()));
                         }
                     }
                 }

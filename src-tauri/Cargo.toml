@@ -20,6 +20,7 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 keyring = { version = "3.6", features = ["apple-native"] }
+lopdf = "0.34"
 plist = "1.7"
 rand = "0.8"
 regex = "1.11"
