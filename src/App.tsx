@@ -1705,7 +1705,7 @@ function ActionQueuePanel({
                           className="ghost"
                           disabled={Boolean(vm.busy)}
                           onClick={() => void vm.handleRunCodexForTask(plan, task)}
-                          title={t("queue.handToCodex")}
+                          title={handToRunnerLabel(vm.config, t)}
                           type="button"
                         >
                           {vm.busy === "codex-run" ? (
@@ -2007,11 +2007,11 @@ function BoardTaskCard({
                 className="secondary"
                 disabled={disabled}
                 onClick={() => void vm.handleRunCodexForTask(plan, task)}
-                title={t("board.handToCodexTitle")}
+                title={handToRunnerLabel(vm.config, t)}
                 type="button"
               >
                 {vm.busy === "codex-run" ? <Loader2 className="spin" size={14} /> : <PlayCircle size={14} />}
-                {t("board.handToCodex")}
+                {handToRunnerLabel(vm.config, t)}
               </button>
             ) : null}
             <button
@@ -2184,7 +2184,7 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
                 type="button"
               >
                 {vm.busy === "codex-run" ? <Loader2 className="spin" size={15} /> : <PlayCircle size={15} />}
-                {t("briefings.reader.handToCodex")}
+                {handToRunnerLabel(vm.config, t)}
               </button>
               <button
                 className="ghost danger"
@@ -2829,6 +2829,13 @@ function runnerLabel(runner: ActionPlan["tasks"][number]["targetRunner"], t: TFu
     default:
       return runner;
   }
+}
+
+// Label fuer die "An <Runner> uebergeben"-Buttons — folgt dem gewaehlten lokalen Runner
+// (Einstellungen: codexPreferredRunner), damit bei Claude nicht "Codex" hardcoded bleibt.
+function handToRunnerLabel(config: { codexPreferredRunner?: string } | null | undefined, t: TFunc): string {
+  const name = config?.codexPreferredRunner === "claude_cli" ? "Claude" : "Codex";
+  return t("action.handToRunner").replace("{runner}", name);
 }
 
 function briefingStatusLabel(status: Briefing["status"], t: TFunc) {

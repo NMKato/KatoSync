@@ -274,6 +274,7 @@ const de = {
   "queue.executionSequential": "sequenziell",
   "queue.executionManual": "manuell",
   "queue.handToCodex": "An Codex übergeben",
+  "action.handToRunner": "An {runner} übergeben",
   "queue.review": "Prüfen",
   "queue.releaseDayPlan": "Tagesplan freigeben",
   "queue.reject": "Ablehnen",

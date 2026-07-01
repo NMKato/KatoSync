@@ -1891,9 +1891,9 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             0
         };
         let context_block = if context_files > 0 {
-            "\n\n## Faktenbasis (verbindlich)\nDer Ordner `KatoContext/` enthaelt deine verbindlichen Quelldaten (z. B. Lebenslauf, Zeugnisse, Kontext). Nutze AUSSCHLIESSLICH belegte Fakten daraus. Erfinde nichts (keine Qualifikationen, Arbeitgeber, Abschluesse, Projekte, Adressen, Ansprechpartner, Zahlen). Fehlt eine Angabe, schreibe woertlich [bitte ergaenzen]. Wahrheit vor Vollstaendigkeit. `KatoContext/` ist NUR-LESEN."
+            "\n\n## Faktenbasis (verbindlich)\nDu hast ZWEI belegte Quellen: (a) die Aufgabe/das Briefing oben — es enthaelt bereits recherchierte Angaben (z. B. Stelle, Unternehmen, Adresse, Anforderungen). Uebernimm diese Angaben und verwirf KEINE davon. (b) der Ordner `KatoContext/` (Lebenslauf, Zeugnisse, Kontext), NUR-LESEN. Nutze Fakten aus BEIDEN Quellen. Erfinde nichts hinzu, was in keiner der beiden Quellen belegt ist (keine Qualifikationen, Arbeitgeber, Abschluesse, Zahlen). Fehlt eine Angabe in BEIDEN Quellen, schreibe woertlich [bitte ergaenzen]. Wahrheit vor Vollstaendigkeit."
         } else {
-            ""
+            "\n\n## Faktenbasis (verbindlich)\nDeine belegte Quelle ist die Aufgabe/das Briefing oben — uebernimm die dort genannten Angaben (z. B. Stelle, Unternehmen, Adresse, Anforderungen) und verwirf KEINE davon. Erfinde nichts hinzu. Fehlt eine Angabe, schreibe woertlich [bitte ergaenzen]."
         };
         format!(
             "{}\n\n## Datei-Modus (verbindlich)\nSchreibe dein Ergebnis als fertige Datei(en) AUSSCHLIESSLICH in den Ordner `{result_rel}/`. Aendere, verschiebe oder loesche KEINE anderen Dateien. Erstelle keinen Code ausserhalb dieses Ergebnis-Ordners.{context_block}",

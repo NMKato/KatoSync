@@ -255,6 +255,7 @@ const en: Record<TKey, string> = {
   "queue.executionSequential": "sequential",
   "queue.executionManual": "manual",
   "queue.handToCodex": "Hand to Codex",
+  "action.handToRunner": "Hand to {runner}",
   "queue.review": "Review",
   "queue.releaseDayPlan": "Release day plan",
   "queue.reject": "Reject",

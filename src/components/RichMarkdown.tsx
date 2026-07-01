@@ -26,6 +26,58 @@ import {
 // tone: brand|ok|warn|danger|info. Unbekannt/ungueltiges JSON -> faellt auf Rohtext zurueck.
 // Die Diagramm-Komponenten liegen in DiagramComponents.tsx und werden auch vom Dashboard-Cockpit genutzt.
 
+// Toleranz: manche Personas (z. B. Bewerbungs-Skill) betten die Bloecke inline als
+// (katosync:typ { ... }) oder katosync:typ { ... } auf EINER Zeile ein statt als ```-Codeblock.
+// Vor dem Rendern in einen echten ```katosync:typ```-Fence normalisieren — klammer-genau, damit
+// verschachteltes JSON und Strings mit Klammern korrekt umschlossen werden. Bereits korrekte
+// Codebloecke (Typ + Zeilenumbruch vor `{`) werden dank der Same-Line-Bedingung nicht angefasst.
+function normalizeKatosyncBlocks(src: string): string {
+  if (!src || !src.includes("katosync:")) return src;
+  const re = /(\()?katosync:(\w+)[ \t]*\{/g;
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) {
+    const hasParen = Boolean(m[1]);
+    const type = m[2];
+    const braceStart = m.index + m[0].length - 1;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let j = braceStart;
+    for (; j < src.length; j++) {
+      const c = src[j];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === "\\") esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === "{") depth++;
+      else if (c === "}") {
+        depth--;
+        if (depth === 0) {
+          j++;
+          break;
+        }
+      }
+    }
+    if (depth !== 0) break; // unbalanciertes JSON -> Rest unveraendert lassen
+    const json = src.slice(braceStart, j);
+    let after = j;
+    if (hasParen) {
+      let k = j;
+      while (k < src.length && (src[k] === " " || src[k] === "\t")) k++;
+      if (src[k] === ")") after = k + 1;
+    }
+    out += src.slice(last, m.index) + `\n\n\`\`\`katosync:${type}\n${json}\n\`\`\`\n\n`;
+    last = after;
+    re.lastIndex = after;
+  }
+  return out + src.slice(last);
+}
+
 function KatosyncBlock({ type, raw }: { type: string; raw: string }) {
   let data: Record<string, unknown>;
   try {
@@ -70,7 +122,7 @@ export function RichMarkdown({ children }: { children: string }) {
         }
       }}
     >
-      {children}
+      {normalizeKatosyncBlocks(children)}
     </ReactMarkdown>
   );
 }

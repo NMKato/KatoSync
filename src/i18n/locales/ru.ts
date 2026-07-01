@@ -255,6 +255,7 @@ const ru: Record<TKey, string> = {
   "queue.executionSequential": "последовательно",
   "queue.executionManual": "вручную",
   "queue.handToCodex": "Передать в Codex",
+  "action.handToRunner": "Передать в {runner}",
   "queue.review": "Проверить",
   "queue.releaseDayPlan": "Утвердить план на день",
   "queue.reject": "Отклонить",
