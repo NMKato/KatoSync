@@ -1913,7 +1913,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         0
     };
     let context_block = if context_files > 0 {
-        "\n\n## Faktenbasis (verbindlich)\nDeine belegten Quellen sind NUR: (a) die Aufgabe/das Briefing oben und (b) der Ordner `KatoContext/` (Lebenslauf, Zeugnisse, Kontakt), NUR-LESEN. Nutze ausschliesslich Fakten, die WOERTLICH in einer dieser Quellen stehen. ERFINDE NICHTS hinzu — insbesondere KEINE Adressen, Postleitzahlen, Ansprechpartner, Namen, Telefonnummern, Daten, Zahlen, Arbeitgeber oder Qualifikationen. Leite auch nichts ab (z. B. eine Wohnadresse aus dem Standort der Stelle). Fehlt eine Angabe in BEIDEN Quellen, schreibe woertlich [bitte ergaenzen]. Wahrheit vor Vollstaendigkeit."
+        "\n\n## Faktenbasis (verbindlich)\nQuellen: (a) die Aufgabe/das Briefing oben — daraus NUR Stellen-/Unternehmensdaten (Position, Firma, Anforderungen); und (b) der Ordner `KatoContext/` (Lebenslauf, Zeugnisse, Kontakt des Bewerbers), NUR-LESEN.\nWICHTIG — persoenliche BEWERBERDATEN (Absenderadresse, Postleitzahl, Ort, Telefon, E-Mail, Name des Bewerbers, Geburtsdatum) NUR aus `KatoContext/` uebernehmen, NIEMALS aus dem Briefing: im Briefing koennen erfundene Angaben stehen (z. B. eine aus dem Stellen-Standort geratene Adresse). Steht eine Bewerberangabe nicht WOERTLICH im `KatoContext/`, schreibe [bitte ergaenzen] — nicht raten, nicht aus dem Briefing kopieren, nicht ableiten.\nErfinde generell nichts hinzu (keine Ansprechpartner, Fristen, Zahlen). Wahrheit vor Vollstaendigkeit."
     } else {
         "\n\n## Faktenbasis (verbindlich)\nNutze ausschliesslich Angaben, die woertlich in der Aufgabe oben stehen. ERFINDE NICHTS hinzu (keine Adressen, Ansprechpartner, Namen, Daten, Zahlen). Fehlt eine Angabe, schreibe woertlich [bitte ergaenzen]."
     };
@@ -2138,6 +2138,12 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     }
 
     // ---- Diff + Auto-Commit (nur bei Erfolg) ----
+    // Datei-Modus: den Ergebnis-Ordner FORCE-adden, falls ihn eine .gitignore/exclude-Regel
+    // ignorieren wuerde -> sonst waere der Diff leer und der Lauf gaelte faelschlich als
+    // "Codex hat keine Ergebnisdatei erzeugt", obwohl die Dateien geschrieben wurden.
+    if file_mode {
+        let _ = git_capture(&repo_path, &["add", "-f", "--", &result_rel]);
+    }
     // Run-Ordner (.katosync) bewusst NICHT mitcommitten -> bleibt lokaler Audit-Trail,
     // die "geaenderte Dateien"-Liste zeigt nur die echten Aenderungen.
     let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync", ":!KatoContext"]);
