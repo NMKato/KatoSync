@@ -56,7 +56,13 @@ KatoSync ist der **kontrollierte Brückenkopf** zwischen KI-Verständnis und lok
 - [x] **Abschließen** — Task ist „ausgeführt" → du prüfst/merged → „erledigt"; ein **Live-Feed** zeigt den Lauf
 
 <p align="center">
-  <img src="docs/images/codex-bridge.png" width="840" alt="Codex Bridge – Runner (Codex/Claude) &amp; Modus (Datei/Coding)" />
+  <img src="docs/images/briefings.png" width="840" alt="Briefings – Mistral-Ergebnisse kommen als lesbare Briefings zurück" /><br/>
+  <sub>📨 <b>Die KI-Ergebnisse kommen zurück</b> — als lesbare, priorisierte Briefings (Executive Summary, Status-Ampeln, To-dos). Annehmen · an den Runner übergeben · ablehnen.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/codex-bridge.png" width="840" alt="Codex Bridge – Runner (Codex/Claude) &amp; Modus (Datei/Coding)" /><br/>
+  <sub>⚙️ <b>… und werden lokal ausgeführt</b> — Runner-Picker (Codex/Claude) &amp; Modus (Datei/Coding), eigener Branch, kein Auto-Merge.</sub>
 </p>
 
 ---
