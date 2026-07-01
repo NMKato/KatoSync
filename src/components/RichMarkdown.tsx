@@ -33,11 +33,17 @@ import {
 // Codebloecke (Typ + Zeilenumbruch vor `{`) werden dank der Same-Line-Bedingung nicht angefasst.
 function normalizeKatosyncBlocks(src: string): string {
   if (!src || !src.includes("katosync:")) return src;
-  const re = /(\()?katosync:(\w+)[ \t]*\{/g;
+  const re = /(\()?katosync:(\w+)\s*\{/g;
   let out = "";
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
+    // Steht direkt davor ein Backtick, ist es bereits ein ```-Fence -> nicht anfassen
+    // (sonst wuerden korrekt formatierte Bloecke doppelt verarbeitet/zerstoert).
+    if (src[m.index - 1] === "`") {
+      re.lastIndex = m.index + m[0].length;
+      continue;
+    }
     const hasParen = Boolean(m[1]);
     const type = m[2];
     const braceStart = m.index + m[0].length - 1;
@@ -68,10 +74,10 @@ function normalizeKatosyncBlocks(src: string): string {
     let after = j;
     if (hasParen) {
       let k = j;
-      while (k < src.length && (src[k] === " " || src[k] === "\t")) k++;
+      while (k < src.length && /\s/.test(src[k])) k++;
       if (src[k] === ")") after = k + 1;
     }
-    out += src.slice(last, m.index) + `\n\n\`\`\`katosync:${type}\n${json}\n\`\`\`\n\n`;
+    out += src.slice(last, m.index) + `\n\n\`\`\`katosync:${type}\n${json.trim()}\n\`\`\`\n\n`;
     last = after;
     re.lastIndex = after;
   }
