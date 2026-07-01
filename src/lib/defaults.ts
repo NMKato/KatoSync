@@ -2,7 +2,7 @@ import type { AppConfig } from "../types";
 
 // Anzeige-Version inkl. Beta-Stand (eine zentrale Quelle; pro Release-Tag aktualisieren).
 // Der macOS-"Ueber"-Dialog zeigt nur die reine semver (2.0.0); diese Zeile macht den Beta-Stand sichtbar.
-export const APP_VERSION_LABEL = "2.0.0 Beta 16";
+export const APP_VERSION_LABEL = "2.0.0 Beta 17";
 
 export const defaultConfig: AppConfig = {
   appVersion: "2.0.0",
@@ -45,6 +45,7 @@ export const defaultConfig: AppConfig = {
   codexModel: "",
   claudeModel: "",
   claudeEffort: "",
+  runnerConnectorMode: false,
   referenceRoot: "",
   projectRepos: {}
 };

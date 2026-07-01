@@ -356,6 +356,8 @@ const de = {
   "codex.model.label": "Modell",
   "codex.model.placeholder": "leer = Standard (z. B. opus, sonnet, gpt-5-codex)",
   "codex.model.default": "Standard",
+  "codex.connector.label": "Autonomer Connector-Lauf (Netz + Connectoren)",
+  "codex.connector.warn": "⚠️ Der Runner darf Netz + seine Connectoren OHNE Nachfrage nutzen. Nur einschalten, wenn du dem Runner und seinen verbundenen Diensten vertraust. Für Human-in-the-Loop lieber die fortsetzbare Session nutzen.",
   "codex.effort.default": "Effort: Standard",
   "codex.effort.low": "schnell",
   "codex.effort.medium": "mittel",

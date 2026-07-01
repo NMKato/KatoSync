@@ -2403,6 +2403,18 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
       {vm.config && !vm.config.codexCodingMode ? (
         <p className="field-hint" style={{ marginTop: 2 }}>{t("codex.output.pdfHint")}</p>
       ) : null}
+      {vm.config ? (
+        <div className="switch-grid" style={{ marginBottom: 6, marginTop: 4 }}>
+          <Toggle
+            checked={vm.config.runnerConnectorMode}
+            label={t("codex.connector.label")}
+            onChange={(checked) => vm.updateConfig("runnerConnectorMode", checked)}
+          />
+        </div>
+      ) : null}
+      {vm.config && vm.config.runnerConnectorMode ? (
+        <p className="field-hint" style={{ marginTop: 2, color: "#c47f00" }}>{t("codex.connector.warn")}</p>
+      ) : null}
       {vm.config && vm.config.codexCodingMode ? (
         <div className="switch-grid" style={{ marginBottom: 6 }}>
           <Toggle

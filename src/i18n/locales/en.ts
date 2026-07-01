@@ -337,6 +337,8 @@ const en: Record<TKey, string> = {
   "codex.model.label": "Model",
   "codex.model.placeholder": "empty = default (e.g. opus, sonnet, gpt-5-codex)",
   "codex.model.default": "Default",
+  "codex.connector.label": "Autonomous connector run (network + connectors)",
+  "codex.connector.warn": "⚠️ The runner may use the network + its connectors WITHOUT asking. Only enable if you trust the runner and its connected services. For human-in-the-loop, prefer the resumable session.",
   "codex.effort.default": "Effort: default",
   "codex.effort.low": "fast",
   "codex.effort.medium": "medium",

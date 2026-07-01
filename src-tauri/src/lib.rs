@@ -78,6 +78,11 @@ pub struct AppConfig {
     claude_model: String,
     #[serde(default)]
     claude_effort: String,
+    // Opt-in: autonomer Connector-Lauf -> der Runner darf Netz + seine Connectoren nutzen
+    // (Codex sandbox_workspace_write.network_access, Claude --dangerously-skip-permissions).
+    // Standard AUS (offline/sandboxed, Schutz vor Exfiltration).
+    #[serde(default)]
+    runner_connector_mode: bool,
     // KatoContext: lokaler Referenzordner (Lebenslauf/Zeugnisse/Kontext). Wird im Datei-Modus vor
     // dem Lauf nach <repo>/KatoContext/ materialisiert; bleibt lokal (nie in Mistral-Library).
     #[serde(default)]
@@ -2083,11 +2088,16 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             .arg(&effective_prompt)
             .arg("--output-format")
             .arg("stream-json")
-            .arg("--verbose")
-            .arg("--permission-mode")
-            .arg(if req.dry_run { "plan" } else { "acceptEdits" })
-            .arg("--add-dir")
-            .arg(&repo_path);
+            .arg("--verbose");
+        if req.dry_run {
+            c.arg("--permission-mode").arg("plan");
+        } else if config.runner_connector_mode {
+            // Connector-Modus (opt-in): alle Tools/Connectoren ohne Nachfrage nutzen.
+            c.arg("--dangerously-skip-permissions");
+        } else {
+            c.arg("--permission-mode").arg("acceptEdits");
+        }
+        c.arg("--add-dir").arg(&repo_path);
         if !config.claude_model.trim().is_empty() {
             c.arg("--model").arg(config.claude_model.trim());
         }
@@ -2113,6 +2123,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             .arg("approval_policy=\"never\"");
         if !config.codex_model.trim().is_empty() {
             c.arg("-m").arg(config.codex_model.trim());
+        }
+        if config.runner_connector_mode {
+            // Connector-Modus (opt-in): Netzzugriff im Sandbox erlauben -> Connectoren erreichbar.
+            c.arg("-c").arg("sandbox_workspace_write.network_access=true");
         }
         c
     };
@@ -3888,6 +3902,7 @@ fn default_config() -> Result<AppConfig> {
         codex_model: String::new(),
         claude_model: String::new(),
         claude_effort: String::new(),
+        runner_connector_mode: false,
         reference_root: String::new(),
         project_repos: std::collections::HashMap::new(),
     })

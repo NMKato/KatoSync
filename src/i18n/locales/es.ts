@@ -337,6 +337,8 @@ const es: Record<TKey, string> = {
   "codex.model.label": "Modelo",
   "codex.model.placeholder": "vacío = predeterminado (p. ej. opus, sonnet, gpt-5-codex)",
   "codex.model.default": "Predeterminado",
+  "codex.connector.label": "Ejecución autónoma con conectores (red + conectores)",
+  "codex.connector.warn": "⚠️ El runner puede usar la red y sus conectores SIN preguntar. Actívalo solo si confías en el runner y sus servicios conectados. Para human-in-the-loop, usa mejor la sesión reanudable.",
   "codex.effort.default": "Effort: predeterminado",
   "codex.effort.low": "rápido",
   "codex.effort.medium": "medio",

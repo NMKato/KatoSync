@@ -337,6 +337,8 @@ const ru: Record<TKey, string> = {
   "codex.model.label": "Модель",
   "codex.model.placeholder": "пусто = по умолчанию (напр. opus, sonnet, gpt-5-codex)",
   "codex.model.default": "По умолчанию",
+  "codex.connector.label": "Автономный запуск с коннекторами (сеть + коннекторы)",
+  "codex.connector.warn": "⚠️ Runner может использовать сеть и коннекторы БЕЗ запроса. Включайте, только если доверяете runner и подключённым сервисам. Для human-in-the-loop лучше используйте возобновляемую сессию.",
   "codex.effort.default": "Effort: по умолчанию",
   "codex.effort.low": "быстро",
   "codex.effort.medium": "средне",

@@ -45,6 +45,8 @@ export interface AppConfig {
   codexModel: string;
   claudeModel: string;
   claudeEffort: string;
+  // Opt-in: autonomer Connector-Lauf (Netz + Runner-Connectoren). Standard aus.
+  runnerConnectorMode: boolean;
   // KatoContext: lokaler Referenzordner (Lebenslauf/Zeugnisse/Kontext) fuer den Datei-Modus.
   referenceRoot: string;
   // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectId -> Pfad).
