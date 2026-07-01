@@ -2327,7 +2327,7 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
   const run = vm.codexRun;
   const result = run.result;
   return (
-    <Panel className="codex-panel" title="Codex Bridge" icon={<TerminalSquare size={18} />}>
+    <Panel className="codex-panel" title="Agenten Bridge" icon={<TerminalSquare size={18} />}>
       <p>{t("codex.intro.description")}</p>
       {vm.config ? (
         <div className="runner-picker" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>

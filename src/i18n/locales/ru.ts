@@ -333,7 +333,7 @@ const ru: Record<TKey, string> = {
   "codex.mode.label": "Режим",
   "codex.mode.file": "Файловый режим",
   "codex.mode.coding": "Режим кода",
-  "codex.output.pdfHint": "Вывод: красиво оформленный PDF (Word/ODT/PowerPoint скоро).",
+  "codex.output.pdfHint": "Вывод: профессиональный PDF (Word/ODT/PowerPoint скоро).",
   "codex.model.label": "Модель",
   "codex.model.placeholder": "пусто = по умолчанию (напр. opus, sonnet, gpt-5-codex)",
   "codex.model.default": "По умолчанию",

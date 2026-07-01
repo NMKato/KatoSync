@@ -333,7 +333,7 @@ const en: Record<TKey, string> = {
   "codex.mode.label": "Mode",
   "codex.mode.file": "File mode",
   "codex.mode.coding": "Coding mode",
-  "codex.output.pdfHint": "Output: nicely formatted PDF (Word/ODT/PowerPoint coming).",
+  "codex.output.pdfHint": "Output: professional PDF (Word/ODT/PowerPoint coming).",
   "codex.model.label": "Model",
   "codex.model.placeholder": "empty = default (e.g. opus, sonnet, gpt-5-codex)",
   "codex.model.default": "Default",

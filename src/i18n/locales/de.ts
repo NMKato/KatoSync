@@ -352,7 +352,7 @@ const de = {
   "codex.mode.label": "Modus",
   "codex.mode.file": "Datei-Modus",
   "codex.mode.coding": "Coding-Modus",
-  "codex.output.pdfHint": "Ausgabe: schön formatiertes PDF (Word/ODT/PowerPoint folgen).",
+  "codex.output.pdfHint": "Ausgabe: professionelles PDF (Word/ODT/PowerPoint folgen).",
   "codex.model.label": "Modell",
   "codex.model.placeholder": "leer = Standard (z. B. opus, sonnet, gpt-5-codex)",
   "codex.model.default": "Standard",

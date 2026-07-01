@@ -333,7 +333,7 @@ const es: Record<TKey, string> = {
   "codex.mode.label": "Modo",
   "codex.mode.file": "Modo archivo",
   "codex.mode.coding": "Modo código",
-  "codex.output.pdfHint": "Salida: PDF con buen formato (Word/ODT/PowerPoint en camino).",
+  "codex.output.pdfHint": "Salida: PDF profesional (Word/ODT/PowerPoint en camino).",
   "codex.model.label": "Modelo",
   "codex.model.placeholder": "vacío = predeterminado (p. ej. opus, sonnet, gpt-5-codex)",
   "codex.model.default": "Predeterminado",
