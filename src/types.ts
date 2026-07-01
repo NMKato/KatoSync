@@ -41,6 +41,10 @@ export interface AppConfig {
   codexCodingMode: boolean;
   // Multi-Runner: bevorzugter lokaler Runner.
   codexPreferredRunner: "codex_cli" | "claude_cli";
+  // Modell-Wahl pro Runner (leer = Runner-Default) + Effort (nur Claude).
+  codexModel: string;
+  claudeModel: string;
+  claudeEffort: string;
   // KatoContext: lokaler Referenzordner (Lebenslauf/Zeugnisse/Kontext) fuer den Datei-Modus.
   referenceRoot: string;
   // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectId -> Pfad).

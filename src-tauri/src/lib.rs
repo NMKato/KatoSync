@@ -70,6 +70,14 @@ pub struct AppConfig {
     // Multi-Runner: bevorzugter lokaler Runner ("codex_cli" Default | "claude_cli").
     #[serde(default)]
     codex_preferred_runner: String,
+    // Modell-Wahl pro Runner (leer = Runner-Default). codex_model -> Codex `-m`,
+    // claude_model -> Claude `--model`, claude_effort -> Claude `--effort` (schnell..gruendlich).
+    #[serde(default)]
+    codex_model: String,
+    #[serde(default)]
+    claude_model: String,
+    #[serde(default)]
+    claude_effort: String,
     // KatoContext: lokaler Referenzordner (Lebenslauf/Zeugnisse/Kontext). Wird im Datei-Modus vor
     // dem Lauf nach <repo>/KatoContext/ materialisiert; bleibt lokal (nie in Mistral-Library).
     #[serde(default)]
@@ -2004,7 +2012,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         let result_dir = format!("{repo_path}/{result_rel}");
         fs::create_dir_all(&result_dir).map_err(error_to_string)?;
         format!(
-            "{}\n\n## Datei-Modus (verbindlich)\nErzeuge die fertigen Dokumente als **Typst-Quelldateien (.typ)** — je Dokument eine (z. B. `anschreiben.typ`, `lebenslauf.typ`) — AUSSCHLIESSLICH im Ordner `{result_rel}/`. KEIN Markdown, kein Klartext. Aendere/loesche keine Dateien ausserhalb dieses Ordners. KatoSync kompiliert deine .typ-Dateien danach automatisch zu schoenen PDFs. Die Bewerbungs-E-Mail ist KEIN PDF/Typst: schreibe sie als reine Textdatei `email.txt` (Betreff-Zeile + Text) — zum Kopieren in ein Mailprogramm.\n\nDESIGN: modern und stilvoll. Farbiges Header-Band mit Name + Rolle in einer Akzentfarbe, klare Sans-Serif-Typografie, grosszuegige Abstaende; beim Lebenslauf ein modernes, gern zweispaltiges Layout mit farbiger Sidebar (Kontakt/Skills/Sprachen) und Hauptspalte (Profil/Erfahrung/Ausbildung). Passe Akzentfarbe und Look an die Branche/Rolle an (Tech-Rolle: modern, reduziert, eine kraeftige Akzentfarbe). WICHTIG zum Lebenslauf: KEINE leere Folgeseite — passe Schriftgroesse, Abstaende und Inhalt so an, dass er sauber auf EINE Seite passt (bei viel Inhalt vollstaendig auf zwei), und setze KEINE manuellen Seitenumbrueche am Ende.\n\nNutze GUELTIGES Typst 0.15. Baue auf dieser Struktur auf (anpassen, aber lauffaehig halten):\n```typ\n#let accent = rgb(\"#E4572E\")\n#set page(paper: \"a4\", margin: 0pt)\n#set text(font: (\"Helvetica Neue\", \"Arial\"), size: 10.5pt, fill: rgb(\"#1b1b1f\"))\n#set par(justify: true, leading: 0.72em)\n#block(width: 100%, fill: accent, inset: (x: 2.3cm, top: 1.6cm, bottom: 1.3cm))[\n  #text(size: 28pt, weight: \"bold\", fill: white)[VOLLER NAME]\n  #v(4pt)\n  #text(size: 11.5pt, fill: rgb(\"#ffdccd\"))[ROLLE / KURZPROFIL]\n]\n#pad(x: 2.3cm, top: 1cm)[\n  // Inhalt: Kontaktzeile, Empfaenger, Betreff in #text(fill: accent), Anrede, Text, Gruss\n]\n```{context_block}",
+            "{}\n\n## Datei-Modus (verbindlich)\nErzeuge die fertigen Dokumente als **Typst-Quelldateien (.typ)** — je Dokument eine — AUSSCHLIESSLICH im Ordner `{result_rel}/`. Benenne die Dateien mit dem vollen Namen des Bewerbers (aus KatoContext), z. B. `Vorname Nachname - Anschreiben.typ`, `Vorname Nachname - Lebenslauf.typ`, `Vorname Nachname - Email.txt` — damit die Anhaenge klar benannt sind. KEIN Markdown, kein Klartext. Aendere/loesche keine Dateien ausserhalb dieses Ordners. KatoSync kompiliert deine .typ-Dateien danach automatisch zu schoenen PDFs. Die Bewerbungs-E-Mail ist KEIN PDF/Typst: schreibe sie als reine Textdatei `email.txt` (Betreff-Zeile + Text) — zum Kopieren in ein Mailprogramm.\n\nDESIGN: modern und stilvoll. Farbiges Header-Band mit Name + Rolle in einer Akzentfarbe, klare Sans-Serif-Typografie, grosszuegige Abstaende; beim Lebenslauf ein modernes, gern zweispaltiges Layout mit farbiger Sidebar (Kontakt/Skills/Sprachen) und Hauptspalte (Profil/Erfahrung/Ausbildung). Passe Akzentfarbe und Look an die Branche/Rolle an (Tech-Rolle: modern, reduziert, eine kraeftige Akzentfarbe). WICHTIG zum Lebenslauf: KEINE leere Folgeseite — passe Schriftgroesse, Abstaende und Inhalt so an, dass er sauber auf EINE Seite passt (bei viel Inhalt vollstaendig auf zwei), und setze KEINE manuellen Seitenumbrueche am Ende.\n\nNutze GUELTIGES Typst 0.15. Baue auf dieser Struktur auf (anpassen, aber lauffaehig halten):\n```typ\n#let accent = rgb(\"#E4572E\")\n#set page(paper: \"a4\", margin: 0pt)\n#set text(font: (\"Helvetica Neue\", \"Arial\"), size: 10.5pt, fill: rgb(\"#1b1b1f\"))\n#set par(justify: true, leading: 0.72em)\n#block(width: 100%, fill: accent, inset: (x: 2.3cm, top: 1.6cm, bottom: 1.3cm))[\n  #text(size: 28pt, weight: \"bold\", fill: white)[VOLLER NAME]\n  #v(4pt)\n  #text(size: 11.5pt, fill: rgb(\"#ffdccd\"))[ROLLE / KURZPROFIL]\n]\n#pad(x: 2.3cm, top: 1cm)[\n  // Inhalt: Kontaktzeile, Empfaenger, Betreff in #text(fill: accent), Anrede, Text, Gruss\n]\n```{context_block}",
             req.prompt
         )
     } else {
@@ -2079,8 +2087,14 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             .arg("--permission-mode")
             .arg(if req.dry_run { "plan" } else { "acceptEdits" })
             .arg("--add-dir")
-            .arg(&repo_path)
-            .current_dir(&repo_path);
+            .arg(&repo_path);
+        if !config.claude_model.trim().is_empty() {
+            c.arg("--model").arg(config.claude_model.trim());
+        }
+        if !config.claude_effort.trim().is_empty() {
+            c.arg("--effort").arg(config.claude_effort.trim());
+        }
+        c.current_dir(&repo_path);
         c
     } else {
         let mut c = TokioCommand::new(codex_bin());
@@ -2097,6 +2111,9 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             .arg("never")
             .arg("-c")
             .arg("approval_policy=\"never\"");
+        if !config.codex_model.trim().is_empty() {
+            c.arg("-m").arg(config.codex_model.trim());
+        }
         c
     };
     command.stdout(Stdio::piped()).stderr(Stdio::from(stderr_file));
@@ -3868,6 +3885,9 @@ fn default_config() -> Result<AppConfig> {
         codex_create_pr: true,
         codex_coding_mode: false,
         codex_preferred_runner: "codex_cli".to_string(),
+        codex_model: String::new(),
+        claude_model: String::new(),
+        claude_effort: String::new(),
         reference_root: String::new(),
         project_repos: std::collections::HashMap::new(),
     })

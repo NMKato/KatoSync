@@ -2349,6 +2349,31 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
         </div>
       ) : null}
       {vm.config ? (
+        <div className="runner-picker" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+          <strong className="section-label">{t("codex.model.label")}</strong>
+          <input
+            type="text"
+            value={vm.config.codexPreferredRunner === "claude_cli" ? vm.config.claudeModel : vm.config.codexModel}
+            onChange={(e) =>
+              vm.updateConfig(
+                vm.config!.codexPreferredRunner === "claude_cli" ? "claudeModel" : "codexModel",
+                e.target.value
+              )
+            }
+            placeholder={t("codex.model.placeholder")}
+            style={{ flex: "1 1 160px", minWidth: 120 }}
+          />
+          {vm.config.codexPreferredRunner === "claude_cli" ? (
+            <select value={vm.config.claudeEffort} onChange={(e) => vm.updateConfig("claudeEffort", e.target.value)}>
+              <option value="">{t("codex.effort.default")}</option>
+              <option value="low">{t("codex.effort.low")}</option>
+              <option value="medium">{t("codex.effort.medium")}</option>
+              <option value="high">{t("codex.effort.high")}</option>
+            </select>
+          ) : null}
+        </div>
+      ) : null}
+      {vm.config ? (
         <div className="runner-picker" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
           <strong className="section-label">{t("codex.mode.label")}</strong>
           <button
