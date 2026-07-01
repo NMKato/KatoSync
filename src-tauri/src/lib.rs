@@ -1380,6 +1380,29 @@ fn pdftotext_bin() -> Option<String> {
     None
 }
 
+// Gebuendelte typst-Binary finden (fuer PDF-Erzeugung im Datei-Modus). Analog zu pdftotext_bin.
+fn typst_bin() -> Option<String> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(contents) = exe.parent().and_then(Path::parent) {
+            let res = contents.join("Resources");
+            for cand in [
+                res.join("typst").join("typst"),
+                res.join("resources").join("typst").join("typst"),
+            ] {
+                if cand.exists() {
+                    return Some(cand.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    for p in ["/opt/homebrew/bin/typst", "/usr/local/bin/typst"] {
+        if Path::new(p).exists() {
+            return Some(p.to_string());
+        }
+    }
+    None
+}
+
 // KatoContext (nur Datei-Modus): Top-Level-Dateien des Referenzordners (Lebenslauf/Zeugnisse/
 // Kontext) nach <repo>/KatoContext/ kopieren, damit der Runner sie als Faktenbasis liest. PDFs
 // zusaetzlich best-effort als .txt-Zwilling (pdftotext/poppler, falls installiert -> auch Codex
@@ -1913,15 +1936,15 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         0
     };
     let context_block = if context_files > 0 {
-        "\n\n## Faktenbasis (verbindlich)\nQuellen: (a) die Aufgabe/das Briefing oben — daraus NUR Stellen-/Unternehmensdaten (Position, Firma, Anforderungen); und (b) der Ordner `KatoContext/` (Lebenslauf, Zeugnisse, Kontakt des Bewerbers), NUR-LESEN.\nWICHTIG — persoenliche BEWERBERDATEN (Absenderadresse, Postleitzahl, Ort, Telefon, E-Mail, Name des Bewerbers, Geburtsdatum) NUR aus `KatoContext/` uebernehmen, NIEMALS aus dem Briefing: im Briefing koennen erfundene Angaben stehen (z. B. eine aus dem Stellen-Standort geratene Adresse). Steht eine Bewerberangabe nicht WOERTLICH im `KatoContext/`, schreibe [bitte ergaenzen] — nicht raten, nicht aus dem Briefing kopieren, nicht ableiten.\nErfinde generell nichts hinzu (keine Ansprechpartner, Fristen, Zahlen). Wahrheit vor Vollstaendigkeit."
+        "\n\n## Faktenbasis (verbindlich)\nQuellen: (a) die Aufgabe/das Briefing oben — daraus NUR Stellen-/Unternehmensdaten (Position, Firma, Anforderungen); und (b) der Ordner `KatoContext/` (Lebenslauf, Zeugnisse, Kontakt des Bewerbers), NUR-LESEN.\nWICHTIG — persoenliche BEWERBERDATEN (Absenderadresse, Postleitzahl, Ort, Telefon, E-Mail, Name des Bewerbers, Geburtsdatum) NUR aus `KatoContext/` uebernehmen, NIEMALS aus dem Briefing (dort koennen erfundene Angaben stehen, z. B. eine aus dem Stellen-Standort geratene Adresse). Steht eine Bewerberangabe nicht WOERTLICH im `KatoContext/`, LASS SIE WEG — KEIN Platzhalter, KEIN [bitte ergaenzen], KEIN Dummy-Feld. Eine moderne Bewerbung braucht nicht jede Angabe (Adresse/Telefon sind optional); arbeite mit dem, was vorhanden ist, und stelle das Dokument sauber und abschickfertig fertig.\nErfinde generell nichts hinzu (keine Ansprechpartner, Fristen, Zahlen). Wahrheit vor Vollstaendigkeit."
     } else {
-        "\n\n## Faktenbasis (verbindlich)\nNutze ausschliesslich Angaben, die woertlich in der Aufgabe oben stehen. ERFINDE NICHTS hinzu (keine Adressen, Ansprechpartner, Namen, Daten, Zahlen). Fehlt eine Angabe, schreibe woertlich [bitte ergaenzen]."
+        "\n\n## Faktenbasis (verbindlich)\nNutze ausschliesslich Angaben, die woertlich in der Aufgabe oben stehen. ERFINDE NICHTS hinzu (keine Adressen, Ansprechpartner, Namen, Daten, Zahlen). Fehlt eine Angabe, LASS SIE WEG (kein Platzhalter, kein [bitte ergaenzen])."
     };
     let effective_prompt = if file_mode {
         let result_dir = format!("{repo_path}/{result_rel}");
         fs::create_dir_all(&result_dir).map_err(error_to_string)?;
         format!(
-            "{}\n\n## Datei-Modus (verbindlich)\nSchreibe dein Ergebnis als fertige Datei(en) AUSSCHLIESSLICH in den Ordner `{result_rel}/`. Aendere, verschiebe oder loesche KEINE anderen Dateien. Erstelle keinen Code ausserhalb dieses Ergebnis-Ordners.{context_block}",
+            "{}\n\n## Datei-Modus (verbindlich)\nErzeuge die fertigen Dokumente als **Typst-Quelldateien (.typ)** — je Dokument eine (z. B. `anschreiben.typ`, `lebenslauf.typ`) — AUSSCHLIESSLICH im Ordner `{result_rel}/`. KEIN Markdown, kein Klartext. Aendere/loesche keine Dateien ausserhalb dieses Ordners. KatoSync kompiliert deine .typ-Dateien danach automatisch zu schoenen PDFs.\n\nDESIGN: modern und stilvoll. Farbiges Header-Band mit Name + Rolle in einer Akzentfarbe, klare Sans-Serif-Typografie, grosszuegige Abstaende; beim Lebenslauf ein modernes, gern zweispaltiges Layout mit farbiger Sidebar (Kontakt/Skills/Sprachen) und Hauptspalte (Profil/Erfahrung/Ausbildung). Passe Akzentfarbe und Look an die Branche/Rolle an (Tech-Rolle: modern, reduziert, eine kraeftige Akzentfarbe).\n\nNutze GUELTIGES Typst 0.15. Baue auf dieser Struktur auf (anpassen, aber lauffaehig halten):\n```typ\n#let accent = rgb(\"#E4572E\")\n#set page(paper: \"a4\", margin: 0pt)\n#set text(font: (\"Helvetica Neue\", \"Arial\"), size: 10.5pt, fill: rgb(\"#1b1b1f\"))\n#set par(justify: true, leading: 0.72em)\n#block(width: 100%, fill: accent, inset: (x: 2.3cm, top: 1.6cm, bottom: 1.3cm))[\n  #text(size: 28pt, weight: \"bold\", fill: white)[VOLLER NAME]\n  #v(4pt)\n  #text(size: 11.5pt, fill: rgb(\"#ffdccd\"))[ROLLE / KURZPROFIL]\n]\n#pad(x: 2.3cm, top: 1cm)[\n  // Inhalt: Kontaktzeile, Empfaenger, Betreff in #text(fill: accent), Anrede, Text, Gruss\n]\n```{context_block}",
             req.prompt
         )
     } else {
@@ -2138,6 +2161,44 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     }
 
     // ---- Diff + Auto-Commit (nur bei Erfolg) ----
+    // Datei-Modus: erzeugte .typ-Dateien mit dem gebuendelten typst zu PDF kompilieren -> der Nutzer
+    // bekommt fertige, schoene PDFs. Fehler je Datei werden geloggt (die .typ bleibt als Quelle),
+    // der Lauf wird nicht hart abgebrochen. Muss VOR dem Staging laufen, damit die PDFs mitcommittet werden.
+    if file_mode && codex_error.is_none() {
+        if let Some(typst) = typst_bin() {
+            let result_dir_abs = format!("{repo_path}/{result_rel}");
+            if let Ok(entries) = fs::read_dir(&result_dir_abs) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("typ") {
+                        let pdf = p.with_extension("pdf");
+                        match std::process::Command::new(&typst)
+                            .arg("compile")
+                            .arg("--root")
+                            .arg(&repo_path)
+                            .arg(&p)
+                            .arg(&pdf)
+                            .output()
+                        {
+                            Ok(o) if o.status.success() => {}
+                            Ok(o) => {
+                                let _ = write_log(
+                                    "codex",
+                                    &format!("typst: {} -> PDF fehlgeschlagen: {}", p.display(), String::from_utf8_lossy(&o.stderr).trim()),
+                                );
+                            }
+                            Err(e) => {
+                                let _ = write_log("codex", &format!("typst-Aufruf fehlgeschlagen: {e}"));
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            let _ = write_log("codex", "typst nicht gefunden -> nur .typ-Dateien, kein PDF");
+        }
+    }
+
     // Datei-Modus: den Ergebnis-Ordner FORCE-adden, falls ihn eine .gitignore/exclude-Regel
     // ignorieren wuerde -> sonst waere der Diff leer und der Lauf gaelte faelschlich als
     // "Codex hat keine Ergebnisdatei erzeugt", obwohl die Dateien geschrieben wurden.

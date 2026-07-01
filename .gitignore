@@ -1,8 +1,9 @@
 node_modules/
 dist/
 target/
-# Gebuendelte poppler-Binaries (GPL, mehrere MB) — werden beim Build via scripts/bundle-poppler.sh erzeugt
+# Gebuendelte Tool-Binaries (poppler/typst, mehrere MB) — werden beim Build via scripts/bundle-poppler.sh erzeugt
 src-tauri/resources/poppler/
+src-tauri/resources/typst/
 .npm-cache/
 .DS_Store
 src-tauri/gen/

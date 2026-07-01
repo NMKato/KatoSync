@@ -333,6 +333,7 @@ const es: Record<TKey, string> = {
   "codex.mode.label": "Modo",
   "codex.mode.file": "Modo archivo",
   "codex.mode.coding": "Modo código",
+  "codex.output.pdfHint": "Salida: PDF con buen formato (Word/ODT/PowerPoint en camino).",
   "codex.toggle.codingModeDesc": "Activado: Codex entrega el resultado a GitHub (branch propio, push, pull request opcional), para proyectos de código. Desactivado (predeterminado): modo archivo – el resultado queda localmente en la carpeta KatoResults, sin necesidad de GitHub (ideal para candidaturas, presentaciones, documentos).",
   "codex.fileMode.hint": "Modo archivo activo (modo código desactivado): los resultados quedan localmente en KatoResults, sin push/PR. La tarea se marca como completada directamente.",
   "codex.mode.description": "Modo código → resultado a GitHub (para código). Modo archivo → resultado localmente en la carpeta KatoResults (para candidaturas, documentos, presentaciones).",

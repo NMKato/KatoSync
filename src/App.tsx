@@ -2367,6 +2367,9 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
           </button>
         </div>
       ) : null}
+      {vm.config && !vm.config.codexCodingMode ? (
+        <p className="field-hint" style={{ marginTop: 2 }}>{t("codex.output.pdfHint")}</p>
+      ) : null}
       {vm.config && vm.config.codexCodingMode ? (
         <div className="switch-grid" style={{ marginBottom: 6 }}>
           <Toggle

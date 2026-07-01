@@ -333,6 +333,7 @@ const ru: Record<TKey, string> = {
   "codex.mode.label": "Режим",
   "codex.mode.file": "Файловый режим",
   "codex.mode.coding": "Режим кода",
+  "codex.output.pdfHint": "Вывод: красиво оформленный PDF (Word/ODT/PowerPoint скоро).",
   "codex.toggle.codingModeDesc": "Включено: Codex отправляет результат в GitHub (отдельный branch, push, опционально pull request) — для кодовых проектов. Выключено (по умолчанию): файловый режим — результат сохраняется локально в папке KatoResults, GitHub не нужен (идеально для резюме, презентаций, документов).",
   "codex.fileMode.hint": "Файловый режим активен (режим кода выключен): результаты сохраняются локально в KatoResults, без push/PR. Задача сразу помечается как выполненная.",
   "codex.mode.description": "Режим кода → результат в GitHub (для кода). Файловый режим → результат локально в папке KatoResults (для резюме, документов, презентаций).",

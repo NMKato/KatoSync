@@ -49,4 +49,14 @@ done
 # Ad-hoc signieren (install_name_tool invalidiert Signaturen -> sonst SIGKILL). Release re-signt mit Developer ID.
 for lib in "$LIBDIR"/*.dylib; do codesign --force -s - "$lib" 2>/dev/null; done
 codesign --force -s - "$BIN" 2>/dev/null
-echo "poppler gebuendelt: $(ls "$LIBDIR" | wc -l | tr -d ' ') libs + pdftotext"
+
+# Typst (self-contained Single-Binary -> PDF-Erzeugung) einfach kopieren + ad-hoc signieren.
+SYS_TYPST="$(command -v typst || echo /opt/homebrew/bin/typst)"
+rm -rf "$HERE/resources/typst"; mkdir -p "$HERE/resources/typst"
+if [ -x "$SYS_TYPST" ]; then
+  cp "$SYS_TYPST" "$HERE/resources/typst/typst"; chmod u+w "$HERE/resources/typst/typst"
+  codesign --force -s - "$HERE/resources/typst/typst" 2>/dev/null
+else
+  echo "WARNUNG: typst nicht gefunden (brew install typst) -> PDF-Erzeugung faellt auf .typ zurueck"
+fi
+echo "poppler: $(ls "$LIBDIR" | wc -l | tr -d ' ') libs + pdftotext; typst: $([ -f "$HERE/resources/typst/typst" ] && echo ja || echo nein)"

@@ -352,6 +352,7 @@ const de = {
   "codex.mode.label": "Modus",
   "codex.mode.file": "Datei-Modus",
   "codex.mode.coding": "Coding-Modus",
+  "codex.output.pdfHint": "Ausgabe: schön formatiertes PDF (Word/ODT/PowerPoint folgen).",
   "codex.toggle.codingModeDesc": "An: Codex liefert das Ergebnis nach GitHub (eigener Branch, Push, optional Pull Request) – für Code-Projekte. Aus (Standard): Datei-Modus – das Ergebnis landet lokal im Ordner KatoResults, kein GitHub nötig (ideal für Bewerbungen, Präsentationen, Dokumente).",
   "codex.fileMode.hint": "Datei-Modus aktiv (Coding-Modus aus): Ergebnisse landen lokal in KatoResults, kein Push/PR. Die Aufgabe wird direkt als erledigt markiert.",
   "codex.mode.description": "Coding-Modus → Ergebnis nach GitHub (für Code). Datei-Modus → Ergebnis lokal im Ordner KatoResults (für Bewerbungen, Dokumente, Präsentationen).",
