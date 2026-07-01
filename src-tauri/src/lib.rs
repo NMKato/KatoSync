@@ -1405,7 +1405,7 @@ fn ensure_git_excludes(repo_path: &str) {
     let existing = fs::read_to_string(&exclude_path).unwrap_or_default();
     let mut content = existing.clone();
     let mut changed = false;
-    for entry in ["KatoContext/", ".katosync/"] {
+    for entry in ["KatoContext/", ".katosync/", "._*"] {
         if !existing.lines().any(|l| l.trim() == entry) {
             if !content.is_empty() && !content.ends_with('\n') {
                 content.push('\n');
@@ -1850,8 +1850,13 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         .map_err(|e| {
             format!("Git-Baseline im Datei-Modus fehlgeschlagen (fehlt eine git-Identitaet?): {e}")
         })?;
-    } else if !git_capture(&repo_path, &["status", "--porcelain", "--", ":!.katosync", ":!KatoContext"])?.is_empty() {
-        // Bestehendes Repo (auch im Datei-Modus): KEINE fremden Aenderungen mitcommitten.
+    } else if !file_mode
+        && !git_capture(&repo_path, &["status", "--porcelain", "--", ":!.katosync", ":!KatoContext", ":!KatoResults"])?
+            .is_empty()
+    {
+        // NUR Coding-Modus: dort passieren Branch/Commit/Push/PR -> keine fremden Aenderungen
+        // mitcommitten. Datei-Modus schreibt nur nach KatoResults (kein Push) -> ein "unsauberer"
+        // Arbeitsbaum blockiert dort NICHT (das war unnoetige Reibung).
         return Err("Der Arbeitsbaum ist nicht sauber. Bitte erst committen oder stashen.".to_string());
     }
 
@@ -1935,6 +1940,21 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         "codex",
         &format!("{runner_label}-Lauf gestartet: {} (Branch {branch} von {default_branch})", sanitize_log(&req.title)),
     );
+    // Datei-Modus erlaubt einen unsauberen Baum -> pre-existierende fremde Aenderungen merken,
+    // damit der spaetere "ausserhalb geschrieben"-Check sie NICHT als Codex-Verstoss wertet.
+    let pre_dirty: std::collections::HashSet<String> = if file_mode {
+        git_capture_raw(
+            &repo_path,
+            &["-c", "core.quotepath=false", "status", "--porcelain", "-z", "--", ":!.katosync", ":!KatoContext"],
+        )
+        .unwrap_or_default()
+        .split(|b| *b == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| String::from_utf8_lossy(s).chars().skip(3).collect::<String>())
+        .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
 
     if let Some(plan_id) = &req.action_plan_id {
         if let Err(e) = patch_action_plan_status_inner(&req.base_url, plan_id, "running").await {
@@ -2142,7 +2162,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         let scope_prefix = format!("{result_rel}/");
         let out_of_scope: Vec<&str> = changed_files
             .iter()
-            .filter(|f| !f.starts_with(&scope_prefix))
+            .filter(|f| !f.starts_with(&scope_prefix) && !pre_dirty.contains(f.as_str()))
             .map(|f| f.as_str())
             .collect();
         if !out_of_scope.is_empty() {
@@ -3382,7 +3402,7 @@ async fn upload_document(
 fn rate_limits_from_headers(headers: &reqwest::header::HeaderMap) -> Vec<RateLimitMetric> {
     let pairs = [
         (
-            "Requests",
+            "Anfragen/Minute",
             "x-ratelimit-limit-req-minute",
             "x-ratelimit-remaining-req-minute",
             "x-ratelimit-reset-req-minute",

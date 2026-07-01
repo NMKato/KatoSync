@@ -94,6 +94,19 @@ export type StepId =
   | "settings"
   | "logs";
 
+// Rate-Limits deduplizieren: pro Kategorie NUR ein Eintrag (knappster Rest = aktuellster Stand).
+// Sonst haengt der Sync pro hochgeladener Datei denselben Eintrag mit fallendem Rest an (9/10, 8/10 …).
+function dedupRateLimits(list: RateLimitMetric[]): RateLimitMetric[] {
+  const byLabel = new Map<string, RateLimitMetric>();
+  for (const m of list) {
+    const prev = byLabel.get(m.label);
+    if (!prev || Number(m.remaining ?? Infinity) <= Number(prev.remaining ?? Infinity)) {
+      byLabel.set(m.label, m);
+    }
+  }
+  return [...byLabel.values()];
+}
+
 export function useKatoSyncViewModel() {
   const [activeStep, setActiveStep] = useState<StepId>("dashboard");
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -119,7 +132,22 @@ export function useKatoSyncViewModel() {
   const [scan, setScan] = useState<ScanSummary | null>(null);
   const [report, setReport] = useState<SyncReport | null>(null);
   const [launchStatus, setLaunchStatus] = useState<LaunchAgentStatus | null>(null);
-  const [rateLimits, setRateLimits] = useState<RateLimitMetric[]>([]);
+  const [rateLimits, setRateLimits] = useState<RateLimitMetric[]>(() => {
+    // Persistiert: die zuletzt gemessenen Limits ueberleben einen App-Neustart (sonst leer,
+    // bis der Nutzer erneut testet/synct).
+    try {
+      return JSON.parse(localStorage.getItem("katosync.rateLimits.v1") || "[]") as RateLimitMetric[];
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("katosync.rateLimits.v1", JSON.stringify(rateLimits));
+    } catch {
+      // localStorage nicht verfuegbar -> ignorieren
+    }
+  }, [rateLimits]);
   const [connectionOk, setConnectionOk] = useState(false);
   const [libraryOk, setLibraryOk] = useState(false);
   const [logs, setLogs] = useState("");
@@ -603,7 +631,7 @@ export function useKatoSyncViewModel() {
         const result = await runSync(config, dryRun);
         setReport(result);
         setScan(result.scan);
-        const latestLimits = result.uploaded.flatMap((upload) => upload.rateLimits || []);
+        const latestLimits = dedupRateLimits(result.uploaded.flatMap((upload) => upload.rateLimits || []));
         if (latestLimits.length) setRateLimits(latestLimits);
         show(result.errors.length ? "warn" : "ok", dryRun ? "Dry-Run abgeschlossen." : "Sync abgeschlossen.");
       } catch (error) {

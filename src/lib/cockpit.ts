@@ -135,10 +135,36 @@ function codexEventTone(event: CodexEvent): Tone {
   return "info";
 }
 
-export function codexTimeline(events: CodexEvent[], limit = 12): TimelineItem[] {
+// Maschinen-Event-Label (item.started, exec_command, tool_use …) -> Klartext-Schritt in Usersprache.
+// Deckt Codex- (item/turn/thread.*) und Claude-Events (assistant/tool_use/result/system) ab.
+export function codexPhaseLabel(label: string): string {
+  const l = (label || "").toLowerCase();
+  if (/(error|fail|abbruch)/.test(l)) return "Fehler";
+  if (l.includes("turn.completed") || l === "result") return "Fertig";
+  if (/(thread\.started|turn\.started|task_started)/.test(l) || l === "system") return "Startet";
+  if (/(patch|apply)/.test(l)) return "Ändert Dateien";
+  if (/(exec|command|tool)/.test(l)) return "Führt Schritt aus";
+  if (/(assistant|agent_message|message)/.test(l)) return "Denkt & schreibt";
+  if (l.includes("item.completed")) return "Schritt fertig";
+  if (l.includes("item.started")) return "Arbeitet …";
+  return "Schritt";
+}
+
+// Aktueller Klartext-Schritt fuers Statusband: juengstes Event mit echtem Text, sonst Phasen-Label.
+export function codexCurrentStep(events: CodexEvent[]): string {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const txt = (events[i].text ?? "").trim();
+    if (txt) return txt.length > 140 ? `${txt.slice(0, 140)}…` : txt;
+  }
+  const last = events[events.length - 1];
+  return last ? codexPhaseLabel(last.label) : "";
+}
+
+export function codexTimeline(events: CodexEvent[], limit = 6): TimelineItem[] {
   return events.slice(-limit).map((event) => {
     const text = (event.text ?? "").trim();
-    const label = text ? `${event.label} — ${text.slice(0, 90)}` : event.label;
+    const phase = codexPhaseLabel(event.label);
+    const label = text ? `${phase} — ${text.slice(0, 80)}` : phase;
     return { time: `#${event.seq}`, label, state: codexEventTone(event) };
   });
 }

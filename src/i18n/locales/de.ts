@@ -42,7 +42,7 @@ const de = {
   "cockpit.title": "Cockpit",
   "cockpit.live.idle.title": "Alles ruhig",
   "cockpit.live.idle.text": "Aktuell läuft kein Lauf. Starte einen Sync oder gib eine Aufgabe an Codex.",
-  "cockpit.live.codex.title": "Codex läuft",
+  "cockpit.live.codex.title": "{runner} läuft",
   "cockpit.live.codex.events": "{count} Ereignisse im Live-Feed …",
   "cockpit.live.codex.running": "Aufgabe wird auf eigenem Branch ausgeführt …",
   "cockpit.live.queue.title": "Projekt-Queue läuft",
@@ -55,7 +55,7 @@ const de = {
 
   "cockpit.section.tasks": "Aufgaben gesamt",
   "cockpit.section.work": "Arbeitsstand",
-  "cockpit.section.feed": "Codex-Live-Feed",
+  "cockpit.section.feed": "{runner}-Live-Feed",
   "cockpit.section.lastRun": "Letzter Lauf",
   "cockpit.section.upload": "Upload-Erfolg",
   "cockpit.section.newIn": "Was kam neu rein",

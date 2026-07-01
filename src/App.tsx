@@ -59,6 +59,8 @@ import { RichMarkdown } from "./components/RichMarkdown";
 import { Bars, Donut, KpiTiles, StatusList, Timeline } from "./components/DiagramComponents";
 import {
   codexTimeline,
+  codexCurrentStep,
+  codexPhaseLabel,
   computeNextRun,
   lastRunKpis,
   newBriefingItems,
@@ -929,7 +931,7 @@ export default function App() {
             {vm.rateLimits.length ? (
               <div className="quota-list">
                 {vm.rateLimits.map((metric) => (
-                  <div className="quota-row" key={`${metric.label}-${metric.limit}-${metric.remaining}`}>
+                  <div className="quota-row" key={metric.label}>
                     <div>
                       <strong>{metric.label}</strong>
                       <span>
@@ -1519,10 +1521,9 @@ function CockpitPanel({
   let liveText = t("cockpit.live.idle.text");
   if (codexRunning) {
     liveActive = true;
-    liveTitle = t("cockpit.live.codex.title");
-    liveText = vm.codexEvents.length
-      ? t("cockpit.live.codex.events", { count: vm.codexEvents.length })
-      : t("cockpit.live.codex.running");
+    liveTitle = t("cockpit.live.codex.title", { runner: runnerName(config) });
+    const step = codexCurrentStep(vm.codexEvents);
+    liveText = step || t("cockpit.live.codex.running");
   } else if (vm.queueRunning) {
     liveActive = true;
     liveTitle = t("cockpit.live.queue.title");
@@ -1575,7 +1576,7 @@ function CockpitPanel({
         </div>
 
         <div className="cockpit-cell cockpit-cell-wide">
-          <div className="ks-title">{t("cockpit.section.feed")}</div>
+          <div className="ks-title">{t("cockpit.section.feed", { runner: runnerName(config) })}</div>
           {feed.length ? (
             <Timeline items={feed} />
           ) : (
@@ -2463,7 +2464,7 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
             <div className="codex-feed">
               {vm.codexEvents.slice(-15).map((event) => (
                 <div className="codex-feed-line" key={`${event.taskId}-${event.seq}`}>
-                  <span className="codex-feed-label">{event.label}</span>
+                  <span className="codex-feed-label">{codexPhaseLabel(event.label)}</span>
                   {event.text ? <span className="codex-feed-text">{event.text}</span> : null}
                 </div>
               ))}
@@ -2833,9 +2834,12 @@ function runnerLabel(runner: ActionPlan["tasks"][number]["targetRunner"], t: TFu
 
 // Label fuer die "An <Runner> uebergeben"-Buttons — folgt dem gewaehlten lokalen Runner
 // (Einstellungen: codexPreferredRunner), damit bei Claude nicht "Codex" hardcoded bleibt.
+function runnerName(config: { codexPreferredRunner?: string } | null | undefined): string {
+  return config?.codexPreferredRunner === "claude_cli" ? "Claude" : "Codex";
+}
+
 function handToRunnerLabel(config: { codexPreferredRunner?: string } | null | undefined, t: TFunc): string {
-  const name = config?.codexPreferredRunner === "claude_cli" ? "Claude" : "Codex";
-  return t("action.handToRunner").replace("{runner}", name);
+  return t("action.handToRunner").replace("{runner}", runnerName(config));
 }
 
 function briefingStatusLabel(status: Briefing["status"], t: TFunc) {

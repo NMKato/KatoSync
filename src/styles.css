@@ -1008,12 +1008,19 @@ button:focus-visible {
 
 .quota-list {
   display: grid;
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .quota-row {
   display: grid;
-  gap: 8px;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(120, 120, 140, 0.2);
+  border-radius: 10px;
+  align-content: start;
 }
 
 .quota-row div:first-child,
