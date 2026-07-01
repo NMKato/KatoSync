@@ -9,7 +9,7 @@
 **KI, die liefert statt nur redet.**
 Dein Projekt-Wissen → ausgeführte Arbeit. Lokal &amp; sicher.
 
-![Release](https://img.shields.io/badge/release-v2.0.0--beta.8-FF6B35)
+![Release](https://img.shields.io/badge/release-v2.0.0--beta.21-FF6B35)
 ![macOS](https://img.shields.io/badge/macOS-signiert%20%2B%20notarisiert-000000?logo=apple&logoColor=white)
 ![Tauri](https://img.shields.io/badge/Tauri_2-24C8DB?logo=tauri&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
@@ -53,7 +53,8 @@ KatoSync ist der **kontrollierte Brückenkopf** zwischen KI-Verständnis und lok
 - [x] **Freigeben** — du triagierst und gibst frei _(Human-in-the-Loop — nichts läuft automatisch)_
 - [x] **Ausführen** — lokaler Runner (**Codex CLI** oder **Claude Code CLI**) arbeitet auf einem **eigenen Branch von main**
 - [x] **Liefern** — Auto-Commit → Push → **Pull Request** _(opt-in)_. **Kein Auto-Merge in main.**
-- [x] **Abschließen** — Task ist „ausgeführt" → du prüfst/merged → „erledigt"; ein **Live-Feed** zeigt den Lauf
+- [x] **Abschließen** — Task ist „ausgeführt" → du prüfst/merged → „erledigt"; ein **Live-Feed** zeigt **jeden echten Schritt** (Befehl · Datei · Websuche · Denken) mit Icon
+- [x] **Fortsetzen** — nach dem Lauf eine **interaktive Terminal-Session** öffnen: volle History + **deine eigenen Connectoren** (Gmail, Blender …), Human-in-the-Loop — z. B. eine E-Mail direkt über den Connector senden
 
 <p align="center">
   <img src="docs/images/briefings.png" width="840" alt="Briefings – Mistral-Ergebnisse kommen als lesbare Briefings zurück" /><br/>
@@ -161,7 +162,11 @@ Hinweis: Auf exFAT-Volumes scheitert Tauris Signier-Schritt an `xattr` → daher
 - [x] Multi-Runner (Codex CLI + Claude Code CLI)
 - [x] Auth-Flows (Bestätigung/Passwort-Reset) + Sicherheitshärtung
 - [x] Modus-Umschalter (Datei-Modus | Coding-Modus)
-- [ ] Datei-Modus end-to-end verifiziert
+- [x] Datei-Modus end-to-end verifiziert — professionelle PDFs via gebündeltem Typst
+- [x] Fortsetzbare Sessions — interaktive Runner-Session mit deinen Connectoren (Human-in-the-Loop)
+- [x] Live-Feed mit benannten Schritten &amp; Icons
+- [ ] Connector-Aktionen live (Gmail/Blender) end-to-end getestet
+- [ ] Weitere Ausgabeformate (Word/ODT/PowerPoint)
 - [ ] Google-Login / KatoOS-Föderation
 
 ---
