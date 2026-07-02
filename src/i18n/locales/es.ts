@@ -307,6 +307,7 @@ const es: Record<TKey, string> = {
   "briefings.reader.copied": "Copiado ✓",
   "briefings.reader.archive": "Archivar",
   "briefings.tabs.inbox": "Entrada",
+  "briefings.detail.back": "Volver",
   "briefings.tabs.archive": "Archivo",
   "briefings.archive.restore": "Restaurar",
   "briefings.archive.deleteForever": "Eliminar definitivamente",

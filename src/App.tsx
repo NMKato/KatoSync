@@ -2,6 +2,7 @@ import {
   Activity,
   AlertTriangle,
   Archive,
+  ArrowLeft,
   BookOpenText,
   CalendarClock,
   Check,
@@ -2041,15 +2042,17 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
     [vm.briefings]
   );
   const [view, setView] = useState<"inbox" | "archive">("inbox");
-  const [selectedId, setSelectedId] = useState<string | null>(inboxBriefings[0]?.briefingId ?? null);
-  const selected = inboxBriefings.find((briefing) => briefing.briefingId === selectedId) ?? inboxBriefings[0];
+  // selectedId === null -> Listen-Ansicht (Vorschau-Karten). Gesetzt -> Vollbild-Detail des Briefings.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = inboxBriefings.find((briefing) => briefing.briefingId === selectedId) ?? null;
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Briefing | null>(null);
 
   useEffect(() => {
-    if (!selectedId && inboxBriefings[0]) setSelectedId(inboxBriefings[0].briefingId);
+    // Auswahl aufheben, wenn das gewaehlte Briefing nicht mehr im Eingang ist
+    // (angenommen/abgelehnt/archiviert) -> automatisch zurueck zur Liste.
     if (selectedId && !inboxBriefings.some((briefing) => briefing.briefingId === selectedId)) {
-      setSelectedId(inboxBriefings[0]?.briefingId ?? null);
+      setSelectedId(null);
     }
   }, [selectedId, inboxBriefings]);
 
@@ -2075,6 +2078,7 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
 
   return (
     <div className="briefings-shell" id="section-briefings">
+      {!(view === "inbox" && selected) ? (
       <div className="briefing-tabs">
         <button
           className={view === "inbox" ? "briefing-tab active" : "briefing-tab"}
@@ -2093,9 +2097,11 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
           {t("briefings.tabs.archive")} ({archivedBriefings.length})
         </button>
       </div>
+      ) : null}
 
       {view === "inbox" ? (
       <div className="briefings-page">
+      {!selected ? (
       <Panel className="briefing-list-panel" title={t("briefings.inbox.title")} icon={<BookOpenText size={18} />}>
         <div className="queue-summary">
           <div>
@@ -2112,7 +2118,7 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
           {inboxBriefings.length ? (
             inboxBriefings.map((briefing) => (
               <button
-                className={selected?.briefingId === briefing.briefingId ? "briefing-card active" : "briefing-card"}
+                className="briefing-card"
                 key={briefing.briefingId}
                 onClick={() => setSelectedId(briefing.briefingId)}
                 type="button"
@@ -2137,9 +2143,62 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
           )}
         </div>
       </Panel>
-
-      <Panel className="briefing-reader-panel">
-        {selected ? (
+      ) : (
+      <div className="briefing-detail">
+        <div className="briefing-detail-bar">
+          <button className="ghost briefing-back" onClick={() => setSelectedId(null)} type="button">
+            <ArrowLeft size={16} />
+            {t("briefings.detail.back")}
+          </button>
+          <div className="briefing-detail-actions">
+            <button
+              className="ghost"
+              onClick={() => void handleCopyBriefing()}
+              title={t("briefings.reader.copy")}
+              type="button"
+            >
+              {copied ? <Check size={15} /> : <Copy size={15} />}
+              {copied ? t("briefings.reader.copied") : t("briefings.reader.copy")}
+            </button>
+            <button
+              className="secondary"
+              disabled={Boolean(vm.busy)}
+              onClick={() => void vm.handleAcceptBriefing(selected.briefingId)}
+              type="button"
+            >
+              <CheckCircle2 size={15} />
+              {t("briefings.reader.accept")}
+            </button>
+            <button
+              className="primary"
+              disabled={Boolean(vm.busy)}
+              onClick={() => void vm.handleRunCodexForBriefing(selected)}
+              type="button"
+            >
+              {vm.busy === "codex-run" ? <Loader2 className="spin" size={15} /> : <PlayCircle size={15} />}
+              {handToRunnerLabel(vm.config, t)}
+            </button>
+            <button
+              className="ghost danger"
+              disabled={Boolean(vm.busy)}
+              onClick={() => void vm.handleRejectBriefing(selected.briefingId)}
+              type="button"
+            >
+              {t("briefings.reader.reject")}
+            </button>
+            <button
+              className="ghost"
+              disabled={Boolean(vm.busy)}
+              onClick={() => void vm.handleArchiveBriefing(selected.briefingId)}
+              title={t("briefings.reader.archive")}
+              type="button"
+            >
+              <Archive size={15} />
+              {t("briefings.reader.archive")}
+            </button>
+          </div>
+        </div>
+        <Panel className="briefing-reader-panel">
           <article className="briefing-reader">
             <header>
               <div>
@@ -2159,53 +2218,6 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
                 <p>{selected.suggestedAction}</p>
               </div>
             ) : null}
-            <footer className="briefing-actions">
-              <button
-                className="ghost"
-                onClick={() => void handleCopyBriefing()}
-                title={t("briefings.reader.copy")}
-                type="button"
-              >
-                {copied ? <Check size={15} /> : <Copy size={15} />}
-                {copied ? t("briefings.reader.copied") : t("briefings.reader.copy")}
-              </button>
-              <button
-                className="secondary"
-                disabled={Boolean(vm.busy)}
-                onClick={() => void vm.handleAcceptBriefing(selected.briefingId)}
-                type="button"
-              >
-                <CheckCircle2 size={15} />
-                {t("briefings.reader.accept")}
-              </button>
-              <button
-                className="primary"
-                disabled={Boolean(vm.busy)}
-                onClick={() => void vm.handleRunCodexForBriefing(selected)}
-                type="button"
-              >
-                {vm.busy === "codex-run" ? <Loader2 className="spin" size={15} /> : <PlayCircle size={15} />}
-                {handToRunnerLabel(vm.config, t)}
-              </button>
-              <button
-                className="ghost danger"
-                disabled={Boolean(vm.busy)}
-                onClick={() => void vm.handleRejectBriefing(selected.briefingId)}
-                type="button"
-              >
-                {t("briefings.reader.reject")}
-              </button>
-              <button
-                className="ghost"
-                disabled={Boolean(vm.busy)}
-                onClick={() => void vm.handleArchiveBriefing(selected.briefingId)}
-                title={t("briefings.reader.archive")}
-                type="button"
-              >
-                <Archive size={15} />
-                {t("briefings.reader.archive")}
-              </button>
-            </footer>
             {vm.busy === "codex-run" ? (
               <div className="codex-running">
                 <Loader2 className="spin" size={16} />
@@ -2214,10 +2226,9 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
               </div>
             ) : null}
           </article>
-        ) : (
-          <div className="empty-state">{t("briefings.reader.emptyState")}</div>
-        )}
-      </Panel>
+        </Panel>
+      </div>
+      )}
       </div>
       ) : (
         <div className="briefing-archive">

@@ -326,6 +326,7 @@ const de = {
   "briefings.reader.copied": "Kopiert ✓",
   "briefings.reader.archive": "Ins Archiv",
   "briefings.tabs.inbox": "Eingang",
+  "briefings.detail.back": "Zurück",
   "briefings.tabs.archive": "Archiv",
   "briefings.archive.restore": "Wiederherstellen",
   "briefings.archive.deleteForever": "Endgültig löschen",

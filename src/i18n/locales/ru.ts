@@ -307,6 +307,7 @@ const ru: Record<TKey, string> = {
   "briefings.reader.copied": "Скопировано ✓",
   "briefings.reader.archive": "В архив",
   "briefings.tabs.inbox": "Входящие",
+  "briefings.detail.back": "Назад",
   "briefings.tabs.archive": "Архив",
   "briefings.archive.restore": "Восстановить",
   "briefings.archive.deleteForever": "Удалить навсегда",
