@@ -1886,6 +1886,9 @@ function BoardTaskCard({
   const isCurrent = vm.currentQueueTaskId === task.taskId;
   const canCodex = task.approved && task.targetRunner === "codex_cli" && task.riskLevel !== "critical";
   const plan = vm.actionPlans.find((entry) => entry.planId === task.planId);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  // Plan noch prüfbar (nicht freigegeben) -> Freigeben/Ablehnen direkt hier im Board anbieten.
+  const planReviewable = Boolean(plan && (plan.status === "pending_user_review" || plan.status === "in_review"));
 
   return (
     <article className={`action-plan-card board-task${task.selected ? " selected" : ""}`}>
@@ -1909,6 +1912,26 @@ function BoardTaskCard({
       {task.summary ? <p className="board-summary">{task.summary}</p> : null}
 
       {!task.approved ? <StatusLine good={false} text={t("board.statusNeedApproval")} /> : null}
+      {!task.approved && planReviewable ? (
+        <div className="board-plan-approval">
+          <button
+            className="primary"
+            disabled={disabled}
+            onClick={() => void vm.handleStartActionPlan(task.planId)}
+            type="button"
+          >
+            <CheckCircle2 size={14} /> {t("board.approvePlan")}
+          </button>
+          <button
+            className="ghost danger"
+            disabled={disabled}
+            onClick={() => void vm.handleRejectActionPlan(task.planId)}
+            type="button"
+          >
+            {t("board.rejectPlan")}
+          </button>
+        </div>
+      ) : null}
       {task.riskLevel === "critical" ? <StatusLine good={false} text={t("board.statusCritical")} /> : null}
       {task.status === "executed" ? (
         <StatusLine
@@ -1925,7 +1948,30 @@ function BoardTaskCard({
       ) : null}
 
       <footer className="board-actions">
-        {task.status === "executed" ? (
+        {confirmRemove ? (
+          <>
+            <span className="board-confirm-text">{t("board.removeConfirm")}</span>
+            <button
+              className="ghost danger"
+              disabled={disabled}
+              onClick={() => {
+                void vm.handleRejectTask(task.taskId);
+                setConfirmRemove(false);
+              }}
+              type="button"
+            >
+              <Trash2 size={14} /> {t("board.remove")}
+            </button>
+            <button
+              className="secondary"
+              disabled={disabled}
+              onClick={() => setConfirmRemove(false)}
+              type="button"
+            >
+              {t("board.cancel")}
+            </button>
+          </>
+        ) : task.status === "executed" ? (
           <>
             <button
               className="secondary"
@@ -1968,7 +2014,7 @@ function BoardTaskCard({
             <button
               className="ghost danger"
               disabled={disabled}
-              onClick={() => void vm.handleRejectTask(task.taskId)}
+              onClick={() => setConfirmRemove(true)}
               title={t("board.remove")}
               type="button"
             >

@@ -691,7 +691,7 @@ export function useKatoSyncViewModel() {
     setBusy("action-plans");
     try {
       setActionPlans(await loadActionPlans(config ?? undefined));
-      show("ok", "Action Queue aktualisiert.");
+      show("ok", "Aufgaben aktualisiert.");
     } catch (error) {
       show("error", getMessage(error));
     } finally {
@@ -721,16 +721,30 @@ export function useKatoSyncViewModel() {
 
   const handleRejectActionPlan = useCallback(
     async (planId: string) => {
-      setActionPlans(await updateActionPlanStatus(config, planId, "rejected"));
-      show("info", "Action Plan abgelehnt. Es wird lokal nichts ausgeführt.");
+      setBusy("board");
+      try {
+        setActionPlans(await updateActionPlanStatus(config, planId, "rejected"));
+        show("info", "Plan abgelehnt. Es wird lokal nichts ausgeführt.");
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setBusy(null);
+      }
     },
     [config, show]
   );
 
   const handleStartActionPlan = useCallback(
     async (planId: string) => {
-      setActionPlans(await updateActionPlanStatus(config, planId, "approved"));
-      show("ok", "Action Plan freigegeben. Tasks mit Codex-Runner kannst du jetzt an Codex übergeben.");
+      setBusy("board");
+      try {
+        setActionPlans(await updateActionPlanStatus(config, planId, "approved"));
+        show("ok", "Plan freigegeben. Ausführbare Aufgaben kannst du jetzt starten.");
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setBusy(null);
+      }
     },
     [config, show]
   );

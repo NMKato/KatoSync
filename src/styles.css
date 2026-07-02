@@ -1866,6 +1866,20 @@ input[type="range"] {
   gap: 6px;
 }
 
+/* Plan-Freigabe direkt am Task (Freigeben/Ablehnen) + Inline-Bestaetigung vor dem Entfernen. */
+.board-plan-approval {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 2px;
+}
+.board-confirm-text {
+  flex: 1 1 auto;
+  align-self: center;
+  font-size: 13px;
+  color: var(--text);
+}
+
 .board-pr {
   margin: 2px 0 6px;
   font-size: 12px;
@@ -2064,6 +2078,24 @@ input[type="range"] {
 .notice.info {
   color: #bfddff;
   background: rgba(42, 92, 138, 0.24);
+}
+
+/* Light-Mode: der helle Text (#b8f7c9 etc.) ist auf hellem Grund kaum lesbar -> dunklere Textfarben. */
+:root[data-theme="light"] .notice.ok {
+  color: #157a3a;
+  background: rgba(46, 160, 90, 0.16);
+}
+:root[data-theme="light"] .notice.warn {
+  color: #8a5300;
+  background: rgba(214, 158, 46, 0.18);
+}
+:root[data-theme="light"] .notice.error {
+  color: #b02a2a;
+  background: rgba(214, 74, 74, 0.16);
+}
+:root[data-theme="light"] .notice.info {
+  color: #1f5c99;
+  background: rgba(42, 92, 138, 0.14);
 }
 
 .notice button {
