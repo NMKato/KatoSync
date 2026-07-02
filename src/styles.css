@@ -203,6 +203,7 @@ button:disabled {
   gap: 6px;
   min-height: 126px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .brand-mark {
@@ -247,6 +248,13 @@ button:disabled {
 .steps {
   display: grid;
   gap: 5px;
+  align-content: start;
+  /* Nav = flexible, scrollbare Mittelzone: staucht/scrollt bei niedrigem Fenster,
+     statt dass die Fußzeile die Icons überlappt. min-height:0 erlaubt das Schrumpfen im Flex-Container. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .step {
@@ -297,9 +305,10 @@ button:disabled {
 }
 
 .sidebar-footer {
-  margin-top: auto;
+  /* Fußzeile bleibt unten fix (die Nav-Mittelzone füllt den Raum darüber) und schrumpft nicht. */
   display: grid;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .license-link {
@@ -3070,6 +3079,28 @@ pre {
 
   .sidebar-footer {
     place-items: center;
+  }
+
+  /* Fußzeile im Icon-Rail-Modus GENAU wie die Nav auf reine Icons umschalten:
+     Sprach-Auswahl, Konto-E-Mail und Versions-Label würden die 80px-Spalte überlaufen -> ausblenden;
+     alle Fußzeilen-Buttons als zentrierte 46px-Icons (wie die Nav-Schritte). */
+  .lang-switch select,
+  .sidebar-account-email,
+  .app-version-label {
+    display: none;
+  }
+
+  .sidebar-footer .license-link,
+  .sidebar-footer .lang-switch {
+    width: 46px;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+  }
+
+  .sidebar-account {
+    align-items: center;
+    padding: 6px 0 2px;
   }
 
   .compact-danger {
