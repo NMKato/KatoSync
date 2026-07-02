@@ -692,7 +692,10 @@ button:disabled {
 }
 
 .queue-panel {
-  min-height: 320px;
+  /* Kein fixes min-height mehr: leere Action-Queue/Board-Karten wachsen mit dem Inhalt (auto frame,
+     wie Briefings). Populierte Listen bringen ihre eigene Höhe mit; auf dem Dashboard gleicht
+     align-items:stretch die Höhe der Zeile ohnehin an. */
+  min-height: 0;
 }
 
 .page-dashboard .queue-panel,
@@ -706,7 +709,8 @@ button:disabled {
 }
 
 .page-actionQueue .action-queue-full,
-.page-logs .logs-panel {
+.page-logs .logs-panel,
+.page-projectBoard .board-panel {
   grid-column: span 12;
 }
 
@@ -716,6 +720,12 @@ button:disabled {
 .page-settings {
   align-items: start;
   grid-auto-flow: row;
+}
+
+/* Auf der Einstellungen-Seite wachsen Panels mit ihrem Inhalt (align-items:start) -> der globale
+   .panel-min-height:172px würde kurze Panels (z. B. leere API-Kontingent-Karte) unnötig hoch machen. */
+.page-settings .panel {
+  min-height: auto;
 }
 
 .page-settings .settings-main-panel {
@@ -751,8 +761,9 @@ button:disabled {
   grid-column: span 12;
   grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
   gap: 14px;
-  align-items: stretch;
-  min-height: min(720px, calc(100vh - 220px));
+  /* Auto-Frame: waechst mit dem Inhalt statt fixer min-height (sonst riesige Leer-Flaeche,
+     wenn wenige/keine Briefings da sind). align-items:start -> Panels behalten ihre Inhaltshoehe. */
+  align-items: start;
 }
 
 .briefing-list-panel,
@@ -3068,7 +3079,8 @@ pre {
   .license-link span,
   .compact-danger span,
   .setup-strip p,
-  .completion-head span {
+  .completion-head span,
+  .setup-gates li span:not(.gate-dot) {
     display: none;
   }
 
@@ -3084,7 +3096,6 @@ pre {
   /* Fußzeile im Icon-Rail-Modus GENAU wie die Nav auf reine Icons umschalten:
      Sprach-Auswahl, Konto-E-Mail und Versions-Label würden die 80px-Spalte überlaufen -> ausblenden;
      alle Fußzeilen-Buttons als zentrierte 46px-Icons (wie die Nav-Schritte). */
-  .lang-switch select,
   .sidebar-account-email,
   .app-version-label {
     display: none;
@@ -3096,6 +3107,22 @@ pre {
     padding: 0;
     gap: 0;
     justify-content: center;
+  }
+
+  /* Sprach-Auswahl im Icon-Rail: das <select> NICHT verstecken (sonst tote, klickbar aussehende Ikone),
+     sondern transparent über das 46px-Icon legen -> Klick öffnet den nativen Picker, das Languages-Icon
+     bleibt der sichtbare Glyph. */
+  .sidebar-footer .lang-switch {
+    position: relative;
+  }
+  .sidebar-footer .lang-switch select {
+    position: absolute;
+    inset: 0;
+    width: 46px;
+    height: 100%;
+    padding: 0;
+    opacity: 0;
+    cursor: pointer;
   }
 
   .sidebar-account {
@@ -3169,6 +3196,13 @@ pre {
   .page-settings #section-rules,
   .page-settings #section-schedule,
   .page-settings .codex-panel {
+    grid-column: 1 / -1;
+  }
+
+  /* Dashboard: das Sync-Panel (.run-panel, base span 4 mit Specificity 0,2,0) collapsed sonst NICHT
+     auf volle Breite -> 2/3-Breite mit Leerraum rechts. 1/-1 mit gleicher Specificity + späterer
+     Quelle gewinnt und stapelt es voll. */
+  .page-dashboard .run-panel {
     grid-column: 1 / -1;
   }
 }
@@ -3641,7 +3675,9 @@ pre {
 }
 .cockpit-now {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0,1fr): Spuren dürfen unter ihren Inhalt schrumpfen -> ein langer Token (Pfad/URL) im
+     Live-Feed sprengt die Karte nicht mehr. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 .cockpit-live,
@@ -3653,6 +3689,11 @@ pre {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface-2);
+  min-width: 0;
+}
+.cockpit-live > div,
+.cockpit-next > div {
+  min-width: 0;
 }
 .cockpit-live strong,
 .cockpit-next strong {
@@ -3666,6 +3707,8 @@ pre {
   margin-top: 2px;
   color: var(--text-muted);
   font-size: var(--fs-label, 12px);
+  /* Lange, umbruchlose Tokens (Pfade/URLs aus dem Live-Feed) dürfen brechen statt zu überlaufen. */
+  overflow-wrap: anywhere;
 }
 .cockpit-next svg {
   flex-shrink: 0;
