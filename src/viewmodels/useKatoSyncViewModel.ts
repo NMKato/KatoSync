@@ -163,6 +163,10 @@ export function useKatoSyncViewModel() {
   const [currentQueueTaskId, setCurrentQueueTaskId] = useState<string | null>(null);
   const [dailyCount, setDailyCount] = useState<number>(() => readDailyCount());
   const stopRef = useRef(false);
+  // Synchroner Lock gegen Doppel-Start des Queue-Runners: der queueRunning-State wird erst NACH dem
+  // await (Repo-Auswahl) gesetzt, ein zweiter Klick in diesem Fenster wuerde sonst einen zweiten
+  // parallelen Lauf starten (TOCTOU). Dieser Ref greift synchron, vor jedem await.
+  const queueStartingRef = useRef(false);
   // Letzte in die Cloud gesicherte library_id -> Push beim Speichern nur, wenn sie sich aenderte.
   const lastLibraryRef = useRef<string>("");
 
@@ -945,30 +949,54 @@ export function useKatoSyncViewModel() {
     });
   }, []);
 
+  // Board-Mutationen setzen busy -> alle Board-Buttons (inkl. Start/Aktualisieren) sind waehrend der
+  // Mutation deaktiviert: keine ueberlappenden Status-Updates (Last-Writer-Wins-Overwrite), keine
+  // Doppelklicks, kein Start/Refresh mitten in einer Mutation. Fehler werden gemeldet statt still.
   const handleDeferTask = useCallback(
     async (taskId: string) => {
-      setActionPlans(await updateActionTaskStatus(config, taskId, "deferred"));
-      setBoardSelection((prev) => prev.filter((id) => id !== taskId));
-      setBoardOrder((prev) => prev.filter((id) => id !== taskId));
-      show("info", "Aufgabe aufgeschoben.");
+      setBusy("board");
+      try {
+        setActionPlans(await updateActionTaskStatus(config, taskId, "deferred"));
+        setBoardSelection((prev) => prev.filter((id) => id !== taskId));
+        setBoardOrder((prev) => prev.filter((id) => id !== taskId));
+        show("info", "Aufgabe aufgeschoben.");
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setBusy(null);
+      }
     },
     [config, show]
   );
 
   const handleRejectTask = useCallback(
     async (taskId: string) => {
-      setActionPlans(await updateActionTaskStatus(config, taskId, "rejected"));
-      setBoardSelection((prev) => prev.filter((id) => id !== taskId));
-      setBoardOrder((prev) => prev.filter((id) => id !== taskId));
-      show("info", "Aufgabe abgelehnt.");
+      setBusy("board");
+      try {
+        setActionPlans(await updateActionTaskStatus(config, taskId, "rejected"));
+        setBoardSelection((prev) => prev.filter((id) => id !== taskId));
+        setBoardOrder((prev) => prev.filter((id) => id !== taskId));
+        show("info", "Aufgabe entfernt.");
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setBusy(null);
+      }
     },
     [config, show]
   );
 
   const handleResumeTask = useCallback(
     async (taskId: string) => {
-      setActionPlans(await updateActionTaskStatus(config, taskId, "pending"));
-      show("info", "Aufgabe wieder eingeplant.");
+      setBusy("board");
+      try {
+        setActionPlans(await updateActionTaskStatus(config, taskId, "pending"));
+        show("info", "Aufgabe wieder eingeplant.");
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setBusy(null);
+      }
     },
     [config, show]
   );
@@ -995,8 +1023,15 @@ export function useKatoSyncViewModel() {
   // Abschluss: manuell als erledigt markieren (z.B. Aufgaben ohne Repo/GitHub oder verifiziert).
   const handleMarkTaskDone = useCallback(
     async (taskId: string) => {
-      setActionPlans(await updateActionTaskStatus(config, taskId, "completed"));
-      show("ok", "Aufgabe als erledigt markiert.");
+      setBusy("board");
+      try {
+        setActionPlans(await updateActionTaskStatus(config, taskId, "completed"));
+        show("ok", "Aufgabe als erledigt markiert.");
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setBusy(null);
+      }
     },
     [config, show]
   );
@@ -1079,7 +1114,9 @@ export function useKatoSyncViewModel() {
   // Sequentieller Executor PRO PROJEKT-SPALTE: ein Repo-Ordner je Lauf, ein Task nach dem anderen.
   const handleStartBoardQueue = useCallback(
     async (projectId: string) => {
-      if (!config || queueRunning) return;
+      if (!config || queueRunning || queueStartingRef.current) return;
+      queueStartingRef.current = true;
+      try {
       const group = boardGroups.find((entry) => entry.projectId === projectId);
       if (!group) return;
       const ordered = group.tasks
@@ -1151,6 +1188,9 @@ export function useKatoSyncViewModel() {
         setQueueRunning(false);
         setCurrentQueueTaskId(null);
         setActionPlans(await loadActionPlans(config));
+      }
+      } finally {
+        queueStartingRef.current = false;
       }
     },
     [

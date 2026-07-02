@@ -89,8 +89,9 @@ import type { ActionPlan, ActionTaskStatus, Briefing, BriefingStatus, FileFindin
 
 const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
   { id: "dashboard", label: "Dashboard", icon: Database },
-  { id: "actionQueue", label: "Action Queue", icon: ClipboardList },
-  { id: "projectBoard", label: "Projekt-Board", icon: LayoutGrid },
+  // Konsolidiert: "Action Queue" + "Projekt-Board" -> EIN Aufgaben-Surface (das Board ist die
+  // reichere Task-Ansicht mit Ausfuehren/Reihenfolge/Entfernen). Interne id bleibt "projectBoard".
+  { id: "projectBoard", label: "Aufgaben", icon: ClipboardList },
   { id: "briefings", label: "Briefings", icon: BookOpenText },
   { id: "settings", label: "Einstellungen", icon: Settings },
   { id: "logs", label: "Aktivitäten", icon: TerminalSquare }
@@ -912,7 +913,7 @@ export default function App() {
           {visibleStep === "dashboard" ? (
             <button
               className="dashboard-queue-link"
-              onClick={() => vm.setActiveStep("actionQueue")}
+              onClick={() => vm.setActiveStep("projectBoard")}
               type="button"
             >
               <ClipboardList size={18} />
@@ -1955,14 +1956,25 @@ function BoardTaskCard({
             </button>
           </>
         ) : task.status === "deferred" ? (
-          <button
-            className="secondary"
-            disabled={disabled}
-            onClick={() => void vm.handleResumeTask(task.taskId)}
-            type="button"
-          >
-            <RotateCcw size={14} /> {t("board.reschedule")}
-          </button>
+          <>
+            <button
+              className="secondary"
+              disabled={disabled}
+              onClick={() => void vm.handleResumeTask(task.taskId)}
+              type="button"
+            >
+              <RotateCcw size={14} /> {t("board.reschedule")}
+            </button>
+            <button
+              className="ghost danger"
+              disabled={disabled}
+              onClick={() => void vm.handleRejectTask(task.taskId)}
+              title={t("board.remove")}
+              type="button"
+            >
+              <Trash2 size={14} /> {t("board.remove")}
+            </button>
+          </>
         ) : (
           <>
             <button
