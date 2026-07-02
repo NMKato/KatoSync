@@ -9,7 +9,7 @@
 **KI, die liefert statt nur redet.**
 Dein Projekt-Wissen → ausgeführte Arbeit. Lokal &amp; sicher.
 
-![Release](https://img.shields.io/badge/release-v2.0.0--beta.21-FF6B35)
+![Release](https://img.shields.io/badge/release-v2.0.0--beta.27-FF6B35)
 ![macOS](https://img.shields.io/badge/macOS-signiert%20%2B%20notarisiert-000000?logo=apple&logoColor=white)
 ![Tauri](https://img.shields.io/badge/Tauri_2-24C8DB?logo=tauri&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
@@ -49,8 +49,8 @@ Claude)** setzt sie in deinem echten Repo um: eigener Branch, Commit, Pull Reque
 KatoSync ist der **kontrollierte Brückenkopf** zwischen KI-Verständnis und lokaler Ausführung:
 
 - [x] **Scannen** — deine Projektordner werden als saubere Wissensbasis bereitgestellt _(Secrets ausgeschlossen)_
-- [x] **Planen** — Mistral-Agenten erzeugen projektbezogene Aufgaben → **Projekt-Board / Action Queue**
-- [x] **Freigeben** — du triagierst und gibst frei _(Human-in-the-Loop — nichts läuft automatisch)_
+- [x] **Planen** — Mistral-Agenten erzeugen projektbezogene Aufgaben → ein aufgeräumtes **Aufgaben-Board** (Vorschau, nach Projekt gruppiert)
+- [x] **Freigeben** — du prüfst, gibst Pläne frei oder entfernst sie _(Human-in-the-Loop — nichts läuft automatisch)_
 - [x] **Ausführen** — lokaler Runner (**Codex CLI** oder **Claude Code CLI**) arbeitet auf einem **eigenen Branch von main**
 - [x] **Liefern** — Auto-Commit → Push → **Pull Request** _(opt-in)_. **Kein Auto-Merge in main.**
 - [x] **Abschließen** — Task ist „ausgeführt" → du prüfst/merged → „erledigt"; ein **Live-Feed** zeigt **jeden echten Schritt** (Befehl · Datei · Websuche · Denken) mit Icon
@@ -165,6 +165,8 @@ Hinweis: Auf exFAT-Volumes scheitert Tauris Signier-Schritt an `xattr` → daher
 - [x] Datei-Modus end-to-end verifiziert — professionelle PDFs via gebündeltem Typst
 - [x] Fortsetzbare Sessions — interaktive Runner-Session mit deinen Connectoren (Human-in-the-Loop)
 - [x] Live-Feed mit benannten Schritten &amp; Icons
+- [x] Aufgaben konsolidiert — ein Task-Surface (freigeben · ausführen · entfernen, mit Bestätigung) statt getrennter Board/Queue
+- [x] Briefings als Vollbild-Reader (Liste → Detail mit Zurück)
 - [ ] Connector-Aktionen live (Gmail/Blender) end-to-end getestet
 - [ ] Weitere Ausgabeformate (Word/ODT/PowerPoint)
 - [ ] Google-Login / KatoOS-Föderation
