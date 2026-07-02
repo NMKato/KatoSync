@@ -3158,6 +3158,19 @@ pre {
   .onboarding-card {
     width: min(390px, calc(100vw - 116px));
   }
+
+  /* Einstellungen: ALLE Unterpanels über die volle Grid-Breite stapeln, statt span 6 nebeneinander.
+     Sonst überlappen Projekt-Ordner (#section-folders) & Sync-Regeln (#section-rules) bei schmaler
+     Breite — folders/schedule fehlten in der span-6-Collapse-Regel. `1 / -1` = volle Breite,
+     unabhängig von der Spaltenanzahl → garantiertes Stapeln, kein Überlappen. */
+  .page-settings .settings-main-panel,
+  .page-settings #section-library,
+  .page-settings #section-folders,
+  .page-settings #section-rules,
+  .page-settings #section-schedule,
+  .page-settings .codex-panel {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 1260px) {
