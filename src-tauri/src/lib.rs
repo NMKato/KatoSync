@@ -534,8 +534,9 @@ async fn mint_connector_token(base_url: String) -> Result<serde_json::Value, Str
 // Beim Login wird aus Passwort + kdf_salt via Argon2id ein 32-Byte-Schluessel abgeleitet
 // (nur im RAM, siehe CLOUD_PROFILE_KEY). Damit wird EIN Blob {apiKey, connectorToken} per
 // AES-256-GCM ent-/verschluesselt. Der Server (/api/me/settings) speichert nur den opaken
-// Cipher + Nonce + Salt + die nicht-geheime library_id und kann NICHTS entschluesseln.
-// Geraete-Pfade (Quellordner/Zeitplan/Referenzordner) werden bewusst NICHT gesynct.
+// Cipher + Nonce + Salt und kann NICHTS entschluesseln.
+// Geraete-Pfade (Quellordner/Zeitplan/Referenzordner) UND die Mistral-library_id werden bewusst
+// NICHT gesynct — die Library ist pro Rechner (jeder Arbeitsplatz kann eine andere Library nutzen).
 // ============================================================================
 
 #[derive(Clone)]
@@ -645,11 +646,11 @@ struct CloudSecretBlob {
 }
 
 // Antwort von GET /api/me/settings (Feld `settings`, sonst null).
+// Hinweis: Der Server liefert weiter ein `libraryId`, wir lesen es aber bewusst NICHT mehr —
+// die Library ist pro Rechner (siehe Header-Kommentar). Serde ignoriert das unbekannte Feld.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteUserSettings {
-    #[serde(default)]
-    library_id: Option<String>,
     #[serde(default)]
     secret_cipher: Option<String>,
     #[serde(default)]
@@ -684,19 +685,19 @@ async fn fetch_user_settings(base_url: &str) -> Result<Option<RemoteUserSettings
 
 async fn put_user_settings(
     base_url: &str,
-    library_id: &str,
     cipher_b64: &str,
     nonce_b64: &str,
     salt_b64: &str,
 ) -> Result<()> {
     let access_token = ensure_supabase_access_token().await?;
     let url = format!("{}/api/me/settings", normalize_base_url(base_url));
+    // library_id wird bewusst NICHT gesendet (pro Rechner, siehe Header). Der Server-Upsert setzt
+    // die Spalte damit auf null — der frueher geteilte Wert wird so beim naechsten Push aufgeraeumt.
     let response = reqwest::Client::new()
         .put(url)
         .header("User-Agent", USER_AGENT)
         .bearer_auth(access_token.trim())
         .json(&json!({
-            "libraryId": library_id,
             "secretCipher": cipher_b64,
             "secretNonce": nonce_b64,
             "kdfSalt": salt_b64,
@@ -713,17 +714,17 @@ async fn put_user_settings(
     Ok(())
 }
 
-// Aktuelle lokale Zugangsdaten einsammeln (leer = nicht gesetzt).
-fn collect_local_secrets() -> (String, String, String) {
+// Aktuelle lokale Zugangsdaten einsammeln (leer = nicht gesetzt). Die library_id gehoert NICHT
+// dazu — sie ist pro Rechner und wird nicht in die Cloud gesynct.
+fn collect_local_secrets() -> (String, String) {
     let api_key = load_api_key().unwrap_or_default();
     let connector_token = load_mcp_connector_token().unwrap_or_default();
-    let library_id = load_config_inner().map(|c| c.library_id).unwrap_or_default();
-    (api_key, connector_token, library_id)
+    (api_key, connector_token)
 }
 
 // Lokale Zugangsdaten mit dem RAM-Schluessel verschluesseln und in die Cloud schreiben.
 async fn push_local_secrets_to_cloud(base_url: &str, material: &CloudKeyMaterial) -> Result<()> {
-    let (api_key, connector_token, library_id) = collect_local_secrets();
+    let (api_key, connector_token) = collect_local_secrets();
     let blob = CloudSecretBlob {
         api_key,
         connector_token,
@@ -734,18 +735,12 @@ async fn push_local_secrets_to_cloud(base_url: &str, material: &CloudKeyMaterial
         use zeroize::Zeroize;
         plaintext.zeroize(); // Klartext-Geheimnisse nicht im RAM zuruecklassen
     }
-    put_user_settings(
-        base_url,
-        &library_id,
-        &cipher_b64,
-        &nonce_b64,
-        &material.salt_b64,
-    )
-    .await
+    put_user_settings(base_url, &cipher_b64, &nonce_b64, &material.salt_b64).await
 }
 
-// Entschluesselte Zugangsdaten lokal anwenden (Keychain + Config) -> "auf neuem Geraet alles wieder da".
-fn apply_cloud_secrets(blob: &CloudSecretBlob, library_id: &str) -> Result<()> {
+// Entschluesselte Zugangsdaten lokal anwenden (Keychain) -> "auf neuem Geraet Zugangsdaten wieder da".
+// Die library_id wird bewusst NICHT aus der Cloud gesetzt (pro Rechner) — der lokale Wert bleibt.
+fn apply_cloud_secrets(blob: &CloudSecretBlob) -> Result<()> {
     let api_key = blob.api_key.trim();
     if !api_key.is_empty() {
         keychain_entry()?.set_password(api_key)?;
@@ -757,12 +752,6 @@ fn apply_cloud_secrets(blob: &CloudSecretBlob, library_id: &str) -> Result<()> {
         mcp_connector_keychain_entry()?.set_password(connector_token)?;
         cache_mcp_connector_token(Some(connector_token.to_string()));
         let _ = write_mcp_connector_token_marker();
-    }
-    let library = library_id.trim();
-    if !library.is_empty() {
-        let mut config = load_config_inner()?;
-        config.library_id = library.to_string();
-        save_config_inner(&config)?;
     }
     Ok(())
 }
@@ -923,12 +912,12 @@ async fn cloud_profile_sync_after_login(
         // Erfolgreich entschluesselt -> lokal anwenden. JEDER Fehler (falsches Passwort nach Reset,
         // kaputtes/zu kurzes Salt) faellt sauber in den Selbstheilungs-Zweig statt hart abzubrechen.
         if let Some((key, blob)) = try_unlock_profile(&password, &salt_b64, &cipher, &nonce) {
-            let library_id = s.library_id.clone().unwrap_or_default();
-            apply_cloud_secrets(&blob, &library_id).map_err(error_to_string)?;
+            apply_cloud_secrets(&blob).map_err(error_to_string)?;
             set_cloud_key(Some(CloudKeyMaterial { key, salt_b64 }));
+            // library_id kommt NICHT aus der Cloud (pro Rechner) -> lokalen Wert unangetastet lassen.
             return Ok(CloudProfileSyncResult {
                 status: "restored".to_string(),
-                library_id: Some(library_id),
+                library_id: None,
             });
         }
         // Nicht entschluesselbar: mit neuem Salt neu schluesseln, damit das naechste Speichern ein
@@ -954,7 +943,7 @@ async fn cloud_profile_sync_after_login(
         key: new_key,
         salt_b64: new_salt_b64,
     };
-    let (api_key, connector_token, _) = collect_local_secrets();
+    let (api_key, connector_token) = collect_local_secrets();
     let has_local = !api_key.trim().is_empty() || !connector_token.trim().is_empty();
     if has_local {
         push_local_secrets_to_cloud(&base_url, &material)
@@ -1031,7 +1020,7 @@ async fn cloud_profile_logout(
     force: bool,
 ) -> Result<CloudProfileLogoutResult, String> {
     if !force {
-        let (api_key, connector_token, _) = collect_local_secrets();
+        let (api_key, connector_token) = collect_local_secrets();
         let has_local = !api_key.trim().is_empty() || !connector_token.trim().is_empty();
         if has_local {
             match cached_cloud_key() {

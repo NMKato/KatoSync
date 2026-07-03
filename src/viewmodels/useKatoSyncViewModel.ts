@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  askConfirm,
   buildCodexPromptFromBriefing,
   buildCodexPromptFromTask,
   chooseFolders,
@@ -168,7 +169,6 @@ export function useKatoSyncViewModel() {
   // parallelen Lauf starten (TOCTOU). Dieser Ref greift synchron, vor jedem await.
   const queueStartingRef = useRef(false);
   // Letzte in die Cloud gesicherte library_id -> Push beim Speichern nur, wenn sie sich aenderte.
-  const lastLibraryRef = useRef<string>("");
 
   const show = useCallback((kind: Notice["kind"], text: string) => setNotice({ kind, text }), []);
 
@@ -186,7 +186,6 @@ export function useKatoSyncViewModel() {
         loadBriefings(loadedConfig)
       ]);
       setConfig(loadedConfig);
-      lastLibraryRef.current = loadedConfig.libraryId ?? "";
       setKeyStatus(loadedKey);
       setMcpTokenStatus(loadedMcpToken);
       setLaunchStatus(loadedLaunch);
@@ -298,7 +297,6 @@ export function useKatoSyncViewModel() {
   // Tenant-Isolierung: nach erfolgreicher Cloud-Sicherung alles Konto-Bezogene lokal raeumen.
   const finalizeLogout = useCallback(() => {
     clearLocalTenantCaches();
-    lastLibraryRef.current = "";
     setSessionStatus({ loggedIn: false, email: null });
     setGeneratedToken(null);
     setActionPlans([]);
@@ -377,17 +375,14 @@ export function useKatoSyncViewModel() {
       setConfig(saved);
       setDirty(false);
       show("ok", "Konfiguration gespeichert.");
-      // library_id ist Teil des Cloud-Profils -> nur bei echter Aenderung pushen.
-      if ((saved.libraryId ?? "") !== lastLibraryRef.current) {
-        lastLibraryRef.current = saved.libraryId ?? "";
-        void pushCloudProfile();
-      }
+      // Hinweis: die library_id wird bewusst NICHT ins Cloud-Profil gepusht (pro Rechner). Geheimnisse
+      // (API-Key/Connector-Token) werden an ihren eigenen Aenderungsstellen gesichert.
     } catch (error) {
       show("error", getMessage(error));
     } finally {
       setBusy(null);
     }
-  }, [config, pushCloudProfile, show]);
+  }, [config, show]);
 
   const saveDraftKeyIfNeeded = useCallback(async () => {
     const draft = keyInput.trim();
@@ -755,6 +750,20 @@ export function useKatoSyncViewModel() {
       if (!config) return null;
       const stored = config.projectRepos?.[projectId];
       if (stored && (await dirExists(stored))) return stored;
+      // Sicherheit (Multi-Rechner): kein gemerkter Ordner auf DIESEM Rechner. Statt still den
+      // Ordner-Dialog zu oeffnen (und ggf. im falschen Ordner loszulaufen) erst bewusst rueckfragen —
+      // der Kontext/Verlauf eines auf einem anderen Rechner erstellten Briefings fehlt hier.
+      const proceed = await askConfirm(
+        `Für diesen Lauf ist auf »${config.device.deviceName}« noch kein Arbeits-Ordner hinterlegt.\n\n` +
+          "Falls dieses Briefing bzw. diese Aufgabe auf einem anderen Rechner entstanden ist, fehlen hier die zugehörigen Dateien und der Verlauf — der Lauf hätte keinen Kontext.\n\n" +
+          "Trotzdem auf diesem Rechner einen Ordner wählen?",
+        {
+          title: "Kein Arbeits-Ordner auf diesem Rechner",
+          okLabel: "Ordner wählen",
+          cancelLabel: "Abbrechen"
+        }
+      );
+      if (!proceed) return null;
       const picked = await chooseRepoFolder(stored ?? config.sourceRoots[0]);
       if (!picked) return null;
       const nextConfig: AppConfig = {

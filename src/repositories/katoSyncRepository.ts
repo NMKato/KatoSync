@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { ask, open } from "@tauri-apps/plugin-dialog";
 import { defaultConfig } from "../lib/defaults";
 import type {
   ActionPlan,
@@ -284,6 +284,23 @@ export async function listenSyncEvents(cb: (event: SyncEvent) => void): Promise<
   } catch {
     return () => {};
   }
+}
+
+// Native Ja/Nein-Rueckfrage (Tauri-Dialog). Browser-Fallback: window.confirm.
+// Gibt true zurueck, wenn der Nutzer bestaetigt.
+export async function askConfirm(
+  message: string,
+  opts?: { title?: string; okLabel?: string; cancelLabel?: string }
+): Promise<boolean> {
+  if (isTauri()) {
+    return await ask(message, {
+      title: opts?.title,
+      kind: "warning",
+      okLabel: opts?.okLabel,
+      cancelLabel: opts?.cancelLabel
+    });
+  }
+  return window.confirm(message);
 }
 
 export async function chooseRepoFolder(defaultPath?: string): Promise<string | null> {
