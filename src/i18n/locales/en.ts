@@ -313,6 +313,8 @@ const en: Record<TKey, string> = {
   "briefings.reader.archive": "Archive",
   "briefings.tabs.inbox": "Inbox",
   "briefings.detail.back": "Back",
+  "briefings.foreign.badge": "Other machine",
+  "briefings.foreign.hint": "Created on another workspace (machine/library) — view only here, not runnable.",
   "briefings.tabs.archive": "Archive",
   "briefings.archive.restore": "Restore",
   "briefings.archive.deleteForever": "Delete forever",

@@ -947,6 +947,7 @@ interface RemoteBriefingRow {
   created_at: string;
   suggested_action: string | null;
   archived_at: string | null;
+  raw_payload?: Record<string, unknown> | null;
 }
 
 async function tryLoadRemoteActionPlans(config: AppConfig): Promise<ActionPlan[] | null> {
@@ -1174,8 +1175,16 @@ function mapRemoteBriefings(response: RemoteBriefingsResponse): Briefing[] {
     summary: briefing.summary || "",
     body: briefing.body ?? "",
     suggestedAction: briefing.suggested_action,
-    archivedAt: briefing.archived_at ?? null
+    archivedAt: briefing.archived_at ?? null,
+    originLibraryId: readOriginLibraryId(briefing.raw_payload)
   }));
+}
+
+// Arbeitsplatz-Marker aus raw_payload lesen (vom Mistral-Skill als katosyncLibraryId gesetzt).
+// Fehlt/ungueltig -> null (Herkunft unbekannt, wird nicht gesperrt).
+function readOriginLibraryId(raw: Record<string, unknown> | null | undefined): string | null {
+  const value = raw?.katosyncLibraryId;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function fromRemoteBriefingStatus(status: string): BriefingStatus {

@@ -5,7 +5,7 @@
 import type { AppConfig } from "../types";
 import { NO_PROJECT_ID } from "../repositories/katoSyncRepository";
 
-export const SKILL_CONTRACT_VERSION = "1";
+export const SKILL_CONTRACT_VERSION = "2";
 
 // Bekannte Projekt-IDs des Nutzers (aus gemerkten Repos), damit der Agent gueltige projectExternalId nutzt.
 export function knownProjectIds(config: AppConfig | null, extra: string[] = []): string[] {
@@ -17,12 +17,21 @@ export function mcpEndpoint(baseUrl: string): string {
   return `${(baseUrl || "https://mcp.katoos.de").replace(/\/+$/, "")}/mcp`;
 }
 
-export function buildSkillPrompt(persona: string, opts: { mcpUrl: string; projects: string[] }): string {
+export function buildSkillPrompt(
+  persona: string,
+  opts: { mcpUrl: string; projects: string[]; libraryId?: string }
+): string {
   const mcp = mcpEndpoint(opts.mcpUrl);
   const projectList = opts.projects.length
     ? opts.projects.join(", ")
     : "(noch keine bekannt — vergib eine sprechende projectExternalId, z. B. \"mein-projekt\")";
   const fence = "```";
+  const libraryId = (opts.libraryId ?? "").trim();
+  // Arbeitsplatz-Marker: nur wenn eine Library gesetzt ist. Damit ordnet KatoSync ein Briefing dem
+  // richtigen Rechner zu (auf anderen Rechnern nur Ansicht, kein Ausfuehren). Siehe Contract v2.
+  const workspaceRule = libraryId
+    ? `Uebergib bei JEDEM create_briefing zusaetzlich das Feld rawPayload mit exakt { "katosyncLibraryId": "${libraryId}" } — damit KatoSync das Briefing dem richtigen Arbeitsplatz (Rechner/Library) zuordnet. Aendere diesen Wert nicht.`
+    : null;
 
   const lines = [
     persona.trim(),
@@ -33,6 +42,7 @@ export function buildSkillPrompt(persona: string, opts: { mcpUrl: string; projec
     "",
     "## 1) Briefings (Leseraum)",
     "Wenn du ein Ergebnis als Briefing uebermittelst, rufe das MCP-Tool create_briefing mit: title, summary, body (Markdown), priority (low|medium|high|critical), suggestedAction.",
+    ...(workspaceRule ? [workspaceRule] : []),
     "Im body darfst du strukturierte Daten als Markdown-Codebloecke einbetten — KatoSync rendert sie als animierte Diagramme. Erlaubte Bloecke (gueltiges JSON im Codeblock, sonst Rohtext):",
     `- ${fence}katosync:kpi${fence}      -> { "title?": "…", "items": [{ "label": "…", "value": "…", "delta?": "…", "tone?": "TONE" }] }`,
     `- ${fence}katosync:donut${fence}    -> { "title?": "…", "segments": [{ "label": "…", "value": 0, "tone?": "TONE" }] }`,

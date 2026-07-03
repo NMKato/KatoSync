@@ -2187,6 +2187,11 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
                 <div>
                   <span className={`priority-pill ${briefing.priority}`}>{briefingPriorityLabel(briefing.priority, t)}</span>
                   <span className={`status-pill ${briefing.status}`}>{briefingStatusLabel(briefing.status, t)}</span>
+                  {briefingIsForeign(briefing, vm.config) ? (
+                    <span className="workspace-pill foreign" title={t("briefings.foreign.hint")}>
+                      {t("briefings.foreign.badge")}
+                    </span>
+                  ) : null}
                 </div>
               </button>
             ))
@@ -2209,6 +2214,11 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
             {t("briefings.detail.back")}
           </button>
           <div className="briefing-detail-actions">
+            {briefingIsForeign(selected, vm.config) ? (
+              <span className="workspace-pill foreign" title={t("briefings.foreign.hint")}>
+                {t("briefings.foreign.badge")}
+              </span>
+            ) : null}
             <button
               className="ghost"
               onClick={() => void handleCopyBriefing()}
@@ -2229,8 +2239,9 @@ function BriefingsPanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> })
             </button>
             <button
               className="primary"
-              disabled={Boolean(vm.busy)}
+              disabled={Boolean(vm.busy) || briefingIsForeign(selected, vm.config)}
               onClick={() => void vm.handleRunCodexForBriefing(selected)}
+              title={briefingIsForeign(selected, vm.config) ? t("briefings.foreign.hint") : undefined}
               type="button"
             >
               {vm.busy === "codex-run" ? <Loader2 className="spin" size={15} /> : <PlayCircle size={15} />}
@@ -2687,7 +2698,13 @@ function SkillGeneratorPanel({
   );
 
   const generate = () => {
-    setOutput(buildSkillPrompt(persona, { mcpUrl: config?.mcp.baseUrl ?? "", projects }));
+    setOutput(
+      buildSkillPrompt(persona, {
+        mcpUrl: config?.mcp.baseUrl ?? "",
+        projects,
+        libraryId: config?.libraryId ?? ""
+      })
+    );
     setCopied(false);
     localStorage.setItem("katosync.skill.generated", "1");
     onGenerated?.();
@@ -3120,6 +3137,18 @@ function briefingPriorityLabel(priority: Briefing["priority"], t: TFunc) {
     default:
       return priority;
   }
+}
+
+// Arbeitsplatz-Scoping: Briefing stammt aus einer anderen Library als der lokal gewaehlten
+// -> anderer Rechner (nur Ansicht). Nur bei gesetztem Marker UND lokaler Library; sonst false
+// (Herkunft unbekannt/kein lokaler Kontext -> nicht sperren, damit nichts faelschlich verschwindet).
+function briefingIsForeign(
+  briefing: Briefing,
+  config: { libraryId?: string } | null | undefined
+): boolean {
+  const origin = briefing.originLibraryId?.trim();
+  const local = config?.libraryId?.trim();
+  return Boolean(origin && local && origin !== local);
 }
 
 function OnboardingDialog({

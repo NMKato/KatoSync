@@ -222,6 +222,9 @@ export interface Briefing {
   body: string;
   suggestedAction?: string | null;
   archivedAt?: string | null;
+  // Arbeitsplatz-Herkunft: die Library, aus der dieses Briefing erzeugt wurde (aus raw_payload,
+  // vom Mistral-Skill gesetzt). Ungleich der lokalen library_id -> anderer Rechner (nur Ansicht).
+  originLibraryId?: string | null;
 }
 
 export interface CodexRunRequest {

@@ -313,6 +313,8 @@ const es: Record<TKey, string> = {
   "briefings.reader.archive": "Archivar",
   "briefings.tabs.inbox": "Entrada",
   "briefings.detail.back": "Volver",
+  "briefings.foreign.badge": "Otro equipo",
+  "briefings.foreign.hint": "Creado en otro puesto de trabajo (equipo/biblioteca) — solo lectura aquí, no ejecutable.",
   "briefings.tabs.archive": "Archivo",
   "briefings.archive.restore": "Restaurar",
   "briefings.archive.deleteForever": "Eliminar definitivamente",

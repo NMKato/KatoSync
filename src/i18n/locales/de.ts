@@ -332,6 +332,8 @@ const de = {
   "briefings.reader.archive": "Ins Archiv",
   "briefings.tabs.inbox": "Eingang",
   "briefings.detail.back": "Zurück",
+  "briefings.foreign.badge": "Anderer Rechner",
+  "briefings.foreign.hint": "Auf einem anderen Arbeitsplatz (Rechner/Library) erzeugt — hier nur zur Ansicht, nicht ausführbar.",
   "briefings.tabs.archive": "Archiv",
   "briefings.archive.restore": "Wiederherstellen",
   "briefings.archive.deleteForever": "Endgültig löschen",

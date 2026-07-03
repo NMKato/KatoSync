@@ -313,6 +313,8 @@ const ru: Record<TKey, string> = {
   "briefings.reader.archive": "В архив",
   "briefings.tabs.inbox": "Входящие",
   "briefings.detail.back": "Назад",
+  "briefings.foreign.badge": "Другой компьютер",
+  "briefings.foreign.hint": "Создано на другом рабочем месте (компьютер/библиотека) — здесь только просмотр, запуск недоступен.",
   "briefings.tabs.archive": "Архив",
   "briefings.archive.restore": "Восстановить",
   "briefings.archive.deleteForever": "Удалить навсегда",
