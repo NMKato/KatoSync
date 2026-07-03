@@ -156,6 +156,51 @@ Hinweis: Auf exFAT-Volumes scheitert Tauris Signier-Schritt an `xattr` → daher
 
 ---
 
+## 🔭 Als Nächstes: KatoSync 3.0 — lokal-first
+
+<div align="center">
+
+**Die Intelligenz wandert auf dein Gerät.**
+Eigene Domain-Agenten statt externem Chat — direkt über deine lokalen Runner, direkt auf deinen Ordnern.
+_Deine Daten bleiben lokal — im Sinne des EU AI Act._
+
+</div>
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+#### 🤖 Eigene Domain-Agenten
+Vorgefertigte, editierbare Personas — **ein Klick**:
+
+🧑‍💼 HR &nbsp;·&nbsp; 🗂️ Projektstatus
+🛡️ Cybersecurity &nbsp;·&nbsp; 🤝 Assistenz
+📸 Fotograf &nbsp;·&nbsp; 🎨 Grafikdesign
+
+</td>
+<td width="50%" valign="top">
+
+#### 🪄 Skill-Generator 2.0
+**Beschreibe deine Rolle** (oder die eines Mitarbeiters) → fertiger Agent-Skill, sofort einsatzbereit.
+Custom-Skills bleiben natürlich möglich.
+
+</td>
+</tr>
+</table>
+
+**So läuft's — vollautomatisch, aber unter deiner Kontrolle:**
+
+`📁 Ordner sammeln` → `⏰ zur festgelegten Zeit auswerten` → `📨 Briefing / Aufgabe` → `✅ du gibst frei` → `⚙️ lokaler Runner führt aus`
+
+- [x] **Lokal-first** — planen **und** ausführen on-device, keine Remote-Library
+- [x] **Optional vollständig lokal** — kleines Modell (z. B. via Ollama) für Planung/Triage; fokussierte Aufgaben brauchen keine Top-Maschine
+- [x] **Zero-Config** — installieren → Runner-Login → Agent wählen → läuft
+- [x] **Zeitgesteuert pro Skill** — wann gesammelt, wann ausgewertet
+
+> Gleiche kontrollierte UX (Briefings + Aufgaben, Human-in-the-Loop) — nur wandert das „Gehirn" auf **dein** Gerät.
+
+---
+
 ## 🗺️ Roadmap
 
 - [x] Cloud-Profil (Zero-Knowledge) — Zugangsdaten folgen dem Konto
