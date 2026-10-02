@@ -294,6 +294,45 @@ export interface SyncEvent {
   remaining?: number;
 }
 
+export interface LocalControlState {
+  daemonPid: number;
+  status: string;
+  currentJobId?: string | null;
+  lastCompletedJobId?: string | null;
+  heartbeatAt: string;
+  controlRoot: string;
+}
+
+export interface LocalControlJobSummary {
+  id: string;
+  status: string;
+  exitCode?: number | null;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  cwd: string;
+  command: string;
+  mode: string;
+  logPath: string;
+  error?: string | null;
+}
+
+export interface LocalControlMonitorStats {
+  total: number;
+  completed: number;
+  failed: number;
+  timeout: number;
+  avgDurationMs: number;
+}
+
+export interface LocalControlMonitorSnapshot {
+  available: boolean;
+  state?: LocalControlState | null;
+  feed: string[];
+  recentJobs: LocalControlJobSummary[];
+  stats: LocalControlMonitorStats;
+}
+
 export interface LaunchAgentStatus {
   installed: boolean;
   loaded: boolean;

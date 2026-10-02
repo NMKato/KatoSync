@@ -17,6 +17,7 @@ import {
   generateConnectorToken,
   getApiKeyStatus,
   getLaunchAgentStatus,
+  getLocalControlSnapshot,
   getMcpConnectorTokenStatus,
   getSupabaseSession,
   installLaunchAgent,
@@ -61,6 +62,7 @@ import type {
   RateLimitMetric,
   KeyStatus,
   LaunchAgentStatus,
+  LocalControlMonitorSnapshot,
   ScanSummary,
   SupabaseSessionStatus,
   SyncReport
@@ -153,6 +155,8 @@ export function useKatoSyncViewModel() {
   const [connectionOk, setConnectionOk] = useState(false);
   const [libraryOk, setLibraryOk] = useState(false);
   const [logs, setLogs] = useState("");
+  const [localControlMonitor, setLocalControlMonitor] = useState<LocalControlMonitorSnapshot | null>(null);
+  const [localControlMonitorError, setLocalControlMonitorError] = useState<string | null>(null);
   const [actionPlans, setActionPlans] = useState<ActionPlan[]>([]);
   const [briefings, setBriefings] = useState<Briefing[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -200,6 +204,32 @@ export function useKatoSyncViewModel() {
   useEffect(() => {
     void boot();
   }, [boot]);
+
+  const refreshLocalControlMonitor = useCallback(async () => {
+    try {
+      const snapshot = await getLocalControlSnapshot();
+      setLocalControlMonitor(snapshot);
+      setLocalControlMonitorError(null);
+    } catch (error) {
+      setLocalControlMonitorError(getMessage(error));
+    }
+  }, []);
+
+  // Nur auf der Aktivitaeten-Seite pollen: lokal, billig und ohne GitHub/LLM-Traffic.
+  useEffect(() => {
+    if (activeStep !== "logs") return undefined;
+    let active = true;
+    const refresh = async () => {
+      if (!active) return;
+      await refreshLocalControlMonitor();
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [activeStep, refreshLocalControlMonitor]);
 
   // Live-Feed: gestreamte Codex-Events sammeln (letzte 300).
   useEffect(() => {
@@ -1334,6 +1364,8 @@ export function useKatoSyncViewModel() {
     keyStatus,
     libraryOk,
     launchStatus,
+    localControlMonitor,
+    localControlMonitorError,
     logs,
     loginEmail,
     loginPassword,
@@ -1381,6 +1413,7 @@ export function useKatoSyncViewModel() {
     handleLaunchInstall,
     handleLaunchRemove,
     handleLogs,
+    refreshLocalControlMonitor,
     handleQuitApp,
     handleRefreshActionPlans,
     handleRefreshBriefings,

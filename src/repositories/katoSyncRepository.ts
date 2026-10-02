@@ -21,6 +21,7 @@ import type {
   GeneratedConnectorToken,
   KeyStatus,
   LaunchAgentStatus,
+  LocalControlMonitorSnapshot,
   ScanSummary,
   SupabaseSessionStatus,
   SyncReport
@@ -34,6 +35,19 @@ const mockMcpConnectorTokenKey = "katosync.mcpConnectorToken";
 // Projekt-Board: Tasks ohne project_external_id landen in einer neutralen "Ohne Projekt"-Gruppe.
 export const NO_PROJECT_ID = "__no_project__";
 const isTauri = () => Boolean(window.__TAURI_INTERNALS__);
+
+export async function getLocalControlSnapshot(): Promise<LocalControlMonitorSnapshot> {
+  if (isTauri()) {
+    return invoke<LocalControlMonitorSnapshot>("local_control_snapshot");
+  }
+  return {
+    available: false,
+    state: null,
+    feed: [],
+    recentJobs: [],
+    stats: { total: 0, completed: 0, failed: 0, timeout: 0, avgDurationMs: 0 }
+  };
+}
 
 export async function loadConfig(): Promise<AppConfig> {
   if (isTauri()) {

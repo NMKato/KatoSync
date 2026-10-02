@@ -31,7 +31,7 @@ struct LocalControlJob {
     require_clean_git: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LocalControlResult {
     id: String,
@@ -47,7 +47,7 @@ struct LocalControlResult {
     error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LocalControlState {
     daemon_pid: u32,
@@ -56,6 +56,89 @@ struct LocalControlState {
     last_completed_job_id: Option<String>,
     heartbeat_at: String,
     control_root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalControlMonitorStats {
+    pub total: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub timeout: usize,
+    pub avg_duration_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalControlMonitorSnapshot {
+    pub available: bool,
+    pub state: Option<LocalControlState>,
+    pub feed: Vec<String>,
+    pub recent_jobs: Vec<LocalControlResult>,
+    pub stats: LocalControlMonitorStats,
+}
+
+pub fn monitor_snapshot() -> Result<LocalControlMonitorSnapshot, String> {
+    let root = control_root()?;
+    ensure_dirs(&root)?;
+
+    let state = match fs::read_to_string(root.join("state.json")) {
+        Ok(raw) => serde_json::from_str::<LocalControlState>(&raw).ok(),
+        Err(_) => None,
+    };
+
+    let feed = fs::read_to_string(root.join("feed.log"))
+        .unwrap_or_default()
+        .lines()
+        .rev()
+        .take(80)
+        .map(str::to_string)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+
+    let mut files = fs::read_dir(root.join("outbox"))
+        .map_err(|e| format!("Local Control: Outbox nicht lesbar: {e}"))?
+        .filter_map(|entry| entry.ok().map(|x| x.path()))
+        .filter(|path| path.extension().and_then(|x| x.to_str()) == Some("json"))
+        .collect::<Vec<_>>();
+    files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+
+    let mut parsed = Vec::new();
+    for path in files.into_iter().take(200) {
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Ok(result) = serde_json::from_str::<LocalControlResult>(&raw) {
+            parsed.push(result);
+        }
+    }
+
+    let total = parsed.len();
+    let completed = parsed.iter().filter(|x| x.status == "completed").count();
+    let failed = parsed.iter().filter(|x| x.status == "failed").count();
+    let timeout = parsed.iter().filter(|x| x.status == "timeout").count();
+    let avg_duration_ms = if total == 0 {
+        0
+    } else {
+        parsed.iter().map(|x| x.duration_ms).sum::<u128>() / total as u128
+    };
+    let recent_jobs = parsed.iter().take(20).cloned().collect();
+
+    Ok(LocalControlMonitorSnapshot {
+        available: state.is_some(),
+        state,
+        feed,
+        recent_jobs,
+        stats: LocalControlMonitorStats {
+            total,
+            completed,
+            failed,
+            timeout,
+            avg_duration_ms,
+        },
+    })
 }
 
 fn default_mode() -> String {
