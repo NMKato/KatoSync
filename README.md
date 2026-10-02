@@ -265,3 +265,13 @@ privilegierte/destruktive Shell-Einstiege und unterscheidet `read_only` von expl
 
 Der Local-Control-Pfad ist unabhängig vom bestehenden Mistral-/Briefing-Workflow; beide Modi
 können parallel installiert bleiben.
+
+## Provider failover router
+
+For bounded autonomous ticket work, scripts/katosync-agent-router.py selects providers in this order:
+
+1. Codex CLI
+2. Claude Code
+3. RDC fallback queue under control/rdc-fallback/
+
+Provider hopping is allowed only for quota/rate-limit, authentication-unavailable, or temporary-capacity failures. A normal code/test failure stops fail-closed instead of switching agents.
