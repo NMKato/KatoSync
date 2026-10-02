@@ -33,7 +33,7 @@ struct LocalControlJob {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LocalControlResult {
+pub(crate) struct LocalControlResult {
     id: String,
     status: String,
     exit_code: Option<i32>,
@@ -49,7 +49,7 @@ struct LocalControlResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LocalControlState {
+pub(crate) struct LocalControlState {
     daemon_pid: u32,
     status: String,
     current_job_id: Option<String>,
