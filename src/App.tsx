@@ -57,6 +57,7 @@ import {
   Toggle
 } from "./components/Primitives";
 import { RichMarkdown } from "./components/RichMarkdown";
+import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
 import { Bars, Donut, KpiTiles, StatusList, Timeline } from "./components/DiagramComponents";
 import {
   codexTimeline,
@@ -222,6 +223,7 @@ export default function App() {
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [onboardingPosition, setOnboardingPosition] = useState<OnboardingPosition | null>(null);
   const [quitConfirmOpen, setQuitConfirmOpen] = useState(false);
+  const [activityView, setActivityView] = useState<"monitor" | "history">("monitor");
   const [licenseOpen, setLicenseOpen] = useState(
     () => localStorage.getItem(acceptedLicenseKey) !== licenseAgreement.version
   );
@@ -1227,24 +1229,55 @@ export default function App() {
 
           {visibleStep === "logs" ? (
           <Panel id="section-activities" className="logs-panel" title={t("logs.title")} icon={<TerminalSquare size={18} />}>
-            <div className="activity-list">
-              {activities.map((item) => (
-                <div className={`activity-item ${item.kind}`} key={item.text}>
-                  <span />
-                  <div>
-                    <strong>{item.title}</strong>
-                    <small>{item.text}</small>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="button-row">
-              <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleLogs} type="button">
-                {vm.busy === "logs" ? <Loader2 className="spin" size={15} /> : null}
-                {vm.busy === "logs" ? t("logs.loading") : t("logs.load")}
+            <div className="activity-subtabs" role="tablist" aria-label={t("monitor.tabsAria")}>
+              <button
+                className={activityView === "monitor" ? "briefing-tab active" : "briefing-tab"}
+                onClick={() => setActivityView("monitor")}
+                role="tab"
+                aria-selected={activityView === "monitor"}
+                type="button"
+              >
+                {t("monitor.tab")}
+              </button>
+              <button
+                className={activityView === "history" ? "briefing-tab active" : "briefing-tab"}
+                onClick={() => setActivityView("history")}
+                role="tab"
+                aria-selected={activityView === "history"}
+                type="button"
+              >
+                {t("monitor.historyTab")}
               </button>
             </div>
-            <pre>{vm.logs || t("logs.empty")}</pre>
+
+            {activityView === "monitor" ? (
+              <LocalControlLiveMonitor
+                snapshot={vm.localControlMonitor}
+                error={vm.localControlMonitorError}
+                onRefresh={() => void vm.refreshLocalControlMonitor()}
+              />
+            ) : (
+              <>
+                <div className="activity-list">
+                  {activities.map((item) => (
+                    <div className={`activity-item ${item.kind}`} key={item.text}>
+                      <span />
+                      <div>
+                        <strong>{item.title}</strong>
+                        <small>{item.text}</small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="button-row">
+                  <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleLogs} type="button">
+                    {vm.busy === "logs" ? <Loader2 className="spin" size={15} /> : null}
+                    {vm.busy === "logs" ? t("logs.loading") : t("logs.load")}
+                  </button>
+                </div>
+                <pre>{vm.logs || t("logs.empty")}</pre>
+              </>
+            )}
           </Panel>
           ) : null}
 

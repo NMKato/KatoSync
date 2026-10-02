@@ -305,6 +305,7 @@ pub fn run() {
             remove_launch_agent,
             launch_agent_status,
             read_logs,
+            local_control_snapshot,
             open_output_dir,
             resume_runner_session,
             quit_app
@@ -330,6 +331,11 @@ fn reopen_main_window(app_handle: &AppHandle) {
         let _ = window.set_focus();
         let _ = write_log("sync", "Fenster per Dock-Klick wieder geoeffnet.");
     }
+}
+
+#[tauri::command]
+fn local_control_snapshot() -> Result<local_control::LocalControlMonitorSnapshot, String> {
+    local_control::monitor_snapshot()
 }
 
 #[tauri::command]
