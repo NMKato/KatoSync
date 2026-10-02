@@ -221,3 +221,47 @@ Custom-Skills bleiben natürlich möglich.
 <div align="center">
 <sub>Ein Produkt von <b>KatoOS</b> · MK Heartbeat UG — kein Auto-Merge, keine automatischen Zahlungen/E-Mails, keine Löschlogik für die Mistral-Library.</sub>
 </div>
+
+
+---
+
+## Local Control Bridge (kein LLM erforderlich)
+
+KatoSync kann zusätzlich als lokaler Ausführungs-Bus für einen externen Orchestrator laufen.
+Dieser Modus benötigt **keinen Mistral-Key, keinen OpenAI-API-Key und keinen Codex-/Claude-Runner**.
+
+Der Daemon verwendet ausschließlich lokale Dateien:
+
+- `~/Library/Application Support/KatoSync/control/inbox/` — atomar eingestellte Jobs
+- `.../outbox/` — maschinenlesbare Ergebnisse
+- `.../state.json` — `idle` / `busy` + Heartbeat
+- `.../feed.log` — kompakter Live-Feed
+- `.../logs/<job>.log` — stdout/stderr je Job
+
+Start manuell:
+
+```bash
+/Applications/KatoSync.app/Contents/MacOS/katosync --local-control-daemon
+```
+
+Oder als Benutzer-LaunchAgent:
+
+```bash
+./scripts/install-local-control-agent.sh /Applications/KatoSync.app
+```
+
+Sicheren Testjob einstellen:
+
+```bash
+python3 scripts/katosync-control-submit.py \
+  --cwd ~/Projects/MeinRepo \
+  --wait \
+  -- git status --short
+```
+
+Jobs sind strukturiert (`command` + `args`), nicht freie Shell-Skripte. Der Daemon blockiert
+privilegierte/destruktive Shell-Einstiege und unterscheidet `read_only` von explizitem
+`workspace_write`. `requireCleanGit` kann für schreibende Repo-Jobs fail-closed aktiviert werden.
+
+Der Local-Control-Pfad ist unabhängig vom bestehenden Mistral-/Briefing-Workflow; beide Modi
+können parallel installiert bleiben.

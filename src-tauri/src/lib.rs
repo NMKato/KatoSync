@@ -25,6 +25,8 @@ use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
+mod local_control;
+
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
@@ -225,6 +227,14 @@ pub struct LaunchAgentStatus {
 }
 
 pub fn run() {
+    if env::args().any(|arg| arg == "--local-control-daemon") {
+        if let Err(error) = local_control::run_daemon() {
+            eprintln!("KatoSync Local Control fehlgeschlagen: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     if env::args().any(|arg| arg == "--run-sync") {
         let result = tokio::runtime::Runtime::new()
             .expect("Tokio runtime konnte nicht gestartet werden")
