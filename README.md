@@ -225,6 +225,12 @@ Custom-Skills bleiben natürlich möglich.
 
 ---
 
+## Continuation Watchdog (lokale Nachtlaeufe)
+
+Der optionale Watchdog fuehrt nur vorab definierte Wellen weiter. Er trifft keine freien LLM-Entscheidungen: Wenn der Local-Control-Daemon idle ist, sein Heartbeat frisch ist und keine andere Inbox/Running-Arbeit existiert, stellt er exakt die naechste Welle aus control/continuation/plan.json ein. Bei stopOnFailure=true stoppt die Kette fail-closed am ersten Fehler.
+
+Installieren: scripts/install-continuation-watchdog.sh. Eine Vorlage liegt unter scripts/continuation-plan.example.json. Status und Log liegen in control/continuation/state.json bzw. watchdog.log. Der bestehende Local-Control-Daemon validiert weiterhin jeden strukturierten Job.
+
 ## Local Control Bridge (kein LLM erforderlich)
 
 KatoSync kann zusätzlich als lokaler Ausführungs-Bus für einen externen Orchestrator laufen.

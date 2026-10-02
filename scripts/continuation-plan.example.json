@@ -1,0 +1,19 @@
+{
+  "planId": "overnight-example",
+  "enabled": false,
+  "stopOnFailure": true,
+  "waves": [
+    {
+      "name": "read-status",
+      "cwd": "/Users/USER/Projects/Example",
+      "command": "git",
+      "args": ["status", "--short"],
+      "mode": "read_only",
+      "timeoutSeconds": 120,
+      "laneId": "example",
+      "projectId": "example",
+      "resourceLocks": [],
+      "dedupeKey": "overnight-example-wave-1"
+    }
+  ]
+}
