@@ -1,10 +1,12 @@
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -14,6 +16,8 @@ const BUSY_HEARTBEAT_SECS: u64 = 10;
 const IDLE_FEED_HEARTBEAT_SECS: u64 = 60;
 const DEFAULT_TIMEOUT_SECS: u64 = 900;
 const MAX_TIMEOUT_SECS: u64 = 7200;
+const DEFAULT_MAX_WORKERS: usize = 4;
+const MAX_WORKERS_HARD_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +33,14 @@ struct LocalControlJob {
     timeout_seconds: u64,
     #[serde(default)]
     require_clean_git: bool,
+    #[serde(default = "default_lane_id")]
+    lane_id: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    resource_locks: Vec<String>,
+    #[serde(default)]
+    dedupe_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +151,10 @@ pub fn monitor_snapshot() -> Result<LocalControlMonitorSnapshot, String> {
             avg_duration_ms,
         },
     })
+}
+
+fn default_lane_id() -> String {
+    "default".to_string()
 }
 
 fn default_mode() -> String {
@@ -547,11 +563,11 @@ fn execute_job(root: &Path, job: &LocalControlJob) -> LocalControlResult {
         }
 
         if last_heartbeat.elapsed() >= Duration::from_secs(BUSY_HEARTBEAT_SECS) {
-            let _ = write_state(root, "busy", Some(&job.id), None);
             let _ = append_feed(
                 root,
                 &format!(
-                    "BUSY job={} cmd={} elapsed={}s",
+                    "BUSY lane={} job={} cmd={} elapsed={}s",
+                    job.lane_id,
                     job.id,
                     command_basename(&job.command),
                     started.elapsed().as_secs()
@@ -567,49 +583,188 @@ fn execute_job(root: &Path, job: &LocalControlJob) -> LocalControlResult {
     result
 }
 
-fn process_job_file(root: &Path, inbox_path: &Path) -> Result<String, String> {
-    let file_name = inbox_path
-        .file_name()
-        .and_then(|x| x.to_str())
-        .ok_or_else(|| "Local Control: ungueltiger Inbox-Dateiname.".to_string())?;
-    let running_path = root.join("running").join(file_name);
-    fs::rename(inbox_path, &running_path)
-        .map_err(|e| format!("Local Control: Job konnte nicht atomar uebernommen werden: {e}"))?;
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalControlLaneSnapshot {
+    lane_id: String,
+    project_id: Option<String>,
+    job_id: String,
+    cwd: String,
+    command: String,
+    mode: String,
+    resource_locks: Vec<String>,
+    started_at: String,
+}
 
-    let raw = fs::read_to_string(&running_path)
-        .map_err(|e| format!("Local Control: Job nicht lesbar: {e}"))?;
-    let job: LocalControlJob = serde_json::from_str(&raw)
-        .map_err(|e| format!("Local Control: Job-JSON ungueltig: {e}"))?;
+#[derive(Debug, Clone)]
+struct ActiveJob {
+    job: LocalControlJob,
+    cwd_key: String,
+    dedupe_key: String,
+    started_at: String,
+}
 
-    write_state(root, "busy", Some(&job.id), None)?;
-    append_feed(
-        root,
-        &format!(
-            "START job={} mode={} cwd={} cmd={} args={}",
-            job.id,
-            job.mode,
-            job.cwd,
-            command_basename(&job.command),
-            job.args.len()
-        ),
-    )?;
+fn configured_max_workers() -> usize {
+    std::env::var("KATOSYNC_MAX_WORKERS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_MAX_WORKERS)
+        .clamp(1, MAX_WORKERS_HARD_LIMIT)
+}
 
-    let result = execute_job(root, &job);
+fn cwd_key(cwd: &str) -> String {
+    Path::new(cwd)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(cwd))
+        .to_string_lossy()
+        .to_string()
+}
+
+fn git_value(cwd: &str, args: &[&str]) -> String {
+    Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+fn effective_dedupe_key(job: &LocalControlJob) -> String {
+    if let Some(key) = job.dedupe_key.as_ref().filter(|key| !key.trim().is_empty()) {
+        return key.trim().to_string();
+    }
+    let branch = git_value(&job.cwd, &["branch", "--show-current"]);
+    let head = git_value(&job.cwd, &["rev-parse", "HEAD"]);
+    format!(
+        "{}|{}|{}|{}|{}",
+        cwd_key(&job.cwd),
+        branch,
+        head,
+        command_basename(&job.command),
+        job.args.join("")
+    )
+}
+
+fn jobs_conflict(job: &LocalControlJob, cwd: &str, active: &ActiveJob) -> bool {
+    if job.lane_id == active.job.lane_id {
+        return true;
+    }
+    if job
+        .resource_locks
+        .iter()
+        .any(|lock| active.job.resource_locks.iter().any(|held| held == lock))
+    {
+        return true;
+    }
+    cwd == active.cwd_key && (job.mode == "workspace_write" || active.job.mode == "workspace_write")
+}
+
+fn write_lane_registry(root: &Path, active: &HashMap<String, ActiveJob>) -> Result<(), String> {
+    let mut lanes = active
+        .values()
+        .map(|entry| LocalControlLaneSnapshot {
+            lane_id: entry.job.lane_id.clone(),
+            project_id: entry.job.project_id.clone(),
+            job_id: entry.job.id.clone(),
+            cwd: entry.job.cwd.clone(),
+            command: command_basename(&entry.job.command).to_string(),
+            mode: entry.job.mode.clone(),
+            resource_locks: entry.job.resource_locks.clone(),
+            started_at: entry.started_at.clone(),
+        })
+        .collect::<Vec<_>>();
+    lanes.sort_by(|a, b| a.lane_id.cmp(&b.lane_id));
+    atomic_json(&root.join("lanes.json"), &lanes)
+}
+
+fn write_terminal_result(
+    root: &Path,
+    job: &LocalControlJob,
+    status: &str,
+    error: Option<String>,
+) -> Result<(), String> {
+    let result = LocalControlResult {
+        id: job.id.clone(),
+        status: status.to_string(),
+        exit_code: None,
+        started_at: now(),
+        finished_at: now(),
+        duration_ms: 0,
+        cwd: job.cwd.clone(),
+        command: command_basename(&job.command).to_string(),
+        mode: job.mode.clone(),
+        log_path: root
+            .join("logs")
+            .join(format!("{}.log", job.id))
+            .to_string_lossy()
+            .to_string(),
+        error,
+    };
     atomic_json(
         &root.join("outbox").join(format!("{}.json", job.id)),
         &result,
-    )?;
+    )
+}
 
-    let archive_path = root.join("archive").join(file_name);
-    let _ = fs::rename(&running_path, archive_path);
-    append_feed(
-        root,
-        &format!(
-            "DONE job={} status={} exit={:?} durationMs={} log={}",
-            result.id, result.status, result.exit_code, result.duration_ms, result.log_path
-        ),
-    )?;
-    Ok(result.id)
+fn archive_inbox_job(root: &Path, inbox_path: &Path) {
+    if let Some(name) = inbox_path.file_name() {
+        let _ = fs::rename(inbox_path, root.join("archive").join(name));
+    }
+}
+
+fn claim_and_spawn(
+    root: &Path,
+    inbox_path: &Path,
+    job: LocalControlJob,
+    tx: mpsc::Sender<String>,
+) -> Result<(), String> {
+    let file_name = inbox_path
+        .file_name()
+        .and_then(|x| x.to_str())
+        .ok_or_else(|| "Local Control: ungueltiger Inbox-Dateiname.".to_string())?
+        .to_string();
+    let running_path = root.join("running").join(&file_name);
+    fs::rename(inbox_path, &running_path)
+        .map_err(|e| format!("Local Control: Job konnte nicht atomar uebernommen werden: {e}"))?;
+
+    let root = root.to_path_buf();
+    thread::spawn(move || {
+        let _ = append_feed(
+            &root,
+            &format!(
+                "START lane={} job={} mode={} cwd={} cmd={} args={}",
+                job.lane_id,
+                job.id,
+                job.mode,
+                job.cwd,
+                command_basename(&job.command),
+                job.args.len()
+            ),
+        );
+        let result = execute_job(&root, &job);
+        let _ = atomic_json(
+            &root.join("outbox").join(format!("{}.json", job.id)),
+            &result,
+        );
+        let archive_path = root.join("archive").join(&file_name);
+        let _ = fs::rename(&running_path, archive_path);
+        let _ = append_feed(
+            &root,
+            &format!(
+                "DONE lane={} job={} status={} exit={:?} durationMs={} log={}",
+                job.lane_id,
+                result.id,
+                result.status,
+                result.exit_code,
+                result.duration_ms,
+                result.log_path
+            ),
+        );
+        let _ = tx.send(job.id.clone());
+    });
+    Ok(())
 }
 
 fn claim_daemon(root: &Path) -> Result<PathBuf, String> {
@@ -629,8 +784,15 @@ fn claim_daemon(root: &Path) -> Result<PathBuf, String> {
         }
         let _ = fs::remove_file(&pid_path);
     }
-    fs::write(&pid_path, format!("{}\n", std::process::id()))
-        .map_err(|e| format!("Local Control: daemon.pid nicht schreibbar: {e}"))?;
+    fs::write(
+        &pid_path,
+        format!(
+            "{}
+",
+            std::process::id()
+        ),
+    )
+    .map_err(|e| format!("Local Control: daemon.pid nicht schreibbar: {e}"))?;
     Ok(pid_path)
 }
 
@@ -638,15 +800,27 @@ pub fn run_daemon() -> Result<(), String> {
     let root = control_root()?;
     ensure_dirs(&root)?;
     let pid_path = claim_daemon(&root)?;
-    append_feed(&root, &format!("DAEMON_START pid={}", std::process::id()))?;
+    let max_workers = configured_max_workers();
+    append_feed(
+        &root,
+        &format!(
+            "DAEMON_START pid={} workers={max_workers}",
+            std::process::id()
+        ),
+    )?;
 
+    let (tx, rx) = mpsc::channel::<String>();
+    let mut active: HashMap<String, ActiveJob> = HashMap::new();
     let mut last_completed: Option<String> = None;
     let mut last_idle_feed = Instant::now()
         .checked_sub(Duration::from_secs(IDLE_FEED_HEARTBEAT_SECS))
         .unwrap_or_else(Instant::now);
 
     loop {
-        write_state(&root, "idle", None, last_completed.as_deref())?;
+        while let Ok(job_id) = rx.try_recv() {
+            active.remove(&job_id);
+            last_completed = Some(job_id);
+        }
 
         let mut jobs: Vec<PathBuf> = fs::read_dir(root.join("inbox"))
             .map_err(|e| format!("Local Control: Inbox nicht lesbar: {e}"))?
@@ -655,37 +829,104 @@ pub fn run_daemon() -> Result<(), String> {
             .collect();
         jobs.sort();
 
-        if let Some(job_path) = jobs.first() {
-            match process_job_file(&root, job_path) {
-                Ok(id) => last_completed = Some(id),
-                Err(e) => {
-                    let _ = append_feed(&root, &format!("ERROR {e}"));
-                    if let Some(name) = job_path.file_name() {
-                        let failed = root.join("outbox").join(name);
-                        let _ = fs::write(
-                            failed,
-                            serde_json::to_vec_pretty(&serde_json::json!({
-                                "status": "failed",
-                                "error": e,
-                                "finishedAt": now()
-                            }))
-                            .unwrap_or_default(),
-                        );
-                    }
+        let mut started_any = false;
+        if active.len() < max_workers {
+            for job_path in jobs {
+                if active.len() >= max_workers {
+                    break;
                 }
+                let raw = match fs::read_to_string(&job_path) {
+                    Ok(raw) => raw,
+                    Err(e) => {
+                        let _ = append_feed(&root, &format!("ERROR inbox-read {e}"));
+                        continue;
+                    }
+                };
+                let job: LocalControlJob = match serde_json::from_str(&raw) {
+                    Ok(job) => job,
+                    Err(e) => {
+                        let _ = append_feed(&root, &format!("ERROR invalid-job-json {e}"));
+                        archive_inbox_job(&root, &job_path);
+                        continue;
+                    }
+                };
+
+                if validate_job_id(&job.id).is_err() || validate_job_id(&job.lane_id).is_err() {
+                    let _ = write_terminal_result(
+                        &root,
+                        &job,
+                        "failed",
+                        Some("Local Control: ungueltige Job- oder Lane-ID.".to_string()),
+                    );
+                    archive_inbox_job(&root, &job_path);
+                    continue;
+                }
+
+                let key = effective_dedupe_key(&job);
+                if active.values().any(|entry| entry.dedupe_key == key) {
+                    let _ = write_terminal_result(
+                        &root,
+                        &job,
+                        "duplicate",
+                        Some("Local Control: identischer Job laeuft bereits.".to_string()),
+                    );
+                    let _ = append_feed(
+                        &root,
+                        &format!("DEDUP lane={} job={} key={}", job.lane_id, job.id, key),
+                    );
+                    archive_inbox_job(&root, &job_path);
+                    continue;
+                }
+
+                let cwd = cwd_key(&job.cwd);
+                if active
+                    .values()
+                    .any(|entry| jobs_conflict(&job, &cwd, entry))
+                {
+                    continue;
+                }
+
+                claim_and_spawn(&root, &job_path, job.clone(), tx.clone())?;
+                active.insert(
+                    job.id.clone(),
+                    ActiveJob {
+                        job,
+                        cwd_key: cwd,
+                        dedupe_key: key,
+                        started_at: now(),
+                    },
+                );
+                started_any = true;
             }
-            continue;
         }
 
-        if last_idle_feed.elapsed() >= Duration::from_secs(IDLE_FEED_HEARTBEAT_SECS) {
-            append_feed(&root, "HEARTBEAT status=idle")?;
+        let current = active.keys().next().map(String::as_str);
+        write_state(
+            &root,
+            if active.is_empty() { "idle" } else { "busy" },
+            current,
+            last_completed.as_deref(),
+        )?;
+        write_lane_registry(&root, &active)?;
+
+        if active.is_empty()
+            && last_idle_feed.elapsed() >= Duration::from_secs(IDLE_FEED_HEARTBEAT_SECS)
+        {
+            append_feed(
+                &root,
+                &format!("HEARTBEAT status=idle workers={max_workers}"),
+            )?;
             last_idle_feed = Instant::now();
         }
-        thread::sleep(Duration::from_millis(DAEMON_POLL_MS));
 
         if !pid_path.exists() {
             return Err("Local Control: daemon.pid wurde entfernt; Daemon stoppt.".to_string());
         }
+        thread::sleep(Duration::from_millis(if started_any {
+            50
+        } else {
+            DAEMON_POLL_MS
+        }));
     }
 }
 
@@ -702,6 +943,10 @@ mod tests {
             mode: mode.to_string(),
             timeout_seconds: 30,
             require_clean_git: false,
+            lane_id: "test".to_string(),
+            project_id: Some("test-project".to_string()),
+            resource_locks: Vec::new(),
+            dedupe_key: None,
         }
     }
 
@@ -733,5 +978,52 @@ mod tests {
     fn invalid_job_id_is_rejected() {
         assert!(validate_job_id("../escape").is_err());
         assert!(validate_job_id("safe-job_123").is_ok());
+    }
+
+    #[test]
+    fn workspace_writer_conflicts_on_same_worktree() {
+        let mut active_job = job("git", &["status"], "workspace_write");
+        active_job.lane_id = "lane-a".to_string();
+        let active = ActiveJob {
+            cwd_key: "/tmp/repo".to_string(),
+            dedupe_key: "a".to_string(),
+            started_at: now(),
+            job: active_job,
+        };
+        let mut candidate = job("git", &["status"], "read_only");
+        candidate.lane_id = "lane-b".to_string();
+        assert!(jobs_conflict(&candidate, "/tmp/repo", &active));
+    }
+
+    #[test]
+    fn read_only_jobs_can_share_worktree_when_lanes_differ() {
+        let mut active_job = job("git", &["status"], "read_only");
+        active_job.lane_id = "lane-a".to_string();
+        let active = ActiveJob {
+            cwd_key: "/tmp/repo".to_string(),
+            dedupe_key: "a".to_string(),
+            started_at: now(),
+            job: active_job,
+        };
+        let mut candidate = job("git", &["log", "-1"], "read_only");
+        candidate.lane_id = "lane-b".to_string();
+        assert!(!jobs_conflict(&candidate, "/tmp/repo", &active));
+    }
+
+    #[test]
+    fn resource_lock_blocks_same_blender_port() {
+        let mut active_job = job("python3", &["worker.py"], "workspace_write");
+        active_job.lane_id = "blender-a".to_string();
+        active_job.resource_locks = vec!["blender:9876".to_string()];
+        let active = ActiveJob {
+            cwd_key: "/tmp/a".to_string(),
+            dedupe_key: "a".to_string(),
+            started_at: now(),
+            job: active_job,
+        };
+        let mut candidate = job("python3", &["worker.py"], "workspace_write");
+        candidate.lane_id = "blender-b".to_string();
+        candidate.resource_locks = vec!["blender:9876".to_string()];
+        assert!(jobs_conflict(&candidate, "/tmp/b", &active));
     }
 }
