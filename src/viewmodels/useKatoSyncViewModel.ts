@@ -6,7 +6,13 @@ import {
   chooseFolders,
   chooseRepoFolder,
   checkCodexTask,
+  cancelProviderLogin,
+  connectProvider,
   dirExists,
+  disconnectProvider,
+  discoverLocalProviders,
+  listenProviderLoginUrls,
+  saveLocalProviderKey,
   listenCodexEvents,
   listenSyncEvents,
   NO_PROJECT_ID,
@@ -19,6 +25,7 @@ import {
   getLaunchAgentStatus,
   getLocalControlSnapshot,
   getMcpConnectorTokenStatus,
+  getProviderStatuses,
   getSupabaseSession,
   installLaunchAgent,
   loadActionPlans,
@@ -43,12 +50,23 @@ import {
   scanProject,
   testConnection,
   testLibrary,
+  testProvider,
   updateActionPlanStatus,
   updateActionTaskStatus,
   updateBriefingStatus,
   archiveBriefing,
   deleteBriefing
 } from "../repositories/katoSyncRepository";
+import {
+  mergeProviderStatus,
+  moveProvider,
+  normalizeProviderPriority,
+  providersDueForRecheck,
+  providerTransitions,
+  validateLocalEndpointInput
+} from "../lib/providerPolicy";
+import { defaultConfig } from "../lib/defaults";
+import { modeForStep } from "../lib/workspaceMode";
 import type { Notice } from "../components/Primitives";
 import type {
   ActionPlan,
@@ -63,6 +81,12 @@ import type {
   KeyStatus,
   LaunchAgentStatus,
   LocalControlMonitorSnapshot,
+  DiscoveredLocalProvider,
+  LocalProviderConfig,
+  ProviderAction,
+  ProviderId,
+  ProviderStatus,
+  ProviderTransition,
   ScanSummary,
   SupabaseSessionStatus,
   SyncReport
@@ -96,7 +120,14 @@ export type StepId =
   | "projectBoard"
   | "briefings"
   | "settings"
-  | "logs";
+  | "logs"
+  // Agent-Sync-Workspace (eigener Navigationsbaum, siehe lib/workspaceMode.ts)
+  | "agentDashboard"
+  | "agentJobs"
+  | "agentProviders"
+  | "agentMonitor"
+  | "agentHistory"
+  | "agentSettings";
 
 // Rate-Limits deduplizieren: pro Kategorie NUR ein Eintrag (knappster Rest = aktuellster Stand).
 // Sonst haengt der Sync pro hochgeladener Datei denselben Eintrag mit fallendem Rest an (9/10, 8/10 …).
@@ -161,6 +192,17 @@ export function useKatoSyncViewModel() {
   const [briefings, setBriefings] = useState<Briefing[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [providerStatuses, setProviderStatuses] = useState<ProviderStatus[]>([]);
+  const [providerHistory, setProviderHistory] = useState<ProviderTransition[]>([]);
+  const [providerBusy, setProviderBusy] = useState<Partial<Record<ProviderId, ProviderAction>>>({});
+  const [providerLoginUrls, setProviderLoginUrls] = useState<Partial<Record<ProviderId, string>>>({});
+  // Entwurf des lokalen Endpunkts: wird erst mit "Speichern & testen" persistiert.
+  const [localProviderDraft, setLocalProviderDraft] = useState<LocalProviderConfig | null>(null);
+  const [localKeyInput, setLocalKeyInput] = useState("");
+  const [localKeyError, setLocalKeyError] = useState<string | null>(null);
+  const [discoveredLocal, setDiscoveredLocal] = useState<DiscoveredLocalProvider[] | null>(null);
+  const providerStatusesRef = useRef<ProviderStatus[]>([]);
+  const providerSmokeCheckedRef = useRef(false);
   // Projekt-Board
   const [boardSelection, setBoardSelection] = useState<string[]>([]);
   const [boardOrder, setBoardOrder] = useState<string[]>([]);
@@ -175,6 +217,15 @@ export function useKatoSyncViewModel() {
   // Letzte in die Cloud gesicherte library_id -> Push beim Speichern nur, wenn sie sich aenderte.
 
   const show = useCallback((kind: Notice["kind"], text: string) => setNotice({ kind, text }), []);
+
+  const applyProviderSnapshot = useCallback((next: ProviderStatus[]) => {
+    const transitions = providerTransitions(providerStatusesRef.current, next);
+    providerStatusesRef.current = next;
+    setProviderStatuses(next);
+    if (transitions.length) {
+      setProviderHistory((current) => [...current, ...transitions].slice(-20));
+    }
+  }, []);
 
   const boot = useCallback(async () => {
     try {
@@ -196,10 +247,15 @@ export function useKatoSyncViewModel() {
       setSessionStatus(loadedSession);
       setActionPlans(loadedPlans);
       setBriefings(loadedBriefings);
+      try {
+        applyProviderSnapshot(await getProviderStatuses(loadedConfig, false));
+      } catch {
+        // Der restliche App-Start bleibt nutzbar; Agent Sync zeigt den Fehler beim manuellen Test.
+      }
     } catch (error) {
       show("error", getMessage(error));
     }
-  }, [show]);
+  }, [applyProviderSnapshot, show]);
 
   useEffect(() => {
     void boot();
@@ -215,9 +271,11 @@ export function useKatoSyncViewModel() {
     }
   }, []);
 
-  // Nur auf der Aktivitaeten-Seite pollen: lokal, billig und ohne GitHub/LLM-Traffic.
+  // Nur im Agent-Sync-Workspace pollen (Readiness-Leiste braucht ueberall frische Heartbeats):
+  // lokal, billig und ohne GitHub/LLM-Traffic.
+  const pollLocalControl = modeForStep(activeStep) === "agentSync";
   useEffect(() => {
-    if (activeStep !== "logs") return undefined;
+    if (!pollLocalControl) return undefined;
     let active = true;
     const refresh = async () => {
       if (!active) return;
@@ -229,7 +287,7 @@ export function useKatoSyncViewModel() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [activeStep, refreshLocalControlMonitor]);
+  }, [pollLocalControl, refreshLocalControlMonitor]);
 
   // Live-Feed: gestreamte Codex-Events sammeln (letzte 300).
   useEffect(() => {
@@ -413,6 +471,261 @@ export function useKatoSyncViewModel() {
       setBusy(null);
     }
   }, [config, show]);
+
+  // ── Agent Sync: Provider-Manager ────────────────────────────────────────────────────
+  // Provider-Aktionen haben einen eigenen Busy-Zustand pro Karte: ein offener Browser-Login
+  // (bis 5 Min.) darf nicht die gesamte App blockieren.
+  const setProviderAction = useCallback((provider: ProviderId, action: ProviderAction | null) => {
+    setProviderBusy((current) => {
+      const next = { ...current };
+      if (action) next[provider] = action;
+      else delete next[provider];
+      return next;
+    });
+  }, []);
+
+  const mergeProvider = useCallback(
+    (status: ProviderStatus, priority: ProviderId[]) => {
+      applyProviderSnapshot(mergeProviderStatus(providerStatusesRef.current, status, priority));
+    },
+    [applyProviderSnapshot]
+  );
+
+  // Speichert NUR Provider-Felder auf die Platten-Config. Andere ungespeicherte Formular-
+  // Aenderungen bleiben unangetastet und weiterhin "dirty".
+  const persistProviderFields = useCallback(
+    async (patch: Partial<Pick<AppConfig, "providerPriority" | "disabledProviders" | "localProvider">>) => {
+      const onDisk = await loadConfig();
+      const saved = await saveConfig({ ...onDisk, ...patch });
+      setConfig((current) =>
+        current
+          ? {
+              ...current,
+              providerPriority: saved.providerPriority,
+              disabledProviders: saved.disabledProviders,
+              localProvider: saved.localProvider
+            }
+          : saved
+      );
+      return saved;
+    },
+    []
+  );
+
+  const handleRefreshProviders = useCallback(
+    async (runSmoke = true) => {
+      if (!config) return;
+      const cards: ProviderId[] = ["codex", "claude", "local"];
+      cards.forEach((provider) => setProviderAction(provider, "test"));
+      try {
+        applyProviderSnapshot(await getProviderStatuses(config, runSmoke));
+        if (runSmoke) providerSmokeCheckedRef.current = true;
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        cards.forEach((provider) => setProviderAction(provider, null));
+      }
+    },
+    [applyProviderSnapshot, config, setProviderAction, show]
+  );
+
+  const handleConnectProvider = useCallback(
+    async (provider: ProviderId, forceLogin = false) => {
+      if (!config || provider === "local_control" || providerBusy[provider]) return;
+      const draft = localProviderDraft ?? config.localProvider;
+      if (provider === "local" && validateLocalEndpointInput(draft.baseUrl)) return;
+      setProviderAction(provider, "connect");
+      setProviderLoginUrls((current) => ({ ...current, [provider]: undefined }));
+      try {
+        const saved = await persistProviderFields({
+          disabledProviders: config.disabledProviders.filter((entry) => entry !== provider),
+          ...(provider === "local" ? { localProvider: draft } : {})
+        });
+        if (provider === "local") setLocalProviderDraft(null);
+        const status =
+          provider === "local"
+            ? await testProvider(saved, provider)
+            : await connectProvider(provider, forceLogin);
+        mergeProvider(status, saved.providerPriority);
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setProviderAction(provider, null);
+        setProviderLoginUrls((current) => ({ ...current, [provider]: undefined }));
+      }
+    },
+    [config, localProviderDraft, mergeProvider, persistProviderFields, providerBusy, setProviderAction, show]
+  );
+
+  const handleCancelProviderLogin = useCallback(
+    async (provider: ProviderId) => {
+      try {
+        await cancelProviderLogin(provider);
+      } catch (error) {
+        show("error", getMessage(error));
+      }
+    },
+    [show]
+  );
+
+  const testProviderSilently = useCallback(
+    async (provider: ProviderId, source: AppConfig) => {
+      setProviderAction(provider, "test");
+      try {
+        mergeProvider(await testProvider(source, provider), source.providerPriority);
+      } finally {
+        setProviderAction(provider, null);
+      }
+    },
+    [mergeProvider, setProviderAction]
+  );
+
+  const handleTestProvider = useCallback(
+    async (provider: ProviderId) => {
+      if (!config || providerBusy[provider]) return;
+      try {
+        await testProviderSilently(provider, config);
+      } catch (error) {
+        show("error", getMessage(error));
+      }
+    },
+    [config, providerBusy, show, testProviderSilently]
+  );
+
+  const handleDisconnectProvider = useCallback(
+    async (provider: ProviderId) => {
+      if (!config || provider === "local_control" || providerBusy[provider]) return;
+      setProviderAction(provider, "disconnect");
+      try {
+        // Nur KatoSync-eigene Secrets/Metadaten; die CLI-Anmeldung bleibt beim Provider.
+        await disconnectProvider(provider);
+        const saved = await persistProviderFields({
+          disabledProviders: Array.from(new Set([...config.disabledProviders, provider]))
+        });
+        const status = (await getProviderStatuses(saved, false)).find((entry) => entry.provider === provider);
+        if (status) mergeProvider(status, saved.providerPriority);
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setProviderAction(provider, null);
+      }
+    },
+    [config, mergeProvider, persistProviderFields, providerBusy, setProviderAction, show]
+  );
+
+  const handleMoveProvider = useCallback(
+    async (provider: ProviderId, direction: "up" | "down") => {
+      if (!config) return;
+      const next = moveProvider(config.providerPriority, provider, direction);
+      if (next.join() === normalizeProviderPriority(config.providerPriority).join()) return;
+      setConfig((current) => (current ? { ...current, providerPriority: next } : current));
+      try {
+        await persistProviderFields({ providerPriority: next });
+      } catch (error) {
+        show("error", getMessage(error));
+      }
+    },
+    [config, persistProviderFields, show]
+  );
+
+  const updateLocalProviderDraft = useCallback(
+    (patch: Partial<LocalProviderConfig>) => {
+      setLocalProviderDraft((current) => {
+        const base = current ?? config?.localProvider ?? defaultConfig.localProvider;
+        return { ...base, ...patch };
+      });
+    },
+    [config]
+  );
+
+  const handleDiscoverLocalProviders = useCallback(async () => {
+    setProviderAction("local", "test");
+    try {
+      const found = await discoverLocalProviders();
+      setDiscoveredLocal(found);
+      const first = found[0];
+      if (first && !(localProviderDraft ?? config?.localProvider)?.baseUrl) {
+        updateLocalProviderDraft({ kind: first.kind, baseUrl: first.baseUrl, model: first.models[0] ?? "" });
+      }
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setProviderAction("local", null);
+    }
+  }, [config, localProviderDraft, setProviderAction, show, updateLocalProviderDraft]);
+
+  const handleSaveLocalProviderKey = useCallback(async () => {
+    if (!config || providerBusy.local) return;
+    const draft = localProviderDraft ?? config.localProvider;
+    setLocalKeyError(null);
+    setProviderAction("local", "key");
+    try {
+      await saveLocalProviderKey(draft.baseUrl, localKeyInput);
+      setLocalKeyInput("");
+      const saved = await persistProviderFields({ localProvider: draft });
+      setLocalProviderDraft(null);
+      mergeProvider(await testProvider(saved, "local"), saved.providerPriority);
+    } catch (error) {
+      setLocalKeyInput("");
+      setLocalKeyError(getMessage(error));
+    } finally {
+      setProviderAction("local", null);
+    }
+  }, [config, localKeyInput, localProviderDraft, mergeProvider, persistProviderFields, providerBusy.local, setProviderAction]);
+
+  const handleRemoveLocalProviderKey = useCallback(async () => {
+    if (!config || providerBusy.local) return;
+    setProviderAction("local", "key");
+    try {
+      await disconnectProvider("local");
+      mergeProvider(await testProvider(config, "local"), config.providerPriority);
+    } catch (error) {
+      setLocalKeyError(getMessage(error));
+    } finally {
+      setProviderAction("local", null);
+    }
+  }, [config, mergeProvider, providerBusy.local, setProviderAction]);
+
+  // Einmal pro App-Sitzung beim Oeffnen des Agent-Sync-Workspace real pruefen (Auth + READY).
+  useEffect(() => {
+    if (modeForStep(activeStep) !== "agentSync" || providerSmokeCheckedRef.current || !config) return;
+    providerSmokeCheckedRef.current = true;
+    void handleRefreshProviders(true);
+  }, [activeStep, config, handleRefreshProviders]);
+
+  // Fallback-Link, falls der Browser beim offiziellen Login nicht automatisch aufgeht.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void listenProviderLoginUrls((event) => {
+      setProviderLoginUrls((current) => ({ ...current, [event.provider]: event.url }));
+    }).then((un) => {
+      if (disposed) un();
+      else unlisten = un;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Sparsamer Auto-Re-Check: nur Provider mit Kontingent-/Kapazitaets-/Erreichbarkeitsproblem,
+  // hoechstens alle 15 Minuten, nur solange die App offen ist.
+  const configRef = useRef<AppConfig | null>(null);
+  configRef.current = config;
+  const providerBusyRef = useRef(providerBusy);
+  providerBusyRef.current = providerBusy;
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const source = configRef.current;
+      if (!source) return;
+      for (const provider of providersDueForRecheck(providerStatusesRef.current)) {
+        if (providerBusyRef.current[provider]) continue;
+        void testProviderSilently(provider, source).catch(() => undefined);
+      }
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [testProviderSilently]);
 
   const saveDraftKeyIfNeeded = useCallback(async () => {
     const draft = keyInput.trim();
@@ -1372,6 +1685,16 @@ export function useKatoSyncViewModel() {
     mcpTokenInput,
     mcpTokenStatus,
     notice,
+    providerBusy,
+    providerHistory,
+    providerLoginUrls,
+    providerStatuses,
+    localProviderDraft: localProviderDraft ?? config?.localProvider ?? null,
+    localKeyInput,
+    localKeyError,
+    discoveredLocal,
+    setLocalKeyInput,
+    updateLocalProviderDraft,
     generatedToken,
     codexRun,
     codexEvents,
@@ -1384,10 +1707,12 @@ export function useKatoSyncViewModel() {
     handleCheckCompletions,
     handleCheckTaskCompletion,
     handleCopyToken,
+    handleConnectProvider,
     handleDeferTask,
     handleDeleteKey,
     handleMarkTaskDone,
     handleDeleteMcpConnectorToken,
+    handleDisconnectProvider,
     handleForgetProjectRepo,
     handleChooseReferenceRoot,
     handleGenerateConnectorToken,
@@ -1399,6 +1724,11 @@ export function useKatoSyncViewModel() {
     handleStartBoardQueue,
     handleStopBoardQueue,
     handleLogin,
+    handleMoveProvider,
+    handleCancelProviderLogin,
+    handleDiscoverLocalProviders,
+    handleSaveLocalProviderKey,
+    handleRemoveLocalProviderKey,
     handleRegister,
     logoutFlow,
     requestLogout,
@@ -1433,6 +1763,8 @@ export function useKatoSyncViewModel() {
     handleRunCodexForBriefing,
     handleTestConnection,
     handleTestLibrary,
+    handleTestProvider,
+    handleRefreshProviders,
     openOutputDir,
     persist,
     setActiveStep,

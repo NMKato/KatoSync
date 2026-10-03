@@ -26,6 +26,7 @@ use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
 mod local_control;
+mod provider_manager;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -92,6 +93,15 @@ pub struct AppConfig {
     // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectExternalId -> Pfad).
     #[serde(default)]
     project_repos: std::collections::HashMap<String, String>,
+    // Agent Sync: Reihenfolge und KatoSync-seitige Aktivierung. Provider-eigene Credentials
+    // gehoeren weiterhin ausschliesslich der jeweiligen CLI.
+    #[serde(default = "default_provider_priority")]
+    provider_priority: Vec<provider_manager::ProviderId>,
+    #[serde(default)]
+    disabled_providers: Vec<provider_manager::ProviderId>,
+    // Nur nicht-geheime Endpoint-Metadaten; API-Keys werden in diesem Slice nicht angenommen.
+    #[serde(default)]
+    local_provider: provider_manager::LocalProviderConfig,
 }
 
 fn default_true() -> bool {
@@ -308,6 +318,13 @@ pub fn run() {
             local_control_snapshot,
             open_output_dir,
             resume_runner_session,
+            provider_statuses,
+            connect_provider,
+            cancel_provider_login,
+            disconnect_provider,
+            save_local_provider_key,
+            discover_local_providers,
+            test_provider,
             quit_app
         ])
         .setup(|app| {
@@ -341,6 +358,81 @@ fn local_control_snapshot() -> Result<local_control::LocalControlMonitorSnapshot
 #[tauri::command]
 fn load_config() -> Result<AppConfig, String> {
     load_config_inner().map_err(error_to_string)
+}
+
+/// Liefert normalisierte, redigierte Provider-Zustaende. READY-Tests laufen nur explizit.
+#[tauri::command]
+async fn provider_statuses(
+    settings: provider_manager::ProviderSettings,
+    run_smoke: bool,
+) -> Vec<provider_manager::ProviderStatus> {
+    provider_manager::statuses(&settings, run_smoke).await
+}
+
+/// Startet ausschliesslich den offiziellen Provider-Login (Browser) und prueft danach Auth + READY.
+/// Oeffnet sich der Browser nicht, wird nur eine offizielle HTTPS-Login-URL als Event gemeldet.
+#[tauri::command]
+async fn connect_provider(
+    provider: provider_manager::ProviderId,
+    force_login: bool,
+    app: AppHandle,
+) -> Result<provider_manager::ProviderStatus, String> {
+    if !matches!(
+        provider,
+        provider_manager::ProviderId::Codex | provider_manager::ProviderId::Claude
+    ) {
+        return Err("Nur Codex und Claude Code nutzen einen Browser-Login.".to_string());
+    }
+    let status = provider_manager::connect(provider, force_login, move |url| {
+        let _ = app.emit(
+            "provider-login-url",
+            serde_json::json!({ "provider": provider, "url": url }),
+        );
+    })
+    .await;
+    Ok(status)
+}
+
+/// Bricht einen laufenden, von KatoSync gestarteten Login-Prozess ab.
+#[tauri::command]
+fn cancel_provider_login(provider: provider_manager::ProviderId) -> bool {
+    provider_manager::cancel_login(provider)
+}
+
+/// Trennt einen Provider KatoSync-seitig. Loescht nur KatoSync-eigene Secrets (lokaler
+/// Endpoint-API-Key); CLI-Anmeldungen von Codex/Claude bleiben unangetastet.
+#[tauri::command]
+fn disconnect_provider(
+    provider: provider_manager::ProviderId,
+) -> Result<(), provider_manager::ProviderReason> {
+    provider_manager::disconnect(provider)
+}
+
+/// Speichert einen optionalen Endpoint-API-Key im OS-Schluesselbund (nie in der Config).
+#[tauri::command]
+fn save_local_provider_key(
+    base_url: String,
+    api_key: String,
+) -> Result<(), provider_manager::ProviderReason> {
+    let mut api_key = api_key;
+    let result = provider_manager::save_local_key(&base_url, &api_key);
+    zeroize::Zeroize::zeroize(&mut api_key);
+    result
+}
+
+/// Sucht ausschliesslich auf Loopback nach Ollama/LM Studio auf Standardports.
+#[tauri::command]
+async fn discover_local_providers() -> Vec<provider_manager::DiscoveredLocalProvider> {
+    provider_manager::discover_local().await
+}
+
+/// Fuehrt einen begrenzten Einzeltest aus, ohne einen Login zu starten.
+#[tauri::command]
+async fn test_provider(
+    provider: provider_manager::ProviderId,
+    settings: provider_manager::ProviderSettings,
+) -> provider_manager::ProviderStatus {
+    provider_manager::test_provider(provider, &settings).await
 }
 
 #[tauri::command]
@@ -4323,6 +4415,43 @@ fn normalize_config(config: &mut AppConfig) {
     if !config.codex_model.trim().is_empty() {
         config.codex_model = String::new();
     }
+    // Fehlende/alte Reihenfolgen selbstheilend auf den sicheren Standard ergaenzen.
+    let mut priority = Vec::new();
+    for provider in config
+        .provider_priority
+        .iter()
+        .copied()
+        .chain(default_provider_priority())
+    {
+        if !priority.contains(&provider) {
+            priority.push(provider);
+        }
+    }
+    // Der deterministische Local-Control-Pfad bleibt immer letzter Fallback.
+    priority.retain(|provider| *provider != provider_manager::ProviderId::LocalControl);
+    priority.push(provider_manager::ProviderId::LocalControl);
+    config.provider_priority = priority;
+    config
+        .disabled_providers
+        .retain(|provider| *provider != provider_manager::ProviderId::LocalControl);
+    config
+        .disabled_providers
+        .sort_by_key(|provider| match provider {
+            provider_manager::ProviderId::Codex => 0,
+            provider_manager::ProviderId::Claude => 1,
+            provider_manager::ProviderId::Local => 2,
+            provider_manager::ProviderId::LocalControl => 3,
+        });
+    config.disabled_providers.dedup();
+}
+
+fn default_provider_priority() -> Vec<provider_manager::ProviderId> {
+    vec![
+        provider_manager::ProviderId::Codex,
+        provider_manager::ProviderId::Claude,
+        provider_manager::ProviderId::Local,
+        provider_manager::ProviderId::LocalControl,
+    ]
 }
 
 fn default_config() -> Result<AppConfig> {
@@ -4372,6 +4501,9 @@ fn default_config() -> Result<AppConfig> {
         runner_connector_mode: false,
         reference_root: String::new(),
         project_repos: std::collections::HashMap::new(),
+        provider_priority: default_provider_priority(),
+        disabled_providers: Vec::new(),
+        local_provider: provider_manager::LocalProviderConfig::default(),
     })
 }
 
