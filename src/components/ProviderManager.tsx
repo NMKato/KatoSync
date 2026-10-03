@@ -41,14 +41,14 @@ type ViewModel = ReturnType<typeof useKatoSyncViewModel>;
 
 const cardProviders: ProviderId[] = ["codex", "claude", "local"];
 
-const providerIcons = {
+export const providerIcons = {
   codex: Bot,
   claude: Cloud,
   local: Cpu,
   local_control: ShieldCheck
 } as const;
 
-const fallbackLabels: Record<ProviderId, string> = {
+export const fallbackLabels: Record<ProviderId, string> = {
   codex: "OpenAI Codex",
   claude: "Anthropic Claude Code",
   local: "Local Model",

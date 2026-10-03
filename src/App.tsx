@@ -17,7 +17,9 @@ import {
   EyeOff,
   FileCheck2,
   FileText,
+  History,
   FolderOpen,
+  Gauge,
   ChevronDown,
   ChevronUp,
   CheckSquare,
@@ -43,6 +45,7 @@ import {
   TerminalSquare,
   Trash2,
   UploadCloud,
+  Workflow,
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -60,6 +63,14 @@ import {
 import { RichMarkdown } from "./components/RichMarkdown";
 import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
 import { ProviderManager } from "./components/ProviderManager";
+import { ModeGateway, ModeSwitch } from "./components/ModeGateway";
+import {
+  AgentReadinessStrip,
+  AgentSyncDashboard,
+  AgentSyncHistory,
+  AgentSyncJobs,
+  useLaneHandoffs
+} from "./components/AgentSyncWorkspace";
 import { Bars, Donut, KpiTiles, StatusList, Timeline } from "./components/DiagramComponents";
 import {
   codexTimeline,
@@ -77,7 +88,14 @@ import {
 import { historyBars, loadRunHistory, recordRun, type RunRecord } from "./lib/runHistory";
 import { buildSkillPrompt, knownProjectIds, mcpEndpoint, SKILL_CONTRACT_VERSION } from "./lib/skillTemplate";
 import { copyText } from "./lib/clipboard";
-import { currentProviderOwner, displayTone, normalizeProviderPriority, providerDisplayState } from "./lib/providerPolicy";
+import {
+  defaultStepForMode,
+  modeForStep,
+  readRememberedMode,
+  rememberMode,
+  stepForMode,
+  type WorkspaceMode
+} from "./lib/workspaceMode";
 import { briefingToMarkdown } from "./lib/briefingExport";
 import { safeHttpUrl } from "./lib/url";
 import { useT, type Lang, type TFunc, type TKey } from "./i18n";
@@ -91,15 +109,24 @@ import {
 import { NO_PROJECT_ID } from "./repositories/katoSyncRepository";
 import type { ActionPlan, ActionTaskStatus, Briefing, BriefingStatus, FileFinding, Weekday } from "./types";
 
-const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
-  { id: "dashboard", label: "Dashboard", icon: Database },
-  { id: "agentSync", label: "Agent Sync", icon: Bot },
+// Getrennte Navigationsbaeume je Workspace (Root-Gateway waehlt den Modus, siehe lib/workspaceMode.ts).
+const mistralSteps: Array<{ id: StepId; icon: typeof Activity }> = [
+  { id: "dashboard", icon: Database },
   // Konsolidiert: "Action Queue" + "Projekt-Board" -> EIN Aufgaben-Surface (das Board ist die
   // reichere Task-Ansicht mit Ausfuehren/Reihenfolge/Entfernen). Interne id bleibt "projectBoard".
-  { id: "projectBoard", label: "Aufgaben", icon: ClipboardList },
-  { id: "briefings", label: "Briefings", icon: BookOpenText },
-  { id: "settings", label: "Einstellungen", icon: Settings },
-  { id: "logs", label: "Aktivitäten", icon: TerminalSquare }
+  { id: "projectBoard", icon: ClipboardList },
+  { id: "briefings", icon: BookOpenText },
+  { id: "settings", icon: Settings },
+  { id: "logs", icon: TerminalSquare }
+];
+
+const agentSyncSteps: Array<{ id: StepId; icon: typeof Activity }> = [
+  { id: "agentDashboard", icon: Gauge },
+  { id: "agentJobs", icon: Workflow },
+  { id: "agentProviders", icon: Bot },
+  { id: "agentMonitor", icon: Activity },
+  { id: "agentHistory", icon: History },
+  { id: "agentSettings", icon: Settings }
 ];
 
 const weekdays = Object.keys(weekdayLabels) as Weekday[];
@@ -116,12 +143,17 @@ const sectionByStep: Record<StepId, string> = {
   rules: "section-rules",
   schedule: "section-schedule",
   dashboard: "section-cockpit",
-  agentSync: "section-agent-sync",
   actionQueue: "section-action-queue",
   projectBoard: "section-project-board",
   briefings: "section-briefings",
   settings: "section-api",
-  logs: "section-activities"
+  logs: "section-activities",
+  agentDashboard: "section-agent-dashboard",
+  agentJobs: "section-agent-jobs",
+  agentProviders: "section-agent-sync",
+  agentMonitor: "section-agent-monitor",
+  agentHistory: "section-agent-history",
+  agentSettings: "section-agent-settings"
 };
 
 const onboardingSteps: Array<{
@@ -185,8 +217,8 @@ function toVisibleStep(step: StepId): StepId {
 function pageCopy(step: StepId, t: TFunc) {
   const visible = toVisibleStep(step);
   const key =
+    modeForStep(visible) === "agentSync" ||
     visible === "actionQueue" ||
-    visible === "agentSync" ||
     visible === "projectBoard" ||
     visible === "briefings" ||
     visible === "settings" ||
@@ -229,7 +261,12 @@ export default function App() {
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [onboardingPosition, setOnboardingPosition] = useState<OnboardingPosition | null>(null);
   const [quitConfirmOpen, setQuitConfirmOpen] = useState(false);
-  const [activityView, setActivityView] = useState<"monitor" | "history">("monitor");
+  // Root-Modus: pro Sitzung erst ueber das Gateway gewaehlt; der zuletzt genutzte Modus ist lokal
+  // gemerkt und im Gateway vorausgewaehlt.
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | null>(null);
+  const [rememberedMode, setRememberedMode] = useState<WorkspaceMode | null>(() => readRememberedMode(localStorage));
+  const lastStepByMode = useRef<Partial<Record<WorkspaceMode, StepId>>>({});
+  const laneHandoffs = useLaneHandoffs(vm);
   const [licenseOpen, setLicenseOpen] = useState(
     () => localStorage.getItem(acceptedLicenseKey) !== licenseAgreement.version
   );
@@ -241,6 +278,7 @@ export default function App() {
   const activities = buildActivities(vm, t);
   const visibleStep = toVisibleStep(vm.activeStep);
   const page = pageCopy(visibleStep, t);
+  const isAgentSync = workspaceMode === "agentSync";
   const issueCount = getIssueCount(vm);
   const hints = buildHints(vm, t);
   const hintSignature = useMemo(() => buildHintSignature(hints), [hints]);
@@ -298,10 +336,12 @@ export default function App() {
   }, []);
 
   // Onboarding-Pflicht: nach Splash + Login + Nutzungsbedingungen, solange Setup < 100 %.
+  // Die Tour gehoert ausschliesslich zum Mistral Mode (Mistral-Key, Library, Uploadplan).
   useEffect(() => {
     if (!config || showSplash) return;
     if (!vm.sessionStatus.loggedIn) return;
     if (licenseOpen) return;
+    if (workspaceMode !== "mistral") return;
     const firstOpenStep = getNextOnboardingIndex(0);
     if (firstOpenStep === -1) {
       localStorage.setItem(onboardingDoneKey, "true");
@@ -319,8 +359,37 @@ export default function App() {
     onboardingOpen,
     onboardingSnoozed,
     showSplash,
-    vm.sessionStatus.loggedIn
+    vm.sessionStatus.loggedIn,
+    workspaceMode
   ]);
+
+  // Navigation bleibt im aktiven Workspace; die letzte Seite je Modus wird fuer den Wechsel gemerkt.
+  useEffect(() => {
+    if (!workspaceMode) return;
+    if (modeForStep(vm.activeStep) !== workspaceMode) {
+      vm.setActiveStep(stepForMode(vm.activeStep, workspaceMode));
+      return;
+    }
+    lastStepByMode.current[workspaceMode] = vm.activeStep;
+  }, [vm.activeStep, vm.setActiveStep, workspaceMode]);
+
+  const enterMode = (mode: WorkspaceMode) => {
+    rememberMode(localStorage, mode);
+    setRememberedMode(mode);
+    setWorkspaceMode(mode);
+    setHintsOpen(false);
+    if (mode !== "mistral") {
+      setOnboardingOpen(false);
+      setSpotlightId(null);
+      setOnboardingPosition(null);
+    }
+    vm.setActiveStep(lastStepByMode.current[mode] ?? defaultStepForMode(mode));
+  };
+
+  const enterModeAt = (mode: WorkspaceMode, step: StepId) => {
+    lastStepByMode.current[mode] = step;
+    enterMode(mode);
+  };
 
   const acceptLicense = () => {
     localStorage.setItem(acceptedLicenseKey, licenseAgreement.version);
@@ -470,8 +539,37 @@ export default function App() {
     return <LoginGate vm={vm} />;
   }
 
+  const licenseDialog = licenseOpen ? (
+    <LicenseDialog
+      accepted={localStorage.getItem(acceptedLicenseKey) === licenseAgreement.version}
+      checked={licenseChecked}
+      onAccept={acceptLicense}
+      onCheckedChange={setLicenseChecked}
+      onClose={() => {
+        if (localStorage.getItem(acceptedLicenseKey) === licenseAgreement.version) {
+          setLicenseChecked(false);
+          setLicenseOpen(false);
+        }
+      }}
+      onQuit={vm.handleQuitApp}
+    />
+  ) : null;
+
+  if (!workspaceMode) {
+    return (
+      <>
+        <ModeGateway onChoose={enterMode} remembered={rememberedMode} />
+        {licenseDialog}
+        {vm.logoutFlow ? <LogoutDialog vm={vm} /> : null}
+        {vm.cloudPasswordPrompt ? <CloudPasswordDialog vm={vm} /> : null}
+      </>
+    );
+  }
+
+  const navSteps = isAgentSync ? agentSyncSteps : mistralSteps;
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell mode-${workspaceMode}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -479,12 +577,14 @@ export default function App() {
           </div>
           <div className="brand-copy">
             <strong>KatoSync</strong>
-            <span>Project Memory Uploader</span>
+            <span>{isAgentSync ? t("mode.agentSyncTagline") : "Project Memory Uploader"}</span>
           </div>
         </div>
 
-        <nav className="steps">
-          {steps.map((step) => (
+        <ModeSwitch mode={workspaceMode} onChange={enterMode} />
+
+        <nav className="steps" aria-label={isAgentSync ? t("mode.agentSyncNav") : t("mode.mistralNav")}>
+          {navSteps.map((step) => (
             <StepButton
               active={visibleStep === step.id}
               description={t(`nav.${step.id}.desc` as TKey)}
@@ -560,6 +660,9 @@ export default function App() {
             <h1>{page.title}</h1>
             <p>{page.text}</p>
           </div>
+          {isAgentSync ? (
+            <AgentReadinessStrip vm={vm} onNavigate={handleStepSelect} />
+          ) : (
           <div className="setup-strip" aria-label={t("setup.progressAria")}>
             <div className="completion-head">
               <span>{t("setup.title")}</span>
@@ -591,6 +694,7 @@ export default function App() {
               </button>
             ) : null}
           </div>
+          )}
           <div className="top-actions">
             <button
               aria-label={theme === "dark" ? t("topbar.themeLight") : t("topbar.themeDark")}
@@ -699,9 +803,31 @@ export default function App() {
           </div>
         ) : null}
 
-        <section className={`dashboard-grid overview-grid page-${visibleStep}`}>
+        <section className={`dashboard-grid overview-grid page-${visibleStep}${isAgentSync ? " agent-page" : ""}`}>
           {visibleStep === "dashboard" ? <CockpitPanel vm={vm} runHistory={runHistory} /> : null}
-          {visibleStep === "agentSync" ? <ProviderManager vm={vm} /> : null}
+
+          {visibleStep === "agentDashboard" ? (
+            <AgentSyncDashboard vm={vm} handoffs={laneHandoffs} onNavigate={handleStepSelect} />
+          ) : null}
+          {visibleStep === "agentJobs" ? (
+            <AgentSyncJobs vm={vm} onOpenMistralTasks={() => enterModeAt("mistral", "projectBoard")} />
+          ) : null}
+          {visibleStep === "agentProviders" ? <ProviderManager vm={vm} /> : null}
+          {visibleStep === "agentMonitor" ? (
+            <section className="agent-monitor-page" id="section-agent-monitor">
+              <LocalControlLiveMonitor
+                snapshot={vm.localControlMonitor}
+                error={vm.localControlMonitorError}
+                onRefresh={() => void vm.refreshLocalControlMonitor()}
+              />
+            </section>
+          ) : null}
+          {visibleStep === "agentHistory" ? <AgentSyncHistory vm={vm} handoffs={laneHandoffs} /> : null}
+          {visibleStep === "agentSettings" ? (
+            <section className="agent-settings-page" id="section-agent-settings">
+              <CodexBridgePanel vm={vm} />
+            </section>
+          ) : null}
 
           {visibleStep === "settings" ? (
           <Panel className="settings-main-panel" id="section-api" title={t("settings.api.title")} icon={<KeyRound size={18} />}>
@@ -1236,55 +1362,24 @@ export default function App() {
 
           {visibleStep === "logs" ? (
           <Panel id="section-activities" className="logs-panel" title={t("logs.title")} icon={<TerminalSquare size={18} />}>
-            <div className="activity-subtabs" role="tablist" aria-label={t("monitor.tabsAria")}>
-              <button
-                className={activityView === "monitor" ? "briefing-tab active" : "briefing-tab"}
-                onClick={() => setActivityView("monitor")}
-                role="tab"
-                aria-selected={activityView === "monitor"}
-                type="button"
-              >
-                {t("monitor.tab")}
-              </button>
-              <button
-                className={activityView === "history" ? "briefing-tab active" : "briefing-tab"}
-                onClick={() => setActivityView("history")}
-                role="tab"
-                aria-selected={activityView === "history"}
-                type="button"
-              >
-                {t("monitor.historyTab")}
+            <div className="activity-list">
+              {activities.map((item) => (
+                <div className={`activity-item ${item.kind}`} key={item.text}>
+                  <span />
+                  <div>
+                    <strong>{item.title}</strong>
+                    <small>{item.text}</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="button-row">
+              <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleLogs} type="button">
+                {vm.busy === "logs" ? <Loader2 className="spin" size={15} /> : null}
+                {vm.busy === "logs" ? t("logs.loading") : t("logs.load")}
               </button>
             </div>
-
-            {activityView === "monitor" ? (
-              <LocalControlLiveMonitor
-                snapshot={vm.localControlMonitor}
-                error={vm.localControlMonitorError}
-                onRefresh={() => void vm.refreshLocalControlMonitor()}
-              />
-            ) : (
-              <>
-                <div className="activity-list">
-                  {activities.map((item) => (
-                    <div className={`activity-item ${item.kind}`} key={item.text}>
-                      <span />
-                      <div>
-                        <strong>{item.title}</strong>
-                        <small>{item.text}</small>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="button-row">
-                  <button className="secondary" disabled={Boolean(vm.busy)} onClick={vm.handleLogs} type="button">
-                    {vm.busy === "logs" ? <Loader2 className="spin" size={15} /> : null}
-                    {vm.busy === "logs" ? t("logs.loading") : t("logs.load")}
-                  </button>
-                </div>
-                <pre>{vm.logs || t("logs.empty")}</pre>
-              </>
-            )}
+            <pre>{vm.logs || t("logs.empty")}</pre>
           </Panel>
           ) : null}
 
@@ -1326,21 +1421,7 @@ export default function App() {
         />
       ) : null}
 
-      {licenseOpen ? (
-        <LicenseDialog
-          accepted={localStorage.getItem(acceptedLicenseKey) === licenseAgreement.version}
-          checked={licenseChecked}
-          onAccept={acceptLicense}
-          onCheckedChange={setLicenseChecked}
-          onClose={() => {
-            if (localStorage.getItem(acceptedLicenseKey) === licenseAgreement.version) {
-              setLicenseChecked(false);
-              setLicenseOpen(false);
-            }
-          }}
-          onQuit={vm.handleQuitApp}
-        />
-      ) : null}
+      {licenseDialog}
 
       {quitConfirmOpen ? (
         <div
@@ -1557,13 +1638,6 @@ function CockpitPanel({
   const upload = uploadDonut(vm.report, t);
   const scanByCategory = scanBars(vm.scan ?? vm.report?.scan ?? null, t);
   const history = historyBars(runHistory, lang, 7);
-  const providerPriority = normalizeProviderPriority(config.providerPriority);
-  const providerOwner = currentProviderOwner(
-    vm.providerStatuses,
-    providerPriority,
-    codexRunning ? config.codexPreferredRunner : null
-  );
-  const lastProviderTransition = vm.providerHistory[vm.providerHistory.length - 1];
 
   let liveActive = false;
   let liveTitle = t("cockpit.live.idle.title");
@@ -1607,41 +1681,6 @@ function CockpitPanel({
             <span>{next.label}</span>
           </div>
         </div>
-      </div>
-
-      <div className="cockpit-provider-health" aria-label={t("cockpit.providers.aria")}>
-        <div>
-          <Bot size={17} />
-          <strong>{t("cockpit.providers.title")}</strong>
-        </div>
-        <div className="cockpit-provider-pills">
-          {providerPriority.map((provider) => {
-            const status = vm.providerStatuses.find((entry) => entry.provider === provider);
-            const display = providerDisplayState(status, provider, vm.providerBusy[provider] === "connect" && provider !== "local");
-            const stateLabel = t(display === "disabled" ? "providers.state.disconnected" : (`providers.state.${display}` as TKey));
-            return (
-              <button
-                className={`${displayTone(display)} ${providerOwner === provider ? "owner" : ""}`}
-                key={provider}
-                onClick={() => vm.setActiveStep("agentSync")}
-                title={`${status?.label ?? provider}: ${stateLabel}`}
-                type="button"
-              >
-                <span aria-hidden="true" />
-                {status?.label ?? provider}
-                <small>{stateLabel}</small>
-                {providerOwner === provider ? <em>{t("cockpit.providers.owner")}</em> : null}
-              </button>
-            );
-          })}
-        </div>
-        {lastProviderTransition ? (
-          <span className="cockpit-provider-transition">
-            {t(`providers.flow.${lastProviderTransition.from}` as TKey)} → {t(`providers.flow.${lastProviderTransition.to}` as TKey)}
-            {" · "}
-            {vm.providerStatuses.find((entry) => entry.provider === lastProviderTransition.provider)?.label ?? lastProviderTransition.provider}
-          </span>
-        ) : null}
       </div>
 
       <div className="cockpit-grid">

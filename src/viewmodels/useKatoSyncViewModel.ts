@@ -66,6 +66,7 @@ import {
   validateLocalEndpointInput
 } from "../lib/providerPolicy";
 import { defaultConfig } from "../lib/defaults";
+import { modeForStep } from "../lib/workspaceMode";
 import type { Notice } from "../components/Primitives";
 import type {
   ActionPlan,
@@ -115,12 +116,18 @@ export type StepId =
   | "rules"
   | "schedule"
   | "dashboard"
-  | "agentSync"
   | "actionQueue"
   | "projectBoard"
   | "briefings"
   | "settings"
-  | "logs";
+  | "logs"
+  // Agent-Sync-Workspace (eigener Navigationsbaum, siehe lib/workspaceMode.ts)
+  | "agentDashboard"
+  | "agentJobs"
+  | "agentProviders"
+  | "agentMonitor"
+  | "agentHistory"
+  | "agentSettings";
 
 // Rate-Limits deduplizieren: pro Kategorie NUR ein Eintrag (knappster Rest = aktuellster Stand).
 // Sonst haengt der Sync pro hochgeladener Datei denselben Eintrag mit fallendem Rest an (9/10, 8/10 …).
@@ -264,9 +271,11 @@ export function useKatoSyncViewModel() {
     }
   }, []);
 
-  // Nur auf der Aktivitaeten-Seite pollen: lokal, billig und ohne GitHub/LLM-Traffic.
+  // Nur im Agent-Sync-Workspace pollen (Readiness-Leiste braucht ueberall frische Heartbeats):
+  // lokal, billig und ohne GitHub/LLM-Traffic.
+  const pollLocalControl = modeForStep(activeStep) === "agentSync";
   useEffect(() => {
-    if (activeStep !== "logs") return undefined;
+    if (!pollLocalControl) return undefined;
     let active = true;
     const refresh = async () => {
       if (!active) return;
@@ -278,7 +287,7 @@ export function useKatoSyncViewModel() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [activeStep, refreshLocalControlMonitor]);
+  }, [pollLocalControl, refreshLocalControlMonitor]);
 
   // Live-Feed: gestreamte Codex-Events sammeln (letzte 300).
   useEffect(() => {
@@ -677,9 +686,9 @@ export function useKatoSyncViewModel() {
     }
   }, [config, mergeProvider, providerBusy.local, setProviderAction]);
 
-  // Einmal pro App-Sitzung beim Oeffnen von Agent Sync real pruefen (Auth + READY).
+  // Einmal pro App-Sitzung beim Oeffnen des Agent-Sync-Workspace real pruefen (Auth + READY).
   useEffect(() => {
-    if (activeStep !== "agentSync" || providerSmokeCheckedRef.current || !config) return;
+    if (modeForStep(activeStep) !== "agentSync" || providerSmokeCheckedRef.current || !config) return;
     providerSmokeCheckedRef.current = true;
     void handleRefreshProviders(true);
   }, [activeStep, config, handleRefreshProviders]);
