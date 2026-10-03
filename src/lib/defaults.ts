@@ -47,7 +47,14 @@ export const defaultConfig: AppConfig = {
   claudeEffort: "",
   runnerConnectorMode: false,
   referenceRoot: "",
-  projectRepos: {}
+  projectRepos: {},
+  providerPriority: ["codex", "claude", "local", "local_control"],
+  disabledProviders: [],
+  localProvider: {
+    kind: "ollama",
+    baseUrl: "",
+    model: ""
+  }
 };
 
 export const weekdayLabels: Record<string, string> = {

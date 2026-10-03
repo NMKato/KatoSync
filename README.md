@@ -87,6 +87,32 @@ KatoSync ist der **kontrollierte Brückenkopf** zwischen KI-Verständnis und lok
 - [x] **Gehärtet gegen Missbrauch** — Prompt-Injection-Leitplanken, Host-Allowlist, strikte CSP, Out-of-Scope-Schutz für den Runner
 - [x] **Referenzdaten bleiben lokal** — private Dokumente (z. B. Lebenslauf) landen nie in Git oder der Cloud-Library
 
+### Agent Sync: Provider verbinden, ohne Passwörter zu teilen
+
+Unter **Agent Sync** verwaltet KatoSync die Ausführungswege in einer klaren Standardreihenfolge
+(per Pfeil-Buttons änderbar, Local Control bleibt immer letzter Fallback):
+
+`OpenAI Codex → Anthropic Claude Code → Local Model → Local Control / RDC`
+
+| Schritt | Was passiert |
+|---|---|
+| **Verbinden** (Codex) | startet `codex login` → offizieller ChatGPT-Login im Browser |
+| **Verbinden** (Claude Code) | startet `claude auth login` → offizieller Anthropic-Login im Browser |
+| Nach dem Login | KatoSync prüft den echten CLI-Status und erst danach einen kurzen `READY`-Test |
+| **Verbunden** | erscheint nur, wenn beides erfolgreich war |
+| **Anmeldung abbrechen** | beendet nur den von KatoSync gestarteten Login-Prozess (Timeout 5 Min.) |
+| **Trennen** | KatoSync nutzt den Provider nicht mehr; die CLI-Anmeldung bleibt beim Provider |
+
+- KatoSync fragt nie nach dem OpenAI-/Anthropic-Passwort und liest oder speichert keine CLI-Tokens.
+- Öffnet sich der Browser nicht, zeigt die Karte einen Link zur offiziellen Anmeldeseite (nur HTTPS auf offiziellen Provider-Hosts).
+- Zustände auf den Karten: *Nicht installiert*, *Verbinden*, *Verbunden*, *Erneute Anmeldung nötig*, *Kontingent erschöpft*, *Offline / Nicht verfügbar*. Kontingent-, Kapazitäts- und Offline-Fälle werden höchstens alle 15 Minuten automatisch neu geprüft.
+- **Lokale Modelle** funktionieren ohne Cloud-Konto: *Lokale Modelle suchen* findet Ollama/LM Studio auf diesem Rechner; alternativ einen OpenAI-kompatiblen Endpunkt eintragen. *Speichern & testen* prüft Modellliste und eine kurze Antwort.
+- Ein optionaler Endpoint-API-Key liegt ausschließlich im **macOS-Schlüsselbund**, ist an genau diesen Endpoint gebunden und wird an entfernte Hosts nur über `https://` gesendet.
+
+Automatisches Failover ist absichtlich begrenzt: Nur Anmelde-, Kontingent-, Kapazitäts- oder Erreichbarkeitsprobleme qualifizieren. Ein normaler Code-, Test- oder Jobfehler wechselt niemals still den Provider.
+
+> Login und UI bleiben Human-Gates: Der Nutzer schließt die offizielle Browser-Anmeldung selbst ab und prüft die Darstellung vor einem Release.
+
 ---
 
 ## 🗂️ Auch für den Alltag (Datei-Modus)
@@ -116,6 +142,7 @@ führt **lokal** aus. **Der Server führt selbst nichts aus.**
 
 - **Frontend** — React/TypeScript in **MVVM + Repository** (`src/App.tsx` ↔ `viewmodels/` ↔ `repositories/`)
 - **Core** — Rust/Tauri (`src-tauri/src/lib.rs`): Scan, Secret-Filter, CURRENT-Dateien, Upload, macOS-Keychain, Runner-Lauf, LaunchAgent
+- **Provider Service** — Rust/Tauri (`src-tauri/src/provider_manager.rs`): validierte CLI-Erkennung, offizielle Browser-Logins, normalisierte Health-States, redigierte Diagnosen und begrenzte READY-/Endpoint-Tests
 - **i18n** De/En/Es/Ru · Light/Dark · Präsentationsmodus (maskiert Token/IDs/E-Mail für Screenshots)
 - Mistral-API-Key &amp; Connector-Token liegen ausschließlich in der macOS-Keychain
 
@@ -265,3 +292,9 @@ privilegierte/destruktive Shell-Einstiege und unterscheidet `read_only` von expl
 
 Der Local-Control-Pfad ist unabhängig vom bestehenden Mistral-/Briefing-Workflow; beide Modi
 können parallel installiert bleiben.
+
+### Plattformhinweise für Agent Sync
+
+- **macOS:** Codex/Claude werden in bekannten Benutzer-, App- und Homebrew-Pfaden sowie in absoluten `PATH`-Einträgen gesucht, nach Name und Ausführungsrecht validiert und ohne Shell mit festen Argumenten gestartet. Laufzeit-verifiziert.
+- **Windows:** `codex.exe`/`codex.cmd` bzw. `claude.exe`/`claude.cmd` aus Benutzerpfaden, `%APPDATA%\npm` und `PATH`; Prozesse starten ohne Konsolenfenster. Kommandoverträge sind unit-getestet; echter Browser-Login, Abbruch und Windows-PATH-Erkennung sind ein **offenes Release-Gate** auf einem Windows-Testsystem. Endpoint-API-Keys werden unter Windows in diesem Build bewusst **nicht** gespeichert (kein Klartext-Fallback).
+- Login-Ausgaben landen nie in KatoSync-Logs. „Sichere Diagnose kopieren“ enthält nur normalisierte Zustände und redigierte Details (keine Tokens, E-Mails, Home-Pfade oder OAuth-Parameter).

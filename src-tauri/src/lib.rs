@@ -26,6 +26,7 @@ use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
 mod local_control;
+mod provider_manager;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -92,6 +93,15 @@ pub struct AppConfig {
     // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectExternalId -> Pfad).
     #[serde(default)]
     project_repos: std::collections::HashMap<String, String>,
+    // Agent Sync: Reihenfolge und KatoSync-seitige Aktivierung. Provider-eigene Credentials
+    // gehoeren weiterhin ausschliesslich der jeweiligen CLI.
+    #[serde(default = "default_provider_priority")]
+    provider_priority: Vec<provider_manager::ProviderId>,
+    #[serde(default)]
+    disabled_providers: Vec<provider_manager::ProviderId>,
+    // Nur nicht-geheime Endpoint-Metadaten; API-Keys werden in diesem Slice nicht angenommen.
+    #[serde(default)]
+    local_provider: provider_manager::LocalProviderConfig,
 }
 
 fn default_true() -> bool {
@@ -307,6 +317,13 @@ pub fn run() {
             read_logs,
             open_output_dir,
             resume_runner_session,
+            provider_statuses,
+            connect_provider,
+            cancel_provider_login,
+            disconnect_provider,
+            save_local_provider_key,
+            discover_local_providers,
+            test_provider,
             quit_app
         ])
         .setup(|app| {
@@ -335,6 +352,81 @@ fn reopen_main_window(app_handle: &AppHandle) {
 #[tauri::command]
 fn load_config() -> Result<AppConfig, String> {
     load_config_inner().map_err(error_to_string)
+}
+
+/// Liefert normalisierte, redigierte Provider-Zustaende. READY-Tests laufen nur explizit.
+#[tauri::command]
+async fn provider_statuses(
+    settings: provider_manager::ProviderSettings,
+    run_smoke: bool,
+) -> Vec<provider_manager::ProviderStatus> {
+    provider_manager::statuses(&settings, run_smoke).await
+}
+
+/// Startet ausschliesslich den offiziellen Provider-Login (Browser) und prueft danach Auth + READY.
+/// Oeffnet sich der Browser nicht, wird nur eine offizielle HTTPS-Login-URL als Event gemeldet.
+#[tauri::command]
+async fn connect_provider(
+    provider: provider_manager::ProviderId,
+    force_login: bool,
+    app: AppHandle,
+) -> Result<provider_manager::ProviderStatus, String> {
+    if !matches!(
+        provider,
+        provider_manager::ProviderId::Codex | provider_manager::ProviderId::Claude
+    ) {
+        return Err("Nur Codex und Claude Code nutzen einen Browser-Login.".to_string());
+    }
+    let status = provider_manager::connect(provider, force_login, move |url| {
+        let _ = app.emit(
+            "provider-login-url",
+            serde_json::json!({ "provider": provider, "url": url }),
+        );
+    })
+    .await;
+    Ok(status)
+}
+
+/// Bricht einen laufenden, von KatoSync gestarteten Login-Prozess ab.
+#[tauri::command]
+fn cancel_provider_login(provider: provider_manager::ProviderId) -> bool {
+    provider_manager::cancel_login(provider)
+}
+
+/// Trennt einen Provider KatoSync-seitig. Loescht nur KatoSync-eigene Secrets (lokaler
+/// Endpoint-API-Key); CLI-Anmeldungen von Codex/Claude bleiben unangetastet.
+#[tauri::command]
+fn disconnect_provider(
+    provider: provider_manager::ProviderId,
+) -> Result<(), provider_manager::ProviderReason> {
+    provider_manager::disconnect(provider)
+}
+
+/// Speichert einen optionalen Endpoint-API-Key im OS-Schluesselbund (nie in der Config).
+#[tauri::command]
+fn save_local_provider_key(
+    base_url: String,
+    api_key: String,
+) -> Result<(), provider_manager::ProviderReason> {
+    let mut api_key = api_key;
+    let result = provider_manager::save_local_key(&base_url, &api_key);
+    zeroize::Zeroize::zeroize(&mut api_key);
+    result
+}
+
+/// Sucht ausschliesslich auf Loopback nach Ollama/LM Studio auf Standardports.
+#[tauri::command]
+async fn discover_local_providers() -> Vec<provider_manager::DiscoveredLocalProvider> {
+    provider_manager::discover_local().await
+}
+
+/// Fuehrt einen begrenzten Einzeltest aus, ohne einen Login zu starten.
+#[tauri::command]
+async fn test_provider(
+    provider: provider_manager::ProviderId,
+    settings: provider_manager::ProviderSettings,
+) -> provider_manager::ProviderStatus {
+    provider_manager::test_provider(provider, &settings).await
 }
 
 #[tauri::command]
@@ -519,7 +611,9 @@ fn logout_supabase() -> Result<SupabaseSessionStatus, String> {
 
 #[tauri::command]
 async fn mint_connector_token(base_url: String) -> Result<serde_json::Value, String> {
-    let access_token = ensure_supabase_access_token().await.map_err(error_to_string)?;
+    let access_token = ensure_supabase_access_token()
+        .await
+        .map_err(error_to_string)?;
     let url = format!("{}/api/me/connector", normalize_base_url(&base_url));
     let response = reqwest::Client::new()
         .post(url)
@@ -533,7 +627,9 @@ async fn mint_connector_token(base_url: String) -> Result<serde_json::Value, Str
     let status = response.status();
     let text = response.text().await.map_err(error_to_string)?;
     if !status.is_success() {
-        return Err(format!("Token-Generierung fehlgeschlagen ({status}): {text}"));
+        return Err(format!(
+            "Token-Generierung fehlgeschlagen ({status}): {text}"
+        ));
     }
     serde_json::from_str(&text).map_err(error_to_string)
 }
@@ -907,7 +1003,9 @@ async fn cloud_profile_sync_after_login(
     if password.trim().is_empty() {
         return Err("Passwort fehlt für die Cloud-Profil-Synchronisierung.".to_string());
     }
-    let settings = fetch_user_settings(&base_url).await.map_err(error_to_string)?;
+    let settings = fetch_user_settings(&base_url)
+        .await
+        .map_err(error_to_string)?;
     let has_profile = settings.as_ref().map_or(false, |s| {
         s.secret_cipher
             .as_deref()
@@ -1079,7 +1177,9 @@ async fn load_remote_action_plans(base_url: String) -> Result<serde_json::Value,
     let status = response.status();
     let text = response.text().await.map_err(error_to_string)?;
     if !status.is_success() {
-        return Err(format!("MCP Action Queue nicht erreichbar ({status}): {text}"));
+        return Err(format!(
+            "MCP Action Queue nicht erreichbar ({status}): {text}"
+        ));
     }
     serde_json::from_str(&text).map_err(error_to_string)
 }
@@ -1438,7 +1538,14 @@ fn strip_trailing_blank_pages(pdf: &Path, pdftotext: &str) {
     let mut last_with_content = 0u32;
     for pageno in 1..=total {
         let has_text = std::process::Command::new(pdftotext)
-            .args(["-f", &pageno.to_string(), "-l", &pageno.to_string(), pdf_str, "-"])
+            .args([
+                "-f",
+                &pageno.to_string(),
+                "-l",
+                &pageno.to_string(),
+                pdf_str,
+                "-",
+            ])
             .output()
             .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
             .unwrap_or(true);
@@ -1534,7 +1641,10 @@ async fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usiz
         let target = format!("{dst}/{name}");
         if let Err(e) = fs::copy(&path, &target) {
             // Nicht still verschlucken: der Runner behandelt KatoContext als verbindliche Faktenbasis.
-            let _ = write_log("codex", &format!("KatoContext: Datei uebersprungen ({name}): {e}"));
+            let _ = write_log(
+                "codex",
+                &format!("KatoContext: Datei uebersprungen ({name}): {e}"),
+            );
             continue;
         }
         count += 1;
@@ -1542,7 +1652,10 @@ async fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usiz
             if let Some(ref bin) = pdftotext {
                 // Kollisionsschutz: hat der Nutzer im Referenzordner bereits eine kuratierte "<name>.txt",
                 // den maschinellen Extrakt als "<name>.extracted.txt" ablegen statt sie zu ueberschreiben.
-                let twin = if Path::new(reference_root).join(format!("{name}.txt")).exists() {
+                let twin = if Path::new(reference_root)
+                    .join(format!("{name}.txt"))
+                    .exists()
+                {
                     format!("{dst}/{name}.extracted.txt")
                 } else {
                     format!("{dst}/{name}.txt")
@@ -1560,7 +1673,10 @@ async fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usiz
                 )
                 .await;
                 if extract.is_err() {
-                    let _ = write_log("codex", &format!("KatoContext: pdftotext-Timeout fuer {name}."));
+                    let _ = write_log(
+                        "codex",
+                        &format!("KatoContext: pdftotext-Timeout fuer {name}."),
+                    );
                 }
             }
         }
@@ -1570,10 +1686,20 @@ async fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usiz
 
 // Default-Branch offline ermitteln (origin/HEAD ist oft nicht gesetzt): main -> master -> aktueller.
 fn detect_default_branch(repo: &str) -> String {
-    if git_capture(repo, &["show-ref", "--verify", "--quiet", "refs/heads/main"]).is_ok() {
+    if git_capture(
+        repo,
+        &["show-ref", "--verify", "--quiet", "refs/heads/main"],
+    )
+    .is_ok()
+    {
         return "main".to_string();
     }
-    if git_capture(repo, &["show-ref", "--verify", "--quiet", "refs/heads/master"]).is_ok() {
+    if git_capture(
+        repo,
+        &["show-ref", "--verify", "--quiet", "refs/heads/master"],
+    )
+    .is_ok()
+    {
         return "master".to_string();
     }
     git_capture(repo, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|_| "main".to_string())
@@ -1590,7 +1716,11 @@ fn git_remote_https_url(repo: &str) -> Option<String> {
     } else {
         raw.to_string()
     };
-    Some(url.trim_end_matches(".git").trim_end_matches('/').to_string())
+    Some(
+        url.trim_end_matches(".git")
+            .trim_end_matches('/')
+            .to_string(),
+    )
 }
 
 // Entfernt den Shell-Wrapper (`/bin/zsh -lc '…'`) aus einem Codex-Befehl, damit der Live-Feed
@@ -1744,14 +1874,10 @@ fn summarize_claude_event(line: &str) -> (String, String) {
                                         .and_then(|i| i.get("command"))
                                         .and_then(|a| a.as_str());
                                     let path = input
-                                        .and_then(|i| {
-                                            i.get("file_path").or_else(|| i.get("path"))
-                                        })
+                                        .and_then(|i| i.get("file_path").or_else(|| i.get("path")))
                                         .and_then(|a| a.as_str());
                                     let other = input
-                                        .and_then(|i| {
-                                            i.get("pattern").or_else(|| i.get("url"))
-                                        })
+                                        .and_then(|i| i.get("pattern").or_else(|| i.get("url")))
                                         .and_then(|a| a.as_str());
                                     out = if let Some(c) = cmd {
                                         format!("{n}: {}", clean_shell_command(c))
@@ -1975,7 +2101,11 @@ fn dir_exists(path: String) -> bool {
 //  2) lokaler Merge-Check (Fallback ohne PR): Branch in den Default-Branch gemerged?
 //     Hinweis: erkennt nur Merge-Commits, nicht Squash/Rebase (andere SHAs); dafuer ist der gh-Pfad zustaendig.
 #[tauri::command]
-async fn check_codex_task(repo_path: String, branch: String, pr_url: String) -> Result<String, String> {
+async fn check_codex_task(
+    repo_path: String,
+    branch: String,
+    pr_url: String,
+) -> Result<String, String> {
     let pr = pr_url.trim();
     if pr.contains("/pull/") && !pr.contains("/pull/new/") {
         let mut cmd = Command::new(gh_bin());
@@ -1986,7 +2116,11 @@ async fn check_codex_task(repo_path: String, branch: String, pr_url: String) -> 
         }
         if let Ok(out) = cmd.output() {
             if out.status.success() {
-                match String::from_utf8_lossy(&out.stdout).trim().to_uppercase().as_str() {
+                match String::from_utf8_lossy(&out.stdout)
+                    .trim()
+                    .to_uppercase()
+                    .as_str()
+                {
                     "MERGED" => return Ok("merged".to_string()),
                     "CLOSED" => return Ok("closed".to_string()),
                     "OPEN" => return Ok("open".to_string()),
@@ -2018,7 +2152,10 @@ async fn check_codex_task(repo_path: String, branch: String, pr_url: String) -> 
 }
 
 #[tauri::command]
-async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<CodexRunResult, String> {
+async fn run_codex_task(
+    req: CodexRunRequest,
+    app: tauri::AppHandle,
+) -> Result<CodexRunResult, String> {
     let started = std::time::Instant::now();
     let run_stamp = Local::now().format("%Y%m%d%H%M%S").to_string();
     let repo_path = req.repo_path.trim().to_string();
@@ -2066,7 +2203,8 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             return Err("Bitte zuerst in Codex per ChatGPT einloggen (codex login).".to_string());
         }
     }
-    let is_git = git_capture(&repo_path, &["rev-parse", "--is-inside-work-tree"]).unwrap_or_default()
+    let is_git = git_capture(&repo_path, &["rev-parse", "--is-inside-work-tree"])
+        .unwrap_or_default()
         == "true";
     if !is_git {
         if file_mode {
@@ -2092,7 +2230,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     if file_mode && !is_git {
         // NUR ein frisch angelegtes Repo: aktuellen Inhalt als Ausgangszustand committen, damit
         // ein HEAD existiert und der spaetere Diff nur Codex' neue Dateien zeigt. Lokal, ohne Push.
-        let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync", ":!KatoContext"]);
+        let _ = git_capture(
+            &repo_path,
+            &["add", "-A", "--", ":!.katosync", ":!KatoContext"],
+        );
         git_capture(
             &repo_path,
             &["commit", "-m", "katosync: Ausgangszustand", "--allow-empty"],
@@ -2101,25 +2242,45 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             format!("Git-Baseline im Datei-Modus fehlgeschlagen (fehlt eine git-Identitaet?): {e}")
         })?;
     } else if !file_mode
-        && !git_capture(&repo_path, &["status", "--porcelain", "--", ":!.katosync", ":!KatoContext", ":!KatoResults"])?
-            .is_empty()
+        && !git_capture(
+            &repo_path,
+            &[
+                "status",
+                "--porcelain",
+                "--",
+                ":!.katosync",
+                ":!KatoContext",
+                ":!KatoResults",
+            ],
+        )?
+        .is_empty()
     {
         // NUR Coding-Modus: dort passieren Branch/Commit/Push/PR -> keine fremden Aenderungen
         // mitcommitten. Datei-Modus schreibt nur nach KatoResults (kein Push) -> ein "unsauberer"
         // Arbeitsbaum blockiert dort NICHT (das war unnoetige Reibung).
-        return Err("Der Arbeitsbaum ist nicht sauber. Bitte erst committen oder stashen.".to_string());
+        return Err(
+            "Der Arbeitsbaum ist nicht sauber. Bitte erst committen oder stashen.".to_string(),
+        );
     }
 
     // ---- Branch + Run-Ordner ----
     let date = Local::now().format("%Y-%m-%d").to_string();
     let project_slug = {
         let s = slugify(&req.project_id);
-        if s.is_empty() { "projekt".to_string() } else { s }
+        if s.is_empty() {
+            "projekt".to_string()
+        } else {
+            s
+        }
     };
     let title_slug = {
         let s: String = slugify(&req.title).chars().take(40).collect();
         let s = s.trim_matches('-').to_string();
-        if s.is_empty() { "aufgabe".to_string() } else { s }
+        if s.is_empty() {
+            "aufgabe".to_string()
+        } else {
+            s
+        }
     };
     // Prefix-Fix: bei generischem Projekt ("katosync"/leer) das Projekt-Segment weglassen
     // -> kein doppeltes "katosync/katosync/".
@@ -2140,7 +2301,11 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         .unwrap_or_else(|| run_stamp.clone());
     let task_slug = {
         let s = slugify(&task_id);
-        if s.is_empty() { "run".to_string() } else { s }
+        if s.is_empty() {
+            "run".to_string()
+        } else {
+            s
+        }
     };
     let run_dir = format!("{}/.katosync/runs/{}/task-{}", repo_path, date, task_slug);
     fs::create_dir_all(&run_dir).map_err(error_to_string)?;
@@ -2149,7 +2314,8 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         serde_json::to_string_pretty(&req.input_plan).unwrap_or_else(|_| "{}".to_string()),
     )
     .map_err(error_to_string)?;
-    fs::write(format!("{run_dir}/prompt.md"), sanitize_log(&req.prompt)).map_err(error_to_string)?;
+    fs::write(format!("{run_dir}/prompt.md"), sanitize_log(&req.prompt))
+        .map_err(error_to_string)?;
 
     // Wahrheit: den Referenzordner IMMER als Faktenbasis materialisieren (beide Modi), wenn gesetzt
     // -> der Runner prueft gegen echte Daten. Die Git-Leak-Guards (.git/info/exclude + Pre-Cleanup,
@@ -2165,9 +2331,19 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 other => other,
             })
             .collect();
-        let capped: String = cleaned.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(70).collect();
+        let capped: String = cleaned
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(70)
+            .collect();
         let name = capped.trim().trim_end_matches('.').trim().to_string();
-        if name.is_empty() { format!("task-{task_slug}") } else { name }
+        if name.is_empty() {
+            format!("task-{task_slug}")
+        } else {
+            name
+        }
     };
     let result_rel = format!("KatoResults/{result_folder}");
     let context_files = if !config.reference_root.trim().is_empty()
@@ -2203,19 +2379,36 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         .map_err(|e| format!("Branch konnte nicht angelegt werden ({branch}): {e}"))?;
     let _ = write_log(
         "codex",
-        &format!("{runner_label}-Lauf gestartet: {} (Branch {branch} von {default_branch})", sanitize_log(&req.title)),
+        &format!(
+            "{runner_label}-Lauf gestartet: {} (Branch {branch} von {default_branch})",
+            sanitize_log(&req.title)
+        ),
     );
     // Datei-Modus erlaubt einen unsauberen Baum -> pre-existierende fremde Aenderungen merken,
     // damit der spaetere "ausserhalb geschrieben"-Check sie NICHT als Codex-Verstoss wertet.
     let pre_dirty: std::collections::HashSet<String> = if file_mode {
         git_capture_raw(
             &repo_path,
-            &["-c", "core.quotepath=false", "status", "--porcelain", "-z", "--", ":!.katosync", ":!KatoContext"],
+            &[
+                "-c",
+                "core.quotepath=false",
+                "status",
+                "--porcelain",
+                "-z",
+                "--",
+                ":!.katosync",
+                ":!KatoContext",
+            ],
         )
         .unwrap_or_default()
         .split(|b| *b == 0)
         .filter(|s| !s.is_empty())
-        .map(|s| String::from_utf8_lossy(s).chars().skip(3).collect::<String>())
+        .map(|s| {
+            String::from_utf8_lossy(s)
+                .chars()
+                .skip(3)
+                .collect::<String>()
+        })
         .collect()
     } else {
         std::collections::HashSet::new()
@@ -2223,17 +2416,29 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
 
     if let Some(plan_id) = &req.action_plan_id {
         if let Err(e) = patch_action_plan_status_inner(&req.base_url, plan_id, "running").await {
-            let _ = write_log("codex", &format!("Warnung: Status running fehlgeschlagen: {e}"));
+            let _ = write_log(
+                "codex",
+                &format!("Warnung: Status running fehlgeschlagen: {e}"),
+            );
         }
     }
     if let Some(task_id) = &req.action_task_id {
-        if let Err(e) = patch_action_task_status_inner(&req.base_url, task_id, "running", None, None).await {
-            let _ = write_log("codex", &format!("Warnung: Task-Status running fehlgeschlagen: {e}"));
+        if let Err(e) =
+            patch_action_task_status_inner(&req.base_url, task_id, "running", None, None).await
+        {
+            let _ = write_log(
+                "codex",
+                &format!("Warnung: Task-Status running fehlgeschlagen: {e}"),
+            );
         }
     }
 
     // ---- codex exec (Sandbox + Timeout) ----
-    let sandbox = if req.dry_run { "read-only" } else { "workspace-write" };
+    let sandbox = if req.dry_run {
+        "read-only"
+    } else {
+        "workspace-write"
+    };
     let timeout_secs = req.timeout_secs.unwrap_or(900);
     let output_path = format!("{run_dir}/output.txt");
     let events_path = format!("{run_dir}/execution_log.jsonl");
@@ -2295,13 +2500,15 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         }
         if config.runner_connector_mode {
             // Connector-Modus (opt-in): Netzzugriff im Sandbox erlauben -> Connectoren erreichbar.
-            c.arg("-c").arg("sandbox_workspace_write.network_access=true");
+            c.arg("-c")
+                .arg("sandbox_workspace_write.network_access=true");
         }
         c
     };
-    command.stdout(Stdio::piped()).stderr(Stdio::from(stderr_file));
-    match command.spawn()
-    {
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(stderr_file));
+    match command.spawn() {
         Ok(mut child) => {
             // Live-Feed: codex-stdout (JSONL) zeilenweise -> in execution_log.jsonl schreiben
             // UND als Tauri-Event "codex-event" ans Frontend streamen.
@@ -2363,7 +2570,12 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 }
             }
         }
-        Err(e) => codex_error = Some(format!("{runner_label}-Start fehlgeschlagen: {}", error_to_string(e))),
+        Err(e) => {
+            codex_error = Some(format!(
+                "{runner_label}-Start fehlgeschlagen: {}",
+                error_to_string(e)
+            ))
+        }
     }
 
     // Bei Fehler: aussagekraeftige Meldung aus den JSONL-Events ziehen (z.B. Usage-Limit).
@@ -2451,11 +2663,18 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                             Ok(o) => {
                                 let _ = write_log(
                                     "codex",
-                                    &format!("typst: {} -> PDF fehlgeschlagen: {}", p.display(), String::from_utf8_lossy(&o.stderr).trim()),
+                                    &format!(
+                                        "typst: {} -> PDF fehlgeschlagen: {}",
+                                        p.display(),
+                                        String::from_utf8_lossy(&o.stderr).trim()
+                                    ),
                                 );
                             }
                             Err(e) => {
-                                let _ = write_log("codex", &format!("typst-Aufruf fehlgeschlagen: {e}"));
+                                let _ = write_log(
+                                    "codex",
+                                    &format!("typst-Aufruf fehlgeschlagen: {e}"),
+                                );
                             }
                         }
                     }
@@ -2474,7 +2693,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 }
             }
         } else {
-            let _ = write_log("codex", "typst nicht gefunden -> nur .typ-Dateien, kein PDF");
+            let _ = write_log(
+                "codex",
+                "typst nicht gefunden -> nur .typ-Dateien, kein PDF",
+            );
         }
     }
 
@@ -2486,13 +2708,23 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     }
     // Run-Ordner (.katosync) bewusst NICHT mitcommitten -> bleibt lokaler Audit-Trail,
     // die "geaenderte Dateien"-Liste zeigt nur die echten Aenderungen.
-    let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync", ":!KatoContext"]);
+    let _ = git_capture(
+        &repo_path,
+        &["add", "-A", "--", ":!.katosync", ":!KatoContext"],
+    );
     // -z + core.quotepath=false: NUL-getrennte, UNescapte UTF-8-Pfade. Ohne das quotet git
     // Umlaut-Namen (z.B. "Lebenslauf_Mueller.md" mit Ue) mit fuehrendem '"' -> der starts_with-
     // Scope-Check unten wuerde sie faelschlich als "ausserhalb" werten und den Lauf verwerfen.
     let changed_files: Vec<String> = git_capture_raw(
         &repo_path,
-        &["-c", "core.quotepath=false", "diff", "--cached", "-z", "--name-only"],
+        &[
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--cached",
+            "-z",
+            "--name-only",
+        ],
     )
     .unwrap_or_default()
     .split(|b| *b == 0)
@@ -2517,7 +2749,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 out_of_scope.join(", ")
             ));
             let _ = git_capture(&repo_path, &["reset", "--hard"]);
-            let _ = git_capture(&repo_path, &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"]);
+            let _ = git_capture(
+                &repo_path,
+                &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"],
+            );
         }
     }
 
@@ -2529,10 +2764,17 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     // Defensiv: KatoContext/.katosync NIE mitcommitten (auch im Coding-Modus, der keinen Scope-Check
     // hat) - selbst wenn ein autonomer Runner sie vorab gestaged hat; der ":!"-add oben entfernt
     // bereits Gestagetes nicht.
-    let _ = git_capture(&repo_path, &["reset", "-q", "--", "KatoContext", ".katosync"]);
+    let _ = git_capture(
+        &repo_path,
+        &["reset", "-q", "--", "KatoContext", ".katosync"],
+    );
     let mut commit: Option<String> = None;
     if codex_error.is_none() && !changed_files.is_empty() {
-        let msg = format!("katosync: {} (task {})", req.title.replace('\n', " "), task_id);
+        let msg = format!(
+            "katosync: {} (task {})",
+            req.title.replace('\n', " "),
+            task_id
+        );
         match git_capture(&repo_path, &["commit", "-m", &msg]) {
             Ok(_) => commit = git_capture(&repo_path, &["rev-parse", "HEAD"]).ok(),
             Err(e) => codex_error = Some(format!("Commit fehlgeschlagen: {e}")),
@@ -2540,9 +2782,15 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     }
     // Datei-Modus: ohne erzeugte Ergebnisdatei (kein Commit) gilt der Lauf nicht als erfolgreich.
     if file_mode && codex_error.is_none() && commit.is_none() {
-        codex_error = Some(format!("Datei-Modus: {runner_label} hat keine Ergebnisdatei erzeugt."));
+        codex_error = Some(format!(
+            "Datei-Modus: {runner_label} hat keine Ergebnisdatei erzeugt."
+        ));
     }
-    let final_status = if codex_error.is_none() { "completed" } else { "failed" };
+    let final_status = if codex_error.is_none() {
+        "completed"
+    } else {
+        "failed"
+    };
 
     let _ = fs::write(
         format!("{run_dir}/changed_files.json"),
@@ -2601,7 +2849,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                         Ok(o) => {
                             let _ = write_log(
                                 "codex",
-                                &format!("gh pr create Hinweis: {}", String::from_utf8_lossy(&o.stderr).trim()),
+                                &format!(
+                                    "gh pr create Hinweis: {}",
+                                    String::from_utf8_lossy(&o.stderr).trim()
+                                ),
                             );
                         }
                         Err(e) => {
@@ -2651,26 +2902,44 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         body["briefingId"] = json!(id);
     }
     if let Err(e) = post_execution_result(&req.base_url, &body).await {
-        let _ = write_log("codex", &format!("Warnung: execution-results POST fehlgeschlagen: {e}"));
+        let _ = write_log(
+            "codex",
+            &format!("Warnung: execution-results POST fehlgeschlagen: {e}"),
+        );
     }
     if let Some(plan_id) = &req.action_plan_id {
         if let Err(e) = patch_action_plan_status_inner(&req.base_url, plan_id, final_status).await {
-            let _ = write_log("codex", &format!("Warnung: Status {final_status} fehlgeschlagen: {e}"));
+            let _ = write_log(
+                "codex",
+                &format!("Warnung: Status {final_status} fehlgeschlagen: {e}"),
+            );
         }
     }
     // Task-Status: Erfolg = 'executed' (ausgefuehrt, wartet auf Merge/Verifikation), inkl. PR/Branch.
     if let Some(task_id) = &req.action_task_id {
         // Datei-Modus: kein PR/Merge-Check -> Task direkt als erledigt. Sonst "executed" (wartet auf Merge).
         let task_status = if final_status == "completed" {
-            if file_mode { "completed" } else { "executed" }
+            if file_mode {
+                "completed"
+            } else {
+                "executed"
+            }
         } else {
             final_status
         };
-        if let Err(e) =
-            patch_action_task_status_inner(&req.base_url, task_id, task_status, pr_url.as_deref(), Some(&branch))
-                .await
+        if let Err(e) = patch_action_task_status_inner(
+            &req.base_url,
+            task_id,
+            task_status,
+            pr_url.as_deref(),
+            Some(&branch),
+        )
+        .await
         {
-            let _ = write_log("codex", &format!("Warnung: Task-Status {task_status} fehlgeschlagen: {e}"));
+            let _ = write_log(
+                "codex",
+                &format!("Warnung: Task-Status {task_status} fehlgeschlagen: {e}"),
+            );
         }
     }
 
@@ -2679,7 +2948,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     // jeder weitere Lauf scheiterte am sauberer-Baum-Check. Auf den Ausgangszustand zuruecksetzen.
     if file_mode && commit.is_none() {
         let _ = git_capture(&repo_path, &["reset", "--hard"]);
-        let _ = git_capture(&repo_path, &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"]);
+        let _ = git_capture(
+            &repo_path,
+            &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"],
+        );
     }
     // Zurueck auf den Default-Branch -> Arbeitskopie bleibt sauber; Codex-Aenderungen leben auf dem Branch.
     let _ = git_capture(&repo_path, &["checkout", &default_branch]);
@@ -2705,7 +2977,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
 
     let _ = write_log(
         "codex",
-        &format!("{runner_label}-Lauf {final_status}: {} (Branch {branch})", sanitize_log(&req.title)),
+        &format!(
+            "{runner_label}-Lauf {final_status}: {} (Branch {branch})",
+            sanitize_log(&req.title)
+        ),
     );
 
     // Session-ID des Laufs aus dem Event-Log ziehen (Codex: thread_id, Claude: session_id) —
@@ -2781,7 +3056,11 @@ fn resume_runner_session(
 
     // Eindeutiger, kollisionsarmer Dateiname: aus der Session-ID (falls vorhanden) sonst Zeitstempel.
     let stamp = sid
-        .map(|s| s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>())
+        .map(|s| {
+            s.chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect::<String>()
+        })
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
             std::time::SystemTime::now()
@@ -2880,9 +3159,17 @@ async fn scan_project(config: AppConfig) -> Result<ScanSummary, String> {
 }
 
 #[tauri::command]
-async fn run_sync(config: AppConfig, dry_run: Option<bool>, app: tauri::AppHandle) -> Result<SyncReport, String> {
+async fn run_sync(
+    config: AppConfig,
+    dry_run: Option<bool>,
+    app: tauri::AppHandle,
+) -> Result<SyncReport, String> {
     let effective_dry_run = dry_run.unwrap_or(config.safety.dry_run_default);
-    if config.source_roots.iter().all(|root| root.trim().is_empty()) {
+    if config
+        .source_roots
+        .iter()
+        .all(|root| root.trim().is_empty())
+    {
         return Err(
             "Kein Quellordner verbunden. Bitte zuerst in den Einstellungen einen Ordner hinzufuegen."
                 .to_string(),
@@ -3007,7 +3294,11 @@ async fn run_headless_sync() -> Result<()> {
     Ok(())
 }
 
-async fn sync_once(config: &AppConfig, dry_run: bool, app: Option<&AppHandle>) -> Result<SyncReport> {
+async fn sync_once(
+    config: &AppConfig,
+    dry_run: bool,
+    app: Option<&AppHandle>,
+) -> Result<SyncReport> {
     let started_at = now_string();
     write_log("sync", &format!("Sync gestartet dry_run={dry_run}"))?;
     let scan = scan_roots(config)?;
@@ -4118,6 +4409,43 @@ fn normalize_config(config: &mut AppConfig) {
     if !config.codex_model.trim().is_empty() {
         config.codex_model = String::new();
     }
+    // Fehlende/alte Reihenfolgen selbstheilend auf den sicheren Standard ergaenzen.
+    let mut priority = Vec::new();
+    for provider in config
+        .provider_priority
+        .iter()
+        .copied()
+        .chain(default_provider_priority())
+    {
+        if !priority.contains(&provider) {
+            priority.push(provider);
+        }
+    }
+    // Der deterministische Local-Control-Pfad bleibt immer letzter Fallback.
+    priority.retain(|provider| *provider != provider_manager::ProviderId::LocalControl);
+    priority.push(provider_manager::ProviderId::LocalControl);
+    config.provider_priority = priority;
+    config
+        .disabled_providers
+        .retain(|provider| *provider != provider_manager::ProviderId::LocalControl);
+    config
+        .disabled_providers
+        .sort_by_key(|provider| match provider {
+            provider_manager::ProviderId::Codex => 0,
+            provider_manager::ProviderId::Claude => 1,
+            provider_manager::ProviderId::Local => 2,
+            provider_manager::ProviderId::LocalControl => 3,
+        });
+    config.disabled_providers.dedup();
+}
+
+fn default_provider_priority() -> Vec<provider_manager::ProviderId> {
+    vec![
+        provider_manager::ProviderId::Codex,
+        provider_manager::ProviderId::Claude,
+        provider_manager::ProviderId::Local,
+        provider_manager::ProviderId::LocalControl,
+    ]
 }
 
 fn default_config() -> Result<AppConfig> {
@@ -4167,6 +4495,9 @@ fn default_config() -> Result<AppConfig> {
         runner_connector_mode: false,
         reference_root: String::new(),
         project_repos: std::collections::HashMap::new(),
+        provider_priority: default_provider_priority(),
+        disabled_providers: Vec::new(),
+        local_provider: provider_manager::LocalProviderConfig::default(),
     })
 }
 
@@ -4549,7 +4880,9 @@ async fn supabase_refresh_session(refresh_token: &str) -> Result<SupabaseTokenRe
     let status = response.status();
     let text = response.text().await?;
     if !status.is_success() {
-        return Err(anyhow!("KatoOS-Sitzung abgelaufen ({status}). Bitte neu anmelden."));
+        return Err(anyhow!(
+            "KatoOS-Sitzung abgelaufen ({status}). Bitte neu anmelden."
+        ));
     }
     serde_json::from_str(&text).map_err(Into::into)
 }

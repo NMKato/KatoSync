@@ -51,6 +51,124 @@ export interface AppConfig {
   referenceRoot: string;
   // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectId -> Pfad).
   projectRepos: Record<string, string>;
+  // Agent Sync: sichere Standardreihenfolge; Local Control ist immer letzter Fallback.
+  providerPriority: ProviderId[];
+  // KatoSync-seitige Trennung. Provider-eigene CLI-Credentials bleiben unveraendert.
+  disabledProviders: ProviderId[];
+  // Ausschliesslich nicht-geheime Endpoint-Metadaten.
+  localProvider: LocalProviderConfig;
+}
+
+export type ProviderId = "codex" | "claude" | "local" | "local_control";
+
+export type ProviderState =
+  | "installed"
+  | "authenticated"
+  | "available"
+  | "quota_limited"
+  | "auth_unavailable"
+  | "capacity_unavailable"
+  | "job_failed"
+  | "offline"
+  | "unknown";
+
+export type LocalProviderKind = "ollama" | "lm_studio" | "open_ai_compatible";
+
+export interface LocalProviderConfig {
+  kind: LocalProviderKind;
+  baseUrl: string;
+  model: string;
+}
+
+export interface ProviderSettings {
+  disabledProviders: ProviderId[];
+  localProvider: LocalProviderConfig;
+}
+
+export type ProviderReason =
+  | "not_checked"
+  | "not_installed"
+  | "not_configured"
+  | "invalid_endpoint"
+  | "sign_in_required"
+  | "ready_test_pending"
+  | "ready"
+  | "disabled_in_kato_sync"
+  | "quota_limited"
+  | "capacity_limited"
+  | "offline"
+  | "timed_out"
+  | "ready_test_failed"
+  | "login_started"
+  | "login_in_progress"
+  | "login_cancelled"
+  | "login_timed_out"
+  | "login_failed"
+  | "no_models"
+  | "model_missing"
+  | "endpoint_auth_required"
+  | "endpoint_error"
+  | "endpoint_invalid_response"
+  | "capability_failed"
+  | "insecure_remote_key"
+  | "secret_store_unavailable"
+  | "local_control_running"
+  | "local_control_queue_only";
+
+// Normalisierter, redigierter Provider-Status aus dem Rust-Adapter. Enthaelt nie Tokens/E-Mails.
+export interface ProviderStatus {
+  provider: ProviderId;
+  label: string;
+  state: ProviderState;
+  reason: ProviderReason;
+  installed: boolean;
+  authenticated: boolean;
+  available: boolean;
+  enabled: boolean;
+  failoverAllowed: boolean;
+  version?: string | null;
+  model?: string | null;
+  endpointScope?: "local" | "lan" | "remote" | null;
+  capabilities: string[];
+  checkedAt: string;
+  lastSuccessAt?: string | null;
+  retryHint?: string | null;
+  secretStored: boolean;
+  detail?: string | null;
+}
+
+// UI-Zustand einer Providerkarte (menschlich lesbar, siehe providerPolicy.providerDisplayState).
+export type ProviderDisplayState =
+  | "notInstalled"
+  | "notConfigured"
+  | "connect"
+  | "connecting"
+  | "testRequired"
+  | "connected"
+  | "reauth"
+  | "quota"
+  | "unavailable"
+  | "offline"
+  | "disabled";
+
+export type ProviderAction = "connect" | "test" | "disconnect" | "key";
+
+export interface DiscoveredLocalProvider {
+  kind: LocalProviderKind;
+  baseUrl: string;
+  models: string[];
+}
+
+export interface ProviderLoginUrlEvent {
+  provider: ProviderId;
+  url: string;
+}
+
+export interface ProviderTransition {
+  provider: ProviderId;
+  from: ProviderState;
+  to: ProviderState;
+  at: string;
 }
 
 export interface McpConfig {

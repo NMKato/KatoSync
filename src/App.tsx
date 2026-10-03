@@ -4,6 +4,7 @@ import {
   Archive,
   ArrowLeft,
   BookOpenText,
+  Bot,
   CalendarClock,
   Check,
   CheckCircle2,
@@ -57,6 +58,7 @@ import {
   Toggle
 } from "./components/Primitives";
 import { RichMarkdown } from "./components/RichMarkdown";
+import { ProviderManager } from "./components/ProviderManager";
 import { Bars, Donut, KpiTiles, StatusList, Timeline } from "./components/DiagramComponents";
 import {
   codexTimeline,
@@ -74,6 +76,7 @@ import {
 import { historyBars, loadRunHistory, recordRun, type RunRecord } from "./lib/runHistory";
 import { buildSkillPrompt, knownProjectIds, mcpEndpoint, SKILL_CONTRACT_VERSION } from "./lib/skillTemplate";
 import { copyText } from "./lib/clipboard";
+import { currentProviderOwner, displayTone, normalizeProviderPriority, providerDisplayState } from "./lib/providerPolicy";
 import { briefingToMarkdown } from "./lib/briefingExport";
 import { safeHttpUrl } from "./lib/url";
 import { useT, type Lang, type TFunc, type TKey } from "./i18n";
@@ -89,6 +92,7 @@ import type { ActionPlan, ActionTaskStatus, Briefing, BriefingStatus, FileFindin
 
 const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
   { id: "dashboard", label: "Dashboard", icon: Database },
+  { id: "agentSync", label: "Agent Sync", icon: Bot },
   // Konsolidiert: "Action Queue" + "Projekt-Board" -> EIN Aufgaben-Surface (das Board ist die
   // reichere Task-Ansicht mit Ausfuehren/Reihenfolge/Entfernen). Interne id bleibt "projectBoard".
   { id: "projectBoard", label: "Aufgaben", icon: ClipboardList },
@@ -111,6 +115,7 @@ const sectionByStep: Record<StepId, string> = {
   rules: "section-rules",
   schedule: "section-schedule",
   dashboard: "section-cockpit",
+  agentSync: "section-agent-sync",
   actionQueue: "section-action-queue",
   projectBoard: "section-project-board",
   briefings: "section-briefings",
@@ -180,6 +185,7 @@ function pageCopy(step: StepId, t: TFunc) {
   const visible = toVisibleStep(step);
   const key =
     visible === "actionQueue" ||
+    visible === "agentSync" ||
     visible === "projectBoard" ||
     visible === "briefings" ||
     visible === "settings" ||
@@ -693,6 +699,7 @@ export default function App() {
 
         <section className={`dashboard-grid overview-grid page-${visibleStep}`}>
           {visibleStep === "dashboard" ? <CockpitPanel vm={vm} runHistory={runHistory} /> : null}
+          {visibleStep === "agentSync" ? <ProviderManager vm={vm} /> : null}
 
           {visibleStep === "settings" ? (
           <Panel className="settings-main-panel" id="section-api" title={t("settings.api.title")} icon={<KeyRound size={18} />}>
@@ -1517,6 +1524,13 @@ function CockpitPanel({
   const upload = uploadDonut(vm.report, t);
   const scanByCategory = scanBars(vm.scan ?? vm.report?.scan ?? null, t);
   const history = historyBars(runHistory, lang, 7);
+  const providerPriority = normalizeProviderPriority(config.providerPriority);
+  const providerOwner = currentProviderOwner(
+    vm.providerStatuses,
+    providerPriority,
+    codexRunning ? config.codexPreferredRunner : null
+  );
+  const lastProviderTransition = vm.providerHistory[vm.providerHistory.length - 1];
 
   let liveActive = false;
   let liveTitle = t("cockpit.live.idle.title");
@@ -1560,6 +1574,41 @@ function CockpitPanel({
             <span>{next.label}</span>
           </div>
         </div>
+      </div>
+
+      <div className="cockpit-provider-health" aria-label={t("cockpit.providers.aria")}>
+        <div>
+          <Bot size={17} />
+          <strong>{t("cockpit.providers.title")}</strong>
+        </div>
+        <div className="cockpit-provider-pills">
+          {providerPriority.map((provider) => {
+            const status = vm.providerStatuses.find((entry) => entry.provider === provider);
+            const display = providerDisplayState(status, provider, vm.providerBusy[provider] === "connect" && provider !== "local");
+            const stateLabel = t(display === "disabled" ? "providers.state.disconnected" : (`providers.state.${display}` as TKey));
+            return (
+              <button
+                className={`${displayTone(display)} ${providerOwner === provider ? "owner" : ""}`}
+                key={provider}
+                onClick={() => vm.setActiveStep("agentSync")}
+                title={`${status?.label ?? provider}: ${stateLabel}`}
+                type="button"
+              >
+                <span aria-hidden="true" />
+                {status?.label ?? provider}
+                <small>{stateLabel}</small>
+                {providerOwner === provider ? <em>{t("cockpit.providers.owner")}</em> : null}
+              </button>
+            );
+          })}
+        </div>
+        {lastProviderTransition ? (
+          <span className="cockpit-provider-transition">
+            {t(`providers.flow.${lastProviderTransition.from}` as TKey)} → {t(`providers.flow.${lastProviderTransition.to}` as TKey)}
+            {" · "}
+            {vm.providerStatuses.find((entry) => entry.provider === lastProviderTransition.provider)?.label ?? lastProviderTransition.provider}
+          </span>
+        ) : null}
       </div>
 
       <div className="cockpit-grid">
