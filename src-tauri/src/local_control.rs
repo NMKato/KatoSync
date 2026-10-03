@@ -393,19 +393,19 @@ fn validate_command(job: &LocalControlJob) -> Result<(), String> {
                     );
                 }
             }
-            "curl" => {
+            "curl"
                 if job.args.iter().any(|a| {
                     matches!(
                         a.as_str(),
                         "-X" | "--request" | "-d" | "--data" | "--data-raw" | "--form"
                     )
-                }) {
-                    return Err(
-                        "Local Control: schreibender curl-Aufruf braucht workspace_write."
-                            .to_string(),
-                    );
-                }
+                }) =>
+            {
+                return Err(
+                    "Local Control: schreibender curl-Aufruf braucht workspace_write.".to_string(),
+                );
             }
+            "curl" => {}
             _ => {}
         }
     }
