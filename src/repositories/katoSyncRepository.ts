@@ -21,10 +21,16 @@ import type {
   GeneratedConnectorToken,
   KeyStatus,
   LaunchAgentStatus,
+  DiscoveredLocalProvider,
+  ProviderId,
+  ProviderLoginUrlEvent,
+  ProviderSettings,
+  ProviderStatus,
   ScanSummary,
   SupabaseSessionStatus,
   SyncReport
 } from "../types";
+import { normalizeProviderPriority, toProviderSettings } from "../lib/providerPolicy";
 
 const mockConfigKey = "katosync.config";
 // v2: Projekt-Board fuegt Tasks ein Pflichtfeld 'status' hinzu -> Key-Bump verwirft Alt-Caches ohne status.
@@ -262,6 +268,115 @@ export async function dirExists(path: string): Promise<boolean> {
     }
   }
   return true; // Browser-Demo: keine echte FS-Pruefung
+}
+
+// ── Agent Sync: Provider-Adapter (Rust) ───────────────────────────────────────────────
+// Alle Provider-Kommandos laufen im Rust-Core mit festen Argumentvektoren. Das Frontend sendet
+// nur nicht-geheime Metadaten; ein optionaler Endpoint-API-Key geht direkt in den OS-Schluesselbund.
+
+function providerSettings(config: AppConfig): ProviderSettings {
+  return toProviderSettings(config.disabledProviders, config.localProvider);
+}
+
+function demoStatus(provider: ProviderId, patch: Partial<ProviderStatus>): ProviderStatus {
+  const now = new Date().toISOString();
+  return {
+    provider,
+    label: { codex: "OpenAI Codex", claude: "Anthropic Claude Code", local: "Local Model", local_control: "Local Control / RDC" }[provider],
+    state: "unknown",
+    reason: "not_checked",
+    installed: false,
+    authenticated: false,
+    available: false,
+    enabled: true,
+    failoverAllowed: true,
+    capabilities: [],
+    checkedAt: now,
+    secretStored: false,
+    ...patch
+  };
+}
+
+// Browser-Demo: realistische, aber eindeutig ungepruefte Zustaende (keine echten CLI-Aufrufe).
+function demoProviderStatuses(config: AppConfig): ProviderStatus[] {
+  const enabled = (provider: ProviderId) => !config.disabledProviders.includes(provider);
+  const cloud = ["text_code_agent", "workspace_write", "cloud"];
+  return [
+    demoStatus("codex", { state: "authenticated", reason: "ready_test_pending", installed: true, authenticated: true, enabled: enabled("codex"), version: "demo", capabilities: cloud }),
+    demoStatus("claude", { state: "auth_unavailable", reason: "sign_in_required", installed: true, enabled: enabled("claude"), version: "demo", capabilities: cloud }),
+    demoStatus("local", {
+      state: config.localProvider.baseUrl ? "offline" : "unknown",
+      reason: config.localProvider.baseUrl ? "offline" : "not_configured",
+      installed: Boolean(config.localProvider.baseUrl),
+      enabled: enabled("local"),
+      model: config.localProvider.model || null,
+      capabilities: ["text_code_agent", "no_cloud_account"]
+    }),
+    demoStatus("local_control", {
+      state: "available",
+      reason: "local_control_queue_only",
+      installed: true,
+      authenticated: true,
+      available: true,
+      failoverAllowed: false,
+      capabilities: ["deterministic_local_control", "queue_preserved"]
+    })
+  ];
+}
+
+export async function getProviderStatuses(config: AppConfig, runSmoke = false): Promise<ProviderStatus[]> {
+  if (isTauri()) {
+    return invoke<ProviderStatus[]>("provider_statuses", {
+      settings: providerSettings(config),
+      runSmoke
+    });
+  }
+  return demoProviderStatuses(config);
+}
+
+export async function connectProvider(provider: ProviderId, forceLogin = false): Promise<ProviderStatus> {
+  if (isTauri()) {
+    return invoke<ProviderStatus>("connect_provider", { provider, forceLogin });
+  }
+  throw new Error("Provider-Login ist nur in der Desktop-App verfügbar.");
+}
+
+export async function cancelProviderLogin(provider: ProviderId): Promise<boolean> {
+  if (isTauri()) return invoke<boolean>("cancel_provider_login", { provider });
+  return false;
+}
+
+export async function testProvider(config: AppConfig, provider: ProviderId): Promise<ProviderStatus> {
+  if (isTauri()) {
+    return invoke<ProviderStatus>("test_provider", {
+      provider,
+      settings: providerSettings(config)
+    });
+  }
+  const status = demoProviderStatuses(config).find((entry) => entry.provider === provider);
+  if (!status) throw new Error("Provider-Status fehlt.");
+  return status;
+}
+
+// Loescht nur KatoSync-eigene Secrets (lokaler Endpoint-Key). CLI-Logins bleiben unberuehrt.
+export async function disconnectProvider(provider: ProviderId): Promise<void> {
+  if (isTauri()) await invoke("disconnect_provider", { provider });
+}
+
+export async function saveLocalProviderKey(baseUrl: string, apiKey: string): Promise<void> {
+  if (!isTauri()) throw new Error("secret_store_unavailable");
+  await invoke("save_local_provider_key", { baseUrl, apiKey });
+}
+
+export async function discoverLocalProviders(): Promise<DiscoveredLocalProvider[]> {
+  if (isTauri()) return invoke<DiscoveredLocalProvider[]>("discover_local_providers");
+  return [];
+}
+
+// Fallback, falls der Browser beim offiziellen Login nicht automatisch aufgeht.
+export async function listenProviderLoginUrls(cb: (event: ProviderLoginUrlEvent) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<ProviderLoginUrlEvent>("provider-login-url", (event) => cb(event.payload));
 }
 
 // Live-Feed: abonniert gestreamte Codex-Events. Gibt eine Unsubscribe-Funktion zurueck.
@@ -1339,7 +1454,17 @@ function normalizeConfig(config: AppConfig): AppConfig {
     codexCodingMode: config.codexCodingMode ?? defaultConfig.codexCodingMode,
     codexPreferredRunner: config.codexPreferredRunner === "claude_cli" ? "claude_cli" : "codex_cli",
     referenceRoot: config.referenceRoot ?? "",
-    projectRepos: config.projectRepos ?? {}
+    projectRepos: config.projectRepos ?? {},
+    providerPriority: normalizeProviderPriority(config.providerPriority),
+    disabledProviders: (config.disabledProviders ?? []).filter((provider) => provider !== "local_control"),
+    localProvider: {
+      kind:
+        config.localProvider?.kind === "lm_studio" || config.localProvider?.kind === "open_ai_compatible"
+          ? config.localProvider.kind
+          : "ollama",
+      baseUrl: config.localProvider?.baseUrl ?? "",
+      model: config.localProvider?.model ?? ""
+    }
   };
 }
 

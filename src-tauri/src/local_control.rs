@@ -551,6 +551,16 @@ fn claim_daemon(root: &Path) -> Result<PathBuf, String> {
     Ok(pid_path)
 }
 
+/// Liest nur Status und Heartbeat des Daemons (fuer den Provider-Manager), ohne Jobdaten.
+pub fn daemon_heartbeat() -> Option<(String, String)> {
+    let raw = fs::read(control_root().ok()?.join("state.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&raw).ok()?;
+    Some((
+        value.get("status")?.as_str()?.to_string(),
+        value.get("heartbeatAt")?.as_str()?.to_string(),
+    ))
+}
+
 pub fn run_daemon() -> Result<(), String> {
     let root = control_root()?;
     ensure_dirs(&root)?;
