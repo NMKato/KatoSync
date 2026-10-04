@@ -1,7 +1,6 @@
 // Created by NMKato Solutions
 // Agent Sync: Providerkarten fuer Codex, Claude Code und lokale Modelle. Reine View – alle
 // Seiteneffekte laufen ueber das ViewModel (Repository -> Rust-Provider-Adapter).
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowDown,
   ArrowUp,
@@ -231,6 +230,7 @@ function ProviderCard({
   const [loginCode, setLoginCode] = useState("");
   const [submittingCode, setSubmittingCode] = useState(false);
   const [browserState, setBrowserState] = useState<"idle" | "opening" | "opened" | "error">("idle");
+  const [linkCopied, setLinkCopied] = useState(false);
   const lastAutoOpenedUrl = useRef<string | null>(null);
   const Icon = providerIcons[provider];
   const action = vm.providerBusy[provider];
@@ -247,13 +247,9 @@ function ProviderCard({
   const openLoginPage = useCallback(async () => {
     if (!loginUrl) return;
     setBrowserState("opening");
-    try {
-      await openUrl(loginUrl);
-      setBrowserState("opened");
-    } catch {
-      setBrowserState("error");
-    }
-  }, [loginUrl]);
+    const opened = await vm.handleOpenProviderLoginUrl(provider, loginUrl);
+    setBrowserState(opened ? "opened" : "error");
+  }, [loginUrl, provider, vm]);
 
   useEffect(() => {
     if (!connecting || !loginUrl || lastAutoOpenedUrl.current === loginUrl) return;
@@ -314,15 +310,27 @@ function ProviderCard({
       {recheck ? <p className="provider-hint">{t("providers.nextRecheck", { time: formatTime(recheck, false) })}</p> : null}
       {connecting && loginUrl ? (
         <div className="provider-login-browser-action">
-          <button
-            className="provider-login-link"
-            disabled={browserState === "opening"}
-            onClick={() => void openLoginPage()}
-            type="button"
-          >
-            {browserState === "opening" ? <Loader2 className="spin" size={14} /> : <ExternalLink size={14} />}
-            {browserState === "opened" ? t("providers.reopenLoginPage") : t("providers.openLoginPage")}
-          </button>
+          <div className="provider-login-browser-buttons">
+            <button
+              className="provider-login-link"
+              disabled={browserState === "opening"}
+              onClick={() => void openLoginPage()}
+              type="button"
+            >
+              {browserState === "opening" ? <Loader2 className="spin" size={14} /> : <ExternalLink size={14} />}
+              {browserState === "opened" ? t("providers.reopenLoginPage") : t("providers.openLoginPage")}
+            </button>
+            <button
+              className="provider-login-link secondary-link"
+              onClick={async () => {
+                setLinkCopied(await copyText(loginUrl));
+              }}
+              type="button"
+            >
+              <Copy size={14} />
+              {linkCopied ? t("providers.loginLinkCopied") : t("providers.copyLoginLink")}
+            </button>
+          </div>
           <span className={`provider-login-feedback ${browserState}`} role="status">
             {browserState === "opening"
               ? t("providers.openingLoginPage")

@@ -320,6 +320,7 @@ pub fn run() {
             resume_runner_session,
             provider_statuses,
             connect_provider,
+            open_provider_login_url,
             cancel_provider_login,
             submit_provider_login_code,
             disconnect_provider,
@@ -370,8 +371,41 @@ async fn provider_statuses(
     provider_manager::statuses(&settings, run_smoke).await
 }
 
-/// Startet ausschliesslich den offiziellen Provider-Login (Browser) und prueft danach Auth + READY.
-/// Oeffnet sich der Browser nicht, wird nur eine offizielle HTTPS-Login-URL als Event gemeldet.
+fn open_provider_login_url_inner(
+    provider: provider_manager::ProviderId,
+    raw_url: &str,
+) -> Result<(), String> {
+    let url = provider_manager::official_login_url(provider, raw_url)
+        .ok_or_else(|| "Keine gültige offizielle Provider-Anmelde-URL.".to_string())?;
+
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open").arg(&url).status();
+    #[cfg(target_os = "windows")]
+    let status = Command::new("explorer.exe").arg(&url).status();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = Command::new("xdg-open").arg(&url).status();
+
+    let status =
+        status.map_err(|e| format!("Standardbrowser konnte nicht gestartet werden: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Standardbrowser konnte die Anmeldeseite nicht öffnen.".to_string())
+    }
+}
+
+/// Öffnet nur eine bereits validierte offizielle Login-URL im Betriebssystem-Browser.
+#[tauri::command]
+fn open_provider_login_url(
+    provider: provider_manager::ProviderId,
+    url: String,
+) -> Result<(), String> {
+    open_provider_login_url_inner(provider, &url)
+}
+
+/// Startet ausschliesslich den offiziellen Provider-Login und prueft danach Auth + READY.
+/// Sobald die CLI ihre offizielle HTTPS-Login-URL ausgibt, wird sie an die UI gemeldet;
+/// die UI öffnet sie über open_provider_login_url im nativen OS-Browser.
 #[tauri::command]
 async fn connect_provider(
     provider: provider_manager::ProviderId,

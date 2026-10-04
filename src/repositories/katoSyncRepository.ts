@@ -372,6 +372,12 @@ export async function testProvider(config: AppConfig, provider: ProviderId): Pro
   return status;
 }
 
+// Öffnet eine vom Rust-Backend erneut validierte offizielle Provider-Login-URL im OS-Browser.
+export async function openProviderLoginUrl(provider: ProviderId, url: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("open_provider_login_url", { provider, url });
+}
+
 // Übergibt ausschließlich einen flüchtigen OAuth-Einmalcode an einen bereits laufenden Login.
 export async function submitProviderLoginCode(provider: ProviderId, code: string): Promise<void> {
   if (!isTauri()) return;
