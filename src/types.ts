@@ -133,6 +133,8 @@ export interface ProviderStatus {
   checkedAt: string;
   lastSuccessAt?: string | null;
   retryHint?: string | null;
+  // Nur Frontend: letzter billiger Auth-/Status-Check. `checkedAt` bleibt die READY-Klassifikation.
+  healthCheckedAt?: string | null;
   secretStored: boolean;
   detail?: string | null;
 }
@@ -389,6 +391,16 @@ export interface CodexRunResult {
 
 export interface CodexRunState {
   status: "idle" | "running" | "completed" | "failed";
+  startedAt?: string;
+  lastActivityAt?: string;
+  context?: {
+    jobId: string;
+    projectId: string;
+    task: string;
+    source: "action_plan" | "briefing";
+    planId?: string | null;
+    createdAt?: string | null;
+  };
   result?: CodexRunResult;
   error?: string;
 }
@@ -399,6 +411,8 @@ export interface CodexEvent {
   seq: number;
   label: string;
   text: string;
+  // Empfangszeit im ViewModel, falls der Runner selbst keinen Zeitstempel liefert.
+  at?: string;
 }
 
 // Live-Status des Sync-Laufs (Upload-Fortschritt + sichtbarer Rate-Limit-Backoff).
@@ -435,6 +449,27 @@ export interface LocalControlJobSummary {
   error?: string | null;
 }
 
+export interface LocalControlLaneSnapshot {
+  laneId: string;
+  projectId?: string | null;
+  jobId: string;
+  cwd: string;
+  command: string;
+  mode: string;
+  resourceLocks: string[];
+  startedAt: string;
+}
+
+export interface LocalControlQueuedJobSnapshot {
+  laneId: string;
+  projectId?: string | null;
+  jobId: string;
+  command: string;
+  mode: string;
+  resourceLocks: string[];
+  requireCleanGit: boolean;
+}
+
 export interface LocalControlMonitorStats {
   total: number;
   completed: number;
@@ -447,8 +482,258 @@ export interface LocalControlMonitorSnapshot {
   available: boolean;
   state?: LocalControlState | null;
   feed: string[];
+  activeLanes: LocalControlLaneSnapshot[];
+  queuedJobs: LocalControlQueuedJobSnapshot[];
   recentJobs: LocalControlJobSummary[];
   stats: LocalControlMonitorStats;
+  // Externe Orchestrierungsvertraege im Control-Root (fehlt in aelteren Builds/Browser-Demo).
+  orchestration?: OrchestrationSnapshot | null;
+}
+
+// ===== Orchestrierungs-Adapter (Rust: orchestration.rs) – roh, begrenzt, ohne absolute Pfade =====
+export interface ProviderHealthSnapshot {
+  checkedAt?: string | null;
+  providers: Array<{ provider: string; installed: boolean; authenticated: boolean }>;
+  waitingFallbackJobs: number;
+  controlIdle: boolean;
+  note?: string | null;
+  lastEventAt?: string | null;
+  // RESUME ohne RESUME_DONE im Scheduler-Log: eine Wiederaufnahme laeuft gerade.
+  resumeInFlight?: { name: string; startedAt: string } | null;
+}
+
+export interface ContinuationSnapshot {
+  planId: string;
+  enabled: boolean;
+  status: string;
+  cursor: number;
+  waveCount: number;
+  activeJobId?: string | null;
+  activeWaveName?: string | null;
+  lastResultStatus?: string | null;
+  lastResultWave?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface RemoteOrchestratorSnapshot {
+  sessionId: string;
+  state: "attached" | "working" | "detached";
+  transport?: "rdc" | null;
+  attachedAt?: string | null;
+  heartbeatAt: string;
+  leaseSeconds: number;
+  leaseExpiresAt: string;
+  transportHeartbeatAt?: string | null;
+  jobId?: string | null;
+  device?: string | null;
+  model?: string | null;
+  activity?: string | null;
+  nextStep?: string | null;
+}
+
+export interface FallbackJobSnapshot {
+  id: string;
+  name: string;
+  branch?: string | null;
+  worktree?: string | null;
+  status: string;
+  reason?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  completedAt?: string | null;
+  failedAt?: string | null;
+  timeoutSeconds?: number | null;
+  activeProvider?: string | null;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: string | null;
+  providerStates: Array<{
+    provider: string;
+    state: string;
+    exitCode?: number | null;
+    retryAt?: string | null;
+    retryHint?: string | null;
+  }>;
+  evidence: Array<{ key: string; value: string }>;
+  branchMatches?: boolean | null;
+  worktreeBusy: boolean;
+}
+
+export interface OrchestrationSnapshot {
+  providerHealth?: ProviderHealthSnapshot | null;
+  continuation?: ContinuationSnapshot | null;
+  remoteOrchestrator?: RemoteOrchestratorSnapshot | null;
+  fallbackJobs: FallbackJobSnapshot[];
+}
+
+// ===== Kanonisches Agent-Sync-Modell (lib/agentJobModel.ts) =====
+// Providerunabhaengiger Vertrag zwischen ViewModel und allen Agent-Sync-Views. Texte sind Codes,
+// die Views uebersetzen; Rohtexte gibt es nur fuer echte Feed-/Evidence-Zeilen.
+
+// Fuenf kanonische Lanes: vier intelligente Besitzer + das deterministische Substrat.
+export type AgentLaneId = "codex" | "claude" | "local" | "remote_orchestrator" | "local_control";
+export type AgentJobStatus = "queued" | "running" | "waiting" | "blocked" | "completed" | "failed";
+export type AgentJobSource = "action_plan" | "runner" | "provider_router" | "continuation" | "local_control";
+export type AgentJobEventKind = "state" | "activity" | "handoff" | "evidence" | "heartbeat";
+export type AgentNextStep =
+  | "await_event"
+  | "review_merge"
+  | "inspect_evidence"
+  | "resume_deferred"
+  | "resolve_gate"
+  | "approve_plan"
+  | "start_when_safe"
+  | "start_local_control"
+  | "await_provider_reset"
+  | "await_scheduler_resume"
+  | "await_intelligent_lane"
+  | "release_stale_lease"
+  | "prove_branch"
+  | "await_worktree"
+  | "await_writer";
+
+export interface AgentHandoff {
+  from: AgentLaneId | null;
+  to: AgentLaneId;
+  at?: string | null;
+  // Failover-Klasse (quota_limited, auth_unavailable, ...) oder Handoff-Grund.
+  reason: string;
+  retryAt?: string | null;
+}
+
+export interface AgentJobEvent {
+  id: string;
+  jobId?: string | null;
+  at: string;
+  kind: AgentJobEventKind;
+  // Rohtext nur fuer Feed-/Evidence-Zeilen; state/handoff tragen Codes.
+  message?: string | null;
+  code?: string | null;
+  lane?: AgentLaneId | null;
+  from?: AgentLaneId | null;
+  to?: AgentLaneId | null;
+}
+
+export type AgentResumeBlock =
+  | "safe"
+  | "branch_unproven"
+  | "worktree_busy"
+  | "writer_active"
+  | "orchestrator_lease"
+  | "no_lane"
+  | "provider_reset_pending";
+
+export interface AgentJob {
+  id: string;
+  source: AgentJobSource;
+  externalId?: string | null;
+  projectId: string;
+  task: string;
+  // Aktueller Besitzer (wer arbeitet/arbeitete wirklich daran) – unabhaengig von Konnektivitaet.
+  owner: AgentLaneId | null;
+  model?: string | null;
+  laneId?: string | null;
+  device?: string | null;
+  branch?: string | null;
+  worktree?: string | null;
+  status: AgentJobStatus;
+  phase: string;
+  createdAt?: string | null;
+  startedAt?: string | null;
+  lastActivityAt?: string | null;
+  completedAt?: string | null;
+  // Rohdetail (redigiert) fuer Blocker/Fehler; `reason` ist ein Code.
+  blocker?: string | null;
+  reason?: string | null;
+  nextStep?: AgentNextStep | null;
+  retryAt?: string | null;
+  handoffs: AgentHandoff[];
+  resume?: { safe: boolean; reason: AgentResumeBlock } | null;
+  events: AgentJobEvent[];
+}
+
+export type AgentLaneConnectivity = "connected" | "limited" | "disconnected" | "disabled" | "not_configured" | "unknown";
+export type AgentLaneActivity = "active" | "waiting" | "idle" | "blocked" | "offline" | "unknown";
+
+export interface AgentLane {
+  id: AgentLaneId;
+  kind: "model_provider" | "orchestrator" | "substrate";
+  // Local Control ist deterministisch und wird nie als LLM-Lane ausgewiesen.
+  intelligent: boolean;
+  rank: number;
+  connectivity: AgentLaneConnectivity;
+  activity: AgentLaneActivity;
+  currentJobId?: string | null;
+  model?: string | null;
+  device?: string | null;
+  checkedAt?: string | null;
+  retryAt?: string | null;
+  reason?: string | null;
+  // Darf die Lane jetzt einen Job uebernehmen (Failover-Ziel)?
+  eligible: boolean;
+}
+
+export interface RemoteOrchestratorRuntime {
+  transport: "online" | "stale" | "unknown";
+  transportAt?: string | null;
+  orchestrator: "attached" | "working" | "stale" | "detached" | "unavailable";
+  attachedAt?: string | null;
+  heartbeatAt?: string | null;
+  leaseExpiresAt?: string | null;
+  // Unabgelaufene Lease blockiert andere Writer, auch wenn der Heartbeat schon alt ist.
+  leaseActive: boolean;
+  jobId?: string | null;
+  device?: string | null;
+  model?: string | null;
+  activity?: string | null;
+  eligible: boolean;
+}
+
+export interface AgentSchedulerRuntime {
+  providerHealth: {
+    state: "armed" | "resuming" | "stale" | "unknown";
+    checkedAt?: string | null;
+    nextCheckAt?: string | null;
+    resumeJob?: string | null;
+    waitingJobs: number;
+  };
+  continuation: {
+    state: "armed" | "waiting_daemon" | "stopped" | "idle" | "unknown";
+    planId?: string | null;
+    activeWave?: string | null;
+    cursor?: number | null;
+    waveCount?: number | null;
+    updatedAt?: string | null;
+  };
+}
+
+export type AgentStartBlock =
+  | "safe"
+  | "runner_busy"
+  | "worktree_lease_active"
+  | "handoff_in_flight"
+  | "orchestrator_lease"
+  | "no_execution_lane";
+
+export interface AgentStartSafety {
+  safe: boolean;
+  reason: AgentStartBlock;
+}
+
+export interface AgentSyncState {
+  // null = ehrlich idle: gerade laeuft nachweislich nichts.
+  currentJob: AgentJob | null;
+  nextJob: AgentJob | null;
+  jobs: AgentJob[];
+  lanes: AgentLane[];
+  events: AgentJobEvent[];
+  handoffs: AgentHandoff[];
+  counts: Record<AgentJobStatus, number>;
+  queueCount: number;
+  startSafety: AgentStartSafety;
+  localControl: "unknown" | "offline" | "stale" | "idle" | "busy";
+  remote: RemoteOrchestratorRuntime;
+  scheduler: AgentSchedulerRuntime;
+  generatedAt: string;
 }
 
 export interface LaunchAgentStatus {

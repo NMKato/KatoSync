@@ -2,7 +2,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  AGENT_LANE_ORDER,
+  PROVIDER_RECHECK_INTERVAL_MS,
   buildSanitizedProviderDiagnostics,
+  isIntelligentLane,
+  mergeCheapProviderHealth,
+  nextLaneAfterFailure,
+  providerRecheckPlan,
+  providerRetryAt,
   currentProviderOwner,
   displayTone,
   failoverAllowedForState,
@@ -132,7 +139,9 @@ test("quota, capacity and offline providers are re-checked sparingly", () => {
     status("codex", { state: "quota_limited", enabled: false })
   ];
   assert.deepEqual(providersDueForRecheck(statuses, now), ["codex"]);
-  assert.equal(nextRecheckAt(statuses[0]), "2026-10-03T10:15:00.000Z");
+  // Stale Provider-Health wird spaetestens nach zehn Minuten erneuert.
+  assert.equal(PROVIDER_RECHECK_INTERVAL_MS, 10 * 60 * 1000);
+  assert.equal(nextRecheckAt(statuses[0]), "2026-10-03T10:10:00.000Z");
   assert.equal(nextRecheckAt(status("codex")), null);
 });
 
@@ -189,4 +198,85 @@ test("copied diagnostics redact credentials and personal identifiers", () => {
   }
   assert.match(diagnostics, /reason=login_failed/);
   assert.ok(redactDiagnostic("x".repeat(1000)).length <= 400);
+});
+
+test("provider reset hints become exact retry times anchored at the provider check", () => {
+  const at = (retryHint: string) => providerRetryAt(status("codex", { state: "quota_limited", retryHint }));
+  assert.equal(at("resets in 2h 30m"), "2026-10-03T12:30:00.000Z");
+  assert.equal(at("try again in 45 minutes"), "2026-10-03T10:45:00.000Z");
+  assert.equal(at("resets at 2026-10-03T13:00:00Z"), "2026-10-03T13:00:00.000Z");
+  assert.equal(at("resets at 2026-10-03T09:00:00Z"), null, "past reset is not a target");
+  const clock = at("Try again at 10:34 PM");
+  assert.ok(clock);
+  assert.equal(new Date(clock).getHours(), 22);
+  assert.equal(new Date(clock).getMinutes(), 34);
+  assert.equal(at("unit test failed at line 12"), null);
+  assert.equal(providerRetryAt(status("codex")), null);
+});
+
+test("exact retry time drives a targeted recheck without drifting or looping", () => {
+  const limited = status("codex", { state: "quota_limited", available: false, retryHint: "resets in 4 min" });
+  assert.equal(nextRecheckAt(limited), "2026-10-03T10:04:00.000Z");
+  // Ein billiger Check nach dem Reset verankert den Hinweis nicht neu und macht ihn nicht minuetlich faellig.
+  const afterCheap = { ...limited, healthCheckedAt: "2026-10-03T10:05:00.000Z" };
+  assert.equal(providerRetryAt(afterCheap), "2026-10-03T10:04:00.000Z");
+  assert.equal(nextRecheckAt(afterCheap), "2026-10-03T10:15:00.000Z");
+  assert.deepEqual(providersDueForRecheck([afterCheap], Date.parse("2026-10-03T10:06:00.000Z")), []);
+});
+
+test("cheap health checks never clear quota or downgrade proven availability", () => {
+  const probe = status("codex", { state: "authenticated", available: false, checkedAt: "2026-10-03T10:10:00.000Z" });
+  const limited = status("codex", { state: "quota_limited", available: false, retryHint: "resets in 2h" });
+  const kept = mergeCheapProviderHealth(limited, probe);
+  assert.equal(kept.state, "quota_limited");
+  assert.equal(kept.checkedAt, limited.checkedAt);
+  assert.equal(kept.healthCheckedAt, "2026-10-03T10:10:00.000Z");
+  assert.equal(mergeCheapProviderHealth(status("codex"), probe).state, "available");
+  const lost = status("codex", { state: "auth_unavailable", authenticated: false, available: false });
+  assert.equal(mergeCheapProviderHealth(limited, lost).state, "auth_unavailable");
+  // Re-Login erkannt: vorher abgelehnte Auth wird durch einen authentifizierten Check aufgehoben.
+  assert.equal(mergeCheapProviderHealth(lost, probe).state, "authenticated");
+});
+
+test("recheck plan keeps costly READY probes for waiting work at the reset time", () => {
+  const now = Date.parse("2026-10-03T10:12:00.000Z");
+  const statuses = [
+    status("codex", { state: "quota_limited", available: false, retryHint: "resets in 10 min" }),
+    status("claude", { state: "quota_limited", available: false, retryHint: "resets in 2h" }),
+    status("local", { checkedAt: "2026-10-03T09:00:00.000Z" }),
+    status("local_control", { checkedAt: "2026-10-03T09:00:00.000Z" })
+  ];
+  assert.deepEqual(providerRecheckPlan(statuses, { nowMs: now, waitingWork: true }), {
+    ready: ["codex"],
+    cheap: ["claude", "local"]
+  });
+  // Ohne wartende Arbeit: nur billige Checks, nie Inferenz.
+  assert.deepEqual(providerRecheckPlan(statuses, { nowMs: now, waitingWork: false }).ready, []);
+  // Ohne Reset-Hinweis: READY-Test hoechstens alle 30 Minuten.
+  const offline = [status("claude", { state: "offline", available: false })];
+  assert.deepEqual(
+    providerRecheckPlan(offline, { nowMs: now, waitingWork: true, lastReadyProbeAt: { claude: "2026-10-03T10:00:00.000Z" } }),
+    { ready: [], cheap: ["claude"] }
+  );
+  assert.deepEqual(
+    providerRecheckPlan(offline, { nowMs: Date.parse("2026-10-03T10:31:00.000Z"), waitingWork: true }).ready,
+    ["claude"]
+  );
+});
+
+test("remote orchestrator is the intelligent fallback before the deterministic substrate", () => {
+  assert.deepEqual(AGENT_LANE_ORDER, ["codex", "claude", "local", "remote_orchestrator", "local_control"]);
+  assert.equal(isIntelligentLane("remote_orchestrator"), true);
+  assert.equal(isIntelligentLane("local_control"), false);
+  const limited = [
+    status("codex", { state: "quota_limited", available: false }),
+    status("claude", { state: "quota_limited", available: false }),
+    status("local", { available: false, state: "offline" })
+  ];
+  const priority: ProviderId[] = ["codex", "claude", "local", "local_control"];
+  assert.equal(nextLaneAfterFailure(limited, priority, "codex", "quota_limited", true), "remote_orchestrator");
+  assert.equal(nextLaneAfterFailure(limited, priority, "codex", "quota_limited", false), "local_control");
+  assert.equal(nextLaneAfterFailure([...limited.slice(0, 1), status("claude")], priority, "codex", "quota_limited", true), "claude");
+  assert.equal(nextLaneAfterFailure(limited, priority, "remote_orchestrator", "offline", true), "local_control");
+  assert.equal(nextLaneAfterFailure(limited, priority, "codex", "job_failed", true), null);
 });

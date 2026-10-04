@@ -50,8 +50,11 @@ export async function getLocalControlSnapshot(): Promise<LocalControlMonitorSnap
     available: false,
     state: null,
     feed: [],
+    activeLanes: [],
+    queuedJobs: [],
     recentJobs: [],
-    stats: { total: 0, completed: 0, failed: 0, timeout: 0, avgDurationMs: 0 }
+    stats: { total: 0, completed: 0, failed: 0, timeout: 0, avgDurationMs: 0 },
+    orchestration: { fallbackJobs: [] }
   };
 }
 

@@ -60,18 +60,21 @@ import {
   deleteBriefing
 } from "../repositories/katoSyncRepository";
 import {
+  mergeCheapProviderHealth,
   mergeProviderStatus,
   moveProvider,
   normalizeProviderPriority,
-  providersDueForRecheck,
+  providerRecheckPlan,
   providerTransitions,
   validateLocalEndpointInput
 } from "../lib/providerPolicy";
+import { agentWorkWaiting, normalizeAgentSyncState } from "../lib/agentJobModel";
 import { defaultConfig } from "../lib/defaults";
 import { modeForStep } from "../lib/workspaceMode";
 import type { Notice } from "../components/Primitives";
 import type {
   ActionPlan,
+  AgentSyncState,
   ActionPlanStatus,
   ActionTask,
   AppConfig,
@@ -204,6 +207,8 @@ export function useKatoSyncViewModel() {
   const [localKeyError, setLocalKeyError] = useState<string | null>(null);
   const [discoveredLocal, setDiscoveredLocal] = useState<DiscoveredLocalProvider[] | null>(null);
   const providerStatusesRef = useRef<ProviderStatus[]>([]);
+  // Kanonischer Agent-Sync-Zustand fuer Timer/Handler, die vor dem useMemo definiert sind.
+  const agentSyncRef = useRef<AgentSyncState | null>(null);
   const providerSmokeCheckedRef = useRef(false);
   // Projekt-Board
   const [boardSelection, setBoardSelection] = useState<string[]>([]);
@@ -298,10 +303,14 @@ export function useKatoSyncViewModel() {
     let unlistenSync: (() => void) | undefined;
     void (async () => {
       const un = await listenCodexEvents((event) => {
+        const received = { ...event, at: event.at ?? new Date().toISOString() };
         setCodexEvents((prev) => {
-          const next = [...prev, event];
+          const next = [...prev, received];
           return next.length > 300 ? next.slice(next.length - 300) : next;
         });
+        setCodexRun((current) => current.status === "running"
+          ? { ...current, lastActivityAt: received.at }
+          : current);
       });
       const unSync = await listenSyncEvents((event) => {
         if (event.phase === "rate_limit") {
@@ -739,23 +748,44 @@ export function useKatoSyncViewModel() {
     };
   }, []);
 
-  // Sparsamer Auto-Re-Check: nur Provider mit Kontingent-/Kapazitaets-/Erreichbarkeitsproblem,
-  // hoechstens alle 15 Minuten, nur solange die App offen ist.
+  // Sparsamer Auto-Re-Check (providerPolicy.providerRecheckPlan): billige Auth-/Status-Checks
+  // halten Provider-Karten hoechstens 10 Minuten alt; teure READY-Tests laufen nur fuer wartende
+  // Arbeit am gemeldeten Reset-Zeitpunkt (ohne Hinweis hoechstens alle 30 Minuten).
   const configRef = useRef<AppConfig | null>(null);
   configRef.current = config;
   const providerBusyRef = useRef(providerBusy);
   providerBusyRef.current = providerBusy;
+  const lastReadyProbeRef = useRef<Partial<Record<ProviderId, string>>>({});
   useEffect(() => {
     const timer = window.setInterval(() => {
       const source = configRef.current;
       if (!source) return;
-      for (const provider of providersDueForRecheck(providerStatusesRef.current)) {
-        if (providerBusyRef.current[provider]) continue;
+      const nowMs = Date.now();
+      const plan = providerRecheckPlan(providerStatusesRef.current, {
+        nowMs,
+        waitingWork: agentWorkWaiting(agentSyncRef.current),
+        lastReadyProbeAt: lastReadyProbeRef.current
+      });
+      const idle = (provider: ProviderId) => !providerBusyRef.current[provider];
+      for (const provider of plan.ready.filter(idle)) {
+        lastReadyProbeRef.current = { ...lastReadyProbeRef.current, [provider]: new Date(nowMs).toISOString() };
         void testProviderSilently(provider, source).catch(() => undefined);
       }
+      const cheap = plan.cheap.filter(idle);
+      if (!cheap.length) return;
+      void getProviderStatuses(source, false)
+        .then((probe) => {
+          const next = providerStatusesRef.current.map((current) => {
+            if (!cheap.includes(current.provider)) return current;
+            const health = probe.find((entry) => entry.provider === current.provider);
+            return health ? mergeCheapProviderHealth(current, health) : current;
+          });
+          applyProviderSnapshot(next);
+        })
+        .catch(() => undefined);
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [testProviderSilently]);
+  }, [applyProviderSnapshot, testProviderSilently]);
 
   const saveDraftKeyIfNeeded = useCallback(async () => {
     const draft = keyInput.trim();
@@ -1179,8 +1209,21 @@ export function useKatoSyncViewModel() {
   const runCodexForTaskWithRepo = useCallback(
     async (plan: ActionPlan, task: ActionTask, repoPath: string): Promise<CodexRunResult> => {
       if (!config) throw new Error("Keine Konfiguration geladen.");
+      const startedAt = new Date().toISOString();
       setCodexEvents([]);
-      setCodexRun({ status: "running" });
+      setCodexRun({
+        status: "running",
+        startedAt,
+        lastActivityAt: startedAt,
+        context: {
+          jobId: task.taskId,
+          projectId: task.projectId,
+          task: task.title,
+          source: "action_plan",
+          planId: plan.planId,
+          createdAt: plan.createdAt
+        }
+      });
       const result = await runCodexTask({
         baseUrl: config.mcp.baseUrl,
         repoPath,
@@ -1206,7 +1249,12 @@ export function useKatoSyncViewModel() {
         },
         runner: config.codexPreferredRunner
       });
-      setCodexRun({ status: result.status === "completed" ? "completed" : "failed", result });
+      setCodexRun((current) => ({
+        ...current,
+        status: result.status === "completed" ? "completed" : "failed",
+        lastActivityAt: new Date().toISOString(),
+        result
+      }));
       return result;
     },
     [config]
@@ -1239,7 +1287,7 @@ export function useKatoSyncViewModel() {
             : `Codex-Lauf fehlgeschlagen: ${result.error ?? "unbekannt"}`
         );
       } catch (error) {
-        setCodexRun({ status: "failed", error: getMessage(error) });
+        setCodexRun((current) => ({ ...current, status: "failed", lastActivityAt: new Date().toISOString(), error: getMessage(error) }));
         await updateActionTaskStatus(config, task.taskId, "failed").catch(() => undefined);
         setActionPlans(await loadActionPlans(config));
         show("error", getMessage(error));
@@ -1255,9 +1303,21 @@ export function useKatoSyncViewModel() {
       if (!config) return;
       const repoPath = await resolveRepoForProject("katosync");
       if (!repoPath) return;
+      const startedAt = new Date().toISOString();
       setBusy("codex-run");
       setCodexEvents([]);
-      setCodexRun({ status: "running" });
+      setCodexRun({
+        status: "running",
+        startedAt,
+        lastActivityAt: startedAt,
+        context: {
+          jobId: briefing.briefingId,
+          projectId: "katosync",
+          task: briefing.title,
+          source: "briefing",
+          createdAt: briefing.createdAt
+        }
+      });
       try {
         const result = await runCodexTask({
           baseUrl: config.mcp.baseUrl,
@@ -1280,7 +1340,12 @@ export function useKatoSyncViewModel() {
           },
           runner: config.codexPreferredRunner
         });
-        setCodexRun({ status: result.status === "completed" ? "completed" : "failed", result });
+        setCodexRun((current) => ({
+          ...current,
+          status: result.status === "completed" ? "completed" : "failed",
+          lastActivityAt: new Date().toISOString(),
+          result
+        }));
         show(
           result.status === "completed" ? "ok" : "warn",
           result.status === "completed"
@@ -1289,7 +1354,7 @@ export function useKatoSyncViewModel() {
         );
         setBriefings(await updateBriefingStatus(config, briefing.briefingId, "queued"));
       } catch (error) {
-        setCodexRun({ status: "failed", error: getMessage(error) });
+        setCodexRun((current) => ({ ...current, status: "failed", lastActivityAt: new Date().toISOString(), error: getMessage(error) }));
         show("error", getMessage(error));
       } finally {
         setBusy(null);
@@ -1511,6 +1576,12 @@ export function useKatoSyncViewModel() {
   const handleStartBoardQueue = useCallback(
     async (projectId: string) => {
       if (!config || queueRunning || queueStartingRef.current) return;
+      // Ein Writer zur Zeit: laeuft bereits ein Handoff/Orchestrator/Writer, startet nichts Zweites.
+      const safety = agentSyncRef.current?.startSafety;
+      if (safety && !safety.safe) {
+        show("warn", `Start gesperrt (${safety.reason}): ein anderer Agent-Job arbeitet bereits oder keine Lane ist frei.`);
+        return;
+      }
       queueStartingRef.current = true;
       try {
       const group = boardGroups.find((entry) => entry.projectId === projectId);
@@ -1687,8 +1758,47 @@ export function useKatoSyncViewModel() {
     [setupGates]
   );
 
+  const agentSync = useMemo(
+    () => normalizeAgentSyncState({
+      actionPlans,
+      codexRun,
+      codexEvents,
+      currentQueueTaskId,
+      queueRunning,
+      localControl: localControlMonitor,
+      providerStatuses,
+      providerTransitions: providerHistory,
+      providerPriority: config?.providerPriority ?? [],
+      preferredRunner: config?.codexPreferredRunner,
+      codexModel: config?.codexModel,
+      claudeModel: config?.claudeModel,
+      localModel: config?.localProvider.model,
+      device: config?.device.deviceName,
+      now: new Date().toISOString()
+    }),
+    [
+      actionPlans,
+      codexEvents,
+      codexRun,
+      config?.claudeModel,
+      config?.codexModel,
+      config?.codexPreferredRunner,
+      config?.device.deviceName,
+      config?.localProvider.model,
+      config?.providerPriority,
+      currentQueueTaskId,
+      localControlMonitor,
+      providerHistory,
+      providerStatuses,
+      queueRunning
+    ]
+  );
+
+  agentSyncRef.current = agentSync;
+
   return {
     activeStep,
+    agentSync,
     actionPlans,
     boardDailyLimit,
     boardGroups,

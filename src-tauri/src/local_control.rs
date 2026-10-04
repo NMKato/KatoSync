@@ -86,8 +86,24 @@ pub struct LocalControlMonitorSnapshot {
     pub available: bool,
     pub state: Option<LocalControlState>,
     pub feed: Vec<String>,
+    pub active_lanes: Vec<LocalControlLaneSnapshot>,
+    pub queued_jobs: Vec<LocalControlQueuedJobSnapshot>,
     pub recent_jobs: Vec<LocalControlResult>,
     pub stats: LocalControlMonitorStats,
+    // Externe Orchestrierungsvertraege (Scheduler, Watchdog, Router-Queue, Remote Orchestrator).
+    pub orchestration: crate::orchestration::OrchestrationSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalControlQueuedJobSnapshot {
+    lane_id: String,
+    project_id: Option<String>,
+    job_id: String,
+    command: String,
+    mode: String,
+    resource_locks: Vec<String>,
+    require_clean_git: bool,
 }
 
 pub fn monitor_snapshot() -> Result<LocalControlMonitorSnapshot, String> {
@@ -109,6 +125,35 @@ pub fn monitor_snapshot() -> Result<LocalControlMonitorSnapshot, String> {
         .into_iter()
         .rev()
         .collect::<Vec<_>>();
+
+    // Strukturierte Adapterdaten fuer das kanonische AgentJob-Modell. Die View muss weder
+    // lanes.json noch Inbox-Dateien oder Prozesslogs kennen beziehungsweise interpretieren.
+    let active_lanes = fs::read_to_string(root.join("lanes.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Vec<LocalControlLaneSnapshot>>(&raw).ok())
+        .unwrap_or_default();
+    let mut queued_jobs = fs::read_dir(root.join("inbox"))
+        .map_err(|e| format!("Local Control: Inbox nicht lesbar: {e}"))?
+        .filter_map(|entry| entry.ok().map(|value| value.path()))
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
+        .filter_map(|path| fs::read_to_string(path).ok())
+        .filter_map(|raw| serde_json::from_str::<LocalControlJob>(&raw).ok())
+        .map(|job| LocalControlQueuedJobSnapshot {
+            lane_id: job.lane_id,
+            project_id: job.project_id,
+            job_id: job.id,
+            command: command_basename(&job.command).to_string(),
+            mode: job.mode,
+            resource_locks: job.resource_locks,
+            require_clean_git: job.require_clean_git,
+        })
+        .collect::<Vec<_>>();
+    queued_jobs.sort_by(|a, b| a.job_id.cmp(&b.job_id));
+    let active_cwds = active_lanes
+        .iter()
+        .map(|lane| cwd_key(&lane.cwd))
+        .collect::<Vec<_>>();
+    let orchestration = crate::orchestration::snapshot(&root, &active_cwds);
 
     let mut files = fs::read_dir(root.join("outbox"))
         .map_err(|e| format!("Local Control: Outbox nicht lesbar: {e}"))?
@@ -142,6 +187,8 @@ pub fn monitor_snapshot() -> Result<LocalControlMonitorSnapshot, String> {
         available: state.is_some(),
         state,
         feed,
+        active_lanes,
+        queued_jobs,
         recent_jobs,
         stats: LocalControlMonitorStats {
             total,
@@ -150,6 +197,7 @@ pub fn monitor_snapshot() -> Result<LocalControlMonitorSnapshot, String> {
             timeout,
             avg_duration_ms,
         },
+        orchestration,
     })
 }
 
@@ -583,9 +631,9 @@ fn execute_job(root: &Path, job: &LocalControlJob) -> LocalControlResult {
     result
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LocalControlLaneSnapshot {
+pub struct LocalControlLaneSnapshot {
     lane_id: String,
     project_id: Option<String>,
     job_id: String,
