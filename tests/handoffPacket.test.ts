@@ -32,6 +32,18 @@ function packet() {
       refs: ["project://genxline/architecture"],
       verifiedAt: "2026-10-04T14:30:00+02:00"
     },
+    feature: {
+      featureId: "world-maplibre",
+      purpose: "WORLD auf einen austauschbaren Karten-Engine-Prototyp vorbereiten.",
+      subsystems: ["WORLD", "Map Engine"],
+      dependencies: ["private media derivatives"],
+      compatibilityGoals: ["bestehende Memory-Marker bleiben kompatibel"]
+    },
+    roadmap: {
+      predecessors: ["private derivatives", "WORLD memory markers"],
+      current: ["MapLibre prototype"],
+      downstream: ["engine decision", "production migration only after acceptance"]
+    },
     task: { taskId: "#136", title: "MapLibre prototype", issue: "#136" },
     goal: "MapLibre-Prototyp sauber bis zum Review bringen.",
     acceptanceCriteria: ["Tests grün", "PR reviewbar", "Tests grün"],
@@ -56,6 +68,10 @@ function packet() {
       expiresAt: "2026-10-04T15:00:00+02:00"
     },
     memoryRefs: ["project://genxline/status", "project://genxline/status"],
+    episodeRefs: ["episode://genxline/handoff"],
+    compatibilityRefs: ["contract://genxline/world-marker-v1"],
+    rexRefs: ["rex://genxline/world", "rex://shared/architecture"],
+    resourceHandles: ["resource://preview/deploy"],
     evidence: [
       {
         id: "git-head",

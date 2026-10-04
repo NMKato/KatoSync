@@ -36,6 +36,20 @@ export interface HandoffTaskIdentity {
   pullRequest?: string | null;
 }
 
+export interface FeatureCapsule {
+  featureId: string;
+  purpose: string;
+  subsystems: string[];
+  dependencies: string[];
+  compatibilityGoals: string[];
+}
+
+export interface RoadmapWindow {
+  predecessors: string[];
+  current: string[];
+  downstream: string[];
+}
+
 export interface ProjectContextSkeleton {
   contextVersion: string;
   contextHash: string;
@@ -62,6 +76,8 @@ export interface HandoffPacket {
   projectId: string;
   projectName: string;
   context: ProjectContextSkeleton;
+  feature: FeatureCapsule;
+  roadmap: RoadmapWindow;
   task: HandoffTaskIdentity;
   goal: string;
   acceptanceCriteria: string[];
@@ -74,6 +90,10 @@ export interface HandoffPacket {
   git: HandoffGitState;
   lease: HandoffLease;
   memoryRefs: string[];
+  episodeRefs: string[];
+  compatibilityRefs: string[];
+  rexRefs: string[];
+  resourceHandles: string[];
   evidence: HandoffEvidenceRef[];
   createdAt: string;
   expiresAt: string;
@@ -278,6 +298,17 @@ export function buildTakeoverPrompt(packet: HandoffPacket): string {
 
   const contextList = (values: string[]) =>
     values.length ? values.map((item) => `- ${item}`).join("\n") : "- Keine zusätzlichen Angaben.";
+
+  const roadmapWindow = [
+    "Davor:",
+    contextList(packet.roadmap.predecessors),
+    "",
+    "Jetzt:",
+    contextList(packet.roadmap.current),
+    "",
+    "Danach:",
+    contextList(packet.roadmap.downstream)
+  ].join("\n");
 
   const contextSkeleton = [
     `Purpose: ${packet.context.purpose}`,
