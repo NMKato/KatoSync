@@ -35,6 +35,7 @@ export function localControlHealth(
 export interface ProviderHealthInput {
   provider: ProviderId;
   display: ProviderDisplayState;
+  connected: boolean;
 }
 
 export type AttentionItem =
@@ -67,7 +68,10 @@ export function agentReadiness(input: {
 }): AgentReadiness {
   // Local Control ist der deterministische Fallback-Pfad, kein Modell-Provider -> separat gezaehlt.
   const providers = input.providers.filter((entry) => entry.provider !== "local_control");
-  const connected = providers.filter((entry) => entry.display === "connected").map((entry) => entry.provider);
+  // "Verbunden" beschreibt die echte Verbindung/Auth zum Provider, nicht die momentane
+  // Ausführbarkeit. Ein authentifizierter Provider bleibt deshalb bei Quota-/Kapazitätslimit
+  // verbunden, auch wenn KatoSync die aktive Lane vorübergehend an den nächsten Provider gibt.
+  const connected = providers.filter((entry) => entry.connected).map((entry) => entry.provider);
   const attention: AttentionItem[] = [];
   for (const entry of providers) {
     const tone = ATTENTION_DISPLAY[entry.display];

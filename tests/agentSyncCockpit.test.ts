@@ -79,9 +79,9 @@ test("Local Control health is derived from the real snapshot and heartbeat age",
 test("readiness reports what is actually ready, never a generic setup-complete state", () => {
   const firstRun = agentReadiness({
     providers: [
-      { provider: "codex", display: "connect" },
-      { provider: "claude", display: "notInstalled" },
-      { provider: "local", display: "notConfigured" }
+      { provider: "codex", display: "connect", connected: false },
+      { provider: "claude", display: "notInstalled", connected: false },
+      { provider: "local", display: "notConfigured", connected: false }
     ],
     localControl: "offline",
     runnerActive: false,
@@ -97,16 +97,16 @@ test("readiness reports what is actually ready, never a generic setup-complete s
 
   const working = agentReadiness({
     providers: [
-      { provider: "codex", display: "quota" },
-      { provider: "claude", display: "connected" },
-      { provider: "local", display: "reauth" },
-      { provider: "local_control", display: "connected" }
+      { provider: "codex", display: "quota", connected: true },
+      { provider: "claude", display: "connected", connected: true },
+      { provider: "local", display: "reauth", connected: false },
+      { provider: "local_control", display: "connected", connected: true }
     ],
     localControl: "busy",
     runnerActive: true,
     runnerFailed: true
   });
-  assert.deepEqual(working.connected, ["claude"]);
+  assert.deepEqual(working.connected, ["codex", "claude"], "Quota does not disconnect a valid provider auth");
   assert.equal(working.total, 3, "Local Control is the fallback path, not a model provider");
   assert.equal(working.activeJobs, 2);
   assert.deepEqual(
