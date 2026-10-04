@@ -13,6 +13,7 @@ import {
   discoverLocalProviders,
   listenProviderLoginUrls,
   saveLocalProviderKey,
+  submitProviderLoginCode,
   listenCodexEvents,
   listenSyncEvents,
   NO_PROJECT_ID,
@@ -563,6 +564,21 @@ export function useKatoSyncViewModel() {
         await cancelProviderLogin(provider);
       } catch (error) {
         show("error", getMessage(error));
+      }
+    },
+    [show]
+  );
+
+  const handleSubmitProviderLoginCode = useCallback(
+    async (provider: ProviderId, code: string) => {
+      const value = code.trim();
+      if (!value) return false;
+      try {
+        await submitProviderLoginCode(provider, value);
+        return true;
+      } catch (error) {
+        show("error", getMessage(error));
+        return false;
       }
     },
     [show]
@@ -1726,6 +1742,7 @@ export function useKatoSyncViewModel() {
     handleLogin,
     handleMoveProvider,
     handleCancelProviderLogin,
+    handleSubmitProviderLoginCode,
     handleDiscoverLocalProviders,
     handleSaveLocalProviderKey,
     handleRemoveLocalProviderKey,

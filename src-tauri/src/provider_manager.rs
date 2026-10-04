@@ -28,9 +28,9 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncBufReadExt, AsyncRead, BufReader},
-    process::Command,
-    sync::Notify,
+    io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader},
+    process::{ChildStdin, Command},
+    sync::{Mutex as AsyncMutex, Notify},
     time::timeout,
 };
 
@@ -904,8 +904,14 @@ async fn cloud_status(provider: ProviderId, enabled: bool, smoke: bool) -> Provi
 // Offizieller Login: begrenzt, abbrechbar, ohne Credential-Zugriff durch KatoSync.
 // ---------------------------------------------------------------------------------------------
 
-fn active_logins() -> &'static Mutex<HashMap<ProviderId, Arc<Notify>>> {
-    static LOGINS: OnceLock<Mutex<HashMap<ProviderId, Arc<Notify>>>> = OnceLock::new();
+#[derive(Clone)]
+struct ActiveLogin {
+    cancel: Arc<Notify>,
+    stdin: Arc<AsyncMutex<Option<ChildStdin>>>,
+}
+
+fn active_logins() -> &'static Mutex<HashMap<ProviderId, ActiveLogin>> {
+    static LOGINS: OnceLock<Mutex<HashMap<ProviderId, ActiveLogin>>> = OnceLock::new();
     LOGINS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -925,8 +931,39 @@ pub fn cancel_login(provider: ProviderId) -> bool {
         .lock()
         .ok()
         .and_then(|logins| logins.get(&provider).cloned())
-        .map(|notify| notify.notify_one())
+        .map(|login| login.cancel.notify_one())
         .is_some()
+}
+
+/// OAuth-Einmalcodes bleiben flüchtig: keine Logs, keine Persistenz, keine Shell.
+/// Erlaubt sichtbare ASCII-Zeichen und Leerzeichen im Inneren, aber keine Steuerzeichen/Zeilenumbrüche.
+pub fn validate_login_code(value: &str) -> bool {
+    let code = value.trim();
+    !code.is_empty() && code.len() <= 4096 && code.chars().all(|c| c == ' ' || c.is_ascii_graphic())
+}
+
+/// Übergibt einen vom offiziellen Provider-Portal angezeigten Einmalcode an genau den
+/// laufenden Login-Prozess. Das ist insbesondere für Claude Code nötig, wenn dessen
+/// Browser-Flow einen manuellen Code zum Zurückkopieren verlangt.
+pub async fn submit_login_code(provider: ProviderId, code: &str) -> bool {
+    if !validate_login_code(code) {
+        return false;
+    }
+    let login = active_logins()
+        .lock()
+        .ok()
+        .and_then(|logins| logins.get(&provider).cloned());
+    let Some(login) = login else {
+        return false;
+    };
+    let mut stdin = login.stdin.lock().await;
+    let Some(writer) = stdin.as_mut() else {
+        return false;
+    };
+    let code = code.trim();
+    writer.write_all(code.as_bytes()).await.is_ok()
+        && writer.write_all(b"\n").await.is_ok()
+        && writer.flush().await.is_ok()
 }
 
 fn official_login_hosts(provider: ProviderId) -> &'static [&'static str] {
@@ -1001,6 +1038,7 @@ async fn run_login(
         return LoginResult::SpawnFailed;
     };
     let notify = Arc::new(Notify::new());
+    let login_stdin = Arc::new(AsyncMutex::new(None));
     {
         let Ok(mut logins) = active_logins().lock() else {
             return LoginResult::SpawnFailed;
@@ -1008,7 +1046,13 @@ async fn run_login(
         if logins.contains_key(&provider) {
             return LoginResult::AlreadyRunning;
         }
-        logins.insert(provider, notify.clone());
+        logins.insert(
+            provider,
+            ActiveLogin {
+                cancel: notify.clone(),
+                stdin: login_stdin.clone(),
+            },
+        );
     }
     let _guard = LoginGuard(provider);
 
@@ -1022,7 +1066,7 @@ async fn run_login(
     let Ok(mut child) = command.spawn() else {
         return LoginResult::SpawnFailed;
     };
-    let _stdin = child.stdin.take();
+    *login_stdin.lock().await = child.stdin.take();
     let url_sent = Arc::new(AtomicBool::new(false));
     let tail = Arc::new(Mutex::new(Vec::new()));
     let mut readers = Vec::new();
@@ -1854,6 +1898,17 @@ mod tests {
             parse_claude_smoke(&outcome(true, claude_wrong, "")),
             SmokeOutcome::Failed { .. }
         ));
+    }
+
+    #[test]
+    fn login_code_validation_is_bounded_and_single_line() {
+        assert!(validate_login_code("abc-DEF_123.xyz"));
+        assert!(validate_login_code("code with spaces"));
+        assert!(!validate_login_code(""));
+        assert!(!validate_login_code("   "));
+        assert!(!validate_login_code("abc\ndef"));
+        assert!(!validate_login_code("abc\rdef"));
+        assert!(!validate_login_code(&"x".repeat(4097)));
     }
 
     #[test]

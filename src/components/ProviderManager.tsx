@@ -20,6 +20,7 @@ import {
   Unplug,
   X
 } from "lucide-react";
+import { useState } from "react";
 import { copyText } from "../lib/clipboard";
 import {
   buildSanitizedProviderDiagnostics,
@@ -226,6 +227,8 @@ function ProviderCard({
   vm: ViewModel;
 }) {
   const { t } = useT();
+  const [loginCode, setLoginCode] = useState("");
+  const [submittingCode, setSubmittingCode] = useState(false);
   const Icon = providerIcons[provider];
   const action = vm.providerBusy[provider];
   const connecting = action === "connect" && provider !== "local";
@@ -287,6 +290,38 @@ function ProviderCard({
           <ExternalLink size={14} />
           {t("providers.openLoginPage")}
         </a>
+      ) : null}
+      {connecting && provider === "claude" ? (
+        <div className="provider-login-code">
+          <label>
+            {t("providers.loginCodeLabel")}
+            <div className="provider-login-code-row">
+              <input
+                autoComplete="one-time-code"
+                onChange={(event) => setLoginCode(event.target.value)}
+                placeholder={t("providers.loginCodePlaceholder")}
+                spellCheck={false}
+                type="password"
+                value={loginCode}
+              />
+              <button
+                className="secondary"
+                disabled={submittingCode || !loginCode.trim()}
+                onClick={async () => {
+                  setSubmittingCode(true);
+                  const accepted = await vm.handleSubmitProviderLoginCode(provider, loginCode);
+                  if (accepted) setLoginCode("");
+                  setSubmittingCode(false);
+                }}
+                type="button"
+              >
+                {submittingCode ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
+                {t("providers.submitLoginCode")}
+              </button>
+            </div>
+          </label>
+          <span className="provider-hint">{t("providers.loginCodeNote")}</span>
+        </div>
       ) : null}
       {display === "notInstalled" && installGuide ? (
         <a className="provider-login-link" href={installGuide} rel="noreferrer" target="_blank">

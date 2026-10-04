@@ -372,6 +372,12 @@ export async function testProvider(config: AppConfig, provider: ProviderId): Pro
   return status;
 }
 
+// Übergibt ausschließlich einen flüchtigen OAuth-Einmalcode an einen bereits laufenden Login.
+export async function submitProviderLoginCode(provider: ProviderId, code: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("submit_provider_login_code", { provider, code });
+}
+
 // Loescht nur KatoSync-eigene Secrets (lokaler Endpoint-Key). CLI-Logins bleiben unberuehrt.
 export async function disconnectProvider(provider: ProviderId): Promise<void> {
   if (isTauri()) await invoke("disconnect_provider", { provider });

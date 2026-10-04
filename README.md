@@ -97,13 +97,13 @@ Unter **Agent Sync** verwaltet KatoSync die Ausführungswege in einer klaren Sta
 | Schritt | Was passiert |
 |---|---|
 | **Verbinden** (Codex) | startet `codex login` → offizieller ChatGPT-Login im Browser |
-| **Verbinden** (Claude Code) | startet `claude auth login` → offizieller Anthropic-Login im Browser |
+| **Verbinden** (Claude Code) | startet `claude auth login` → offizieller Anthropic-Login im Browser; falls Anthropic einen Einmalcode zeigt, wird er direkt in der Provider-Karte bestätigt |
 | Nach dem Login | KatoSync prüft den echten CLI-Status und erst danach einen kurzen `READY`-Test |
 | **Verbunden** | erscheint nur, wenn beides erfolgreich war |
 | **Anmeldung abbrechen** | beendet nur den von KatoSync gestarteten Login-Prozess (Timeout 5 Min.) |
 | **Trennen** | KatoSync nutzt den Provider nicht mehr; die CLI-Anmeldung bleibt beim Provider |
 
-- KatoSync fragt nie nach dem OpenAI-/Anthropic-Passwort und liest oder speichert keine CLI-Tokens.
+- KatoSync fragt nie nach dem OpenAI-/Anthropic-Passwort und liest oder speichert keine CLI-Tokens. Ein eventuell nötiger Claude-Einmalcode wird nur flüchtig an den wartenden CLI-Prozess weitergereicht und nicht persistiert oder geloggt.
 - Öffnet sich der Browser nicht, zeigt die Karte einen Link zur offiziellen Anmeldeseite (nur HTTPS auf offiziellen Provider-Hosts).
 - Zustände auf den Karten: *Nicht installiert*, *Verbinden*, *Verbunden*, *Erneute Anmeldung nötig*, *Kontingent erschöpft*, *Offline / Nicht verfügbar*. Kontingent-, Kapazitäts- und Offline-Fälle werden höchstens alle 15 Minuten automatisch neu geprüft.
 - **Lokale Modelle** funktionieren ohne Cloud-Konto: *Lokale Modelle suchen* findet Ollama/LM Studio auf diesem Rechner; alternativ einen OpenAI-kompatiblen Endpunkt eintragen. *Speichern & testen* prüft Modellliste und eine kurze Antwort.
