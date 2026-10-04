@@ -22,6 +22,19 @@ Version 1.0 bleibt bewusst fokussiert:
 Die Business-Logik für Scan, Secret-Filter, Bündelung und Upload liegt im Rust-Core.
 Das Frontend ruft diese Funktionen nur über ein Repository auf.
 
+## Context Fabric Foundation
+
+KatoSync erzeugt lokal zusätzlich einen versionierten Context Pack aus den bereits gescannten
+Status-, Roadmap- und Memory-Quellen. Der Rust-Core bleibt dafür die einzige Business-Logik:
+
+- kanonisches JSON: `CURRENT_CONTEXT_PACK__<device>.json`
+- abgeleitete Obsidian-Markdown-Ansicht: `CURRENT_CONTEXT_PACK__<device>.md`
+- Vertrag und Consumer-/Writeback-Grenzen: [`CONTEXT_PACK.md`](CONTEXT_PACK.md)
+
+Die Dateien werden nicht hochgeladen. Secret-markierte Context-Quellen lassen nur die Pack-Erzeugung
+fail-closed abbrechen (kein Pack, alter Pack entfernt, Sync-Warnung); die bestehende Pipeline läuft weiter.
+Autonome Memory-Schreibzugriffe sind nicht Teil dieser Foundation.
+
 ## Reports Inbox für Version 1.1
 
 Die beste Erweiterung für fertige Agentenberichte ist eine **Mistral Workflow Runs API-Abfrage**.

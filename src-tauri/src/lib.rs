@@ -25,6 +25,7 @@ use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
+mod context_pack;
 mod local_control;
 mod orchestration;
 mod provider_manager;
@@ -3605,6 +3606,13 @@ fn write_current_files(
         .filter(|finding| !finding.skipped && finding.category != "ignore")
         .collect();
     let areas = project_areas(&relevant);
+    // Context Pack vor allen Schreibzugriffen vollständig im Speicher erzeugen. Eine secret-
+    // markierte Status-/Roadmap-/Memory-Quelle hinterlässt dadurch weder JSON noch Markdown.
+    // Der Fehler bleibt auf den Pack begrenzt: Aggregate, Briefing und Upload laufen wie bisher.
+    let context_pack = render_context_pack(config, scan, &chrono::Utc::now());
+    if let Err(error) = &context_pack {
+        warnings.push(error_to_string(error));
+    }
 
     for finding in &relevant {
         let src = PathBuf::from(&finding.path);
@@ -3636,6 +3644,8 @@ fn write_current_files(
         "CURRENT_MISTRAL_BRIEFING_SOURCE",
         "txt",
     ));
+    let context_json = output_dir.join(current_file_name(config, "CURRENT_CONTEXT_PACK", "json"));
+    let context_md = output_dir.join(current_file_name(config, "CURRENT_CONTEXT_PACK", "md"));
 
     fs::write(&manifest, render_manifest(config, scan, &date, warnings))?;
     fs::write(&index, render_index(config, scan, &date, &areas))?;
@@ -3651,11 +3661,113 @@ fn write_current_files(
     fs::write(&brief_md, &briefing)?;
     fs::write(&brief_txt, &briefing)?;
 
-    let files = vec![brief_md, brief_txt, status_all, memory_all, index, manifest]
+    let mut files = vec![brief_md, brief_txt, status_all, memory_all, index, manifest];
+    match context_pack {
+        Ok((json, markdown)) => {
+            fs::write(&context_json, json)?;
+            fs::write(&context_md, markdown)?;
+            files.extend([context_json, context_md]);
+        }
+        Err(_) => {
+            // Fail-closed: ein alter Pack darf nicht als aktueller Stand weitergereicht werden.
+            for stale in [&context_json, &context_md] {
+                if stale.exists() {
+                    fs::remove_file(stale)?;
+                }
+            }
+        }
+    }
+
+    Ok(files
         .into_iter()
         .map(|path| path.to_string_lossy().to_string())
-        .collect();
-    Ok(files)
+        .collect())
+}
+
+/// Erzeugt kanonisches JSON und die daraus abgeleitete Markdown-Ansicht als Paar.
+fn render_context_pack(
+    config: &AppConfig,
+    scan: &ScanSummary,
+    generated_at: &chrono::DateTime<chrono::Utc>,
+) -> Result<(String, String)> {
+    let pack = context_pack::ContextPack::generate(
+        &context_pack_project(config),
+        &generated_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        context_pack_sources(scan)?,
+    )?;
+    Ok((pack.to_canonical_json()?, pack.to_markdown()))
+}
+
+fn context_pack_project(config: &AppConfig) -> String {
+    let names = config
+        .source_roots
+        .iter()
+        .filter_map(|root| {
+            Path::new(root)
+                .file_name()
+                .and_then(OsStr::to_str)
+                .filter(|name| !name.trim().is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .collect::<BTreeSet<_>>();
+    if names.is_empty() {
+        "KatoSync Project".to_string()
+    } else {
+        names.into_iter().collect::<Vec<_>>().join(" + ")
+    }
+}
+
+/// Übergibt ausschließlich die bereits klassifizierten Context-Kategorien an den Pack-Generator.
+/// Der erneute Secret-Check derselben Dateien schließt auch Konfigurationen mit deaktiviertem
+/// allgemeinem Secret-Scan sicher aus, ohne zusätzliche Verzeichnisse zu durchsuchen.
+fn context_pack_sources(scan: &ScanSummary) -> Result<Vec<context_pack::ContextSourceInput>> {
+    let mut sources = Vec::new();
+    for finding in scan
+        .findings
+        .iter()
+        .filter(|finding| matches!(finding.category.as_str(), "status" | "roadmap" | "memory"))
+    {
+        let path = PathBuf::from(&finding.path);
+        let skipped_for_secret = finding.skipped
+            && finding
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("secret");
+
+        if finding.skipped {
+            if skipped_for_secret || file_name_has_secret_marker(&path) {
+                sources.push(context_pack::ContextSourceInput {
+                    relative_path: finding.relative_path.clone(),
+                    category: finding.category.clone(),
+                    modified_at: finding.modified_at.clone(),
+                    size_bytes: finding.size_bytes,
+                    content: String::new(),
+                    secret_detected: true,
+                });
+            }
+            continue;
+        }
+
+        let content = fs::read_to_string(&path).with_context(|| {
+            format!(
+                "Context-Quelle konnte nicht gelesen werden: {}",
+                finding.relative_path
+            )
+        })?;
+        let secret_detected =
+            file_name_has_secret_marker(&path) || secret_regex().is_match(&content);
+        sources.push(context_pack::ContextSourceInput {
+            relative_path: finding.relative_path.clone(),
+            category: finding.category.clone(),
+            modified_at: finding.modified_at.clone(),
+            size_bytes: finding.size_bytes,
+            content,
+            secret_detected,
+        });
+    }
+    Ok(sources)
 }
 
 fn render_manifest(
@@ -5135,4 +5247,177 @@ fn xml_escape(value: &str) -> String {
 
 fn error_to_string(error: impl std::fmt::Display) -> String {
     sanitize_log(&error.to_string())
+}
+
+#[cfg(test)]
+mod context_pack_pipeline_tests {
+    use super::*;
+
+    #[test]
+    fn context_source_secret_is_detected_even_if_scan_marked_it_relevant() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("katosync-context-pack-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let source_path = temp_dir.join("PROJECT_STATUS.md");
+        let secret = "OPENAI_API_KEY=sk-never-serialize-this-value";
+        fs::write(&source_path, format!("# Status\n{secret}\n")).unwrap();
+        let scan = ScanSummary {
+            scanned_files: 1,
+            relevant_files: 1,
+            skipped_files: 0,
+            secret_warnings: 0,
+            findings: vec![FileFinding {
+                path: source_path.to_string_lossy().to_string(),
+                relative_path: "PROJECT_STATUS.md".to_string(),
+                category: "status".to_string(),
+                size_bytes: fs::metadata(&source_path).unwrap().len(),
+                modified_at: "2026-10-04 20:00".to_string(),
+                skipped: false,
+                reason: None,
+            }],
+        };
+
+        let sources = context_pack_sources(&scan).unwrap();
+        assert!(sources[0].secret_detected);
+        let error = context_pack::ContextPack::generate(
+            "KatoSync",
+            "2026-10-04T20:00:00Z",
+            sources,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(!error.contains(secret));
+        assert!(!error.contains("sk-never-serialize-this-value"));
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn existing_scan_pipeline_writes_local_pack_but_does_not_upload_it() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("katosync-context-pack-{}", Uuid::new_v4()));
+        let source_root = temp_dir.join("sample-project");
+        let output_dir = temp_dir.join("current");
+        let snapshot_dir = output_dir.join("snapshots").join("2026-10-04");
+        fs::create_dir_all(&source_root).unwrap();
+        fs::create_dir_all(&snapshot_dir).unwrap();
+        fs::write(
+            source_root.join("PROJECT_STATUS.md"),
+            "# Current State\n- Context pipeline selected\n# Evidence\n- Architecture reviewed\n",
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("roadmap.md"),
+            "# Goal\nShared local handoff\n# Next Safe Steps\n- Run tests\n",
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("MEMORY.md"),
+            "# Learned Rules\n- JSON remains canonical\n",
+        )
+        .unwrap();
+
+        let mut config = default_config().unwrap();
+        config.device = DeviceConfig {
+            device_id: "device-test-12345678".to_string(),
+            device_name: "Test Mac".to_string(),
+        };
+        config.source_roots = vec![source_root.to_string_lossy().to_string()];
+        config.output_dir = output_dir.to_string_lossy().to_string();
+
+        let scan = scan_roots(&config).unwrap();
+        let mut warnings = Vec::new();
+        let current_files = write_current_files(
+            &config,
+            &scan,
+            &output_dir,
+            &snapshot_dir,
+            &mut warnings,
+        )
+        .unwrap();
+        let json_path = output_dir.join(current_file_name(&config, "CURRENT_CONTEXT_PACK", "json"));
+        let markdown_path =
+            output_dir.join(current_file_name(&config, "CURRENT_CONTEXT_PACK", "md"));
+        assert!(current_files.contains(&json_path.to_string_lossy().to_string()));
+        assert!(current_files.contains(&markdown_path.to_string_lossy().to_string()));
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&json_path).unwrap()).unwrap();
+        assert_eq!(json["schemaVersion"], "katosync.context-pack/v1");
+        assert_eq!(json["project"], "sample-project");
+        assert_eq!(json["provenance"]["sources"].as_array().unwrap().len(), 3);
+        assert!(fs::read_to_string(markdown_path)
+            .unwrap()
+            .contains("# Context Pack — sample-project"));
+        assert!(upload_order(&output_dir, &config, &scan)
+            .iter()
+            .all(|path| !path.to_string_lossy().contains("CURRENT_CONTEXT_PACK")));
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn secret_skipped_context_source_blocks_only_the_pack_and_removes_stale_pack() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("katosync-context-pack-{}", Uuid::new_v4()));
+        let source_root = temp_dir.join("sample-project");
+        let output_dir = temp_dir.join("current");
+        let snapshot_dir = output_dir.join("snapshots").join("2026-10-04");
+        fs::create_dir_all(&source_root).unwrap();
+        fs::create_dir_all(&snapshot_dir).unwrap();
+        let secret_value = "sk-never-leak-into-pack-1234567890";
+        fs::write(
+            source_root.join("PROJECT_STATUS.md"),
+            format!("# Current State\n- ok\nOPENAI_API_KEY={secret_value}\n"),
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("MEMORY.md"),
+            "# Learned Rules\n- JSON remains canonical\n",
+        )
+        .unwrap();
+
+        let mut config = default_config().unwrap();
+        config.device = DeviceConfig {
+            device_id: "device-test-12345678".to_string(),
+            device_name: "Test Mac".to_string(),
+        };
+        config.safety.secret_scan_enabled = true;
+        config.source_roots = vec![source_root.to_string_lossy().to_string()];
+        config.output_dir = output_dir.to_string_lossy().to_string();
+        let json_path = output_dir.join(current_file_name(&config, "CURRENT_CONTEXT_PACK", "json"));
+        let markdown_path =
+            output_dir.join(current_file_name(&config, "CURRENT_CONTEXT_PACK", "md"));
+        fs::write(&json_path, "{\"stale\":true}").unwrap();
+        fs::write(&markdown_path, "stale").unwrap();
+
+        let scan = scan_roots(&config).unwrap();
+        assert!(scan
+            .findings
+            .iter()
+            .any(|finding| finding.category == "status" && finding.skipped));
+        let mut warnings = Vec::new();
+        let current_files = write_current_files(
+            &config,
+            &scan,
+            &output_dir,
+            &snapshot_dir,
+            &mut warnings,
+        )
+        .unwrap();
+
+        assert!(!json_path.exists());
+        assert!(!markdown_path.exists());
+        assert!(current_files
+            .iter()
+            .all(|path| !path.contains("CURRENT_CONTEXT_PACK")));
+        assert!(output_dir
+            .join(current_file_name(&config, "CURRENT_MISTRAL_BRIEFING_SOURCE", "md"))
+            .exists());
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.starts_with("Context Pack nicht erzeugt")));
+        assert!(warnings.iter().all(|warning| !warning.contains(secret_value)));
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
 }
