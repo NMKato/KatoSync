@@ -109,14 +109,23 @@ export function useLaneHandoffs(vm: ViewModel): LaneHandoff[] {
 
 export function buildAgentReadiness(vm: ViewModel, nowMs = Date.now()): AgentReadiness {
   return agentReadiness({
-    providers: modelProviders.map((provider) => ({
-      provider,
-      display: providerDisplayState(
-        vm.providerStatuses.find((entry) => entry.provider === provider),
+    providers: modelProviders.map((provider) => {
+      const status = vm.providerStatuses.find((entry) => entry.provider === provider);
+      return {
         provider,
-        vm.providerBusy[provider] === "connect" && provider !== "local"
-      )
-    })),
+        display: providerDisplayState(
+          status,
+          provider,
+          vm.providerBusy[provider] === "connect" && provider !== "local"
+        ),
+        // Cloud-Provider zählen als verbunden, solange ihre echte CLI-Authentifizierung gültig ist.
+        // Lokale Modelle haben keinen OAuth-Login; dort entspricht eine verfügbare Konfiguration
+        // der Verbindung. Deaktivierte Provider werden bewusst nicht als verbunden gezählt.
+        connected: Boolean(
+          status?.enabled && (provider === "local" ? status.available : status.authenticated)
+        )
+      };
+    }),
     localControl: localControlHealth(vm.localControlMonitor, nowMs),
     runnerActive: vm.codexRun.status === "running" || vm.queueRunning,
     runnerFailed: vm.codexRun.status === "failed"
