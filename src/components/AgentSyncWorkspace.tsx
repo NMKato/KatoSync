@@ -36,6 +36,7 @@ import { NO_PROJECT_ID } from "../repositories/katoSyncRepository";
 import { fallbackLabels } from "./ProviderManager";
 import {
   AgentJobList,
+  AutoLanePanel,
   ControlTower,
   CurrentJobCard,
   StatusCounts,
@@ -135,6 +136,14 @@ export function AgentReadinessStrip({ vm, onNavigate }: { vm: ViewModel; onNavig
         <span>RDC</span>
         <strong>{t(`agent.rdc.${state.remote.transport}` as TKey)}</strong>
       </button>
+      <button className="agent-ready-chip" onClick={() => onNavigate("agentDashboard")} type="button">
+        <span className={`agent-chip-dot ${state.autoLanes.enabled ? (state.autoLanes.counts.running ? "live" : "ok") : "neutral"}`} aria-hidden="true" />
+        <span>{t("agent.auto.mode")}</span>
+        <strong>
+          {state.autoLanes.enabled ? t("agent.auto.on") : t("agent.auto.off")}
+          {state.autoLanes.lanes.length ? ` · ${state.autoLanes.lanes.length}` : ""}
+        </strong>
+      </button>
       <button className="agent-ready-chip" onClick={() => onNavigate("agentJobs")} type="button">
         <span className={`agent-chip-dot ${state.queueCount ? "warn" : "neutral"}`} aria-hidden="true" />
         <span>{t("agent.job.queue")}</span>
@@ -160,6 +169,13 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   return (
     <section className="agent-dashboard" id="section-agent-dashboard">
       <ControlTower state={state} />
+
+      <AutoLanePanel
+        busy={Boolean(vm.busy)}
+        onRelease={(taskId) => void vm.handleReleaseAutoLane(taskId)}
+        onToggle={vm.handleSetAutoMode}
+        plan={state.autoLanes}
+      />
 
       {readiness.attention.length ? (
         <ul className="agent-attention glass" aria-label={t("agent.readiness.attention")}>
@@ -308,6 +324,13 @@ export function AgentSyncJobs({ vm, onOpenMistralTasks }: { vm: ViewModel; onOpe
           </p>
         </div>
       </div>
+
+      <AutoLanePanel
+        busy={Boolean(vm.busy)}
+        onRelease={(taskId) => void vm.handleReleaseAutoLane(taskId)}
+        onToggle={vm.handleSetAutoMode}
+        plan={state.autoLanes}
+      />
 
       <div className="glass agent-card">
         <CardTitle icon={<ListChecks size={17} />} title={t("agent.queue.title")} />
