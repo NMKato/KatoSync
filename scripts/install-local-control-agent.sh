@@ -9,13 +9,17 @@ else
 fi
 PLIST="$HOME/Library/LaunchAgents/com.nmkato.katosync.control.plist"
 LOG_DIR="$HOME/Library/Logs/KatoSync"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONTROL_BIN="$HOME/Library/Application Support/KatoSync/control/bin"
 
 if [[ ! -x "$BIN" ]]; then
   echo "KatoSync binary not found: $BIN" >&2
   exit 2
 fi
 
-mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR"
+mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR" "$CONTROL_BIN"
+install -m 700 "$SCRIPT_DIR/katosync-agent-router.py" "$CONTROL_BIN/katosync-agent-router.py"
+install -m 700 "$SCRIPT_DIR/katosync-orchestrator-lease.py" "$CONTROL_BIN/katosync-orchestrator-lease.py"
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

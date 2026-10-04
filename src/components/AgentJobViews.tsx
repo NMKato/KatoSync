@@ -105,6 +105,178 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function heartbeatTone(lane: AgentLane): "live" | "ok" | "warn" | "off" {
+  if (lane.activity === "active") return "live";
+  if (lane.connectivity === "connected") return "ok";
+  if (lane.connectivity === "limited") return "warn";
+  return "off";
+}
+
+function laneStatusText(t: TFunc, lane: AgentLane): string {
+  if (lane.activity === "active") return t("agent.laneAct.active");
+  if (lane.connectivity === "limited") return t("agent.conn.limited");
+  if (lane.connectivity === "not_configured") return t("agent.conn.not_configured");
+  if (lane.connectivity === "disconnected" || lane.activity === "offline") return t("agent.conn.disconnected");
+  if (lane.connectivity === "connected") return t("agent.laneAct.idle");
+  return t("agent.conn.unknown");
+}
+
+function controlTowerNext(state: AgentSyncState, t: TFunc): string {
+  const current = state.currentJob;
+  if (current?.nextStep) return t(`agent.next.${current.nextStep}` as TKey);
+  if (state.nextJob) return t("agent.control.queueNext", { task: state.nextJob.task });
+  if (state.scheduler.providerHealth.nextCheckAt) {
+    return t("agent.control.schedulerNext", { time: clock(state.scheduler.providerHealth.nextCheckAt) });
+  }
+  return t("agent.control.noNext");
+}
+
+function controlTowerTruth(state: AgentSyncState, t: TFunc): { title: string; detail: string; tone: string } {
+  const job = state.currentJob;
+  if (job?.status === "running") {
+    return {
+      title: t("agent.control.working", { owner: ownerLabel(t, job), task: job.task }),
+      detail: [job.projectId, phaseLabel(t, job.phase), job.lastActivityAt ? t("agent.control.lastSeen", { time: clock(job.lastActivityAt, true) }) : null]
+        .filter(Boolean)
+        .join(" · "),
+      tone: "working"
+    };
+  }
+  if (job) {
+    return {
+      title: t("agent.control.waiting", { task: job.task }),
+      detail: [ownerLabel(t, job), reasonLabel(t, job.reason ?? job.blocker), job.retryAt ? t("agent.lane.retry", { time: clock(job.retryAt) }) : null]
+        .filter(Boolean)
+        .join(" · "),
+      tone: job.status === "failed" || job.status === "blocked" ? "danger" : "waiting"
+    };
+  }
+  const ready = state.lanes.filter((lane) => lane.intelligent && lane.connectivity === "connected").length;
+  return {
+    title: t("agent.control.idle"),
+    detail: state.queueCount
+      ? t("agent.control.queueWaiting", { count: state.queueCount })
+      : t("agent.control.idleReady", { count: ready }),
+    tone: "idle"
+  };
+}
+
+function HeartbeatMini({ label, lane, now }: { label: string; lane: AgentLane; now: string }) {
+  const { t } = useT();
+  const tone = heartbeatTone(lane);
+  const age = lane.checkedAt ? Math.max(0, Date.parse(now) - Date.parse(lane.checkedAt)) : Number.NaN;
+  const seen = lane.checkedAt
+    ? t("agent.control.lastSeen", { time: clock(lane.checkedAt, true) })
+    : t("agent.control.noHeartbeat");
+  return (
+    <div className={`control-heartbeat ${tone}`}>
+      <div className="control-heartbeat-copy">
+        <strong>{label}</strong>
+        <small>{laneStatusText(t, lane)} · {seen}</small>
+      </div>
+      <div
+        className="control-heartbeat-wave"
+        aria-label={Number.isNaN(age) ? seen : `${seen} · ${Math.round(age / 1000)}s`}
+        title={Number.isNaN(age) ? seen : `${seen} · ${Math.round(age / 1000)}s`}
+      >
+        <i /><i /><i /><i /><i /><i /><i />
+      </div>
+    </div>
+  );
+}
+
+export function ControlTower({ state }: { state: AgentSyncState }) {
+  const { t } = useT();
+  const truth = controlTowerTruth(state, t);
+  const activeJobs = state.jobs.filter((job) => job.status === "running");
+  const currentOwner = state.currentJob?.owner ?? null;
+  const jobHandoffs = state.currentJob?.handoffs ?? [];
+  const latestHandoff = jobHandoffs[jobHandoffs.length - 1] ?? state.handoffs[state.handoffs.length - 1] ?? null;
+  return (
+    <div className="control-tower">
+      <div className={`glass control-truth ${truth.tone}`}>
+        <div>
+          <span className="section-label">{t("agent.control.eyebrow")}</span>
+          <h2>{truth.title}</h2>
+          <p>{truth.detail}</p>
+          {activeJobs.length > 1 ? (
+            <div className="control-active-jobs" aria-label={t("agent.control.activeJobs", { count: activeJobs.length })}>
+              <strong>{t("agent.control.activeJobs", { count: activeJobs.length })}</strong>
+              <span>
+                {activeJobs.slice(0, 3).map((job) => `${ownerLabel(t, job)} · ${job.projectId}`).join("  ·  ")}
+                {activeJobs.length > 3 ? ` · +${activeJobs.length - 3}` : ""}
+              </span>
+            </div>
+          ) : null}
+        </div>
+        <div className="control-next">
+          <span>{t("agent.control.nextAuto")}</span>
+          <strong>{controlTowerNext(state, t)}</strong>
+          <small>{state.startSafety.safe ? t("agent.safety.safe") : t(`agent.safety.${state.startSafety.reason}` as TKey)}</small>
+        </div>
+      </div>
+
+      <div className="control-tower-grid">
+        <div className="glass control-lane-card">
+          <div className="agent-card-title">
+            <GitBranch size={17} />
+            <h3>{t("agent.control.lanes")}</h3>
+          </div>
+          {latestHandoff ? (
+            <div className="control-handoff-now">
+              <span className="control-handoff-pulse" aria-hidden="true" />
+              <strong>{t("agent.control.handoff", {
+                from: laneLabel(t, latestHandoff.from),
+                to: laneLabel(t, latestHandoff.to)
+              })}</strong>
+              <small>{reasonLabel(t, latestHandoff.reason)}</small>
+            </div>
+          ) : null}
+          <ol className="control-lane-map">
+            {state.lanes.map((lane, index) => {
+              const Icon = laneIcons[lane.id];
+              const owner = lane.id === currentOwner;
+              const tone = heartbeatTone(lane);
+              return (
+                <li className={`control-lane-node ${tone}${owner ? " owner" : ""}`} key={lane.id}>
+                  {index > 0 ? <span className="control-lane-connector" aria-hidden="true"><i /></span> : null}
+                  <div className="control-lane-orb">
+                    <Icon size={20} />
+                    <span className="control-lane-pulse" aria-hidden="true" />
+                  </div>
+                  <strong>{laneLabel(t, lane.id)}</strong>
+                  <small>{laneStatusText(t, lane)}</small>
+                  {owner && state.currentJob ? <em title={state.currentJob.task}>{state.currentJob.task}</em> : lane.model ? <em title={lane.model}>{lane.model}</em> : null}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+
+        <div className="glass control-heartbeat-card">
+          <div className="agent-card-title">
+            <RadioTower size={17} />
+            <h3>{t("agent.control.heartbeat")}</h3>
+          </div>
+          <div className="control-heartbeat-grid">
+            {state.lanes.map((lane) => (
+              <HeartbeatMini key={lane.id} label={laneLabel(t, lane.id)} lane={lane} now={state.generatedAt} />
+            ))}
+          </div>
+          <div className="control-runtime-strip">
+            <span className={`runtime-pill ${state.scheduler.providerHealth.state}`}>
+              {t("agent.substrate.health")}: <strong>{t(`agent.sched.${state.scheduler.providerHealth.state}` as TKey)}</strong>
+            </span>
+            <span className={`runtime-pill ${state.scheduler.continuation.state}`}>
+              {t("agent.substrate.continuation")}: <strong>{t(`agent.cont.${state.scheduler.continuation.state}` as TKey)}</strong>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function HandoffChain({ handoffs }: { handoffs: AgentHandoff[] }) {
   const { t } = useT();
   if (!handoffs.length) return <p className="agent-empty">{t("agent.job.noHandoffs")}</p>;
@@ -419,29 +591,33 @@ export function AgentJobList({ jobs, limit }: { jobs: AgentJob[]; limit?: number
 export function AgentLiveMonitor({ state }: { state: AgentSyncState }) {
   const { t } = useT();
   const view = monitorProjection(state);
-  const steps = view.job ? view.events.filter((event) => event.jobId && event.kind !== "evidence").slice(0, 6).reverse() : [];
+  const steps = view.job ? view.events.filter((event) => event.jobId && event.kind !== "evidence").slice(0, 8).reverse() : [];
   return (
     <section className="agent-dashboard agent-live" aria-label={t("agent.monitor.title")}>
-      <div className="agent-dashboard-row">
-        <div className="agent-live-main">
-          <CurrentJobCard state={state} compact />
-          {steps.length ? (
-            <div className="glass agent-card">
-              <div className="agent-card-title">
-                <Clock3 size={17} />
-                <h3>{t("agent.monitor.steps")}</h3>
-              </div>
-              <ol className="agent-phase-rail" aria-label={t("agent.monitor.steps")}>
-                {steps.map((event, index) => (
-                  <li className={index === steps.length - 1 && view.job?.status === "running" ? "current" : ""} key={event.id} title={eventText(t, event)}>
-                    <span aria-hidden="true" />
-                    {eventText(t, event).slice(0, 48)}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : null}
-          <div className="glass agent-card">
+      <ControlTower state={state} />
+
+      {steps.length ? (
+        <div className="glass agent-card control-now-playing">
+          <div className="agent-card-title">
+            <Clock3 size={17} />
+            <h3>{t("agent.monitor.steps")}</h3>
+          </div>
+          <ol className="agent-phase-rail" aria-label={t("agent.monitor.steps")}>
+            {steps.map((event, index) => (
+              <li className={index === steps.length - 1 && view.job?.status === "running" ? "current" : ""} key={event.id} title={eventText(t, event)}>
+                <span aria-hidden="true" />
+                {eventText(t, event).slice(0, 64)}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+
+      <details className="glass control-diagnostics">
+        <summary>{t("agent.control.diagnostics")}</summary>
+        <div className="control-diagnostics-grid">
+          <SubstratePanel state={state} />
+          <div className="agent-card">
             <div className="agent-card-title">
               <GitBranch size={17} />
               <h3>{t("agent.job.handoffs")}</h3>
@@ -449,27 +625,26 @@ export function AgentLiveMonitor({ state }: { state: AgentSyncState }) {
             <HandoffChain handoffs={view.handoffs} />
           </div>
         </div>
-        <SubstratePanel state={state} />
-      </div>
-      <div className="glass agent-card">
-        <div className="agent-card-title">
-          <RadioTower size={17} />
-          <h3>{t("agent.monitor.events")}</h3>
+        <div className="agent-card">
+          <div className="agent-card-title">
+            <RadioTower size={17} />
+            <h3>{t("agent.monitor.events")}</h3>
+          </div>
+          {view.events.length ? (
+            <ul className="agent-history-list agent-event-stream">
+              {view.events.slice(0, 40).map((event) => (
+                <li className={event.kind} key={event.id}>
+                  <Clock3 size={13} />
+                  <span>{eventText(t, event)}</span>
+                  <time dateTime={event.at}>{clock(event.at, true)}</time>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="agent-empty">{t("agent.monitor.noEvents")}</p>
+          )}
         </div>
-        {view.events.length ? (
-          <ul className="agent-history-list agent-event-stream">
-            {view.events.slice(0, 40).map((event) => (
-              <li className={event.kind} key={event.id}>
-                <Clock3 size={13} />
-                <span>{eventText(t, event)}</span>
-                <time dateTime={event.at}>{clock(event.at, true)}</time>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="agent-empty">{t("agent.monitor.noEvents")}</p>
-        )}
-      </div>
+      </details>
     </section>
   );
 }

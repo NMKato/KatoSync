@@ -362,6 +362,13 @@ function fallbackJobs(
       owner = laneFromProvider(last(item.providerStates)?.provider);
       phase = "failed";
       nextStep = "inspect_evidence";
+    } else if (item.status === "running" && item.activeProvider) {
+      owner = laneFromProvider(item.activeProvider);
+      status = owner ? "running" : "blocked";
+      phase = owner ? "execution" : "blocked";
+      reason = owner ? "router_active" : "unknown_active_provider";
+      nextStep = owner ? "await_event" : "inspect_evidence";
+      startedAt = item.updatedAt ?? item.createdAt ?? null;
     } else if (leased && remote.leaseActive) {
       owner = "remote_orchestrator";
       phase = "orchestrator";
