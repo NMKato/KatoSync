@@ -26,6 +26,7 @@ use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
 mod local_control;
+mod orchestration;
 mod provider_manager;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").

@@ -82,7 +82,7 @@ Service einen `reason`-Code, den das Frontend übersetzt (Rust liefert keine UI-
 
 ### Routingvertrag
 
-Standard: `Codex → Claude Code → Local Model → Local Control/RDC`. Nur Auth-, Quota-,
+Standard: `Codex → Claude Code → Local Brain → Remote Orchestrator + RDC → Local Control`. Nur Auth-, Quota-,
 Capacity- und Unavailable-Klassen sind failover-fähig (`nextProviderAfterFailure`). `job_failed`
 ist ausdrücklich nicht failover-fähig; ein gewöhnlicher Build-, Test- oder Codefehler bleibt beim
 aktuellen Besitzer. Local Control/RDC ist immer der letzte Platz und nimmt Jobs auch ohne
@@ -99,3 +99,68 @@ nicht in dieses Modell.
 - **Live (manuell, macOS):** `cargo test --lib live_provider_gate -- --ignored --nocapture` liest echten Auth-Status und fährt den READY-Test (kein Login/Logout).
 - **Human-Gate:** echter Browser-Login/Re-Login je Provider sowie visuelle Prüfung in Light/Dark.
 - **Windows-Gate:** Erkennung von `.exe`/`.cmd`-Installationen, Login inkl. Abbruch, fehlende Konsolenfenster.
+
+## Agent Sync Cockpit: kanonisches Job-/Lane-Modell
+
+Overview, Jobs & Queue und Live Monitor rendern dieselbe `AgentSyncState`
+(`lib/agentJobModel.ts → normalizeAgentSyncState`). Das ViewModel komponiert sie einmal aus allen
+Quellen; Views enthalten keine Provider-, RDC- oder Scheduler-Entscheidungen.
+
+**Fünf kanonische Lanes** (Konnektivität getrennt vom aktuellen Job-Besitzer):
+
+1. Codex · 2. Claude Code · 3. Local Brain (vorbereitete Schnittstelle) – Modell-Lanes
+4. Remote Orchestrator + RDC – intelligenter Fallback (LLM-geführtes Coden/Review/Orchestrieren),
+   nur mit gültiger Lease übernahmefähig
+5. Local Control – deterministisches Substrat, nie als LLM ausgewiesen; parkt Jobs sicher
+
+`providerPolicy.nextLaneAfterFailure` setzt diese Kette um; `job_failed` wechselt nie die Lane.
+
+**Normalisierte Quellen:** Action-Plan-Tasks, Runner-Lauf, Local-Control-Lanes/Inbox/Outbox,
+Provider-Router-Queue (`control/rdc-fallback/*.json`), Provider-Health-Scheduler
+(`control/provider-health.json` + Log: `RESUME` ohne `RESUME_DONE` = laufende Wiederaufnahme),
+Continuation-Watchdog (`control/continuation/`) und die Remote-Orchestrator-Lease. Der Rust-Adapter
+`orchestration.rs` liest alles begrenzt (64 KiB je Datei, max. 40 Queue-Einträge), redigiert
+Home-Pfade und liefert vom Worktree nur den Basename plus zwei Nachweise: `branchMatches`
+(aktueller Branch = erwarteter Branch) und `worktreeBusy` (aktiver Local-Control-Writer im selben
+Worktree).
+
+**Wiederaufnahme nur mit Nachweis:** Ein wartender Router-Job ist erst „sicher fortsetzbar“, wenn
+der Branch nachgewiesen ist, kein anderer Writer läuft, der Worktree frei ist, keine
+Orchestrator-Lease ihn hält und eine intelligente Lane übernehmen kann. Kein automatischer Merge.
+
+### Remote Orchestrator + RDC: Lease-Vertrag
+
+`control/remote-orchestrator.json` (Schema 1, atomar, Modus 0600), geschrieben ausschließlich über
+`scripts/katosync-orchestrator-lease.py` (argv, keine Shell):
+
+```json
+{
+  "schemaVersion": 1,
+  "sessionId": "rdc-session",
+  "state": "attached | working | detached",
+  "attachedAt": "ISO-8601",
+  "heartbeatAt": "ISO-8601",
+  "leaseSeconds": 300,
+  "transport": { "kind": "rdc", "heartbeatAt": "ISO-8601" },
+  "jobId": "router-item-or-task-id",
+  "device": "label", "model": "label", "activity": "kurz", "nextStep": "kurz"
+}
+```
+
+- Lease 30–1800 s; Heartbeats > 120 s in der Zukunft werden verworfen.
+- UI: *angebunden/arbeitet* (Heartbeat ≤ 5 min, Lease gültig), *veraltet* (Lease gültig, Heartbeat
+  alt – blockiert weiterhin andere Writer), *abgemeldet*, *nicht verfügbar*. RDC-Transport wird
+  separat als online/veraltet/unbekannt geführt.
+- `claim --item <id>` setzt einen wartenden Router-Job auf `orchestrator_active`; der
+  Provider-Health-Scheduler nimmt nur `waiting`/`provider_ready` auf → genau ein Writer nach der
+  Übergabe. `claim` verweigert, solange der Scheduler denselben Job bereits wieder aufnimmt.
+  `release --status waiting|completed|failed` (bzw. `--if-expired` für abgelaufene Leases) gibt ihn frei.
+
+### Provider-Re-Check
+
+- Billige Auth-/Status-Checks (ohne Inferenz) halten Provider-Karten höchstens **10 Minuten** alt.
+- Gemeldete Reset-Zeitpunkte („try again at …“, „resets in 2h 30m“, ISO) werden exakt
+  angesteuert; relative Hinweise bleiben an der READY-Klassifikation (`checkedAt`) verankert.
+- Teure READY-Tests laufen nur, wenn Arbeit wartet: am Reset-Zeitpunkt bzw. ohne Hinweis
+  höchstens alle 30 Minuten (`providerRecheckPlan`).
+- Ein billiger Check hebt Quota/Kapazität/Offline nie auf und stuft verfügbare Provider nicht herab.

@@ -62,14 +62,14 @@ import {
 } from "./components/Primitives";
 import { RichMarkdown } from "./components/RichMarkdown";
 import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
+import { AgentLiveMonitor } from "./components/AgentJobViews";
 import { ProviderManager } from "./components/ProviderManager";
 import { ModeGateway, ModeSwitch } from "./components/ModeGateway";
 import {
   AgentReadinessStrip,
   AgentSyncDashboard,
   AgentSyncHistory,
-  AgentSyncJobs,
-  useLaneHandoffs
+  AgentSyncJobs
 } from "./components/AgentSyncWorkspace";
 import { Bars, Donut, KpiTiles, StatusList, Timeline } from "./components/DiagramComponents";
 import {
@@ -266,7 +266,6 @@ export default function App() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | null>(null);
   const [rememberedMode, setRememberedMode] = useState<WorkspaceMode | null>(() => readRememberedMode(localStorage));
   const lastStepByMode = useRef<Partial<Record<WorkspaceMode, StepId>>>({});
-  const laneHandoffs = useLaneHandoffs(vm);
   const [licenseOpen, setLicenseOpen] = useState(
     () => localStorage.getItem(acceptedLicenseKey) !== licenseAgreement.version
   );
@@ -807,7 +806,7 @@ export default function App() {
           {visibleStep === "dashboard" ? <CockpitPanel vm={vm} runHistory={runHistory} /> : null}
 
           {visibleStep === "agentDashboard" ? (
-            <AgentSyncDashboard vm={vm} handoffs={laneHandoffs} onNavigate={handleStepSelect} />
+            <AgentSyncDashboard vm={vm} onNavigate={handleStepSelect} />
           ) : null}
           {visibleStep === "agentJobs" ? (
             <AgentSyncJobs vm={vm} onOpenMistralTasks={() => enterModeAt("mistral", "projectBoard")} />
@@ -815,6 +814,7 @@ export default function App() {
           {visibleStep === "agentProviders" ? <ProviderManager vm={vm} /> : null}
           {visibleStep === "agentMonitor" ? (
             <section className="agent-monitor-page" id="section-agent-monitor">
+              <AgentLiveMonitor state={vm.agentSync} />
               <LocalControlLiveMonitor
                 snapshot={vm.localControlMonitor}
                 error={vm.localControlMonitorError}
@@ -822,7 +822,7 @@ export default function App() {
               />
             </section>
           ) : null}
-          {visibleStep === "agentHistory" ? <AgentSyncHistory vm={vm} handoffs={laneHandoffs} /> : null}
+          {visibleStep === "agentHistory" ? <AgentSyncHistory vm={vm} /> : null}
           {visibleStep === "agentSettings" ? (
             <section className="agent-settings-page" id="section-agent-settings">
               <CodexBridgePanel vm={vm} />

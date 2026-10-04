@@ -6147,6 +6147,147 @@ button.agent-tile:hover {
   min-height: auto;
 }
 
+/* ===== Kanonischer Job/Lane-Zustand (Issue #27) ===== */
+.agent-route > li.first { grid-template-columns: minmax(0, 1fr); }
+
+.agent-route-kind {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-route-node em.soft {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-style: normal;
+}
+
+.agent-current .agent-card-title { justify-content: flex-start; }
+.agent-current .agent-card-title .agent-job-stage { margin-left: auto; }
+.agent-current.running { border-color: color-mix(in srgb, var(--agent-live) 45%, var(--glass-line)); }
+.agent-current.blocked,
+.agent-current.failed { border-color: color-mix(in srgb, var(--danger) 40%, var(--glass-line)); }
+
+.agent-current-head {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.agent-current-head strong {
+  overflow: hidden;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-current-head small { color: var(--text-muted); font-size: 12.5px; }
+
+.agent-current-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.agent-current-facts dt { color: var(--text-faint); font-size: 11px; }
+
+.agent-current-facts dd {
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-current-next,
+.agent-current-blocker {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.agent-current-blocker { color: var(--danger); }
+
+.agent-current-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.agent-current-foot span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-safety {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.agent-safety.ok svg { color: var(--ok); }
+.agent-safety.warn svg { color: var(--warn); }
+.agent-safety span { color: var(--text-muted); }
+
+.agent-handoff-chain {
+  display: grid;
+  gap: 5px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-handoff-chain li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 7px;
+  font-size: 12px;
+}
+
+.agent-handoff-chain small { color: var(--warn); font-size: 11px; }
+.agent-handoff-chain time,
+.agent-handoff-chain em { color: var(--text-faint); font-size: 11px; font-style: normal; }
+
+.agent-canonical-jobs {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-canonical-jobs .agent-job { align-items: start; }
+.agent-canonical-jobs .agent-job.blocked { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.agent-canonical-jobs .agent-job.waiting { border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.agent-job-stage.waiting { color: var(--warn); background: rgba(255, 200, 87, 0.12); }
+.agent-job-stage.blocked { color: var(--danger); background: rgba(255, 116, 116, 0.12); }
+.agent-job-next { color: var(--text-muted) !important; }
+
+.agent-live-main {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.agent-event-stream { max-height: 420px; overflow: auto; }
+.agent-event-stream li.handoff > svg { color: var(--warn); }
+.agent-event-stream li.evidence > svg { color: var(--ok); }
+.agent-event-stream li.heartbeat > svg { color: var(--text-faint); }
+
 @media (max-width: 1180px) {
   .agent-dashboard-row,
   .agent-hero {
