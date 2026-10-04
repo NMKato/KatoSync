@@ -1,6 +1,7 @@
 // Created by NMKato Solutions
 // Agent Sync: Providerkarten fuer Codex, Claude Code und lokale Modelle. Reine View – alle
 // Seiteneffekte laufen ueber das ViewModel (Repository -> Rust-Provider-Adapter).
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowDown,
   ArrowUp,
@@ -20,7 +21,7 @@ import {
   Unplug,
   X
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { copyText } from "../lib/clipboard";
 import {
   buildSanitizedProviderDiagnostics,
@@ -229,6 +230,8 @@ function ProviderCard({
   const { t } = useT();
   const [loginCode, setLoginCode] = useState("");
   const [submittingCode, setSubmittingCode] = useState(false);
+  const [browserState, setBrowserState] = useState<"idle" | "opening" | "opened" | "error">("idle");
+  const lastAutoOpenedUrl = useRef<string | null>(null);
   const Icon = providerIcons[provider];
   const action = vm.providerBusy[provider];
   const connecting = action === "connect" && provider !== "local";
@@ -240,6 +243,30 @@ function ProviderCard({
   const recheck = status ? nextRecheckAt(status) : null;
   const reason = status ? reasonKey(status.reason) : null;
   const needsLogin = !isLocal && (display === "connect" || display === "reauth" || display === "disabled");
+
+  const openLoginPage = useCallback(async () => {
+    if (!loginUrl) return;
+    setBrowserState("opening");
+    try {
+      await openUrl(loginUrl);
+      setBrowserState("opened");
+    } catch {
+      setBrowserState("error");
+    }
+  }, [loginUrl]);
+
+  useEffect(() => {
+    if (!connecting || !loginUrl || lastAutoOpenedUrl.current === loginUrl) return;
+    lastAutoOpenedUrl.current = loginUrl;
+    void openLoginPage();
+  }, [connecting, loginUrl, openLoginPage]);
+
+  useEffect(() => {
+    if (!connecting) {
+      lastAutoOpenedUrl.current = null;
+      setBrowserState("idle");
+    }
+  }, [connecting]);
 
   return (
     <article className={`provider-card ${tone}`} aria-busy={Boolean(action)}>
@@ -286,10 +313,26 @@ function ProviderCard({
       ) : null}
       {recheck ? <p className="provider-hint">{t("providers.nextRecheck", { time: formatTime(recheck, false) })}</p> : null}
       {connecting && loginUrl ? (
-        <a className="provider-login-link" href={loginUrl} rel="noreferrer" target="_blank">
-          <ExternalLink size={14} />
-          {t("providers.openLoginPage")}
-        </a>
+        <div className="provider-login-browser-action">
+          <button
+            className="provider-login-link"
+            disabled={browserState === "opening"}
+            onClick={() => void openLoginPage()}
+            type="button"
+          >
+            {browserState === "opening" ? <Loader2 className="spin" size={14} /> : <ExternalLink size={14} />}
+            {browserState === "opened" ? t("providers.reopenLoginPage") : t("providers.openLoginPage")}
+          </button>
+          <span className={`provider-login-feedback ${browserState}`} role="status">
+            {browserState === "opening"
+              ? t("providers.openingLoginPage")
+              : browserState === "opened"
+                ? t("providers.loginPageOpened")
+                : browserState === "error"
+                  ? t("providers.loginPageOpenFailed")
+                  : ""}
+          </span>
+        </div>
       ) : null}
       {connecting && provider === "claude" ? (
         <div className="provider-login-code">
