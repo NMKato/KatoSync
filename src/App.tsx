@@ -654,7 +654,7 @@ export default function App() {
       </aside>
 
       <main className="workspace">
-        <header className="topbar">
+        <header className={`topbar${isAgentSync ? " agent-sync-topbar" : ""}`}>
           <div>
             <h1>{page.title}</h1>
             <p>{page.text}</p>
