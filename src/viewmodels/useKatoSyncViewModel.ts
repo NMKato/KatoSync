@@ -12,6 +12,7 @@ import {
   disconnectProvider,
   discoverLocalProviders,
   listenProviderLoginUrls,
+  openProviderLoginUrl,
   saveLocalProviderKey,
   submitProviderLoginCode,
   listenCodexEvents,
@@ -556,6 +557,19 @@ export function useKatoSyncViewModel() {
       }
     },
     [config, localProviderDraft, mergeProvider, persistProviderFields, providerBusy, setProviderAction, show]
+  );
+
+  const handleOpenProviderLoginUrl = useCallback(
+    async (provider: ProviderId, url: string) => {
+      try {
+        await openProviderLoginUrl(provider, url);
+        return true;
+      } catch (error) {
+        show("error", getMessage(error));
+        return false;
+      }
+    },
+    [show]
   );
 
   const handleCancelProviderLogin = useCallback(
@@ -1704,6 +1718,7 @@ export function useKatoSyncViewModel() {
     providerBusy,
     providerHistory,
     providerLoginUrls,
+    handleOpenProviderLoginUrl,
     providerStatuses,
     localProviderDraft: localProviderDraft ?? config?.localProvider ?? null,
     localKeyInput,

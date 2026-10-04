@@ -980,7 +980,7 @@ fn official_login_hosts(provider: ProviderId) -> &'static [&'static str] {
 }
 
 /// Extrahiert nur HTTPS-URLs exakt auf offiziellen Provider-Hosts (kein Lookalike, kein HTTP).
-fn official_login_url(provider: ProviderId, line: &str) -> Option<String> {
+pub(crate) fn official_login_url(provider: ProviderId, line: &str) -> Option<String> {
     let re = regex(r#"https://[^\s"'<>`]+"#)?;
     let found = re.find_iter(line).find_map(|found| {
         let candidate = found.as_str().trim_end_matches(['.', ',', ')', ']']);
