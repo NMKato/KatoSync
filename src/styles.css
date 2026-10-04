@@ -4207,6 +4207,37 @@ pre {
   font-weight: 700;
 }
 
+.provider-login-code {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--brand) 7%, var(--surface-2));
+}
+
+.provider-login-code label {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.provider-login-code-row {
+  display: flex;
+  gap: 8px;
+}
+
+.provider-login-code-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.provider-login-code-row button {
+  flex: 0 0 auto;
+}
+
 .local-provider-discover {
   display: flex;
   align-items: center;
@@ -4338,7 +4369,8 @@ pre {
   .provider-hero-actions button { flex: 1 1 100%; }
   .provider-route { grid-template-columns: 1fr; }
   .provider-transitions li { grid-template-columns: 110px 1fr; }
-  .local-provider-key-row { flex-direction: column; }
+  .local-provider-key-row,
+  .provider-login-code-row { flex-direction: column; }
   .provider-transitions time { display: none; }
 }
 

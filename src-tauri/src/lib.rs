@@ -321,6 +321,7 @@ pub fn run() {
             provider_statuses,
             connect_provider,
             cancel_provider_login,
+            submit_provider_login_code,
             disconnect_provider,
             save_local_provider_key,
             discover_local_providers,
@@ -397,6 +398,24 @@ async fn connect_provider(
 #[tauri::command]
 fn cancel_provider_login(provider: provider_manager::ProviderId) -> bool {
     provider_manager::cancel_login(provider)
+}
+
+/// Übergibt einen flüchtigen OAuth-Einmalcode an den aktuell laufenden Provider-Login.
+/// Der Code wird weder geloggt noch gespeichert und unmittelbar nach Übergabe aus dem
+/// Command-Speicher überschrieben.
+#[tauri::command]
+async fn submit_provider_login_code(
+    provider: provider_manager::ProviderId,
+    code: String,
+) -> Result<(), String> {
+    let mut code = code;
+    let accepted = provider_manager::submit_login_code(provider, &code).await;
+    zeroize::Zeroize::zeroize(&mut code);
+    if accepted {
+        Ok(())
+    } else {
+        Err("Kein passender Login wartet auf einen gültigen Einmalcode.".to_string())
+    }
 }
 
 /// Trennt einen Provider KatoSync-seitig. Loescht nur KatoSync-eigene Secrets (lokaler
