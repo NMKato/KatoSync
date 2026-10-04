@@ -69,6 +69,22 @@ import {
   validateLocalEndpointInput
 } from "../lib/providerPolicy";
 import { agentWorkWaiting, normalizeAgentSyncState } from "../lib/agentJobModel";
+import {
+  AUTO_LANE_PLAN_REFRESH_MS,
+  AUTO_LANE_TICK_MS,
+  addAutoLaneClaim,
+  pruneAutoLaneClaims,
+  releaseAutoLaneClaim
+} from "../lib/autoLanePlanner";
+import {
+  readAutoLaneClaims,
+  readAutoLaneMode,
+  readBoardSelection,
+  writeAutoLaneClaims,
+  writeAutoLaneMode,
+  writeBoardSelection,
+  type AutoLaneMode
+} from "../lib/autoLaneStore";
 import { defaultConfig } from "../lib/defaults";
 import { modeForStep } from "../lib/workspaceMode";
 import type { Notice } from "../components/Primitives";
@@ -77,7 +93,10 @@ import type {
   AgentSyncState,
   ActionPlanStatus,
   ActionTask,
+  ActionTaskStatus,
   AppConfig,
+  AutoLaneClaim,
+  AutoLaneRunner,
   Briefing,
   CodexEvent,
   CodexRunResult,
@@ -211,8 +230,9 @@ export function useKatoSyncViewModel() {
   const agentSyncRef = useRef<AgentSyncState | null>(null);
   const providerSmokeCheckedRef = useRef(false);
   // Projekt-Board
-  const [boardSelection, setBoardSelection] = useState<string[]>([]);
-  const [boardOrder, setBoardOrder] = useState<string[]>([]);
+  // Auswahl + Reihenfolge ueberleben einen Neustart: Auto Mode arbeitet nur ausgewaehlte Tasks ab.
+  const [boardSelection, setBoardSelection] = useState<string[]>(() => readBoardSelection());
+  const [boardOrder, setBoardOrder] = useState<string[]>(() => readBoardSelection());
   const [queueRunning, setQueueRunning] = useState(false);
   const [currentQueueTaskId, setCurrentQueueTaskId] = useState<string | null>(null);
   const [dailyCount, setDailyCount] = useState<number>(() => readDailyCount());
@@ -221,6 +241,16 @@ export function useKatoSyncViewModel() {
   // await (Repo-Auswahl) gesetzt, ein zweiter Klick in diesem Fenster wuerde sonst einen zweiten
   // parallelen Lauf starten (TOCTOU). Dieser Ref greift synchron, vor jedem await.
   const queueStartingRef = useRef(false);
+  // Auto-Lane-Planer: persistierter Modus + Claims, sitzungslokaler Lauf-/Repo-Zustand.
+  const [autoMode, setAutoMode] = useState<AutoLaneMode>(() => readAutoLaneMode());
+  const [autoClaims, setAutoClaims] = useState<AutoLaneClaim[]>(() => readAutoLaneClaims());
+  const [autoInFlight, setAutoInFlight] = useState<string[]>([]);
+  const [autoMissingRepos, setAutoMissingRepos] = useState<string[]>([]);
+  const [autoLastDispatch, setAutoLastDispatch] = useState<Record<string, string>>({});
+  const [autoTickSeq, setAutoTickSeq] = useState(0);
+  // Synchrone Locks: Auto-Dispatch und manuelle Einzel-Laeufe schliessen sich vor jedem await aus.
+  const autoDispatchingRef = useRef(false);
+  const manualRunRef = useRef(0);
   // Letzte in die Cloud gesicherte library_id -> Push beim Speichern nur, wenn sie sich aenderte.
 
   const show = useCallback((kind: Notice["kind"], text: string) => setNotice({ kind, text }), []);
@@ -418,6 +448,12 @@ export function useKatoSyncViewModel() {
     setQueueRunning(false);
     setCurrentQueueTaskId(null);
     setDailyCount(0);
+    setBoardSelection([]);
+    setBoardOrder([]);
+    setAutoMode({ enabled: false, updatedAt: null });
+    setAutoClaims([]);
+    setAutoMissingRepos([]);
+    setAutoLastDispatch({});
     setLogs("");
     stopRef.current = false;
     // Tageszaehler-Schluessel des heutigen Tages entfernen, damit das Quota nicht "geerbt" wird.
@@ -1207,8 +1243,9 @@ export function useKatoSyncViewModel() {
 
   // Kern-Codex-Lauf OHNE Ordnerdialog (vom Einzel-Button UND vom Board-Executor genutzt).
   const runCodexForTaskWithRepo = useCallback(
-    async (plan: ActionPlan, task: ActionTask, repoPath: string): Promise<CodexRunResult> => {
+    async (plan: ActionPlan, task: ActionTask, repoPath: string, runner?: AutoLaneRunner): Promise<CodexRunResult> => {
       if (!config) throw new Error("Keine Konfiguration geladen.");
+      const selectedRunner = runner ?? config.codexPreferredRunner;
       const startedAt = new Date().toISOString();
       setCodexEvents([]);
       setCodexRun({
@@ -1221,7 +1258,8 @@ export function useKatoSyncViewModel() {
           task: task.title,
           source: "action_plan",
           planId: plan.planId,
-          createdAt: plan.createdAt
+          createdAt: plan.createdAt,
+          runner: selectedRunner
         }
       });
       const result = await runCodexTask({
@@ -1247,7 +1285,7 @@ export function useKatoSyncViewModel() {
           projectId: task.projectId,
           riskLevel: task.riskLevel
         },
-        runner: config.codexPreferredRunner
+        runner: selectedRunner
       });
       setCodexRun((current) => ({
         ...current,
@@ -1260,7 +1298,24 @@ export function useKatoSyncViewModel() {
     [config]
   );
 
-  const handleRunCodexForTask = useCallback(
+  // Manuelle Einzel-Laeufe und der Auto-Dispatcher teilen sich den einen Runner-Writer.
+  const guardManualRun = useCallback(
+    async (run: () => Promise<void>) => {
+      if (autoDispatchingRef.current) {
+        show("warn", "Auto Mode führt gerade eine Aufgabe aus. Bitte warten, bis sie fertig ist.");
+        return;
+      }
+      manualRunRef.current += 1;
+      try {
+        await run();
+      } finally {
+        manualRunRef.current -= 1;
+      }
+    },
+    [show]
+  );
+
+  const runCodexForTaskManually = useCallback(
     async (plan: ActionPlan, task: ActionTask) => {
       if (!config) return;
       const repoPath = await resolveRepoForProject(task.projectId);
@@ -1298,7 +1353,12 @@ export function useKatoSyncViewModel() {
     [config, resolveRepoForProject, runCodexForTaskWithRepo, show]
   );
 
-  const handleRunCodexForBriefing = useCallback(
+  const handleRunCodexForTask = useCallback(
+    (plan: ActionPlan, task: ActionTask) => guardManualRun(() => runCodexForTaskManually(plan, task)),
+    [guardManualRun, runCodexForTaskManually]
+  );
+
+  const runCodexForBriefingManually = useCallback(
     async (briefing: Briefing) => {
       if (!config) return;
       const repoPath = await resolveRepoForProject("katosync");
@@ -1363,6 +1423,11 @@ export function useKatoSyncViewModel() {
     [config, resolveRepoForProject, show]
   );
 
+  const handleRunCodexForBriefing = useCallback(
+    (briefing: Briefing) => guardManualRun(() => runCodexForBriefingManually(briefing)),
+    [guardManualRun, runCodexForBriefingManually]
+  );
+
   // ===== Projekt-Board =====
   const boardGroups = useMemo<BoardGroup[]>(
     () => groupTasksByProject(actionPlans, boardSelection, boardOrder),
@@ -1379,6 +1444,8 @@ export function useKatoSyncViewModel() {
 
   // Selektion/Reihenfolge bereinigen, sobald ein Task das aktive Board verlaesst.
   useEffect(() => {
+    // Vor dem ersten Laden sind keine Plans da: die persistierte Auswahl nicht leerraeumen.
+    if (!actionPlans.length) return;
     const activeIds = new Set<string>();
     for (const plan of actionPlans) {
       for (const task of plan.tasks) {
@@ -1388,6 +1455,10 @@ export function useKatoSyncViewModel() {
     setBoardSelection((prev) => prev.filter((id) => activeIds.has(id)));
     setBoardOrder((prev) => prev.filter((id) => activeIds.has(id)));
   }, [actionPlans]);
+
+  useEffect(() => {
+    writeBoardSelection(boardOrder);
+  }, [boardOrder]);
 
   const handleSelectTask = useCallback((taskId: string) => {
     setBoardSelection((prev) =>
@@ -1576,6 +1647,10 @@ export function useKatoSyncViewModel() {
   const handleStartBoardQueue = useCallback(
     async (projectId: string) => {
       if (!config || queueRunning || queueStartingRef.current) return;
+      if (autoDispatchingRef.current) {
+        show("warn", "Auto Mode führt gerade eine Aufgabe aus. Die Queue startet danach.");
+        return;
+      }
       // Ein Writer zur Zeit: laeuft bereits ein Handoff/Orchestrator/Writer, startet nichts Zweites.
       const safety = agentSyncRef.current?.startSafety;
       if (safety && !safety.safe) {
@@ -1671,6 +1746,172 @@ export function useKatoSyncViewModel() {
       show
     ]
   );
+
+  // ===== Auto-Lane-Dispatcher =====
+  // Startet ausschliesslich den vom Planer (agentSync.autoLanes.dispatch) freigegebenen Kopf-Task ueber
+  // den bestehenden Runner. Claim wird synchron VOR jedem await persistiert und erst nach dem finalen
+  // Task-Status freigegeben; kann ein Status nicht gespeichert werden, bleibt die Lane sichtbar gesperrt.
+  const actionPlansRef = useRef(actionPlans);
+  actionPlansRef.current = actionPlans;
+  const autoModeRef = useRef(autoMode);
+  autoModeRef.current = autoMode;
+  const autoTickRef = useRef<() => Promise<void>>(async () => undefined);
+  const lastAutoPlanRefreshRef = useRef(0);
+
+  const commitAutoClaims = useCallback((update: (claims: AutoLaneClaim[]) => AutoLaneClaim[]) => {
+    const next = update(readAutoLaneClaims());
+    writeAutoLaneClaims(next);
+    setAutoClaims(next);
+    return next;
+  }, []);
+
+  const dispatchAutoLane = useCallback(async () => {
+    const source = configRef.current;
+    const state = agentSyncRef.current;
+    const next = state?.autoLanes.dispatch[0];
+    if (!source || !state?.autoLanes.enabled || !autoModeRef.current.enabled || !next) return;
+    if (autoDispatchingRef.current || queueStartingRef.current || manualRunRef.current > 0 || !state.startSafety.safe) return;
+    if (readDailyCount() >= boardDailyLimit) return;
+    // Zweite Sperre neben dem Planer: der persistierte Ledger (z. B. aus einem anderen Render-Zyklus).
+    if (readAutoLaneClaims().some((claim) => claim.taskId === next.taskId)) return;
+    const repoPath = source.projectRepos?.[next.projectId];
+    const plan = actionPlansRef.current.find((entry) => entry.planId === next.planId);
+    const task = plan?.tasks.find((entry) => entry.taskId === next.taskId);
+    if (!repoPath || !plan || !task) return;
+
+    autoDispatchingRef.current = true;
+    const claimedAt = new Date().toISOString();
+    commitAutoClaims((claims) =>
+      addAutoLaneClaim(claims, { taskId: task.taskId, projectId: task.projectId, repoKey: repoPath, runner: next.runner, claimedAt })
+    );
+    setAutoLastDispatch((current) => ({ ...current, [task.projectId]: claimedAt }));
+    setAutoInFlight([task.taskId]);
+    let releaseClaim = true;
+    try {
+      if (!(await dirExists(repoPath))) {
+        setAutoMissingRepos((current) => (current.includes(task.projectId) ? current : [...current, task.projectId]));
+        show("warn", `Auto Mode: Projektordner für ${task.projectId} fehlt auf diesem Rechner. Lane gesperrt.`);
+        return;
+      }
+      try {
+        setActionPlans(await updateActionTaskStatus(source, task.taskId, "running"));
+      } catch {
+        releaseClaim = false;
+        show("warn", `Auto Mode: Status für „${task.title}“ nicht gespeichert. Lane bleibt gesperrt.`);
+        return;
+      }
+      let finalStatus: ActionTaskStatus = "failed";
+      let extra: { prUrl: string | null; branch: string | null } | undefined;
+      try {
+        const result = await runCodexForTaskWithRepo(plan, task, repoPath, next.runner);
+        if (result.status === "completed") {
+          const isFileMode = result.fileMode ?? !source.codexCodingMode;
+          finalStatus = isFileMode ? "completed" : "executed";
+          extra = { prUrl: result.prUrl ?? null, branch: result.branch ?? null };
+          const done = readDailyCount() + 1;
+          writeDailyCount(done);
+          setDailyCount(done);
+        } else {
+          // Jobfehler: Task bleibt failed, die Projekt-Lane wartet auf Pruefung. Kein Providerwechsel.
+          show("warn", `Auto Mode: „${task.title}“ fehlgeschlagen. Diese Projekt-Lane pausiert, andere laufen weiter.`);
+        }
+      } catch (error) {
+        setCodexRun((current) => ({ ...current, status: "failed", lastActivityAt: new Date().toISOString(), error: getMessage(error) }));
+        show("warn", `Auto Mode: „${task.title}“ abgebrochen. Diese Projekt-Lane pausiert, andere laufen weiter.`);
+      }
+      try {
+        setActionPlans(await updateActionTaskStatus(source, task.taskId, finalStatus, extra));
+      } catch {
+        releaseClaim = false;
+        show("warn", `Auto Mode: Endstatus für „${task.title}“ nicht gespeichert. Lane bleibt gesperrt.`);
+      }
+    } finally {
+      if (releaseClaim) commitAutoClaims((claims) => releaseAutoLaneClaim(claims, task.taskId));
+      setAutoInFlight([]);
+      try {
+        setActionPlans(await loadActionPlans(source));
+      } catch {
+        // Server nicht erreichbar: der naechste Takt laedt erneut.
+      }
+      autoDispatchingRef.current = false;
+      // Nach Abschluss/Fehler sofort neu bewerten, ohne erneuten Klick.
+      void autoTickRef.current();
+    }
+  }, [boardDailyLimit, commitAutoClaims, runCodexForTaskWithRepo, show]);
+
+  const handleCheckCompletionsRef = useRef(handleCheckCompletions);
+  handleCheckCompletionsRef.current = handleCheckCompletions;
+
+  // Ein Takt: frische Local-Control-Evidenz (Writer/Leases), gelegentlich Plans + Merge-Status,
+  // dann Dispatch-Bewertung im naechsten Render (agentSyncRef ist dann aktuell).
+  autoTickRef.current = async () => {
+    if (!autoModeRef.current.enabled) return;
+    await refreshLocalControlMonitor();
+    setDailyCount(readDailyCount());
+    const source = configRef.current;
+    if (source && !autoDispatchingRef.current && Date.now() - lastAutoPlanRefreshRef.current >= AUTO_LANE_PLAN_REFRESH_MS) {
+      lastAutoPlanRefreshRef.current = Date.now();
+      try {
+        setActionPlans(await loadActionPlans(source));
+      } catch {
+        // Server nicht erreichbar: Planer arbeitet mit dem letzten Stand.
+      }
+      if (agentSyncRef.current?.autoLanes.lanes.some((lane) => lane.reason === "merge_pending")) {
+        await handleCheckCompletionsRef.current(false).catch(() => undefined);
+      }
+    }
+    setAutoTickSeq((value) => value + 1);
+  };
+
+  const handleSetAutoMode = useCallback(
+    (enabled: boolean) => {
+      const mode: AutoLaneMode = { enabled, updatedAt: new Date().toISOString() };
+      writeAutoLaneMode(mode);
+      setAutoMode(mode);
+      show(
+        "info",
+        enabled
+          ? "Auto Mode an: ausgewählte, freigegebene Aufgaben starten automatisch, sobald es sicher ist."
+          : "Auto Mode pausiert: eine laufende Aufgabe endet normal, danach startet nichts Neues."
+      );
+    },
+    [show]
+  );
+
+  // Unterbrochene Lane (Claim/„running“ ohne laufenden Besitzer) bewusst freigeben: der Task wird
+  // zurückgestellt und startet erst wieder, wenn er im Board bewusst neu eingeplant wird.
+  const handleReleaseAutoLane = useCallback(
+    async (taskId: string) => {
+      if (autoInFlight.includes(taskId) || agentSyncRef.current?.currentJob?.id === taskId) return;
+      setBusy("board");
+      try {
+        setActionPlans(await updateActionTaskStatus(config, taskId, "deferred"));
+        commitAutoClaims((claims) => releaseAutoLaneClaim(claims, taskId));
+        show("info", "Unterbrochene Aufgabe zurückgestellt. Im Projekt-Board kannst du sie bewusst wieder einplanen.");
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [autoInFlight, commitAutoClaims, config, show]
+  );
+
+  // Erledigte Claims (Endstatus erreicht) aus dem Ledger entfernen.
+  useEffect(() => {
+    if (autoDispatchingRef.current) return;
+    const current = readAutoLaneClaims();
+    const pruned = pruneAutoLaneClaims(current, actionPlans);
+    if (pruned.length !== current.length) {
+      writeAutoLaneClaims(pruned);
+      setAutoClaims(pruned);
+    }
+  }, [actionPlans]);
+
+  // Neue Repo-Zuordnung -> fehlende Ordner erneut pruefen.
+  useEffect(() => {
+    setAutoMissingRepos([]);
+  }, [config?.projectRepos]);
 
   const handleAcceptBriefing = useCallback(
     async (briefingId: string) => {
@@ -1774,10 +2015,28 @@ export function useKatoSyncViewModel() {
       claudeModel: config?.claudeModel,
       localModel: config?.localProvider.model,
       device: config?.device.deviceName,
+      autoLane: {
+        enabled: autoMode.enabled,
+        selectedOrder: boardOrder,
+        repos: config?.projectRepos ?? {},
+        missingRepos: autoMissingRepos,
+        claims: autoClaims,
+        inFlightTaskIds: autoInFlight,
+        dailyCount,
+        dailyLimit: boardDailyLimit,
+        lastDispatchAt: autoLastDispatch
+      },
       now: new Date().toISOString()
     }),
     [
       actionPlans,
+      autoClaims,
+      autoInFlight,
+      autoLastDispatch,
+      autoMissingRepos,
+      autoMode.enabled,
+      boardDailyLimit,
+      boardOrder,
       codexEvents,
       codexRun,
       config?.claudeModel,
@@ -1785,8 +2044,10 @@ export function useKatoSyncViewModel() {
       config?.codexPreferredRunner,
       config?.device.deviceName,
       config?.localProvider.model,
+      config?.projectRepos,
       config?.providerPriority,
       currentQueueTaskId,
+      dailyCount,
       localControlMonitor,
       providerHistory,
       providerStatuses,
@@ -1795,6 +2056,20 @@ export function useKatoSyncViewModel() {
   );
 
   agentSyncRef.current = agentSync;
+
+  // Auto-Mode-Takt (nur bei offener App und eingeschaltetem Modus): begrenzt, kein Busy-Loop.
+  useEffect(() => {
+    if (!autoMode.enabled) return undefined;
+    void autoTickRef.current();
+    const timer = window.setInterval(() => void autoTickRef.current(), AUTO_LANE_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [autoMode.enabled]);
+
+  // Dispatch nur direkt nach einem Takt mit frischer Evidenz bewerten.
+  useEffect(() => {
+    // Bewusst nur am Takt haengend: dispatchAutoLane stammt aus genau diesem Render.
+    if (autoTickSeq > 0) void dispatchAutoLane();
+  }, [autoTickSeq]);
 
   return {
     activeStep,
@@ -1864,6 +2139,9 @@ export function useKatoSyncViewModel() {
     handleSelectTask,
     handleStartBoardQueue,
     handleStopBoardQueue,
+    handleSetAutoMode,
+    handleReleaseAutoLane,
+    autoMode,
     handleLogin,
     handleMoveProvider,
     handleCancelProviderLogin,

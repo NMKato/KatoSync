@@ -6646,6 +6646,56 @@ button.agent-tile:hover {
 
 .control-secondary { align-items: stretch; }
 
+/* Auto-Lanes: geplante bis gesperrte Projektarbeit im Control Tower */
+.control-auto-card {
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.control-auto-head { flex-wrap: wrap; }
+.control-auto-head .runtime-pill { margin-left: auto; }
+.control-auto-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.control-auto-counts strong { color: var(--text); }
+.control-auto-lanes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.control-auto-lane {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--glass-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+.control-auto-lane > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.control-auto-lane strong { font-size: 12.5px; }
+.control-auto-lane small {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.control-auto-lane .control-auto-reason { color: var(--text-faint); }
+.control-auto-lane.blocked { border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.control-auto-lane.waiting { border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.control-auto-lane.running { border-color: color-mix(in srgb, var(--agent-live) 45%, transparent); }
+
 .control-diagnostics {
   padding: 0;
   overflow: hidden;
@@ -6738,7 +6788,7 @@ button.agent-tile:hover {
 
 
 .control-strip {
-  grid-template-columns: minmax(230px, 1.7fr) repeat(4, minmax(105px, auto));
+  grid-template-columns: minmax(230px, 1.7fr) repeat(5, minmax(105px, auto));
 }
 .control-strip .agent-ready-chip {
   min-width: 0;

@@ -250,6 +250,10 @@ export function clearLocalTenantCaches(): void {
     localStorage.removeItem(mockMcpConnectorTokenKey);
     localStorage.removeItem(mockConfigKey);
     localStorage.removeItem("katosync.runHistory.v1"); // spiegelt STORAGE_KEY in lib/runHistory.ts
+    // Auto-Lane-Modus, Dispatch-Claims und Board-Auswahl (Keys in lib/autoLaneStore.ts) sind tenant-bezogen.
+    localStorage.removeItem("katosync.autoLane.mode.v1");
+    localStorage.removeItem("katosync.autoLane.claims.v1");
+    localStorage.removeItem("katosync.board.selection.v1");
     // Tages-Zaehler ALLER Tage entfernen (Codex-Quota nicht vom Vortenant erben; Key in
     // useKatoSyncViewModel.dailyCountKey = katosync.board.completed.<datum>).
     for (const key of Object.keys(localStorage)) {
