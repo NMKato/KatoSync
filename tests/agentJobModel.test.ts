@@ -173,6 +173,29 @@ test("router fallback job keeps the failover reason, retry time and handoff chai
   assert.deepEqual(completed.handoffs.map((handoff) => [handoff.from, handoff.to]), [["codex", "claude"]]);
 });
 
+test("direct provider-router job is visible as active instead of disappearing until fallback", () => {
+  const state = normalizeAgentSyncState(input({
+    providerStatuses: [provider("codex", { state: "quota_limited", available: false }), provider("claude")],
+    localControl: snapshot({
+      fallbackJobs: [fallback({
+        status: "running",
+        reason: "router_active",
+        activeProvider: "claude",
+        providerStates: [{ provider: "codex", state: "quota_limited", exitCode: 1 }]
+      })]
+    })
+  }));
+  const job = state.jobs.find((entry) => entry.source === "provider_router");
+  assert.ok(job);
+  assert.equal(job.status, "running");
+  assert.equal(job.owner, "claude");
+  assert.equal(job.phase, "execution");
+  assert.equal(state.currentJob?.id, job.id);
+  assert.equal(state.counts.running, 1);
+  assert.equal(state.lanes.find((lane) => lane.id === "claude")?.activity, "active");
+  assert.equal(state.startSafety.safe, false);
+});
+
 test("remote orchestrator + RDC is an intelligent fallback lane distinct from Local Control", () => {
   const attached = normalizeAgentSyncState(input({ localControl: snapshot({ fallbackJobs: [fallback()], remoteOrchestrator: lease() }) }));
   assert.equal(attached.remote.orchestrator, "attached");

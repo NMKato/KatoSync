@@ -36,10 +36,9 @@ import { NO_PROJECT_ID } from "../repositories/katoSyncRepository";
 import { fallbackLabels } from "./ProviderManager";
 import {
   AgentJobList,
+  ControlTower,
   CurrentJobCard,
-  LaneRoute,
   StatusCounts,
-  SubstratePanel,
   clock,
   duration,
   laneLabel
@@ -115,42 +114,41 @@ function attentionTarget(item: AttentionItem): StepId {
 export function AgentReadinessStrip({ vm, onNavigate }: { vm: ViewModel; onNavigate: Navigate }) {
   const { t } = useT();
   const readiness = buildAgentReadiness(vm);
+  const state = vm.agentSync;
+  const current = state.currentJob;
   const attention = readiness.attention.length;
+  const currentTone = current?.status === "running" ? "live" : current ? "warn" : "ok";
   return (
-    <div className="agent-readiness-strip" aria-label={t("agent.readiness.aria")}>
+    <div className="agent-readiness-strip control-strip" aria-label={t("agent.readiness.aria")}>
+      <button className="agent-ready-chip control-strip-main" onClick={() => onNavigate("agentDashboard")} type="button">
+        <span className={`agent-chip-dot ${currentTone}`} aria-hidden="true" />
+        <span>{current?.owner ? laneLabel(t, current.owner) : t("agent.control.eyebrow")}</span>
+        <strong title={current?.task}>{current ? current.task : t("agent.control.idle")}</strong>
+      </button>
       <button className="agent-ready-chip" onClick={() => onNavigate("agentProviders")} type="button">
         <span className={`agent-chip-dot ${readiness.connected.length ? "ok" : "neutral"}`} aria-hidden="true" />
         <span>{t("agent.readiness.providers")}</span>
-        <strong>{t("agent.readiness.providersValue", { count: readiness.connected.length, total: readiness.total })}</strong>
+        <strong>{readiness.connected.length}/{readiness.total}</strong>
       </button>
       <button className="agent-ready-chip" onClick={() => onNavigate("agentMonitor")} type="button">
-        <span className={`agent-chip-dot ${healthTone(readiness.localControl)}`} aria-hidden="true" />
-        <span>{t("agent.readiness.localControl")}</span>
-        <strong>{t(`agent.lc.${readiness.localControl}` as TKey)}</strong>
+        <span className={`agent-chip-dot ${state.remote.transport === "online" ? "ok" : state.remote.transport === "stale" ? "warn" : "neutral"}`} aria-hidden="true" />
+        <span>RDC</span>
+        <strong>{t(`agent.rdc.${state.remote.transport}` as TKey)}</strong>
       </button>
       <button className="agent-ready-chip" onClick={() => onNavigate("agentJobs")} type="button">
-        <span className={`agent-chip-dot ${readiness.activeJobs ? "live" : "neutral"}`} aria-hidden="true" />
-        <span>{t("agent.readiness.activeJobs")}</span>
-        <strong>{readiness.activeJobs}</strong>
+        <span className={`agent-chip-dot ${state.queueCount ? "warn" : "neutral"}`} aria-hidden="true" />
+        <span>{t("agent.job.queue")}</span>
+        <strong>{state.queueCount}</strong>
       </button>
-      <button
-        className={`agent-ready-chip${attention ? " attention" : ""}`}
-        onClick={() => onNavigate(attention ? attentionTarget(readiness.attention[0]) : "agentDashboard")}
-        type="button"
-      >
-        <span className={`agent-chip-dot ${attention ? "warn" : "ok"}`} aria-hidden="true" />
-        <span>{t("agent.readiness.attention")}</span>
-        <strong>{attention}</strong>
-      </button>
+      {attention ? (
+        <button className="agent-ready-chip attention" onClick={() => onNavigate(attentionTarget(readiness.attention[0]))} type="button">
+          <span className="agent-chip-dot warn" aria-hidden="true" />
+          <span>{t("agent.readiness.attention")}</span>
+          <strong>{attention}</strong>
+        </button>
+      ) : null}
     </div>
   );
-}
-
-function healthTone(health: AgentReadiness["localControl"]): string {
-  if (health === "busy") return "live";
-  if (health === "idle") return "ok";
-  if (health === "unknown") return "neutral";
-  return "warn";
 }
 
 // ===== Dashboard =====
@@ -158,55 +156,10 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   const { t } = useT();
   const readiness = buildAgentReadiness(vm);
   const state = vm.agentSync;
-  // Erststart-Text sagt, was wirklich bereit ist – kein generisches "Setup abgeschlossen".
-  const headline =
-    !readiness.connected.length && !readiness.activeJobs
-      ? "setup"
-      : readiness.attention.length
-        ? "attention"
-        : readiness.activeJobs
-          ? "working"
-          : "ready";
 
   return (
     <section className="agent-dashboard" id="section-agent-dashboard">
-      <div className={`agent-hero glass headline-${headline}`}>
-        <div className="agent-hero-copy">
-          <span className="section-label">{t("agent.hero.eyebrow")}</span>
-          <h2>{t(`agent.hero.${headline}.title` as TKey)}</h2>
-          <p>{t(`agent.hero.${headline}.text` as TKey)}</p>
-        </div>
-        <div className="agent-hero-tiles">
-          <button className="agent-tile" onClick={() => onNavigate("agentProviders")} type="button">
-            <span>{t("agent.readiness.providers")}</span>
-            <strong>{t("agent.readiness.providersValue", { count: readiness.connected.length, total: readiness.total })}</strong>
-            <small>
-              {readiness.connected.length
-                ? readiness.connected.map((provider) => providerLabel(vm, provider)).join(" · ")
-                : t("agent.tile.noneConnected")}
-            </small>
-          </button>
-          <button className="agent-tile" onClick={() => onNavigate("agentMonitor")} type="button">
-            <span>{t("agent.readiness.localControl")}</span>
-            <strong className={`tone-${healthTone(readiness.localControl)}`}>{t(`agent.lc.${readiness.localControl}` as TKey)}</strong>
-            <small>
-              {vm.localControlMonitor?.state
-                ? t("agent.tile.heartbeat", { time: clock(vm.localControlMonitor.state.heartbeatAt, true) })
-                : t("agent.tile.lcHint")}
-            </small>
-          </button>
-          <button className="agent-tile" onClick={() => onNavigate("agentJobs")} type="button">
-            <span>{t("agent.readiness.activeJobs")}</span>
-            <strong className={readiness.activeJobs ? "tone-live" : ""}>{readiness.activeJobs}</strong>
-            <small>{t("agent.tile.queued", { count: state.queueCount })}</small>
-          </button>
-          <div className={`agent-tile${readiness.attention.length ? " attention" : ""}`}>
-            <span>{t("agent.readiness.attention")}</span>
-            <strong className={readiness.attention.length ? "tone-warn" : "tone-ok"}>{readiness.attention.length}</strong>
-            <small>{readiness.attention.length ? t("agent.tile.attentionSee") : t("agent.tile.attentionNone")}</small>
-          </div>
-        </div>
-      </div>
+      <ControlTower state={state} />
 
       {readiness.attention.length ? (
         <ul className="agent-attention glass" aria-label={t("agent.readiness.attention")}>
@@ -223,12 +176,7 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
         </ul>
       ) : null}
 
-      <CurrentJobCard state={state} />
-
-      <LaneRoute state={state} />
-
-      <div className="agent-dashboard-row">
-        <SubstratePanel state={state} />
+      <div className="agent-dashboard-row control-secondary">
         <div className="glass agent-card agent-card-flow">
           <CardTitle icon={<Workflow size={17} />} title={t("agent.flow.statusTitle")} />
           <StatusCounts state={state} />
@@ -237,14 +185,15 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
             <ArrowRight size={14} />
           </button>
         </div>
-      </div>
-
-      <div className="agent-dashboard-row">
         <div className="glass agent-card agent-card-activity">
           <CardTitle icon={<Activity size={17} />} title={t("agent.activity.title")} />
           <LocalJobActivity vm={vm} />
         </div>
-        <div className="glass agent-card agent-card-evidence">
+      </div>
+
+      <details className="glass control-diagnostics">
+        <summary>{t("agent.control.diagnostics")}</summary>
+        <div className="agent-card agent-card-evidence">
           <CardTitle icon={<ShieldCheck size={17} />} title={t("agent.evidence.title")} />
           <LastRunnerResult vm={vm} />
           <button className="ghost compact-button agent-card-link" onClick={() => onNavigate("agentHistory")} type="button">
@@ -252,7 +201,7 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
             <ArrowRight size={14} />
           </button>
         </div>
-      </div>
+      </details>
     </section>
   );
 }
