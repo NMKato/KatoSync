@@ -13,6 +13,25 @@ function packet() {
     packetId: "genx-136-abc123",
     projectId: "genxline",
     projectName: "GENXLine",
+    context: {
+      contextVersion: "2026-10-04.1",
+      contextHash: "ctx-genx-v1",
+      purpose: "Private Family Spaces für Fotos, Timeline, Galerie und WORLD.",
+      primaryUsers: ["Familien"],
+      operatingEnvironment: ["Web", "Mobile Safari"],
+      architecturePatterns: ["MVVM + Repository/Adapter", "Views ohne Provider-I/O"],
+      subsystemBoundaries: ["WORLD liest private Derivatives über autorisierte APIs"],
+      technologies: ["Next.js", "Supabase", "Cloudflare R2"],
+      securityInvariants: ["RLS/Privacy strikt", "Originale bleiben privat"],
+      sourceOfTruthRules: ["Git + verifizierte Runtime-Evidenz vor Zusammenfassungen"],
+      workflowPolicies: ["One writer per worktree", "Feature-Branch vor main"],
+      qualityGates: ["TypeScript", "Tests", "Production build"],
+      humanGates: ["Echte visuelle Real-Daten-Abnahme vor WORLD-Merge"],
+      nonGoals: ["Keine Privacy-Abkürzungen für schnellere Demos"],
+      vocabulary: ["WORLD", "Family Space", "Derivative"],
+      refs: ["project://genxline/architecture"],
+      verifiedAt: "2026-10-04T14:30:00+02:00"
+    },
     task: { taskId: "#136", title: "MapLibre prototype", issue: "#136" },
     goal: "MapLibre-Prototyp sauber bis zum Review bringen.",
     acceptanceCriteria: ["Tests grün", "PR reviewbar", "Tests grün"],
@@ -55,6 +74,7 @@ const live = {
   branch: "feat/world-maplibre",
   headSha: "abc123",
   workspaceId: "genxline-maplibre",
+  contextHash: "ctx-genx-v1",
   laneId: "genxline-map",
   leaseOwner: "claude",
   worktreeId: "genxline-maplibre"
@@ -66,6 +86,7 @@ test("handoff packet normalizes duplicate context without losing truth", () => {
   assert.deepEqual(value.acceptanceCriteria, ["Tests grün", "PR reviewbar"]);
   assert.deepEqual(value.git.dirtyFiles, ["src/map.ts"]);
   assert.deepEqual(value.memoryRefs, ["project://genxline/status"]);
+  assert.deepEqual(value.context.architecturePatterns, ["MVVM + Repository/Adapter", "Views ohne Provider-I/O"]);
 });
 
 test("fresh packet validates against branch, HEAD and lease", () => {
@@ -73,6 +94,16 @@ test("fresh packet validates against branch, HEAD and lease", () => {
     validateHandoffPacket(packet(), live, new Date("2026-10-04T14:35:00+02:00")),
     { status: "fresh", reasons: [] }
   );
+});
+
+test("changed project skeleton rejects takeover before the new provider reasons from stale architecture", () => {
+  const result = validateHandoffPacket(
+    packet(),
+    { ...live, contextHash: "ctx-genx-v2" },
+    new Date("2026-10-04T14:35:00+02:00")
+  );
+  assert.equal(result.status, "rejected");
+  assert.ok(result.reasons.includes("context_hash_mismatch"));
 });
 
 test("changed HEAD rejects stale takeover instead of re-orienting from guesses", () => {
@@ -103,10 +134,33 @@ test("expired packet is stale but does not invent a new truth", () => {
 
 test("takeover prompt starts at the verified next action and forbids a full rescan", () => {
   const prompt = buildTakeoverPrompt(packet());
+  assert.match(prompt, /Project Context Skeleton/);
+  assert.match(prompt, /Private Family Spaces/);
+  assert.match(prompt, /MVVM \+ Repository\/Adapter/);
+  assert.match(prompt, /RLS\/Privacy strikt/);
   assert.match(prompt, /Nächste Aktion/);
   assert.match(prompt, /Bestehenden Diff prüfen/);
   assert.match(prompt, /KEINEN vollständigen Repository-Rescan/);
   assert.match(prompt, /abc123/);
+});
+
+test("the same live task carries project-specific architecture guidance through the skeleton", () => {
+  const genxPrompt = buildTakeoverPrompt(packet());
+  const alternate = packet();
+  alternate.context = {
+    ...alternate.context,
+    contextVersion: "2026-10-04.2",
+    contextHash: "ctx-kai-v1",
+    purpose: "Digitaler Desktop-Mitarbeiter mit deterministischen Skills.",
+    architecturePatterns: ["MVVM + Repository/Adapter", "LLM entscheidet, geprüfte Tools führen aus"],
+    securityInvariants: ["Unbekannte UI-Zustände fail-closed"]
+  };
+  const kaiPrompt = buildTakeoverPrompt(alternate);
+
+  assert.match(genxPrompt, /Private Family Spaces/);
+  assert.match(kaiPrompt, /Digitaler Desktop-Mitarbeiter/);
+  assert.match(kaiPrompt, /fail-closed/);
+  assert.notEqual(genxPrompt, kaiPrompt);
 });
 
 test("recovery readiness is green only for fresh, evidenced canonical state", () => {
