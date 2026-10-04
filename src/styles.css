@@ -4197,15 +4197,34 @@ pre {
 .provider-card footer { margin-top: auto; }
 .provider-card footer button { flex: 1 1 auto; min-width: 120px; }
 
+.provider-login-browser-action {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 10px;
+}
+
 .provider-login-link {
   display: inline-flex;
+  width: fit-content;
   align-items: center;
   gap: 6px;
-  margin: 0 0 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--brand);
+  font: inherit;
   font-size: 12px;
   font-weight: 700;
+  cursor: pointer;
+  text-align: left;
 }
+
+.provider-login-link:hover:not(:disabled) { text-decoration: underline; }
+.provider-login-link:disabled { cursor: wait; opacity: .72; }
+.provider-login-feedback { min-height: 15px; font-size: 11px; color: var(--muted); }
+.provider-login-feedback.opened { color: var(--success); }
+.provider-login-feedback.error { color: var(--danger); }
 
 .provider-login-code {
   display: grid;
