@@ -16,6 +16,7 @@ import {
   History,
   ListChecks,
   PlayCircle,
+  RefreshCcw,
   ShieldCheck,
   StopCircle,
   TerminalSquare,
@@ -252,8 +253,10 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
         </div>
       </section>
 
+      <AutoQStarter vm={vm} onOpenProjects={() => onNavigate("agentProjects")} />
+
       <AutoLanePanel
-        busy={Boolean(vm.busy)}
+        busy={Boolean(vm.busy) || vm.projectWorkSyncBusy}
         onRelease={(taskId) => void vm.handleReleaseAutoLane(taskId)}
         onToggle={vm.handleSetAutoMode}
         plan={state.autoLanes}
@@ -353,6 +356,67 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   );
 }
 
+function AutoQStarter({ vm, onOpenProjects }: { vm: ViewModel; onOpenProjects: () => void }) {
+  const { t } = useT();
+  const report = vm.projectWorkSyncReport;
+  return (
+    <section className="glass agent-autoq" aria-label={t("agent.autoq.title")}>
+      <div className="agent-autoq-main">
+        <span className="agent-autoq-icon" aria-hidden="true">
+          <Workflow size={18} />
+        </span>
+        <div className="agent-autoq-copy">
+          <strong>{t("agent.autoq.title")}</strong>
+          <p>{t("agent.autoq.text")}</p>
+        </div>
+        <button
+          className="primary agent-autoq-start"
+          disabled={vm.projectWorkSyncBusy || Boolean(vm.busy)}
+          onClick={() => void vm.handleStartAutoQ()}
+          type="button"
+        >
+          {vm.projectWorkSyncBusy ? <RefreshCcw className="spin" size={15} /> : <PlayCircle size={15} />}
+          {vm.projectWorkSyncBusy ? t("agent.autoq.syncing") : t("agent.autoq.start")}
+        </button>
+      </div>
+
+      {report ? (
+        <div className="agent-autoq-report">
+          <div className="agent-autoq-counts">
+            <span className="ok">{t("agent.autoq.ready", { count: report.readyCount })}</span>
+            <span className="warn">{t("agent.autoq.gated", { count: report.gatedCount })}</span>
+            <span>{t("agent.autoq.empty", { count: report.emptyCount })}</span>
+          </div>
+          <div className="agent-autoq-projects">
+            {report.projects.map((project) => (
+              <div
+                className={`agent-autoq-project ${project.ready > 0 ? "ready" : project.gated ? "gated" : "empty"}`}
+                key={project.projectId}
+              >
+                <span className="projects-prio">{project.priority}</span>
+                <strong>{project.name}</strong>
+                <small>
+                  {project.ready > 0
+                    ? t("agent.autoq.projectReady", { count: project.ready })
+                    : project.detail ?? t("agent.autoq.projectEmpty")}
+                </small>
+              </div>
+            ))}
+          </div>
+          {report.readyCount === 0 && report.gatedCount > 0 ? (
+            <button className="ghost compact-button" onClick={onOpenProjects} type="button">
+              {t("agent.autoq.resolve")}
+              <ArrowRight size={13} />
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <small className="agent-autoq-hint">{t("agent.autoq.hint")}</small>
+      )}
+    </section>
+  );
+}
+
 function CardTitle({ icon, title }: { icon: ReactNode; title: string }) {
   return (
     <div className="agent-card-title">
@@ -437,7 +501,7 @@ export function AgentSyncJobs({ vm, onOpenMistralTasks }: { vm: ViewModel; onOpe
       jobs: group.tasks
         .filter((task) => task.targetRunner === "codex_cli")
         .map((task) => {
-          const plan = vm.actionPlans.find((entry) => entry.planId === task.planId);
+          const plan = vm.agentActionPlans.find((entry) => entry.planId === task.planId);
           return { task, stage: plan ? jobStage(task, plan, vm.currentQueueTaskId) : null };
         })
         .filter((job): job is { task: typeof job.task; stage: JobStage } => job.stage !== null)
@@ -551,7 +615,7 @@ export function AgentSyncJobs({ vm, onOpenMistralTasks }: { vm: ViewModel; onOpe
 // ===== Verlauf & Nachweise (nur echter Zustand) =====
 export function AgentSyncHistory({ vm }: { vm: ViewModel }) {
   const { t } = useT();
-  const finished = vm.actionPlans
+  const finished = vm.agentActionPlans
     .flatMap((plan) => plan.tasks.map((task) => ({ task, stage: jobStage(task, plan, vm.currentQueueTaskId) })))
     .filter((job) => job.task.targetRunner === "codex_cli")
     .filter((job) => job.stage === "executed" || job.stage === "completed" || job.stage === "failed");

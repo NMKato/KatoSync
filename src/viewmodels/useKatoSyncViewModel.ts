@@ -96,6 +96,14 @@ import {
   type AutoLaneMode
 } from "../lib/autoLaneStore";
 import { defaultConfig } from "../lib/defaults";
+import {
+  buildProjectWorkSync,
+  isProjectWorkPlan,
+  readProjectWorkPlans,
+  updateProjectWorkTask,
+  writeProjectWorkPlans,
+  type ProjectWorkSyncReport
+} from "../lib/projectWorkSync";
 import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 import { modeForStep } from "../lib/workspaceMode";
 import type { Notice } from "../components/Primitives";
@@ -225,6 +233,11 @@ export function useKatoSyncViewModel() {
   const [localControlMonitor, setLocalControlMonitor] = useState<LocalControlMonitorSnapshot | null>(null);
   const [localControlMonitorError, setLocalControlMonitorError] = useState<string | null>(null);
   const [actionPlans, setActionPlans] = useState<ActionPlan[]>([]);
+  const [projectWorkPlans, setProjectWorkPlans] = useState<ActionPlan[]>(() => readProjectWorkPlans());
+  const projectWorkPlansRef = useRef<ActionPlan[]>(projectWorkPlans);
+  projectWorkPlansRef.current = projectWorkPlans;
+  const [projectWorkSyncReport, setProjectWorkSyncReport] = useState<ProjectWorkSyncReport | null>(null);
+  const [projectWorkSyncBusy, setProjectWorkSyncBusy] = useState(false);
   const [briefings, setBriefings] = useState<Briefing[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -276,6 +289,14 @@ export function useKatoSyncViewModel() {
   projectsRegistryRef.current = projects.registry;
   const focusPolicyRef = useRef(projects.focusPolicy);
   focusPolicyRef.current = projects.focusPolicy;
+
+  const commitProjectWorkPlans = useCallback((update: (plans: ActionPlan[]) => ActionPlan[]) => {
+    const next = update(projectWorkPlansRef.current);
+    projectWorkPlansRef.current = next;
+    writeProjectWorkPlans(next);
+    setProjectWorkPlans(next);
+    return next;
+  }, []);
 
   const applyProviderSnapshot = useCallback((next: ProviderStatus[]) => {
     const transitions = providerTransitions(providerStatusesRef.current, next);
@@ -1584,28 +1605,35 @@ export function useKatoSyncViewModel() {
     [guardManualRun, runCodexForBriefingManually]
   );
 
-  // ===== Projekt-Board =====
+  // ===== Projekt-Board / lokale Project-Work-Pläne =====
+  const effectiveActionPlans = useMemo(
+    () => [...actionPlans, ...projectWorkPlans],
+    [actionPlans, projectWorkPlans]
+  );
+
+  // Das alte Mistral-Projektboard bleibt serverseitig. Lokale AutoQ-Pläne erscheinen nur
+  // in Agent Sync/Auto-Lanes und werden nie versehentlich über MCP-Board-Mutationen geschrieben.
   const boardGroups = useMemo<BoardGroup[]>(
     () => groupTasksByProject(actionPlans, boardSelection, boardOrder, projects.registry),
     [actionPlans, boardSelection, boardOrder, projects.registry]
   );
 
   const boardDailyLimit = useMemo(() => {
-    const limits = actionPlans
+    const limits = effectiveActionPlans
       .filter((plan) => plan.status === "approved")
       .map((plan) => plan.dailyLimit)
       .filter((value) => Number.isFinite(value) && value > 0);
     return limits.length ? Math.max(...limits) : 3;
-  }, [actionPlans]);
+  }, [effectiveActionPlans]);
 
   // Selektion/Reihenfolge bereinigen, sobald ein Task das aktive Board verlaesst ODER heute
   // keinem aktuellen Fokusprojekt mehr zugeordnet ist. Manuelle aktuelle Projekte bleiben fuer
   // bewusste Handarbeit sichtbar; parked/archived/unmapped Altarbeit (z. B. Telefon/Twilio) fliegt raus.
   useEffect(() => {
     // Vor dem ersten Laden sind keine Plans da: die persistierte Auswahl nicht leerraeumen.
-    if (!actionPlans.length) return;
+    if (!effectiveActionPlans.length) return;
     const activeIds = new Set<string>();
-    for (const plan of actionPlans) {
+    for (const plan of effectiveActionPlans) {
       for (const task of plan.tasks) {
         if (task.status === "completed" || task.status === "rejected") continue;
         const focus = evaluateFocus(projects.focusPolicy, task.projectId);
@@ -1614,7 +1642,7 @@ export function useKatoSyncViewModel() {
     }
     setBoardSelection((prev) => prev.filter((id) => activeIds.has(id)));
     setBoardOrder((prev) => prev.filter((id) => activeIds.has(id)));
-  }, [actionPlans, projects.focusPolicy]);
+  }, [effectiveActionPlans, projects.focusPolicy]);
 
   useEffect(() => {
     writeBoardSelection(boardOrder);
@@ -1756,9 +1784,14 @@ export function useKatoSyncViewModel() {
   const handleCheckCompletions = useCallback(
     async (manual = false) => {
       if (!config) return;
-      const executed = actionPlans
-        .flatMap((plan) => plan.tasks)
-        .filter((task) => task.status === "executed" && (task.prUrl || task.branch));
+      const executed = effectiveActionPlans
+        .flatMap((plan) =>
+          plan.tasks.map((task) => ({
+            task,
+            localProjectWork: isProjectWorkPlan(plan)
+          }))
+        )
+        .filter(({ task }) => task.status === "executed" && (task.prUrl || task.branch));
       if (!executed.length) {
         if (manual) show("info", "Keine ausgeführten Aufgaben mit PR/Branch zu prüfen.");
         return;
@@ -1766,19 +1799,22 @@ export function useKatoSyncViewModel() {
       if (manual) setBusy("check-completions");
       try {
         let changed = 0;
-        for (const task of executed) {
+        let remoteChanged = false;
+        for (const { task, localProjectWork } of executed) {
           const repoPath = repoPathFor(projectsRegistryRef.current, config.projectRepos, task.projectId) ?? "";
           const state = await checkCodexTask(repoPath, task.branch ?? "", task.prUrl ?? "");
-          if (state === "merged") {
-            await updateActionTaskStatus(config, task.taskId, "completed");
-            changed += 1;
-          } else if (state === "closed") {
-            await updateActionTaskStatus(config, task.taskId, "rejected");
-            changed += 1;
+          const finalStatus = state === "merged" ? "completed" : state === "closed" ? "rejected" : null;
+          if (!finalStatus) continue;
+          if (localProjectWork) {
+            commitProjectWorkPlans((plans) => updateProjectWorkTask(plans, task.taskId, finalStatus));
+          } else {
+            await updateActionTaskStatus(config, task.taskId, finalStatus);
+            remoteChanged = true;
           }
+          changed += 1;
         }
+        if (remoteChanged) setActionPlans(await loadActionPlans(config));
         if (changed) {
-          setActionPlans(await loadActionPlans(config));
           show("ok", `${changed} Aufgabe(n) aktualisiert (gemerged/geschlossen).`);
         } else if (manual) {
           show("info", "Noch nichts gemerged/geschlossen.");
@@ -1787,7 +1823,7 @@ export function useKatoSyncViewModel() {
         if (manual) setBusy(null);
       }
     },
-    [actionPlans, config, show]
+    [commitProjectWorkPlans, config, effectiveActionPlans, show]
   );
 
   // On-demand: beim Betreten des Projekt-Boards einmal automatisch pruefen.
@@ -1911,8 +1947,8 @@ export function useKatoSyncViewModel() {
   // Startet ausschliesslich den vom Planer (agentSync.autoLanes.dispatch) freigegebenen Kopf-Task ueber
   // den bestehenden Runner. Claim wird synchron VOR jedem await persistiert und erst nach dem finalen
   // Task-Status freigegeben; kann ein Status nicht gespeichert werden, bleibt die Lane sichtbar gesperrt.
-  const actionPlansRef = useRef(actionPlans);
-  actionPlansRef.current = actionPlans;
+  const actionPlansRef = useRef(effectiveActionPlans);
+  actionPlansRef.current = effectiveActionPlans;
   const autoModeRef = useRef(autoMode);
   autoModeRef.current = autoMode;
   const autoTickRef = useRef<() => Promise<void>>(async () => undefined);
@@ -1938,6 +1974,7 @@ export function useKatoSyncViewModel() {
     const plan = actionPlansRef.current.find((entry) => entry.planId === next.planId);
     const task = plan?.tasks.find((entry) => entry.taskId === next.taskId);
     if (!repoPath || !plan || !task) return;
+    const localProjectWork = isProjectWorkPlan(plan);
     // Zweite Sperre neben dem Planer: Fokus-Portfolio (geparkt/archiviert/manuell/unbekannt startet nie autonom).
     if (!evaluateFocus(focusPolicyRef.current, task.projectId).allowed) return;
 
@@ -1956,7 +1993,11 @@ export function useKatoSyncViewModel() {
         return;
       }
       try {
-        setActionPlans(await updateActionTaskStatus(source, task.taskId, "running"));
+        if (localProjectWork) {
+          commitProjectWorkPlans((plans) => updateProjectWorkTask(plans, task.taskId, "running"));
+        } else {
+          setActionPlans(await updateActionTaskStatus(source, task.taskId, "running"));
+        }
       } catch {
         releaseClaim = false;
         show("warn", `Auto Mode: Status für „${task.title}“ nicht gespeichert. Lane bleibt gesperrt.`);
@@ -1982,7 +2023,16 @@ export function useKatoSyncViewModel() {
         show("warn", `Auto Mode: „${task.title}“ abgebrochen. Diese Projekt-Lane pausiert, andere laufen weiter.`);
       }
       try {
-        setActionPlans(await updateActionTaskStatus(source, task.taskId, finalStatus, extra));
+        if (localProjectWork) {
+          commitProjectWorkPlans((plans) =>
+            updateProjectWorkTask(plans, task.taskId, finalStatus, {
+              prUrl: extra?.prUrl ?? null,
+              branch: extra?.branch ?? null
+            })
+          );
+        } else {
+          setActionPlans(await updateActionTaskStatus(source, task.taskId, finalStatus, extra));
+        }
       } catch {
         releaseClaim = false;
         show("warn", `Auto Mode: Endstatus für „${task.title}“ nicht gespeichert. Lane bleibt gesperrt.`);
@@ -1990,16 +2040,18 @@ export function useKatoSyncViewModel() {
     } finally {
       if (releaseClaim) commitAutoClaims((claims) => releaseAutoLaneClaim(claims, task.taskId));
       setAutoInFlight([]);
-      try {
-        setActionPlans(await loadActionPlans(source));
-      } catch {
-        // Server nicht erreichbar: der naechste Takt laedt erneut.
+      if (!localProjectWork) {
+        try {
+          setActionPlans(await loadActionPlans(source));
+        } catch {
+          // Server nicht erreichbar: der naechste Takt laedt erneut.
+        }
       }
       autoDispatchingRef.current = false;
       // Nach Abschluss/Fehler sofort neu bewerten, ohne erneuten Klick.
       void autoTickRef.current();
     }
-  }, [boardDailyLimit, commitAutoClaims, runCodexForTaskWithRepo, show]);
+  }, [boardDailyLimit, commitAutoClaims, commitProjectWorkPlans, runCodexForTaskWithRepo, show]);
 
   const handleCheckCompletionsRef = useRef(handleCheckCompletions);
   handleCheckCompletionsRef.current = handleCheckCompletions;
@@ -2029,6 +2081,7 @@ export function useKatoSyncViewModel() {
     (enabled: boolean) => {
       const mode: AutoLaneMode = { enabled, updatedAt: new Date().toISOString() };
       writeAutoLaneMode(mode);
+      autoModeRef.current = mode;
       setAutoMode(mode);
       show(
         "info",
@@ -2040,6 +2093,47 @@ export function useKatoSyncViewModel() {
     [show]
   );
 
+  const handleStartAutoQ = useCallback(async () => {
+    if (projectWorkSyncBusy) return;
+    setProjectWorkSyncBusy(true);
+    try {
+      const source = configRef.current;
+      const { plans, selectedTaskIds, report } = buildProjectWorkSync(
+        projectsRegistryRef.current,
+        source?.projectRepos,
+        projectWorkPlansRef.current,
+        new Date().toISOString()
+      );
+      projectWorkPlansRef.current = plans;
+      writeProjectWorkPlans(plans);
+      setProjectWorkPlans(plans);
+      setProjectWorkSyncReport(report);
+      setBoardSelection(selectedTaskIds);
+      setBoardOrder(selectedTaskIds);
+      writeBoardSelection(selectedTaskIds);
+
+      const mode: AutoLaneMode = { enabled: true, updatedAt: new Date().toISOString() };
+      writeAutoLaneMode(mode);
+      autoModeRef.current = mode;
+      setAutoMode(mode);
+
+      if (report.readyCount > 0) {
+        show(
+          "ok",
+          `AutoQ: ${report.readyCount} ausführbare Aufgabe${report.readyCount === 1 ? "" : "n"} synchronisiert. ${report.gatedCount ? `${report.gatedCount} Projekt-Gate${report.gatedCount === 1 ? "" : "s"} bleiben geschützt.` : ""}`
+        );
+      } else {
+        show(
+          "warn",
+          `AutoQ: keine sofort ausführbare Arbeit gefunden. ${report.gatedCount} Gate${report.gatedCount === 1 ? "" : "s"}, ${report.emptyCount} Projekt${report.emptyCount === 1 ? "" : "e"} ohne explizites Next Safe Work.`
+        );
+      }
+      window.setTimeout(() => void autoTickRef.current(), 0);
+    } finally {
+      setProjectWorkSyncBusy(false);
+    }
+  }, [projectWorkSyncBusy, show]);
+
   // Unterbrochene Lane (Claim/„running“ ohne laufenden Besitzer) bewusst freigeben: der Task wird
   // zurückgestellt und startet erst wieder, wenn er im Board bewusst neu eingeplant wird.
   const handleReleaseAutoLane = useCallback(
@@ -2047,7 +2141,12 @@ export function useKatoSyncViewModel() {
       if (autoInFlight.includes(taskId) || agentSyncRef.current?.currentJob?.id === taskId) return;
       setBusy("board");
       try {
-        setActionPlans(await updateActionTaskStatus(config, taskId, "deferred"));
+        const plan = actionPlansRef.current.find((entry) => entry.tasks.some((task) => task.taskId === taskId));
+        if (isProjectWorkPlan(plan)) {
+          commitProjectWorkPlans((plans) => updateProjectWorkTask(plans, taskId, "deferred"));
+        } else {
+          setActionPlans(await updateActionTaskStatus(config, taskId, "deferred"));
+        }
         commitAutoClaims((claims) => releaseAutoLaneClaim(claims, taskId));
         show("info", "Unterbrochene Aufgabe zurückgestellt. Im Projekt-Board kannst du sie bewusst wieder einplanen.");
       } catch (error) {
@@ -2056,19 +2155,19 @@ export function useKatoSyncViewModel() {
         setBusy(null);
       }
     },
-    [autoInFlight, commitAutoClaims, config, show]
+    [autoInFlight, commitAutoClaims, commitProjectWorkPlans, config, show]
   );
 
   // Erledigte Claims (Endstatus erreicht) aus dem Ledger entfernen.
   useEffect(() => {
     if (autoDispatchingRef.current) return;
     const current = readAutoLaneClaims();
-    const pruned = pruneAutoLaneClaims(current, actionPlans);
+    const pruned = pruneAutoLaneClaims(current, effectiveActionPlans);
     if (pruned.length !== current.length) {
       writeAutoLaneClaims(pruned);
       setAutoClaims(pruned);
     }
-  }, [actionPlans]);
+  }, [effectiveActionPlans]);
 
   // Neue Repo-Zuordnung -> fehlende Ordner erneut pruefen.
   useEffect(() => {
@@ -2162,25 +2261,25 @@ export function useKatoSyncViewModel() {
   );
 
   const planProjectIds = useMemo(
-    () => [...new Set(actionPlans.flatMap((plan) => plan.tasks.map((task) => task.projectId)).filter(Boolean))],
-    [actionPlans]
+    () => [...new Set(effectiveActionPlans.flatMap((plan) => plan.tasks.map((task) => task.projectId)).filter(Boolean))],
+    [effectiveActionPlans]
   );
 
   // Defense in depth: Auto-Lanes sehen ausschliesslich aktuell Auto-erlaubte Fokus-Tasks.
   // Persistierte Alt-Auswahl darf nie ueber einen spaeteren Registry-/Fokuswechsel wieder anlaufen.
   const autoSelectedOrder = useMemo(() => {
     const projectByTask = new Map(
-      actionPlans.flatMap((plan) => plan.tasks.map((task) => [task.taskId, task.projectId] as const))
+      effectiveActionPlans.flatMap((plan) => plan.tasks.map((task) => [task.taskId, task.projectId] as const))
     );
     return boardOrder.filter((taskId) => {
       const projectId = projectByTask.get(taskId);
       return Boolean(projectId && evaluateFocus(projects.focusPolicy, projectId).allowed);
     });
-  }, [actionPlans, boardOrder, projects.focusPolicy]);
+  }, [effectiveActionPlans, boardOrder, projects.focusPolicy]);
 
   const agentSync = useMemo(
     () => normalizeAgentSyncState({
-      actionPlans,
+      actionPlans: effectiveActionPlans,
       codexRun,
       codexEvents,
       currentQueueTaskId,
@@ -2209,7 +2308,7 @@ export function useKatoSyncViewModel() {
       now: new Date().toISOString()
     }),
     [
-      actionPlans,
+      effectiveActionPlans,
       autoClaims,
       autoInFlight,
       autoLastDispatch,
@@ -2258,6 +2357,9 @@ export function useKatoSyncViewModel() {
     activeStep,
     agentSync,
     actionPlans,
+    agentActionPlans: effectiveActionPlans,
+    projectWorkSyncReport,
+    projectWorkSyncBusy,
     boardDailyLimit,
     boardGroups,
     boardSelection,
@@ -2328,6 +2430,7 @@ export function useKatoSyncViewModel() {
     handleStartBoardQueue,
     handleStopBoardQueue,
     handleSetAutoMode,
+    handleStartAutoQ,
     handleReleaseAutoLane,
     autoMode,
     handleLogin,
