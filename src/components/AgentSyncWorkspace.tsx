@@ -226,11 +226,30 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
             <ArrowRight size={14} />
           </button>
         </div>
-        <small className="agent-project-linker-status">
-          {vm.projects.registry.projects.length
-            ? t("agent.projects.quickConnected", { count: vm.projects.registry.projects.length })
-            : t("agent.projects.quickEmpty")}
-        </small>
+        <div className="agent-project-linker-status">
+          <small>
+            {vm.projects.registry.projects.length
+              ? t("agent.projects.quickConnected", { count: vm.projects.registry.projects.length })
+              : t("agent.projects.quickEmpty")}
+          </small>
+          {vm.projects.registry.projects.length ? (
+            <div className="agent-project-linker-chips">
+              {vm.projects.portfolio.map((project) => (
+                <button
+                  className={`agent-project-chip ${project.focus.autoMode === "off" ? "manual" : ""}`}
+                  key={project.id}
+                  onClick={() => onNavigate("agentProjects")}
+                  title={project.name}
+                  type="button"
+                >
+                  <span>{project.name}</span>
+                  <b>{project.focus.priority}</b>
+                  {project.focus.autoMode === "off" ? <em>{t("projects.auto.off")}</em> : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </section>
 
       <AutoLanePanel

@@ -8204,3 +8204,64 @@ button.agent-tile:hover {
     grid-column: 1 / -1;
   }
 }
+
+
+/* ===== Agent Sync · connected project visibility ===== */
+.agent-project-linker-status {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.agent-project-linker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-project-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 260px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--agent) 24%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--agent) 7%, var(--surface-2));
+  color: var(--text);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.agent-project-chip:hover {
+  border-color: color-mix(in srgb, var(--agent) 48%, var(--line));
+}
+
+.agent-project-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-project-chip > b {
+  flex: 0 0 auto;
+  color: var(--agent);
+  font-size: 9px;
+}
+
+.agent-project-chip > em {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.agent-project-chip.manual {
+  opacity: .68;
+}

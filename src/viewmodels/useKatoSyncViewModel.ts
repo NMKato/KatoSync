@@ -1589,19 +1589,23 @@ export function useKatoSyncViewModel() {
     return limits.length ? Math.max(...limits) : 3;
   }, [actionPlans]);
 
-  // Selektion/Reihenfolge bereinigen, sobald ein Task das aktive Board verlaesst.
+  // Selektion/Reihenfolge bereinigen, sobald ein Task das aktive Board verlaesst ODER heute
+  // keinem aktuellen Fokusprojekt mehr zugeordnet ist. Manuelle aktuelle Projekte bleiben fuer
+  // bewusste Handarbeit sichtbar; parked/archived/unmapped Altarbeit (z. B. Telefon/Twilio) fliegt raus.
   useEffect(() => {
     // Vor dem ersten Laden sind keine Plans da: die persistierte Auswahl nicht leerraeumen.
     if (!actionPlans.length) return;
     const activeIds = new Set<string>();
     for (const plan of actionPlans) {
       for (const task of plan.tasks) {
-        if (task.status !== "completed" && task.status !== "rejected") activeIds.add(task.taskId);
+        if (task.status === "completed" || task.status === "rejected") continue;
+        const focus = evaluateFocus(projects.focusPolicy, task.projectId);
+        if (focus.allowed || focus.reason === "project_manual") activeIds.add(task.taskId);
       }
     }
     setBoardSelection((prev) => prev.filter((id) => activeIds.has(id)));
     setBoardOrder((prev) => prev.filter((id) => activeIds.has(id)));
-  }, [actionPlans]);
+  }, [actionPlans, projects.focusPolicy]);
 
   useEffect(() => {
     writeBoardSelection(boardOrder);
@@ -2153,6 +2157,18 @@ export function useKatoSyncViewModel() {
     [actionPlans]
   );
 
+  // Defense in depth: Auto-Lanes sehen ausschliesslich aktuell Auto-erlaubte Fokus-Tasks.
+  // Persistierte Alt-Auswahl darf nie ueber einen spaeteren Registry-/Fokuswechsel wieder anlaufen.
+  const autoSelectedOrder = useMemo(() => {
+    const projectByTask = new Map(
+      actionPlans.flatMap((plan) => plan.tasks.map((task) => [task.taskId, task.projectId] as const))
+    );
+    return boardOrder.filter((taskId) => {
+      const projectId = projectByTask.get(taskId);
+      return Boolean(projectId && evaluateFocus(projects.focusPolicy, projectId).allowed);
+    });
+  }, [actionPlans, boardOrder, projects.focusPolicy]);
+
   const agentSync = useMemo(
     () => normalizeAgentSyncState({
       actionPlans,
@@ -2172,7 +2188,7 @@ export function useKatoSyncViewModel() {
       focus: projects.focusPolicy,
       autoLane: {
         enabled: autoMode.enabled,
-        selectedOrder: boardOrder,
+        selectedOrder: autoSelectedOrder,
         repos: buildRepoMap(projects.registry, config?.projectRepos, planProjectIds),
         missingRepos: autoMissingRepos,
         claims: autoClaims,
@@ -2191,7 +2207,7 @@ export function useKatoSyncViewModel() {
       autoMissingRepos,
       autoMode.enabled,
       boardDailyLimit,
-      boardOrder,
+      autoSelectedOrder,
       codexEvents,
       codexRun,
       config?.claudeModel,
