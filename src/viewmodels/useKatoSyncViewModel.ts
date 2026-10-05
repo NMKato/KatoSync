@@ -2150,6 +2150,21 @@ export function useKatoSyncViewModel() {
     }
   }, [projectWorkSyncBusy, projects.rescanAtPath, show]);
 
+  // Auto Mode ist ein dauerhafter Wunsch, kein Einmal-Klick. Nach App-Start oder einer geaenderten
+  // Runner-Zuordnung synchronisiert AutoQ deshalb einmal selbststaendig die aktuelle Projektwahrheit.
+  // Der Signatur-Guard verhindert Schleifen, wenn die READ-ONLY-Scans die Registry aktualisieren.
+  const autoQSyncSignatureRef = useRef("");
+  useEffect(() => {
+    if (!autoMode.enabled || !projects.loaded || projectWorkSyncBusy || !config) return undefined;
+    const entries = Object.entries(config.projectRepos ?? {}).sort(([a], [b]) => a.localeCompare(b));
+    if (!entries.length) return undefined;
+    const signature = JSON.stringify(entries);
+    if (autoQSyncSignatureRef.current === signature) return undefined;
+    autoQSyncSignatureRef.current = signature;
+    const timer = window.setTimeout(() => void handleStartAutoQ(), 250);
+    return () => window.clearTimeout(timer);
+  }, [autoMode.enabled, config, handleStartAutoQ, projectWorkSyncBusy, projects.loaded]);
+
   // Unterbrochene Lane (Claim/„running“ ohne laufenden Besitzer) bewusst freigeben: der Task wird
   // zurückgestellt und startet erst wieder, wenn er im Board bewusst neu eingeplant wird.
   const handleReleaseAutoLane = useCallback(
