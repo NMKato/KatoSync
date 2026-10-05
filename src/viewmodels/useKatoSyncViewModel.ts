@@ -11,6 +11,15 @@ import {
   dirExists,
   disconnectProvider,
   discoverLocalProviders,
+  fetchApiProviderModels,
+  saveApiProviderKey,
+  removeApiProviderKey,
+  getLocalBrainStatus,
+  installLocalBrain,
+  startLocalBrain,
+  stopLocalBrain,
+  removeLocalBrain,
+  listenLocalBrainProgress,
   listenProviderLoginUrls,
   openProviderLoginUrl,
   saveLocalProviderKey,
@@ -86,11 +95,14 @@ import {
   type AutoLaneMode
 } from "../lib/autoLaneStore";
 import { defaultConfig } from "../lib/defaults";
+import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 import { modeForStep } from "../lib/workspaceMode";
 import type { Notice } from "../components/Primitives";
 import type {
   ActionPlan,
   AgentSyncState,
+  ApiProviderCatalog,
+  ApiProviderConfig,
   ActionPlanStatus,
   ActionTask,
   ActionTaskStatus,
@@ -225,6 +237,14 @@ export function useKatoSyncViewModel() {
   const [localKeyInput, setLocalKeyInput] = useState("");
   const [localKeyError, setLocalKeyError] = useState<string | null>(null);
   const [discoveredLocal, setDiscoveredLocal] = useState<DiscoveredLocalProvider[] | null>(null);
+  // API-Pool: UI zeigt maximal drei Slots, das Datenmodell bleibt absichtlich ein Array ohne harte 3er-Grenze.
+  const [apiProviderDrafts, setApiProviderDrafts] = useState<Record<string, ApiProviderConfig>>({});
+  const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({});
+  const [apiKeyErrors, setApiKeyErrors] = useState<Record<string, string | null>>({});
+  const [apiCatalogs, setApiCatalogs] = useState<Record<string, ApiProviderCatalog>>({});
+  const [localBrainStatus, setLocalBrainStatus] = useState<LocalBrainStatus | null>(null);
+  const [localBrainProgress, setLocalBrainProgress] = useState<LocalBrainProgress | null>(null);
+  const [localBrainBusy, setLocalBrainBusy] = useState<"install" | "start" | "stop" | "remove" | null>(null);
   const providerStatusesRef = useRef<ProviderStatus[]>([]);
   // Kanonischer Agent-Sync-Zustand fuer Timer/Handler, die vor dem useMemo definiert sind.
   const agentSyncRef = useRef<AgentSyncState | null>(null);
@@ -541,7 +561,7 @@ export function useKatoSyncViewModel() {
   // Speichert NUR Provider-Felder auf die Platten-Config. Andere ungespeicherte Formular-
   // Aenderungen bleiben unangetastet und weiterhin "dirty".
   const persistProviderFields = useCallback(
-    async (patch: Partial<Pick<AppConfig, "providerPriority" | "disabledProviders" | "localProvider">>) => {
+    async (patch: Partial<Pick<AppConfig, "providerPriority" | "disabledProviders" | "localProvider" | "apiProviders" | "apiProjectPreferences">>) => {
       const onDisk = await loadConfig();
       const saved = await saveConfig({ ...onDisk, ...patch });
       setConfig((current) =>
@@ -550,7 +570,9 @@ export function useKatoSyncViewModel() {
               ...current,
               providerPriority: saved.providerPriority,
               disabledProviders: saved.disabledProviders,
-              localProvider: saved.localProvider
+              localProvider: saved.localProvider,
+              apiProviders: saved.apiProviders,
+              apiProjectPreferences: saved.apiProjectPreferences
             }
           : saved
       );
@@ -562,7 +584,7 @@ export function useKatoSyncViewModel() {
   const handleRefreshProviders = useCallback(
     async (runSmoke = true) => {
       if (!config) return;
-      const cards: ProviderId[] = ["codex", "claude", "local"];
+      const cards: ProviderId[] = ["codex", "claude", "api", "local"];
       cards.forEach((provider) => setProviderAction(provider, "test"));
       try {
         applyProviderSnapshot(await getProviderStatuses(config, runSmoke));
@@ -760,6 +782,304 @@ export function useKatoSyncViewModel() {
       setProviderAction("local", null);
     }
   }, [config, mergeProvider, providerBusy.local, setProviderAction]);
+
+  const getApiProviderDraft = useCallback(
+    (connectionId: string) =>
+      apiProviderDrafts[connectionId] ?? config?.apiProviders.find((connection) => connection.id === connectionId) ?? null,
+    [apiProviderDrafts, config]
+  );
+
+  const setApiKeyInput = useCallback((connectionId: string, value: string) => {
+    setApiKeyInputs((current) => ({ ...current, [connectionId]: value }));
+  }, []);
+
+  const updateApiProviderDraft = useCallback(
+    (connectionId: string, patch: Partial<ApiProviderConfig>) => {
+      const base = apiProviderDrafts[connectionId] ?? config?.apiProviders.find((connection) => connection.id === connectionId);
+      if (!base) return;
+      setApiProviderDrafts((current) => ({ ...current, [connectionId]: { ...base, ...patch } }));
+      setApiCatalogs((current) => {
+        const next = { ...current };
+        delete next[connectionId];
+        return next;
+      });
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: null }));
+    },
+    [apiProviderDrafts, config]
+  );
+
+  const handleAddApiProvider = useCallback(async () => {
+    if (!config || config.apiProviders.length >= 3 || providerBusy.api) return;
+    let slot = 1;
+    const ids = new Set(config.apiProviders.map((connection) => connection.id));
+    while (ids.has(`api-${slot}`)) slot += 1;
+    const connection: ApiProviderConfig = {
+      id: `api-${slot}`,
+      label: "",
+      preset: "openrouter_eu",
+      baseUrl: "",
+      model: "",
+      effort: "auto",
+      mode: "auto",
+      capabilities: [],
+      enabled: true
+    };
+    const saved = await persistProviderFields({
+      disabledProviders: config.disabledProviders.filter((entry) => entry !== "api"),
+      apiProviders: [...config.apiProviders, connection]
+    });
+    setApiProviderDrafts((current) => ({ ...current, [connection.id]: connection }));
+    mergeProvider(await testProvider(saved, "api"), saved.providerPriority);
+  }, [config, mergeProvider, persistProviderFields, providerBusy.api]);
+
+  const handleSaveApiProviderKey = useCallback(async (connectionId: string) => {
+    if (!config || providerBusy.api) return;
+    const draft = getApiProviderDraft(connectionId);
+    const apiKey = apiKeyInputs[connectionId] ?? "";
+    if (!draft || !apiKey.trim()) return;
+    setApiKeyErrors((current) => ({ ...current, [connectionId]: null }));
+    setProviderAction("api", "key");
+    try {
+      await saveApiProviderKey(draft, apiKey);
+      setApiKeyInputs((current) => ({ ...current, [connectionId]: "" }));
+      const catalog = await fetchApiProviderModels(draft);
+      setApiCatalogs((current) => ({ ...current, [connectionId]: catalog }));
+      const nextDraft = {
+        ...draft,
+        model: draft.model && catalog.models.includes(draft.model) ? draft.model : (catalog.models[0] ?? "")
+      };
+      const apiProviders = config.apiProviders.map((connection) => connection.id === connectionId ? nextDraft : connection);
+      const saved = await persistProviderFields({
+        disabledProviders: config.disabledProviders.filter((entry) => entry !== "api"),
+        apiProviders
+      });
+      setApiProviderDrafts((current) => {
+        const next = { ...current };
+        delete next[connectionId];
+        return next;
+      });
+      mergeProvider(await testProvider(saved, "api"), saved.providerPriority);
+    } catch (error) {
+      setApiKeyInputs((current) => ({ ...current, [connectionId]: "" }));
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: getMessage(error) }));
+    } finally {
+      setProviderAction("api", null);
+    }
+  }, [apiKeyInputs, config, getApiProviderDraft, mergeProvider, persistProviderFields, providerBusy.api, setProviderAction]);
+
+  const handleRefreshApiModels = useCallback(async (connectionId: string) => {
+    if (!config || providerBusy.api) return;
+    const draft = getApiProviderDraft(connectionId);
+    if (!draft) return;
+    setProviderAction("api", "catalog");
+    setApiKeyErrors((current) => ({ ...current, [connectionId]: null }));
+    try {
+      const catalog = await fetchApiProviderModels(draft);
+      setApiCatalogs((current) => ({ ...current, [connectionId]: catalog }));
+      if (!draft.model && catalog.models[0]) {
+        setApiProviderDrafts((current) => ({
+          ...current,
+          [connectionId]: { ...draft, model: catalog.models[0] }
+        }));
+      }
+    } catch (error) {
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: getMessage(error) }));
+    } finally {
+      setProviderAction("api", null);
+    }
+  }, [config, getApiProviderDraft, providerBusy.api, setProviderAction]);
+
+  const handleSaveApiProvider = useCallback(async (connectionId: string) => {
+    if (!config || providerBusy.api) return;
+    const draft = getApiProviderDraft(connectionId);
+    if (!draft) return;
+    setProviderAction("api", "connect");
+    setApiKeyErrors((current) => ({ ...current, [connectionId]: null }));
+    try {
+      const apiProviders = config.apiProviders.map((connection) => connection.id === connectionId ? draft : connection);
+      const saved = await persistProviderFields({
+        disabledProviders: config.disabledProviders.filter((entry) => entry !== "api"),
+        apiProviders
+      });
+      setApiProviderDrafts((current) => {
+        const next = { ...current };
+        delete next[connectionId];
+        return next;
+      });
+      mergeProvider(await testProvider(saved, "api"), saved.providerPriority);
+    } catch (error) {
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: getMessage(error) }));
+    } finally {
+      setProviderAction("api", null);
+    }
+  }, [config, getApiProviderDraft, mergeProvider, persistProviderFields, providerBusy.api, setProviderAction]);
+
+  const handleRemoveApiProviderKey = useCallback(async (connectionId: string) => {
+    if (!config || providerBusy.api) return;
+    setProviderAction("api", "key");
+    try {
+      await removeApiProviderKey(connectionId);
+      setApiCatalogs((current) => {
+        const next = { ...current };
+        delete next[connectionId];
+        return next;
+      });
+      mergeProvider(await testProvider(config, "api"), config.providerPriority);
+    } catch (error) {
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: getMessage(error) }));
+    } finally {
+      setProviderAction("api", null);
+    }
+  }, [config, mergeProvider, providerBusy.api, setProviderAction]);
+
+  const handleDeleteApiProvider = useCallback(async (connectionId: string) => {
+    if (!config || providerBusy.api) return;
+    setProviderAction("api", "disconnect");
+    try {
+      await removeApiProviderKey(connectionId);
+    } catch {
+      // Das Entfernen des nicht-geheimen Slots darf nicht an einem bereits fehlenden Key scheitern.
+    }
+    try {
+      const saved = await persistProviderFields({
+        apiProviders: config.apiProviders.filter((connection) => connection.id !== connectionId)
+      });
+      setApiProviderDrafts((current) => {
+        const next = { ...current };
+        delete next[connectionId];
+        return next;
+      });
+      setApiCatalogs((current) => {
+        const next = { ...current };
+        delete next[connectionId];
+        return next;
+      });
+      setApiKeyErrors((current) => {
+        const next = { ...current };
+        delete next[connectionId];
+        return next;
+      });
+      mergeProvider(await testProvider(saved, "api"), saved.providerPriority);
+    } finally {
+      setProviderAction("api", null);
+    }
+  }, [config, mergeProvider, persistProviderFields, providerBusy.api, setProviderAction]);
+
+  const handleSetProjectApiPreference = useCallback(
+    async (projectId: string, connectionId: string | null) => {
+      if (!config || !projectId.trim()) return;
+      const apiProjectPreferences = { ...config.apiProjectPreferences };
+      if (connectionId && config.apiProviders.some((connection) => connection.id === connectionId)) {
+        apiProjectPreferences[projectId] = connectionId;
+      } else {
+        delete apiProjectPreferences[projectId];
+      }
+      await persistProviderFields({ apiProjectPreferences });
+    },
+    [config, persistProviderFields]
+  );
+
+  const registerLocalBrainProvider = useCallback(
+    async (brain: LocalBrainStatus) => {
+      if (!config || !brain.running) return;
+      const localProvider: LocalProviderConfig = {
+        kind: "open_ai_compatible",
+        baseUrl: brain.endpoint,
+        model: brain.modelAlias
+      };
+      const saved = await persistProviderFields({ localProvider });
+      setLocalProviderDraft(null);
+      mergeProvider(await testProvider(saved, "local"), saved.providerPriority);
+    },
+    [config, mergeProvider, persistProviderFields]
+  );
+
+  const handleInstallLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    setLocalBrainBusy("install");
+    setLocalBrainProgress(null);
+    try {
+      const installed = await installLocalBrain();
+      setLocalBrainStatus(installed);
+      setLocalBrainBusy("start");
+      const started = await startLocalBrain();
+      setLocalBrainStatus(started);
+      await registerLocalBrainProvider(started);
+      show("ok", "Kato Local Brain ist installiert, gestartet und als lokale Lane registriert.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, registerLocalBrainProvider, show]);
+
+  const handleStartLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    setLocalBrainBusy("start");
+    try {
+      const started = await startLocalBrain();
+      setLocalBrainStatus(started);
+      await registerLocalBrainProvider(started);
+      show("ok", "Kato Local Brain läuft lokal.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, registerLocalBrainProvider, show]);
+
+  const handleStopLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    setLocalBrainBusy("stop");
+    try {
+      setLocalBrainStatus(await stopLocalBrain());
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, show]);
+
+  const handleRemoveLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    const approved = await askConfirm(
+      "Kato Local Brain inklusive Modell und verwalteter llama.cpp-Runtime von diesem Rechner entfernen?",
+      { title: "Local Brain entfernen", okLabel: "Entfernen", cancelLabel: "Abbrechen" }
+    );
+    if (!approved) return;
+    setLocalBrainBusy("remove");
+    try {
+      setLocalBrainStatus(await removeLocalBrain());
+      setLocalBrainProgress(null);
+      show("ok", "Kato Local Brain wurde von diesem Rechner entfernt.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, show]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void getLocalBrainStatus()
+      .then((brain) => {
+        if (!disposed && brain) setLocalBrainStatus(brain);
+      })
+      .catch(() => {
+        // Nicht unterstuetzte Browser-/Testumgebung: lokale Anbieter bleiben weiterhin manuell nutzbar.
+      });
+    void listenLocalBrainProgress((progress) => {
+      if (!disposed) setLocalBrainProgress(progress);
+    }).then((un) => {
+      if (disposed) un();
+      else unlisten = un;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Einmal pro App-Sitzung beim Oeffnen des Agent-Sync-Workspace real pruefen (Auth + READY).
   useEffect(() => {
@@ -2109,8 +2429,18 @@ export function useKatoSyncViewModel() {
     localKeyInput,
     localKeyError,
     discoveredLocal,
+    apiProviders: config?.apiProviders.map((connection) => apiProviderDrafts[connection.id] ?? connection) ?? [],
+    apiProjectPreferences: config?.apiProjectPreferences ?? {},
+    apiKeyInputs,
+    apiKeyErrors,
+    apiCatalogs,
+    localBrainStatus,
+    localBrainProgress,
+    localBrainBusy,
     setLocalKeyInput,
     updateLocalProviderDraft,
+    setApiKeyInput,
+    updateApiProviderDraft,
     generatedToken,
     codexRun,
     codexEvents,
@@ -2149,6 +2479,17 @@ export function useKatoSyncViewModel() {
     handleDiscoverLocalProviders,
     handleSaveLocalProviderKey,
     handleRemoveLocalProviderKey,
+    handleAddApiProvider,
+    handleSaveApiProviderKey,
+    handleRefreshApiModels,
+    handleSaveApiProvider,
+    handleRemoveApiProviderKey,
+    handleDeleteApiProvider,
+    handleSetProjectApiPreference,
+    handleInstallLocalBrain,
+    handleStartLocalBrain,
+    handleStopLocalBrain,
+    handleRemoveLocalBrain,
     handleRegister,
     logoutFlow,
     requestLogout,

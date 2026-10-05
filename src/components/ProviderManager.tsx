@@ -9,14 +9,19 @@ import {
   Cloud,
   Copy,
   Cpu,
+  Download,
   ExternalLink,
   KeyRound,
   Loader2,
   LogIn,
   PlugZap,
+  Plus,
   RefreshCcw,
   Search,
   ShieldCheck,
+  Play,
+  Square,
+  Trash2,
   Unplug,
   X
 } from "lucide-react";
@@ -26,6 +31,7 @@ import {
   buildSanitizedProviderDiagnostics,
   currentProviderOwner,
   displayTone,
+  API_PROVIDER_PRESETS,
   LOCAL_PRESETS,
   nextRecheckAt,
   normalizeProviderPriority,
@@ -34,17 +40,29 @@ import {
   validateLocalEndpointInput
 } from "../lib/providerPolicy";
 import { safeHttpUrl } from "../lib/url";
+import { apiModelProfile, formatApiPrice } from "../lib/apiModelCatalog";
+import { apiUsageSummary } from "../lib/apiUsageLedger";
 import { useT, type TKey } from "../i18n";
-import type { LocalProviderKind, ProviderId, ProviderReason, ProviderStatus } from "../types";
+import type {
+  ApiCapability,
+  ApiEffort,
+  ApiProviderConfig,
+  ApiProviderPreset,
+  LocalProviderKind,
+  ProviderId,
+  ProviderReason,
+  ProviderStatus
+} from "../types";
 import type { useKatoSyncViewModel } from "../viewmodels/useKatoSyncViewModel";
 
 type ViewModel = ReturnType<typeof useKatoSyncViewModel>;
 
-const cardProviders: ProviderId[] = ["codex", "claude", "local"];
+const cardProviders: ProviderId[] = ["codex", "claude", "api", "local"];
 
 export const providerIcons = {
   codex: Bot,
   claude: Cloud,
+  api: KeyRound,
   local: Cpu,
   local_control: ShieldCheck
 } as const;
@@ -52,6 +70,7 @@ export const providerIcons = {
 export const fallbackLabels: Record<ProviderId, string> = {
   codex: "OpenAI Codex",
   claude: "Anthropic Claude Code",
+  api: "API Provider",
   local: "Local Model",
   local_control: "Local Control / RDC"
 };
@@ -234,15 +253,16 @@ function ProviderCard({
   const lastAutoOpenedUrl = useRef<string | null>(null);
   const Icon = providerIcons[provider];
   const action = vm.providerBusy[provider];
-  const connecting = action === "connect" && provider !== "local";
+  const connecting = action === "connect" && provider !== "local" && provider !== "api";
   const display = providerDisplayState(status, provider, connecting);
   const tone = displayTone(display);
+  const isApi = provider === "api";
   const isLocal = provider === "local";
   const loginUrl = safeHttpUrl(vm.providerLoginUrls[provider]);
   const installGuide = safeHttpUrl(PROVIDER_INSTALL_GUIDES[provider]);
   const recheck = status ? nextRecheckAt(status) : null;
   const reason = status ? reasonKey(status.reason) : null;
-  const needsLogin = !isLocal && (display === "connect" || display === "reauth" || display === "disabled");
+  const needsLogin = !isLocal && !isApi && (display === "connect" || display === "reauth" || display === "disabled");
 
   const openLoginPage = useCallback(async () => {
     if (!loginUrl) return;
@@ -265,7 +285,7 @@ function ProviderCard({
   }, [connecting]);
 
   return (
-    <article className={`provider-card ${tone}`} aria-busy={Boolean(action)}>
+    <article className={`provider-card provider-card-${provider} ${tone}`} aria-busy={Boolean(action)}>
       <header>
         <div className="provider-mark"><Icon size={24} /></div>
         <div className="provider-card-title">
@@ -295,8 +315,18 @@ function ProviderCard({
         </div>
       </header>
 
-      {isLocal ? (
-        <LocalProviderForm status={status} vm={vm} />
+      {isApi ? (
+        <ApiProviderForm vm={vm} />
+      ) : isLocal ? (
+        <>
+          <LocalBrainInstaller vm={vm} />
+          <details className="local-provider-advanced">
+            <summary>{t("providers.localBrain.advanced")}</summary>
+            <div className="local-provider-advanced-body">
+              <LocalProviderForm status={status} vm={vm} />
+            </div>
+          </details>
+        </>
       ) : (
         <p className="provider-auth-note">{t(`providers.${provider}.authNote` as TKey)}</p>
       )}
@@ -395,7 +425,7 @@ function ProviderCard({
             <X size={16} />
             {t("providers.cancelLogin")}
           </button>
-        ) : isLocal ? (
+        ) : isApi ? null : isLocal ? (
           <button
             className="primary"
             disabled={Boolean(action) || Boolean(validateLocalEndpointInput(vm.localProviderDraft?.baseUrl ?? ""))}
@@ -416,7 +446,7 @@ function ProviderCard({
             {display === "reauth" ? t("providers.reconnect") : t("providers.connect")}
           </button>
         ) : null}
-        {!connecting && !(isLocal && !status?.installed) ? (
+        {!connecting && !isApi && !(isLocal && !status?.installed) ? (
           <button
             className={needsLogin || isLocal ? "secondary" : "primary"}
             disabled={Boolean(action) || !status?.installed}
@@ -427,7 +457,7 @@ function ProviderCard({
             {t("providers.test")}
           </button>
         ) : null}
-        {!connecting && status?.enabled && status.installed ? (
+        {!connecting && !isApi && status?.enabled && status.installed ? (
           <button
             className="ghost"
             disabled={Boolean(action)}
@@ -441,6 +471,477 @@ function ProviderCard({
         ) : null}
       </footer>
     </article>
+  );
+}
+
+const API_PRESET_OPTIONS: ApiProviderPreset[] = [
+  "openrouter_eu",
+  "openrouter_global",
+  "openai",
+  "anthropic",
+  "deepseek",
+  "mistral",
+  "xai",
+  "zai",
+  "custom_openai"
+];
+
+const API_CAPABILITY_OPTIONS: ApiCapability[] = ["coding", "reasoning", "security", "vision", "image", "video"];
+
+function apiProviderLabel(preset: ApiProviderPreset, t: ReturnType<typeof useT>["t"]) {
+  return preset === "custom_openai"
+    ? t("providers.api.custom")
+    : API_PROVIDER_PRESETS[preset as Exclude<ApiProviderPreset, "custom_openai">].label;
+}
+
+function ApiProviderForm({ vm }: { vm: ViewModel }) {
+  const { t } = useT();
+  const action = vm.providerBusy.api;
+  const connections = vm.apiProviders;
+
+  return (
+    <div className="api-provider-form">
+      <div className="api-provider-pool-head">
+        <div>
+          <strong>{t("providers.api.poolTitle")}</strong>
+          <span>{t("providers.api.poolHint")}</span>
+        </div>
+        <span className="api-provider-counter">{connections.length}/3</span>
+      </div>
+
+      {connections.length ? (
+        <div className="api-provider-pool">
+          {connections.map((connection: ApiProviderConfig, index: number) => (
+            <ApiConnectionSlot
+              connection={connection}
+              index={index}
+              key={connection.id}
+              vm={vm}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="api-provider-empty">
+          <KeyRound size={20} />
+          <div>
+            <strong>{t("providers.api.emptyTitle")}</strong>
+            <span>{t("providers.api.emptyText")}</span>
+          </div>
+        </div>
+      )}
+
+      {connections.length < 3 ? (
+        <button
+          className="secondary api-provider-add"
+          disabled={Boolean(action)}
+          onClick={() => void vm.handleAddApiProvider()}
+          type="button"
+        >
+          <Plus size={16} />
+          {t("providers.api.add")}
+        </button>
+      ) : (
+        <span className="provider-hint">{t("providers.api.limit")}</span>
+      )}
+
+      <div className="api-provider-meta api-provider-pool-meta">
+        <span><ShieldCheck size={13} />{t("providers.api.secretSafe")}</span>
+        <span>{t("providers.api.poolSafe")}</span>
+      </div>
+    </div>
+  );
+}
+
+function compactTokenCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}K`;
+  return String(value);
+}
+
+function compactUsd(value: number): string {
+  if (value > 0 && value < 0.001) return "<$0.001";
+  return `$${value.toFixed(value < 0.1 ? 3 : 2)}`;
+}
+
+function ApiConnectionSlot({
+  connection,
+  index,
+  vm
+}: {
+  connection: ApiProviderConfig;
+  index: number;
+  vm: ViewModel;
+}) {
+  const { t } = useT();
+  const action = vm.providerBusy.api;
+  const catalog = vm.apiCatalogs[connection.id];
+  const models = catalog?.models ?? [];
+  const apiKey = vm.apiKeyInputs[connection.id] ?? "";
+  const error = vm.apiKeyErrors[connection.id];
+  const profile = connection.model ? apiModelProfile(connection.preset, connection.model) : null;
+  const usage = apiUsageSummary(connection.id);
+  const supportedEfforts = profile?.supportedEfforts ?? (["auto"] as ApiEffort[]);
+  const effort = supportedEfforts.includes(connection.effort) ? connection.effort : "auto";
+  const displayName = connection.label.trim() || apiProviderLabel(connection.preset, t);
+
+  const toggleCapability = (capability: ApiCapability) => {
+    const next = connection.capabilities.includes(capability)
+      ? connection.capabilities.filter((item: ApiCapability) => item !== capability)
+      : [...connection.capabilities, capability];
+    vm.updateApiProviderDraft(connection.id, { capabilities: next });
+  };
+
+  return (
+    <section className="api-connection-slot">
+      <header className="api-connection-slot-head">
+        <div>
+          <span>{t("providers.api.slot", { number: index + 1 })}</span>
+          <strong>{displayName}</strong>
+        </div>
+        <span className={connection.model ? "api-slot-ready" : "api-slot-open"}>
+          {connection.model ? t("providers.api.configured") : t("providers.api.notConfigured")}
+        </span>
+      </header>
+
+      <div className="api-provider-grid">
+        <label>
+          {t("providers.api.provider")}
+          <select
+            disabled={Boolean(action)}
+            value={connection.preset}
+            onChange={(event) =>
+              vm.updateApiProviderDraft(connection.id, {
+                preset: event.target.value as ApiProviderPreset,
+                baseUrl: event.target.value === "custom_openai" ? connection.baseUrl : "",
+                model: ""
+              })
+            }
+          >
+            {API_PRESET_OPTIONS.map((preset) => (
+              <option key={preset} value={preset}>{apiProviderLabel(preset, t)}</option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          {t("providers.api.effort")}
+          <select
+            disabled={Boolean(action)}
+            value={effort}
+            onChange={(event) =>
+              vm.updateApiProviderDraft(connection.id, { effort: event.target.value as ApiEffort })
+            }
+          >
+            {supportedEfforts.map((item: ApiEffort) => (
+              <option key={item} value={item}>{t(`providers.api.effort.${item}` as TKey)}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {connection.preset === "custom_openai" ? (
+        <label>
+          {t("providers.api.endpoint")}
+          <input
+            autoCapitalize="none"
+            autoComplete="off"
+            disabled={Boolean(action)}
+            onChange={(event) => vm.updateApiProviderDraft(connection.id, { baseUrl: event.target.value })}
+            placeholder="https://api.example.com/v1"
+            spellCheck={false}
+            value={connection.baseUrl}
+          />
+        </label>
+      ) : null}
+
+      <div className="api-provider-key-row">
+        <label>
+          {t("providers.api.key")}
+          <input
+            autoComplete="off"
+            disabled={Boolean(action)}
+            onChange={(event) => vm.setApiKeyInput(connection.id, event.target.value)}
+            placeholder={t("providers.api.keyPlaceholder")}
+            spellCheck={false}
+            type="password"
+            value={apiKey}
+          />
+        </label>
+        <button
+          className="secondary"
+          disabled={Boolean(action) || !apiKey.trim()}
+          onClick={() => void vm.handleSaveApiProviderKey(connection.id)}
+          type="button"
+        >
+          {action === "key" ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
+          {t("providers.api.saveKey")}
+        </button>
+      </div>
+
+      <div className="api-provider-model-row">
+        <label>
+          {t("providers.api.model")}
+          {models.length ? (
+            <select
+              disabled={Boolean(action)}
+              value={connection.model}
+              onChange={(event) => vm.updateApiProviderDraft(connection.id, { model: event.target.value })}
+            >
+              {connection.model && !models.includes(connection.model) ? (
+                <option value={connection.model}>{connection.model}</option>
+              ) : null}
+              {models.map((model: string) => {
+                const modelProfile = apiModelProfile(connection.preset, model);
+                return (
+                  <option key={model} value={model}>
+                    {model} · {formatApiPrice(modelProfile)}
+                  </option>
+                );
+              })}
+            </select>
+          ) : (
+            <input
+              autoCapitalize="none"
+              autoComplete="off"
+              disabled={Boolean(action)}
+              onChange={(event) => vm.updateApiProviderDraft(connection.id, { model: event.target.value })}
+              placeholder={t("providers.api.modelPlaceholder")}
+              spellCheck={false}
+              value={connection.model}
+            />
+          )}
+        </label>
+        <button
+          className="secondary"
+          disabled={Boolean(action)}
+          onClick={() => void vm.handleRefreshApiModels(connection.id)}
+          type="button"
+        >
+          {action === "catalog" ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
+          {t("providers.api.loadModels")}
+        </button>
+      </div>
+
+      {profile ? (
+        <div className="api-model-summary">
+          <span>{formatApiPrice(profile)}</span>
+          <span>{t(`providers.api.speed.${profile.speed}` as TKey)}</span>
+          {profile.contextWindow ? (
+            <span>{t("providers.api.context", { count: Math.round(profile.contextWindow / 1000) })}</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="api-usage-strip">
+        <span>
+          <small>{t("providers.api.usage.month")}</small>
+          <strong>
+            {usage.monthCostIsEstimate ? "≈ " : ""}
+            {compactUsd(usage.monthCostUsd)}
+          </strong>
+        </span>
+        <span>
+          <small>{t("providers.api.usage.input")}</small>
+          <strong>{compactTokenCount(usage.inputTokens)}</strong>
+        </span>
+        <span>
+          <small>{t("providers.api.usage.output")}</small>
+          <strong>{compactTokenCount(usage.outputTokens)}</strong>
+        </span>
+        <span>
+          <small>{t("providers.api.usage.requests")}</small>
+          <strong>{usage.requests}</strong>
+        </span>
+        <span className="api-usage-source">
+          {usage.requests
+            ? t(usage.monthCostIsEstimate ? "providers.api.usage.estimated" : "providers.api.usage.reported")
+            : t("providers.api.usage.empty")}
+        </span>
+      </div>
+
+      <details className="api-provider-advanced">
+        <summary>{t("providers.api.advanced")}</summary>
+        <div className="api-provider-advanced-body">
+          <label>
+            {t("providers.api.name")}
+            <input
+              disabled={Boolean(action)}
+              onChange={(event) => vm.updateApiProviderDraft(connection.id, { label: event.target.value })}
+              placeholder={t("providers.api.namePlaceholder")}
+              value={connection.label}
+            />
+          </label>
+          <label>
+            {t("providers.api.mode")}
+            <select
+              disabled={Boolean(action)}
+              onChange={(event) =>
+                vm.updateApiProviderDraft(connection.id, {
+                  mode: event.target.value as ApiProviderConfig["mode"]
+                })
+              }
+              value={connection.mode}
+            >
+              <option value="auto">{t("providers.api.mode.auto")}</option>
+              <option value="specialist">{t("providers.api.mode.specialist")}</option>
+              <option value="fallback">{t("providers.api.mode.fallback")}</option>
+            </select>
+          </label>
+
+          <div className="api-capability-field">
+            <span>{t("providers.api.preferredFor")}</span>
+            <div className="api-capability-chips">
+              {API_CAPABILITY_OPTIONS.map((capability) => (
+                <button
+                  aria-pressed={connection.capabilities.includes(capability)}
+                  className={connection.capabilities.includes(capability) ? "active" : ""}
+                  disabled={Boolean(action)}
+                  key={capability}
+                  onClick={() => toggleCapability(capability)}
+                  type="button"
+                >
+                  {t(`providers.api.capability.${capability}` as TKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="api-provider-enabled">
+            <input
+              checked={connection.enabled}
+              disabled={Boolean(action)}
+              onChange={(event) => vm.updateApiProviderDraft(connection.id, { enabled: event.target.checked })}
+              type="checkbox"
+            />
+            <span>{t("providers.api.enabled")}</span>
+          </label>
+        </div>
+      </details>
+
+      <div className="api-provider-meta">
+        {connection.preset === "openrouter_eu" ? <span>{t("providers.api.euRoute")}</span> : null}
+        {catalog ? <span>{t("providers.api.modelCount", { count: catalog.models.length })}</span> : null}
+      </div>
+
+      {error ? <span className="provider-field-error">{error}</span> : null}
+
+      <div className="api-connection-actions">
+        <button
+          className="primary"
+          disabled={Boolean(action) || !connection.model.trim()}
+          onClick={() => void vm.handleSaveApiProvider(connection.id)}
+          type="button"
+        >
+          {action === "connect" ? <Loader2 className="spin" size={16} /> : <PlugZap size={16} />}
+          {t("providers.api.saveAndTest")}
+        </button>
+        <button
+          className="ghost"
+          disabled={Boolean(action)}
+          onClick={() => void vm.handleRemoveApiProviderKey(connection.id)}
+          type="button"
+        >
+          <KeyRound size={14} />
+          {t("providers.api.removeKey")}
+        </button>
+        <button
+          className="ghost danger"
+          disabled={Boolean(action)}
+          onClick={() => void vm.handleDeleteApiProvider(connection.id)}
+          type="button"
+        >
+          <Trash2 size={14} />
+          {t("providers.api.delete")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function LocalBrainInstaller({ vm }: { vm: ViewModel }) {
+  const { t } = useT();
+  const brain = vm.localBrainStatus;
+  const progress = vm.localBrainProgress;
+  const busy = vm.localBrainBusy;
+  const installed = Boolean(brain?.runtimeInstalled && brain?.modelInstalled);
+  const running = Boolean(brain?.running);
+  const percent = progress?.percent == null ? null : Math.max(0, Math.min(100, progress.percent));
+  const sizeGb = brain ? (brain.modelSizeBytes / 1_000_000_000).toFixed(2) : "4.59";
+  const ramText = brain?.ramGb ? `${brain.ramGb} GB` : t("providers.localBrain.unknown");
+  const fitKey = brain?.ramFit ?? "unknown";
+
+  return (
+    <section className={`local-brain-card ${running ? "running" : installed ? "installed" : ""}`}>
+      <div className="local-brain-head">
+        <div className="local-brain-icon"><Cpu size={19} /></div>
+        <div className="local-brain-copy">
+          <span>{t("providers.localBrain.recommended")}</span>
+          <strong>{brain?.modelName ?? "Kato Local Brain · Gemma 4 E4B"}</strong>
+          <small>{t("providers.localBrain.subtitle")}</small>
+        </div>
+        <span className={`local-brain-state ${running ? "live" : installed ? "ok" : ""}`}>
+          {running
+            ? t("providers.localBrain.running")
+            : installed
+              ? t("providers.localBrain.installed")
+              : t("providers.localBrain.notInstalled")}
+        </span>
+      </div>
+
+      <div className="local-brain-facts">
+        <span><strong>{sizeGb} GB</strong>{t("providers.localBrain.download")}</span>
+        <span><strong>{brain?.quantization ?? "Q4_0"}</strong>{t("providers.localBrain.quantization")}</span>
+        <span><strong>{ramText}</strong>{t(`providers.localBrain.fit.${fitKey}` as TKey)}</span>
+      </div>
+
+      {progress && busy === "install" ? (
+        <div className="local-brain-progress" role="status" aria-live="polite">
+          <div>
+            <span>{progress.label}</span>
+            <strong>{percent == null ? "…" : `${percent.toFixed(0)}%`}</strong>
+          </div>
+          <div className="local-brain-progress-track" aria-hidden="true">
+            <span style={{ width: `${percent ?? 4}%` }} />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="local-brain-actions">
+        {!installed ? (
+          <button
+            className="primary"
+            disabled={Boolean(busy) || brain?.supported === false}
+            onClick={() => void vm.handleInstallLocalBrain()}
+            type="button"
+          >
+            {busy === "install" ? <Loader2 className="spin" size={15} /> : <Download size={15} />}
+            {t("providers.localBrain.install")}
+          </button>
+        ) : running ? (
+          <button className="secondary" disabled={Boolean(busy)} onClick={() => void vm.handleStopLocalBrain()} type="button">
+            {busy === "stop" ? <Loader2 className="spin" size={15} /> : <Square size={14} />}
+            {t("providers.localBrain.stop")}
+          </button>
+        ) : (
+          <button className="primary" disabled={Boolean(busy)} onClick={() => void vm.handleStartLocalBrain()} type="button">
+            {busy === "start" ? <Loader2 className="spin" size={15} /> : <Play size={15} />}
+            {t("providers.localBrain.start")}
+          </button>
+        )}
+        {installed ? (
+          <button className="ghost" disabled={Boolean(busy)} onClick={() => void vm.handleRemoveLocalBrain()} type="button">
+            {busy === "remove" ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+            {t("providers.localBrain.remove")}
+          </button>
+        ) : null}
+      </div>
+
+      {brain?.supported === false ? (
+        <span className="provider-field-error">{t("providers.localBrain.unsupported")}</span>
+      ) : (
+        <span className="provider-safe-note">{t("providers.localBrain.safe")}</span>
+      )}
+    </section>
   );
 }
 
