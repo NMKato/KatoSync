@@ -269,7 +269,7 @@ function ProviderCard({
   }, [connecting]);
 
   return (
-    <article className={`provider-card ${tone}`} aria-busy={Boolean(action)}>
+    <article className={`provider-card provider-card-${provider} ${tone}`} aria-busy={Boolean(action)}>
       <header>
         <div className="provider-mark"><Icon size={24} /></div>
         <div className="provider-card-title">
@@ -302,7 +302,12 @@ function ProviderCard({
       {isLocal ? (
         <>
           <LocalBrainInstaller vm={vm} />
-          <LocalProviderForm status={status} vm={vm} />
+          <details className="local-provider-advanced">
+            <summary>{t("providers.localBrain.advanced")}</summary>
+            <div className="local-provider-advanced-body">
+              <LocalProviderForm status={status} vm={vm} />
+            </div>
+          </details>
         </>
       ) : (
         <p className="provider-auth-note">{t(`providers.${provider}.authNote` as TKey)}</p>

@@ -7241,3 +7241,259 @@ button.agent-tile:hover {
     transition: none;
   }
 }
+
+
+/* Provider UX compact pass — 2026-10-05 */
+.page-agentProviders .provider-manager {
+  width: 100%;
+  min-width: 0;
+}
+
+.provider-manager {
+  gap: 12px;
+}
+
+.provider-hero {
+  gap: 16px;
+  padding: 18px 20px;
+}
+
+.provider-hero h2 {
+  margin: 2px 0 5px;
+  font-size: clamp(22px, 2.4vw, 30px);
+}
+
+.provider-hero p {
+  max-width: 900px;
+  line-height: 1.42;
+}
+
+.provider-route-wrap {
+  gap: 6px;
+}
+
+.provider-route {
+  gap: 6px;
+  padding: 6px;
+}
+
+.provider-route-item {
+  gap: 7px;
+  padding: 8px 9px;
+}
+
+.provider-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.provider-card {
+  min-height: 0;
+  padding: 15px 16px;
+}
+
+.provider-card-local {
+  grid-column: 1 / -1;
+}
+
+.provider-card > header {
+  gap: 10px;
+  margin-bottom: 11px;
+}
+
+.provider-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+}
+
+.provider-card h3 {
+  margin-bottom: 3px;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.provider-auth-note {
+  min-height: 0;
+  margin-bottom: 9px;
+  padding: 10px 11px;
+  line-height: 1.38;
+}
+
+.provider-message {
+  min-height: 0;
+  margin-bottom: 6px;
+  line-height: 1.38;
+}
+
+.provider-meta {
+  margin: 8px 0 9px;
+  gap: 5px;
+}
+
+.provider-meta div {
+  padding-bottom: 5px;
+}
+
+.provider-card footer {
+  margin-top: 4px;
+}
+
+.provider-info-grid {
+  gap: 10px;
+}
+
+.provider-policy-note {
+  gap: 10px;
+  padding: 11px 13px;
+}
+
+.provider-policy-note span {
+  font-size: 11px;
+  line-height: 1.38;
+}
+
+.provider-card-local .local-brain-card {
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.85fr);
+  grid-template-areas:
+    "head facts"
+    "progress progress"
+    "actions note";
+  gap: 10px 14px;
+  padding: 13px 14px;
+}
+
+.provider-card-local .local-brain-head {
+  grid-area: head;
+  align-self: center;
+}
+
+.provider-card-local .local-brain-facts {
+  grid-area: facts;
+  align-self: center;
+}
+
+.provider-card-local .local-brain-progress {
+  grid-area: progress;
+}
+
+.provider-card-local .local-brain-actions {
+  grid-area: actions;
+  align-items: center;
+}
+
+.provider-card-local .local-brain-card > .provider-safe-note,
+.provider-card-local .local-brain-card > .provider-field-error {
+  grid-area: note;
+  align-self: center;
+  margin: 0;
+}
+
+.local-brain-copy > small {
+  max-width: 760px;
+  line-height: 1.3;
+}
+
+.local-brain-facts > span {
+  padding: 7px 8px;
+}
+
+.local-brain-actions button {
+  flex: 0 1 auto;
+  min-width: 150px;
+}
+
+.local-provider-advanced {
+  margin-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.local-provider-advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 9px 2px 3px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 720;
+}
+
+.local-provider-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.local-provider-advanced > summary::before {
+  content: "›";
+  display: inline-block;
+  width: 14px;
+  color: var(--brand);
+  font-size: 16px;
+  line-height: 0;
+  transform: translateY(1px);
+  transition: transform 140ms ease;
+}
+
+.local-provider-advanced[open] > summary::before {
+  transform: translateY(1px) rotate(90deg);
+}
+
+.local-provider-advanced-body {
+  padding-top: 9px;
+}
+
+.provider-card-local .local-provider-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 12px;
+  margin-bottom: 8px;
+}
+
+.provider-card-local .local-provider-discover,
+.provider-card-local .local-provider-key,
+.provider-card-local .provider-safe-note,
+.provider-card-local .provider-field-error {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1040px) {
+  .provider-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-card-local {
+    grid-column: auto;
+  }
+
+  .provider-card-local .local-brain-card {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "head"
+      "facts"
+      "progress"
+      "actions"
+      "note";
+  }
+
+  .provider-card-local .local-provider-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .provider-hero {
+    padding: 15px 16px;
+  }
+
+  .provider-card {
+    padding: 14px;
+  }
+
+  .provider-card-local .local-brain-card {
+    padding: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .local-provider-advanced > summary::before {
+    transition: none;
+  }
+}
