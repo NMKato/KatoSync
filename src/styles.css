@@ -7363,5 +7363,506 @@ button.agent-tile:hover {
 
   .projects-add-choices {
     flex-direction: column;
+/* Managed Kato Local Brain — one-click lane inside Local Provider */
+.local-brain-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--agent) 28%, var(--line));
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--agent) 12%, transparent), transparent 42%),
+    color-mix(in srgb, var(--surface-2) 82%, transparent);
+}
+
+.local-brain-card.installed {
+  border-color: color-mix(in srgb, var(--ok) 34%, var(--line));
+}
+
+.local-brain-card.running {
+  border-color: color-mix(in srgb, var(--agent-live) 50%, var(--line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--agent-live) 12%, transparent) inset;
+}
+
+.local-brain-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+
+.local-brain-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: var(--agent);
+  background: color-mix(in srgb, var(--agent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--agent) 24%, transparent);
+}
+
+.local-brain-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.local-brain-copy > span {
+  color: var(--agent);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.09em;
+}
+
+.local-brain-copy > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+.local-brain-copy > small {
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.local-brain-state {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.local-brain-state.ok {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 38%, var(--line));
+}
+
+.local-brain-state.live {
+  color: var(--agent-live);
+  border-color: color-mix(in srgb, var(--agent-live) 48%, var(--line));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--agent-live) 14%, transparent);
+}
+
+.local-brain-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.local-brain-facts > span {
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.local-brain-facts strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.local-brain-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.local-brain-progress > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.local-brain-progress-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--line);
+}
+
+.local-brain-progress-track > span {
+  display: block;
+  min-width: 4px;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--agent), var(--agent-live));
+  transition: width 180ms ease;
+}
+
+.local-brain-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.local-brain-actions button {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .local-brain-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .local-brain-state {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .local-brain-facts {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .local-brain-progress-track > span {
+    transition: none;
+  }
+}
+
+
+/* Provider UX compact pass — 2026-10-05 */
+.page-agentProviders .provider-manager {
+  width: 100%;
+  min-width: 0;
+}
+
+.provider-manager {
+  gap: 12px;
+}
+
+.provider-hero {
+  gap: 16px;
+  padding: 18px 20px;
+}
+
+.provider-hero h2 {
+  margin: 2px 0 5px;
+  font-size: clamp(22px, 2.4vw, 30px);
+}
+
+.provider-hero p {
+  max-width: 900px;
+  line-height: 1.42;
+}
+
+.provider-route-wrap {
+  gap: 6px;
+}
+
+.provider-route {
+  gap: 6px;
+  padding: 6px;
+}
+
+.provider-route-item {
+  gap: 7px;
+  padding: 8px 9px;
+}
+
+.provider-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.provider-card {
+  min-height: 0;
+  padding: 15px 16px;
+}
+
+.provider-card-local {
+  grid-column: 1 / -1;
+}
+
+.provider-card > header {
+  gap: 10px;
+  margin-bottom: 11px;
+}
+
+.provider-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+}
+
+.provider-card h3 {
+  margin-bottom: 3px;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.provider-auth-note {
+  min-height: 0;
+  margin-bottom: 9px;
+  padding: 10px 11px;
+  line-height: 1.38;
+}
+
+.provider-message {
+  min-height: 0;
+  margin-bottom: 6px;
+  line-height: 1.38;
+}
+
+.provider-meta {
+  margin: 8px 0 9px;
+  gap: 5px;
+}
+
+.provider-meta div {
+  padding-bottom: 5px;
+}
+
+.provider-card footer {
+  margin-top: 4px;
+}
+
+.provider-info-grid {
+  gap: 10px;
+}
+
+.provider-policy-note {
+  gap: 10px;
+  padding: 11px 13px;
+}
+
+.provider-policy-note span {
+  font-size: 11px;
+  line-height: 1.38;
+}
+
+.provider-card-local .local-brain-card {
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.85fr);
+  grid-template-areas:
+    "head facts"
+    "progress progress"
+    "actions note";
+  gap: 10px 14px;
+  padding: 13px 14px;
+}
+
+.provider-card-local .local-brain-head {
+  grid-area: head;
+  align-self: center;
+}
+
+.provider-card-local .local-brain-facts {
+  grid-area: facts;
+  align-self: center;
+}
+
+.provider-card-local .local-brain-progress {
+  grid-area: progress;
+}
+
+.provider-card-local .local-brain-actions {
+  grid-area: actions;
+  align-items: center;
+}
+
+.provider-card-local .local-brain-card > .provider-safe-note,
+.provider-card-local .local-brain-card > .provider-field-error {
+  grid-area: note;
+  align-self: center;
+  margin: 0;
+}
+
+.local-brain-copy > small {
+  max-width: 760px;
+  line-height: 1.3;
+}
+
+.local-brain-facts > span {
+  padding: 7px 8px;
+}
+
+.local-brain-actions button {
+  flex: 0 1 auto;
+  min-width: 150px;
+}
+
+.local-provider-advanced {
+  margin-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.local-provider-advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 9px 2px 3px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 720;
+}
+
+.local-provider-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.local-provider-advanced > summary::before {
+  content: "›";
+  display: inline-block;
+  width: 14px;
+  color: var(--brand);
+  font-size: 16px;
+  line-height: 0;
+  transform: translateY(1px);
+  transition: transform 140ms ease;
+}
+
+.local-provider-advanced[open] > summary::before {
+  transform: translateY(1px) rotate(90deg);
+}
+
+.local-provider-advanced-body {
+  padding-top: 9px;
+}
+
+.provider-card-local .local-provider-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 12px;
+  margin-bottom: 8px;
+}
+
+.provider-card-local .local-provider-discover,
+.provider-card-local .local-provider-key,
+.provider-card-local .provider-safe-note,
+.provider-card-local .provider-field-error {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1040px) {
+  .provider-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-card-local {
+    grid-column: auto;
+  }
+
+  .provider-card-local .local-brain-card {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "head"
+      "facts"
+      "progress"
+      "actions"
+      "note";
+  }
+
+  .provider-card-local .local-provider-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .provider-hero {
+    padding: 15px 16px;
+  }
+
+  .provider-card {
+    padding: 14px;
+  }
+
+  .provider-card-local .local-brain-card {
+    padding: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .local-provider-advanced > summary::before {
+    transition: none;
+  }
+}
+
+
+/* ===== Agent Sync · Intelligent Project Search entry ===== */
+.agent-project-linker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 18px;
+  align-items: center;
+  padding: 14px 16px;
+  border-color: color-mix(in srgb, var(--agent) 28%, var(--line));
+  background:
+    radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--agent) 12%, transparent), transparent 42%),
+    color-mix(in srgb, var(--surface-2) 88%, transparent);
+}
+
+.agent-project-linker-copy,
+.agent-project-linker-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agent-project-linker-copy {
+  min-width: 0;
+}
+
+.agent-project-linker-copy > div {
+  min-width: 0;
+}
+
+.agent-project-linker-copy strong {
+  display: block;
+  font-size: 14px;
+}
+
+.agent-project-linker-copy p {
+  margin: 3px 0 0;
+  max-width: 780px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-project-linker-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--agent) 30%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--agent) 10%, transparent);
+  color: var(--agent);
+}
+
+.agent-project-linker-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.agent-project-linker-status {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+  .agent-project-linker {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-project-linker-actions {
+    justify-content: flex-start;
   }
 }

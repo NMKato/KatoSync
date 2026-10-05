@@ -32,6 +32,7 @@ import type {
   SyncReport
 } from "../types";
 import { normalizeProviderPriority, toProviderSettings } from "../lib/providerPolicy";
+import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 
 const mockConfigKey = "katosync.config";
 // v2: Projekt-Board fuegt Tasks ein Pflichtfeld 'status' hinzu -> Key-Bump verwirft Alt-Caches ohne status.
@@ -404,6 +405,36 @@ export async function saveLocalProviderKey(baseUrl: string, apiKey: string): Pro
 export async function discoverLocalProviders(): Promise<DiscoveredLocalProvider[]> {
   if (isTauri()) return invoke<DiscoveredLocalProvider[]>("discover_local_providers");
   return [];
+}
+
+export async function getLocalBrainStatus(): Promise<LocalBrainStatus | null> {
+  if (!isTauri()) return null;
+  return invoke<LocalBrainStatus>("local_brain_status");
+}
+
+export async function installLocalBrain(): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("install_local_brain");
+}
+
+export async function startLocalBrain(): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("start_local_brain");
+}
+
+export async function stopLocalBrain(): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("stop_local_brain");
+}
+
+export async function removeLocalBrain(): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("remove_local_brain");
+}
+
+export async function listenLocalBrainProgress(cb: (progress: LocalBrainProgress) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<LocalBrainProgress>("local-brain-progress", (event) => cb(event.payload));
 }
 
 // Fallback, falls der Browser beim offiziellen Login nicht automatisch aufgeht.

@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   Clock3,
   ExternalLink,
+  FolderPlus,
+  FolderSearch,
   GitBranch,
   History,
   ListChecks,
@@ -175,6 +177,51 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   return (
     <section className="agent-dashboard" id="section-agent-dashboard">
       <ControlTower state={state} />
+
+      <section className="glass agent-project-linker" aria-label={t("agent.projects.quickTitle")}>
+        <div className="agent-project-linker-copy">
+          <span className="agent-project-linker-icon" aria-hidden="true">
+            <FolderSearch size={19} />
+          </span>
+          <div>
+            <strong>{t("agent.projects.quickTitle")}</strong>
+            <p>{t("agent.projects.quickText")}</p>
+          </div>
+        </div>
+        <div className="agent-project-linker-actions">
+          <button
+            className="primary"
+            disabled={vm.projects.busy !== null}
+            onClick={() => {
+              void vm.projects.startDiscovery("project").then(() => onNavigate("agentProjects"));
+            }}
+            type="button"
+          >
+            <FolderPlus size={15} />
+            {t("projects.add")}
+          </button>
+          <button
+            className="secondary"
+            disabled={vm.projects.busy !== null}
+            onClick={() => {
+              void vm.projects.startDiscovery("workspace").then(() => onNavigate("agentProjects"));
+            }}
+            type="button"
+          >
+            <FolderSearch size={15} />
+            {t("agent.projects.quickWorkspace")}
+          </button>
+          <button className="ghost compact-button" onClick={() => onNavigate("agentProjects")} type="button">
+            {t("agent.projects.quickOpen")}
+            <ArrowRight size={14} />
+          </button>
+        </div>
+        <small className="agent-project-linker-status">
+          {vm.projects.registry.projects.length
+            ? t("agent.projects.quickConnected", { count: vm.projects.registry.projects.length })
+            : t("agent.projects.quickEmpty")}
+        </small>
+      </section>
 
       <AutoLanePanel
         busy={Boolean(vm.busy)}

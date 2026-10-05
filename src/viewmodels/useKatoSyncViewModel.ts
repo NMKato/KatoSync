@@ -15,6 +15,12 @@ import {
   dirExists,
   disconnectProvider,
   discoverLocalProviders,
+  getLocalBrainStatus,
+  installLocalBrain,
+  startLocalBrain,
+  stopLocalBrain,
+  removeLocalBrain,
+  listenLocalBrainProgress,
   listenProviderLoginUrls,
   openProviderLoginUrl,
   saveLocalProviderKey,
@@ -90,6 +96,7 @@ import {
   type AutoLaneMode
 } from "../lib/autoLaneStore";
 import { defaultConfig } from "../lib/defaults";
+import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 import { modeForStep } from "../lib/workspaceMode";
 import type { Notice } from "../components/Primitives";
 import type {
@@ -230,6 +237,9 @@ export function useKatoSyncViewModel() {
   const [localKeyInput, setLocalKeyInput] = useState("");
   const [localKeyError, setLocalKeyError] = useState<string | null>(null);
   const [discoveredLocal, setDiscoveredLocal] = useState<DiscoveredLocalProvider[] | null>(null);
+  const [localBrainStatus, setLocalBrainStatus] = useState<LocalBrainStatus | null>(null);
+  const [localBrainProgress, setLocalBrainProgress] = useState<LocalBrainProgress | null>(null);
+  const [localBrainBusy, setLocalBrainBusy] = useState<"install" | "start" | "stop" | "remove" | null>(null);
   const providerStatusesRef = useRef<ProviderStatus[]>([]);
   // Kanonischer Agent-Sync-Zustand fuer Timer/Handler, die vor dem useMemo definiert sind.
   const agentSyncRef = useRef<AgentSyncState | null>(null);
@@ -772,6 +782,108 @@ export function useKatoSyncViewModel() {
       setProviderAction("local", null);
     }
   }, [config, mergeProvider, providerBusy.local, setProviderAction]);
+
+  const registerLocalBrainProvider = useCallback(
+    async (brain: LocalBrainStatus) => {
+      if (!config || !brain.running) return;
+      const localProvider: LocalProviderConfig = {
+        kind: "open_ai_compatible",
+        baseUrl: brain.endpoint,
+        model: brain.modelAlias
+      };
+      const saved = await persistProviderFields({ localProvider });
+      setLocalProviderDraft(null);
+      mergeProvider(await testProvider(saved, "local"), saved.providerPriority);
+    },
+    [config, mergeProvider, persistProviderFields]
+  );
+
+  const handleInstallLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    setLocalBrainBusy("install");
+    setLocalBrainProgress(null);
+    try {
+      const installed = await installLocalBrain();
+      setLocalBrainStatus(installed);
+      setLocalBrainBusy("start");
+      const started = await startLocalBrain();
+      setLocalBrainStatus(started);
+      await registerLocalBrainProvider(started);
+      show("ok", "Kato Local Brain ist installiert, gestartet und als lokale Lane registriert.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, registerLocalBrainProvider, show]);
+
+  const handleStartLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    setLocalBrainBusy("start");
+    try {
+      const started = await startLocalBrain();
+      setLocalBrainStatus(started);
+      await registerLocalBrainProvider(started);
+      show("ok", "Kato Local Brain läuft lokal.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, registerLocalBrainProvider, show]);
+
+  const handleStopLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    setLocalBrainBusy("stop");
+    try {
+      setLocalBrainStatus(await stopLocalBrain());
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, show]);
+
+  const handleRemoveLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    const approved = await askConfirm(
+      "Kato Local Brain inklusive Modell und verwalteter llama.cpp-Runtime von diesem Rechner entfernen?",
+      { title: "Local Brain entfernen", okLabel: "Entfernen", cancelLabel: "Abbrechen" }
+    );
+    if (!approved) return;
+    setLocalBrainBusy("remove");
+    try {
+      setLocalBrainStatus(await removeLocalBrain());
+      setLocalBrainProgress(null);
+      show("ok", "Kato Local Brain wurde von diesem Rechner entfernt.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, show]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void getLocalBrainStatus()
+      .then((brain) => {
+        if (!disposed && brain) setLocalBrainStatus(brain);
+      })
+      .catch(() => {
+        // Nicht unterstuetzte Browser-/Testumgebung: lokale Anbieter bleiben weiterhin manuell nutzbar.
+      });
+    void listenLocalBrainProgress((progress) => {
+      if (!disposed) setLocalBrainProgress(progress);
+    }).then((un) => {
+      if (disposed) un();
+      else unlisten = un;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Einmal pro App-Sitzung beim Oeffnen des Agent-Sync-Workspace real pruefen (Auth + READY).
   useEffect(() => {
@@ -2155,6 +2267,9 @@ export function useKatoSyncViewModel() {
     localKeyInput,
     localKeyError,
     discoveredLocal,
+    localBrainStatus,
+    localBrainProgress,
+    localBrainBusy,
     setLocalKeyInput,
     updateLocalProviderDraft,
     generatedToken,
@@ -2197,6 +2312,10 @@ export function useKatoSyncViewModel() {
     handleDiscoverLocalProviders,
     handleSaveLocalProviderKey,
     handleRemoveLocalProviderKey,
+    handleInstallLocalBrain,
+    handleStartLocalBrain,
+    handleStopLocalBrain,
+    handleRemoveLocalBrain,
     handleRegister,
     logoutFlow,
     requestLogout,

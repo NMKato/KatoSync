@@ -26,6 +26,7 @@ use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
 mod context_pack;
+mod local_brain;
 mod local_control;
 mod orchestration;
 mod project_registry;
@@ -334,6 +335,11 @@ pub fn run() {
             disconnect_provider,
             save_local_provider_key,
             discover_local_providers,
+            local_brain_status,
+            install_local_brain,
+            start_local_brain,
+            stop_local_brain,
+            remove_local_brain,
             test_provider,
             quit_app
         ])
@@ -485,6 +491,31 @@ fn save_local_provider_key(
 #[tauri::command]
 async fn discover_local_providers() -> Vec<provider_manager::DiscoveredLocalProvider> {
     provider_manager::discover_local().await
+}
+
+#[tauri::command]
+fn local_brain_status(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::status(&app).map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn install_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::install(&app).await.map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn start_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::start(&app).await.map_err(error_to_string)
+}
+
+#[tauri::command]
+fn stop_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::stop(&app).map_err(error_to_string)
+}
+
+#[tauri::command]
+fn remove_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::remove(&app).map_err(error_to_string)
 }
 
 /// Fuehrt einen begrenzten Einzeltest aus, ohne einen Login zu starten.
@@ -3345,6 +3376,9 @@ fn open_output_dir() -> Result<String, String> {
 
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
+    // Fenster-Schließen lässt KatoSync absichtlich weiterlaufen. Nur der explizite
+    // "Programm beenden"-Pfad beendet auch die von KatoSync verwaltete Local-Brain-Runtime.
+    let _ = local_brain::stop(&app);
     app.exit(0);
 }
 
