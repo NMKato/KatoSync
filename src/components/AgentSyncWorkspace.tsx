@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
 import { providerDisplayState } from "../lib/providerPolicy";
+import { isInActiveFocus } from "../lib/projectFocus";
 import {
   agentReadiness,
   jobStage,
@@ -167,12 +168,21 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   const { t } = useT();
   const readiness = buildAgentReadiness(vm);
   const state = vm.agentSync;
-  const approvalPlans = vm.actionPlans.filter(
-    (plan) => plan.status === "pending_user_review" || plan.status === "in_review"
-  );
-  const reviewJobs = state.jobs.filter(
-    (job) => job.status === "implemented" || job.status === "review_ready" || job.status === "human_gate"
-  );
+  const hasLinkedProjects = vm.projects.registry.projects.length > 0;
+  const approvalPlans = hasLinkedProjects
+    ? vm.actionPlans.filter(
+        (plan) =>
+          (plan.status === "pending_user_review" || plan.status === "in_review") &&
+          plan.tasks.some((task) => isInActiveFocus(vm.projects.focusPolicy, task.projectId))
+      )
+    : [];
+  const reviewJobs = hasLinkedProjects
+    ? state.jobs.filter(
+        (job) =>
+          (job.status === "implemented" || job.status === "review_ready" || job.status === "human_gate") &&
+          isInActiveFocus(vm.projects.focusPolicy, job.projectId)
+      )
+    : [];
 
   return (
     <section className="agent-dashboard" id="section-agent-dashboard">
