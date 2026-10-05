@@ -102,9 +102,16 @@ pub struct AppConfig {
     provider_priority: Vec<provider_manager::ProviderId>,
     #[serde(default)]
     disabled_providers: Vec<provider_manager::ProviderId>,
-    // Nur nicht-geheime Endpoint-Metadaten; API-Keys werden in diesem Slice nicht angenommen.
+    // Nur nicht-geheime Endpoint-Metadaten; Secrets bleiben im OS-Schluesselbund.
     #[serde(default)]
     local_provider: provider_manager::LocalProviderConfig,
+    #[serde(default)]
+    api_providers: Vec<provider_manager::ApiProviderConfig>,
+    #[serde(default)]
+    api_project_preferences: std::collections::HashMap<String, String>,
+    // Read-only Migration alter Preview-Configs. Wird nie wieder serialisiert.
+    #[serde(default, rename = "apiProvider", skip_serializing)]
+    api_provider_legacy: Option<provider_manager::ApiProviderConfig>,
 }
 
 fn default_true() -> bool {
@@ -328,6 +335,10 @@ pub fn run() {
             submit_provider_login_code,
             disconnect_provider,
             save_local_provider_key,
+            save_api_provider_key,
+            disconnect_api_provider_key,
+            api_provider_models,
+            run_api_worker,
             discover_local_providers,
             local_brain_status,
             install_local_brain,
@@ -479,6 +490,75 @@ fn save_local_provider_key(
     let result = provider_manager::save_local_key(&base_url, &api_key);
     zeroize::Zeroize::zeroize(&mut api_key);
     result
+}
+
+/// Speichert den Remote-API-Key origin-gebunden im OS-Schluesselbund. Config/REX sehen ihn nie.
+#[tauri::command]
+fn save_api_provider_key(
+    config: provider_manager::ApiProviderConfig,
+    api_key: String,
+) -> Result<(), provider_manager::ProviderReason> {
+    let mut api_key = api_key;
+    let result = provider_manager::save_api_provider_key(&config, &api_key);
+    zeroize::Zeroize::zeroize(&mut api_key);
+    result
+}
+
+/// Loescht ausschliesslich den Key eines API-Slots. Andere Connections bleiben unangetastet.
+#[tauri::command]
+fn disconnect_api_provider_key(
+    connection_id: String,
+) -> Result<(), provider_manager::ProviderReason> {
+    provider_manager::disconnect_api_provider_key(&connection_id)
+}
+
+/// Laedt den echten, begrenzten Modellkatalog mit dem im OS-Schluesselbund gespeicherten Key.
+#[tauri::command]
+async fn api_provider_models(
+    config: provider_manager::ApiProviderConfig,
+) -> Result<provider_manager::ApiProviderCatalog, provider_manager::ProviderReason> {
+    provider_manager::api_provider_models(&config).await
+}
+
+/// Führt einen read-only API-Reasoning-Lauf mit dem lokal erzeugten, secret-geprüften
+/// Context Pack aus. Das Frontend bekommt weder Key noch Rohpfad des Context Packs.
+#[tauri::command]
+async fn run_api_worker(
+    prompt: String,
+    connection_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<provider_manager::ApiWorkerResult, provider_manager::ProviderReason> {
+    let config =
+        load_config_inner().map_err(|_| provider_manager::ProviderReason::NotConfigured)?;
+    let context_path = PathBuf::from(&config.output_dir).join(current_file_name(
+        &config,
+        "CURRENT_CONTEXT_PACK",
+        "json",
+    ));
+    let context = fs::read_to_string(context_path)
+        .map_err(|_| provider_manager::ProviderReason::NotConfigured)?;
+    let preferred_id = connection_id.or_else(|| {
+        project_id
+            .as_deref()
+            .and_then(|project| config.api_project_preferences.get(project))
+            .cloned()
+    });
+    let connection = preferred_id
+        .as_deref()
+        .and_then(|id| {
+            config
+                .api_providers
+                .iter()
+                .find(|item| item.id == id && item.enabled)
+        })
+        .or_else(|| {
+            config
+                .api_providers
+                .iter()
+                .find(|item| item.enabled && !item.model.trim().is_empty())
+        })
+        .ok_or(provider_manager::ProviderReason::NotConfigured)?;
+    provider_manager::run_api_worker(connection, &prompt, &context).await
 }
 
 /// Sucht ausschliesslich auf Loopback nach Ollama/LM Studio auf Standardports.
@@ -4639,16 +4719,62 @@ fn normalize_config(config: &mut AppConfig) {
         .sort_by_key(|provider| match provider {
             provider_manager::ProviderId::Codex => 0,
             provider_manager::ProviderId::Claude => 1,
-            provider_manager::ProviderId::Local => 2,
-            provider_manager::ProviderId::LocalControl => 3,
+            provider_manager::ProviderId::Api => 2,
+            provider_manager::ProviderId::Local => 3,
+            provider_manager::ProviderId::LocalControl => 4,
         });
     config.disabled_providers.dedup();
+
+    // Multi-API Migration: alte Preview-Builds hatten genau eine `apiProvider`-Connection.
+    // Beim ersten Laden wird sie in den Pool übernommen; danach wird nur noch `apiProviders`
+    // serialisiert. Die UI limitiert auf drei Slots, die Core-Struktur absichtlich nicht.
+    if config.api_providers.is_empty() {
+        if let Some(mut legacy) = config.api_provider_legacy.take() {
+            if legacy.id.trim().is_empty() {
+                legacy.id = "api-1".to_string();
+            }
+            config.api_providers.push(legacy);
+        }
+    } else {
+        config.api_provider_legacy = None;
+    }
+
+    let mut used_ids: Vec<String> = Vec::new();
+    for (index, connection) in config.api_providers.iter_mut().enumerate() {
+        let safe_id = !connection.id.trim().is_empty()
+            && connection.id.len() <= 64
+            && connection
+                .id
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
+        if !safe_id || used_ids.iter().any(|id| id == &connection.id) {
+            let mut suffix = index + 1;
+            loop {
+                let candidate = format!("api-{suffix}");
+                if !used_ids.iter().any(|id| id == &candidate) {
+                    connection.id = candidate;
+                    break;
+                }
+                suffix += 1;
+            }
+        }
+        connection.label = connection.label.trim().chars().take(80).collect();
+        connection.base_url = connection.base_url.trim().to_string();
+        connection.model = connection.model.trim().to_string();
+        used_ids.push(connection.id.clone());
+    }
+    config
+        .api_project_preferences
+        .retain(|project_id, connection_id| {
+            !project_id.trim().is_empty() && used_ids.iter().any(|id| id == connection_id)
+        });
 }
 
 fn default_provider_priority() -> Vec<provider_manager::ProviderId> {
     vec![
         provider_manager::ProviderId::Codex,
         provider_manager::ProviderId::Claude,
+        provider_manager::ProviderId::Api,
         provider_manager::ProviderId::Local,
         provider_manager::ProviderId::LocalControl,
     ]
@@ -4704,6 +4830,9 @@ fn default_config() -> Result<AppConfig> {
         provider_priority: default_provider_priority(),
         disabled_providers: Vec::new(),
         local_provider: provider_manager::LocalProviderConfig::default(),
+        api_providers: Vec::new(),
+        api_project_preferences: std::collections::HashMap::new(),
+        api_provider_legacy: None,
     })
 }
 
