@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:autoq-acceptance": "node --experimental-strip-types --test tests/autoQRuntimeAcceptance.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "build": "tsc && vite build",

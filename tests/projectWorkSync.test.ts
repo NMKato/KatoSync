@@ -153,3 +153,44 @@ test("AutoQ requires an explicit worktree mapping and preserves terminal local l
   assert.equal(second.selectedTaskIds.length, 1);
   assert.equal(second.plans[0].tasks.find((task) => task.status === "completed")?.status, "completed");
 });
+
+test("empty queue replenishes from fresh READY project truth", () => {
+  const p = project({ id: "katosync", name: "KatoSync" });
+  const first = buildProjectWorkSync(registry([p]), { katosync: p.rootPath }, [], now);
+  const completed = first.selectedTaskIds.reduce(
+    (plans, taskId) => updateProjectWorkTask(plans, taskId, "completed"),
+    first.plans
+  );
+  const empty = buildProjectWorkSync(registry([p]), { katosync: p.rootPath }, completed, now);
+  assert.equal(empty.report.readyCount, 0);
+
+  const refreshed = project({
+    id: "katosync",
+    name: "KatoSync",
+    capsule: {
+      ...p.capsule!,
+      nextSafeWork: ["Implement refreshed runtime acceptance"]
+    }
+  });
+  const replenished = buildProjectWorkSync(registry([refreshed]), { katosync: refreshed.rootPath }, completed, now);
+  assert.equal(replenished.report.readyCount, 1);
+  assert.equal(replenished.plans[0].tasks[0].title, "Implement refreshed runtime acceptance");
+  assert.equal(replenished.plans[0].tasks[0].status, "pending");
+});
+
+test("historical failure does not block a fresh runnable project item", () => {
+  const p = project({ id: "katosync", name: "KatoSync" });
+  const first = buildProjectWorkSync(registry([p]), { katosync: p.rootPath }, [], now);
+  const failed = updateProjectWorkTask(first.plans, first.selectedTaskIds[0], "failed");
+  const refreshed = project({
+    id: "katosync",
+    name: "KatoSync",
+    capsule: {
+      ...p.capsule!,
+      nextSafeWork: ["Run independent fresh verification"]
+    }
+  });
+  const next = buildProjectWorkSync(registry([refreshed]), { katosync: refreshed.rootPath }, failed, now);
+  assert.equal(next.report.readyCount, 1);
+  assert.equal(next.plans[0].tasks[0].status, "pending");
+});

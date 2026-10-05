@@ -283,7 +283,12 @@ export function planAutoLanes(input: AutoLanePlannerInput): AutoLanePlan {
 
 // ===== Claim-Ledger (rein; Persistenz liegt im ViewModel) =====
 export function addAutoLaneClaim(claims: AutoLaneClaim[], claim: AutoLaneClaim): AutoLaneClaim[] {
-  return claims.some((entry) => entry.taskId === claim.taskId) ? claims : [...claims, claim];
+  return hasAutoLaneClaimConflict(claims, claim.taskId, claim.repoKey) ? claims : [...claims, claim];
+}
+
+/** Ein Task oder Worktree darf zu jedem Zeitpunkt hoechstens einen Writer-Claim besitzen. */
+export function hasAutoLaneClaimConflict(claims: AutoLaneClaim[], taskId: string, repoKey: string): boolean {
+  return claims.some((entry) => entry.taskId === taskId || entry.repoKey === repoKey);
 }
 
 export function releaseAutoLaneClaim(claims: AutoLaneClaim[], taskId: string): AutoLaneClaim[] {
@@ -291,11 +296,29 @@ export function releaseAutoLaneClaim(claims: AutoLaneClaim[], taskId: string): A
 }
 
 /** Claims, deren Task inzwischen einen eindeutigen Endstatus hat oder verschwunden ist, sind erledigt. */
-export function pruneAutoLaneClaims(claims: AutoLaneClaim[], plans: ActionPlan[]): AutoLaneClaim[] {
-  if (!plans.length) return claims;
+export function pruneAutoLaneClaims(claims: AutoLaneClaim[], plans: ActionPlan[], authoritative = false): AutoLaneClaim[] {
+  // Ein leerer, noch nicht geladener Planstand darf nie Claims freigeben. Nach einem erfolgreichen,
+  // autoritativen AutoQ-Refresh ist ein leerer Stand dagegen echte Wahrheit: verschwundene/erledigte
+  // Claims sind dann sicher freizugeben.
+  if (!plans.length && !authoritative) return claims;
   const status = new Map(plans.flatMap((plan) => plan.tasks.map((task) => [task.taskId, task.status] as const)));
   return claims.filter((claim) => {
     const current = status.get(claim.taskId);
     return current !== undefined && !CLAIM_RESOLVED.has(current);
   });
+}
+
+/**
+ * Bereinigt nur Claims eines autoritativ erneuerten Teil-Ledgers. Claims anderer Planquellen bleiben
+ * unangetastet, weil ein AutoQ-Refresh keine Aussage ueber deren Writer-Eigentum treffen darf.
+ */
+export function pruneAutoLaneClaimsInScope(
+  claims: AutoLaneClaim[],
+  plans: ActionPlan[],
+  scopedTaskIds: Iterable<string>
+): AutoLaneClaim[] {
+  const scope = new Set(scopedTaskIds);
+  const scopedClaims = claims.filter((claim) => scope.has(claim.taskId));
+  const retained = new Set(pruneAutoLaneClaims(scopedClaims, plans, true).map((claim) => claim.taskId));
+  return claims.filter((claim) => !scope.has(claim.taskId) || retained.has(claim.taskId));
 }

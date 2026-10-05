@@ -83,9 +83,12 @@ import {
   AUTO_LANE_PLAN_REFRESH_MS,
   AUTO_LANE_TICK_MS,
   addAutoLaneClaim,
+  hasAutoLaneClaimConflict,
   pruneAutoLaneClaims,
+  pruneAutoLaneClaimsInScope,
   releaseAutoLaneClaim
 } from "../lib/autoLanePlanner";
+import { autoQRefreshReason } from "../lib/autoQRuntime";
 import {
   readAutoLaneClaims,
   readAutoLaneMode,
@@ -238,6 +241,7 @@ export function useKatoSyncViewModel() {
   projectWorkPlansRef.current = projectWorkPlans;
   const [projectWorkSyncReport, setProjectWorkSyncReport] = useState<ProjectWorkSyncReport | null>(null);
   const [projectWorkSyncBusy, setProjectWorkSyncBusy] = useState(false);
+  const projectWorkSyncingRef = useRef(false);
   const [briefings, setBriefings] = useState<Briefing[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -1952,7 +1956,11 @@ export function useKatoSyncViewModel() {
   const autoModeRef = useRef(autoMode);
   autoModeRef.current = autoMode;
   const autoTickRef = useRef<() => Promise<void>>(async () => undefined);
+  const autoQRefreshRef = useRef<(announce: boolean, armAutoMode: boolean) => Promise<ProjectWorkSyncReport | null>>(
+    async () => null
+  );
   const lastAutoPlanRefreshRef = useRef(0);
+  const lastAutoQRefreshRef = useRef(0);
 
   const commitAutoClaims = useCallback((update: (claims: AutoLaneClaim[]) => AutoLaneClaim[]) => {
     const next = update(readAutoLaneClaims());
@@ -1969,20 +1977,25 @@ export function useKatoSyncViewModel() {
     if (autoDispatchingRef.current || queueStartingRef.current || manualRunRef.current > 0 || !state.startSafety.safe) return;
     if (readDailyCount() >= boardDailyLimit) return;
     // Zweite Sperre neben dem Planer: der persistierte Ledger (z. B. aus einem anderen Render-Zyklus).
-    if (readAutoLaneClaims().some((claim) => claim.taskId === next.taskId)) return;
     const repoPath = repoPathFor(projectsRegistryRef.current, source.projectRepos, next.projectId);
     const plan = actionPlansRef.current.find((entry) => entry.planId === next.planId);
     const task = plan?.tasks.find((entry) => entry.taskId === next.taskId);
     if (!repoPath || !plan || !task) return;
+    if (hasAutoLaneClaimConflict(readAutoLaneClaims(), next.taskId, repoPath)) return;
     const localProjectWork = isProjectWorkPlan(plan);
     // Zweite Sperre neben dem Planer: Fokus-Portfolio (geparkt/archiviert/manuell/unbekannt startet nie autonom).
     if (!evaluateFocus(focusPolicyRef.current, task.projectId).allowed) return;
 
     autoDispatchingRef.current = true;
     const claimedAt = new Date().toISOString();
-    commitAutoClaims((claims) =>
+    const committedClaims = commitAutoClaims((claims) =>
       addAutoLaneClaim(claims, { taskId: task.taskId, projectId: task.projectId, repoKey: repoPath, runner: next.runner, claimedAt })
     );
+    // Letzte synchrone Sicherung gegen einen zwischen Planung und Claim eingetragenen Repo-Writer.
+    if (!committedClaims.some((claim) => claim.taskId === task.taskId && claim.repoKey === repoPath)) {
+      autoDispatchingRef.current = false;
+      return;
+    }
     setAutoLastDispatch((current) => ({ ...current, [task.projectId]: claimedAt }));
     setAutoInFlight([task.taskId]);
     let releaseClaim = true;
@@ -2074,6 +2087,25 @@ export function useKatoSyncViewModel() {
         await handleCheckCompletionsRef.current(false).catch(() => undefined);
       }
     }
+    const state = agentSyncRef.current;
+    const ownershipBusy =
+      autoDispatchingRef.current ||
+      queueStartingRef.current ||
+      manualRunRef.current > 0 ||
+      state?.startSafety.reason === "runner_busy" ||
+      state?.startSafety.reason === "worktree_lease_active" ||
+      state?.startSafety.reason === "handoff_in_flight" ||
+      state?.startSafety.reason === "orchestrator_lease";
+    const refreshReason = autoQRefreshReason({
+      // Vor geladener Registry/Config ist ein leerer Stand keine autoritative Projektwahrheit.
+      enabled: autoModeRef.current.enabled && projects.loaded && Boolean(source),
+      syncing: projectWorkSyncingRef.current,
+      writerActive: ownershipBusy,
+      laneCount: state?.autoLanes.lanes.length ?? 0,
+      lastRefreshAt: lastAutoQRefreshRef.current,
+      now: Date.now()
+    });
+    if (refreshReason) await autoQRefreshRef.current(false, false);
     setAutoTickSeq((value) => value + 1);
   };
 
@@ -2093,12 +2125,15 @@ export function useKatoSyncViewModel() {
     [show]
   );
 
-  const handleStartAutoQ = useCallback(async () => {
-    if (projectWorkSyncBusy) return;
+  const syncProjectWork = useCallback(async (announce: boolean, armAutoMode: boolean): Promise<ProjectWorkSyncReport | null> => {
+    if (projectWorkSyncingRef.current) return null;
+    projectWorkSyncingRef.current = true;
     setProjectWorkSyncBusy(true);
     try {
       const source = configRef.current;
+      if (!source || !projects.loaded) return null;
       let registry = projectsRegistryRef.current;
+      const previousProjectPlans = projectWorkPlansRef.current;
 
       // Vor jeder AutoQ-Planung wird der explizit gewählte Runner-Worktree READ-ONLY neu geprüft.
       // So liest AutoQ nicht den alten kanonischen Main/Audit-Stand, wenn der Nutzer einen frischeren
@@ -2117,7 +2152,7 @@ export function useKatoSyncViewModel() {
       const { plans, selectedTaskIds, report } = buildProjectWorkSync(
         registry,
         source?.projectRepos,
-        projectWorkPlansRef.current,
+        previousProjectPlans,
         new Date().toISOString()
       );
       projectWorkPlansRef.current = plans;
@@ -2128,27 +2163,49 @@ export function useKatoSyncViewModel() {
       setBoardOrder(selectedTaskIds);
       writeBoardSelection(selectedTaskIds);
 
-      const mode: AutoLaneMode = { enabled: true, updatedAt: new Date().toISOString() };
-      writeAutoLaneMode(mode);
-      autoModeRef.current = mode;
-      setAutoMode(mode);
+      // Dieser Scan ist autoritativ: Claims erledigter oder aus der aktuellen Wahrheit entfernter
+      // Tasks werden freigegeben. Nicht geladene Planstaende ausserhalb dieses Pfads bleiben konservativ.
+      const currentClaims = readAutoLaneClaims();
+      const projectTaskIds = [...previousProjectPlans, ...plans].flatMap((plan) => plan.tasks.map((task) => task.taskId));
+      const prunedClaims = pruneAutoLaneClaimsInScope(currentClaims, plans, projectTaskIds);
+      if (prunedClaims.length !== currentClaims.length) {
+        writeAutoLaneClaims(prunedClaims);
+        setAutoClaims(prunedClaims);
+      }
 
-      if (report.readyCount > 0) {
+      lastAutoQRefreshRef.current = Date.now();
+
+      if (armAutoMode) {
+        const mode: AutoLaneMode = { enabled: true, updatedAt: new Date().toISOString() };
+        writeAutoLaneMode(mode);
+        autoModeRef.current = mode;
+        setAutoMode(mode);
+      }
+
+      if (announce && report.readyCount > 0) {
         show(
           "ok",
           `AutoQ: ${report.readyCount} ausführbare Aufgabe${report.readyCount === 1 ? "" : "n"} synchronisiert. ${report.gatedCount ? `${report.gatedCount} Projekt-Gate${report.gatedCount === 1 ? "" : "s"} bleiben geschützt.` : ""}`
         );
-      } else {
+      } else if (announce) {
         show(
           "warn",
           `AutoQ: keine sofort ausführbare Arbeit gefunden. ${report.gatedCount} Gate${report.gatedCount === 1 ? "" : "s"}, ${report.emptyCount} Projekt${report.emptyCount === 1 ? "" : "e"} ohne explizites Next Safe Work.`
         );
       }
-      window.setTimeout(() => void autoTickRef.current(), 0);
+      return report;
     } finally {
+      projectWorkSyncingRef.current = false;
       setProjectWorkSyncBusy(false);
     }
-  }, [projectWorkSyncBusy, projects.rescanAtPath, show]);
+  }, [projects.loaded, projects.rescanAtPath, show]);
+
+  autoQRefreshRef.current = syncProjectWork;
+
+  const handleStartAutoQ = useCallback(async () => {
+    const report = await syncProjectWork(true, true);
+    if (report) window.setTimeout(() => void autoTickRef.current(), 0);
+  }, [syncProjectWork]);
 
   // Auto Mode ist ein dauerhafter Wunsch, kein Einmal-Klick. Nach App-Start oder einer geaenderten
   // Runner-Zuordnung synchronisiert AutoQ deshalb einmal selbststaendig die aktuelle Projektwahrheit.
