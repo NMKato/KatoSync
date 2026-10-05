@@ -1,4 +1,5 @@
 // Created by NMKato Solutions
+import manifest from "./localBrainManifest.json" with { type: "json" };
 
 export type LocalBrainRuntime = "llama_cpp";
 export type LocalBrainQuantization = "Q4_0" | "Q8_0" | "BF16";
@@ -32,50 +33,84 @@ export interface LocalBrainModelDefinition {
   };
 }
 
-export const GEMMA_4_E4B_IT_Q4: LocalBrainModelDefinition = {
-  id: "gemma-4-e4b-it-q4_0",
-  displayName: "Kato Local Brain · Gemma 4 E4B",
-  runtime: "llama_cpp",
-  protocol: "open_ai_compatible",
-  quantization: "Q4_0",
-  license: "Apache-2.0",
-  recommended: true,
-  minimumRamGb: 12,
-  preferredRamGb: 16,
-  textArtifact: {
-    fileName: "gemma-4-E4B-it-Q4_0.gguf",
-    sourceRepo: "ggml-org/gemma-4-E4B-it-GGUF",
-    sourceRevision: "main",
-    sha256: "a555b900214b477d8880e7832e0b8925e139b0159640036b09fe472b6f2097f2",
-    sizeBytes: 4_590_000_000
-  },
-  // Gemma 4 Vision wird in llama.cpp als separates Projektor-Artefakt geladen.
-  // Der v1-Installer darf deshalb Text-Gewichte nicht fälschlich als vollständiges Vision-Paket melden.
-  visionProjectionRequired: true,
-  capabilities: {
-    text: true,
-    code: true,
-    tools: true,
-    image: false,
-    audio: false
-  }
-};
+export interface LocalBrainStatus {
+  supported: boolean;
+  target: string;
+  ramGb: number | null;
+  ramFit: "unsupported" | "supported" | "recommended" | "unknown";
+  runtimeId: string;
+  runtimeVersion: string;
+  runtimeInstalled: boolean;
+  modelId: string;
+  modelName: string;
+  modelInstalled: boolean;
+  modelSizeBytes: number;
+  quantization: string;
+  license: string;
+  sourceRepo: string;
+  sourceRevision: string;
+  textReady: boolean;
+  codeReady: boolean;
+  toolsReady: boolean;
+  audioReady: boolean;
+  running: boolean;
+  endpoint: string;
+  modelAlias: string;
+  visionReady: boolean;
+}
 
-export const LOCAL_BRAIN_CATALOG = [GEMMA_4_E4B_IT_Q4] as const;
+export interface LocalBrainProgress {
+  phase: "runtime" | "model" | "verify" | string;
+  label: string;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  percent: number | null;
+}
+
+type ManifestModel = (typeof manifest.models)[number];
+const model = manifest.models.find((entry) => entry.recommended) ?? manifest.models[0];
+
+function toDefinition(entry: ManifestModel): LocalBrainModelDefinition {
+  return {
+    id: entry.id,
+    displayName: entry.displayName,
+    runtime: "llama_cpp",
+    protocol: "open_ai_compatible",
+    quantization: entry.quantization as LocalBrainQuantization,
+    license: entry.license as "Apache-2.0",
+    recommended: entry.recommended,
+    minimumRamGb: entry.minimumRamGb,
+    preferredRamGb: entry.preferredRamGb,
+    textArtifact: {
+      fileName: entry.fileName,
+      sourceRepo: entry.sourceRepo,
+      sourceRevision: entry.sourceRevision,
+      sha256: entry.sha256,
+      sizeBytes: entry.sizeBytes
+    },
+    // Vision/MMProj bleibt absichtlich separat, damit die UI keinen falschen
+    // "voll multimodal installiert"-Status anzeigt, bevor das Projektor-Paket verifiziert ist.
+    visionProjectionRequired: entry.visionProjectionRequired,
+    capabilities: entry.capabilities
+  };
+}
+
+export const GEMMA_4_E4B_IT_Q4: LocalBrainModelDefinition = toDefinition(model);
+export const LOCAL_BRAIN_CATALOG = manifest.models.map(toDefinition);
 
 export function recommendedLocalBrain(): LocalBrainModelDefinition {
-  return LOCAL_BRAIN_CATALOG.find((model) => model.recommended) ?? LOCAL_BRAIN_CATALOG[0];
+  return LOCAL_BRAIN_CATALOG.find((entry) => entry.recommended) ?? LOCAL_BRAIN_CATALOG[0];
 }
 
 export function localBrainFit(
-  model: LocalBrainModelDefinition,
+  entry: LocalBrainModelDefinition,
   ramGb: number
 ): "unsupported" | "supported" | "recommended" {
-  if (!Number.isFinite(ramGb) || ramGb < model.minimumRamGb) return "unsupported";
-  if (ramGb < model.preferredRamGb) return "supported";
+  if (!Number.isFinite(ramGb) || ramGb < entry.minimumRamGb) return "unsupported";
+  if (ramGb < entry.preferredRamGb) return "supported";
   return "recommended";
 }
 
-export function localBrainDownloadGb(model: LocalBrainModelDefinition): number {
-  return Math.round((model.textArtifact.sizeBytes / 1_000_000_000) * 100) / 100;
+export function localBrainDownloadGb(entry: LocalBrainModelDefinition): number {
+  return Math.round((entry.textArtifact.sizeBytes / 1_000_000_000) * 100) / 100;
 }

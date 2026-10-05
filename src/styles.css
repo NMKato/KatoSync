@@ -7066,3 +7066,178 @@ button.agent-tile:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* Managed Kato Local Brain — one-click lane inside Local Provider */
+.local-brain-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--agent) 28%, var(--line));
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--agent) 12%, transparent), transparent 42%),
+    color-mix(in srgb, var(--surface-2) 82%, transparent);
+}
+
+.local-brain-card.installed {
+  border-color: color-mix(in srgb, var(--ok) 34%, var(--line));
+}
+
+.local-brain-card.running {
+  border-color: color-mix(in srgb, var(--agent-live) 50%, var(--line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--agent-live) 12%, transparent) inset;
+}
+
+.local-brain-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+
+.local-brain-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: var(--agent);
+  background: color-mix(in srgb, var(--agent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--agent) 24%, transparent);
+}
+
+.local-brain-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.local-brain-copy > span {
+  color: var(--agent);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.09em;
+}
+
+.local-brain-copy > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+.local-brain-copy > small {
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.local-brain-state {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.local-brain-state.ok {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 38%, var(--line));
+}
+
+.local-brain-state.live {
+  color: var(--agent-live);
+  border-color: color-mix(in srgb, var(--agent-live) 48%, var(--line));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--agent-live) 14%, transparent);
+}
+
+.local-brain-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.local-brain-facts > span {
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.local-brain-facts strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.local-brain-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.local-brain-progress > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.local-brain-progress-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--line);
+}
+
+.local-brain-progress-track > span {
+  display: block;
+  min-width: 4px;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--agent), var(--agent-live));
+  transition: width 180ms ease;
+}
+
+.local-brain-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.local-brain-actions button {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .local-brain-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .local-brain-state {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .local-brain-facts {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .local-brain-progress-track > span {
+    transition: none;
+  }
+}
