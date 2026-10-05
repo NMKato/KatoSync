@@ -4,7 +4,7 @@
 // ganzer Dokumente – nur kurze, geschwaerzte Auszuege. Ersetzt den Context Pack nicht (siehe docs/PROJECT_REGISTRY.md).
 import type { ContextCapsule, DocFact, MismatchResolution, ProjectProbe, ProjectVerification } from "../types";
 import { redactSecrets } from "./projectExclusions.ts";
-import { collectClaims } from "./projectVerification.ts";
+import { collectClaims, parseStatusClaims } from "./projectVerification.ts";
 
 const MAX_PURPOSE = 240;
 const MAX_ITEM = 160;
@@ -112,16 +112,32 @@ function guardrailsOf(docs: DocFact[]): string[] {
   return rules;
 }
 
-const NEXT_HEADING = /(next safe steps?|nächste sichere schritte|next steps?|nächste schritte|naechste schritte|to-?do|offene punkte|open items)/i;
+const NEXT_HEADING = /(next safe steps?|nächste sichere schritte|naechste sichere schritte|nächster sicherer schritt|naechster sicherer schritt|next steps?|nächste schritte|naechste schritte|to-?do|offene punkte|open items)/i;
+
+function freshness(doc: DocFact): number {
+  const claims = parseStatusClaims(doc.content ?? "");
+  const value = claims.updatedAt ?? doc.modifiedAt;
+  if (!value) return 0;
+  const parsed = Date.parse(value.length === 10 ? `${value}T00:00:00Z` : value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
 
 function nextWorkOf(docs: DocFact[]): string[] {
-  const items: string[] = [];
-  for (const doc of readable(docs, ["status", "handoff"])) {
+  const candidates = readable(docs, ["status", "handoff"]).sort(
+    (a, b) => freshness(b) - freshness(a) || a.path.localeCompare(b.path)
+  );
+  // Der frischeste Handoff/Status mit expliziter Next-Work-Sektion gewinnt. Historische
+  // TODO-Bloecke aus Monate alten Statusdateien duerfen AutoQ nicht wiederbeleben.
+  for (const doc of candidates) {
+    const items: string[] = [];
     for (const section of sections(doc.content ?? "").filter((entry) => NEXT_HEADING.test(entry.heading))) {
-      for (const item of bullets(section.lines).filter((entry) => !/^\[x\]/i.test(entry))) pushUnique(items, clip(item.replace(/^\[ \]\s*/, "")), 5);
+      for (const item of bullets(section.lines).filter((entry) => !/^\[x\]/i.test(entry))) {
+        pushUnique(items, clip(item.replace(/^\[ \]\s*/, "")), 5);
+      }
     }
+    if (items.length) return items;
   }
-  return items;
+  return [];
 }
 
 function baseName(path: string): string {

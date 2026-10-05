@@ -30,7 +30,7 @@ import {
   resolveFinding,
   updateFocus
 } from "../src/lib/projectRegistry.ts";
-import { parseStatusClaims, verifyProject } from "../src/lib/projectVerification.ts";
+import { collectClaims, parseStatusClaims, verifyProject } from "../src/lib/projectVerification.ts";
 import { buildContextCapsule } from "../src/lib/projectCapsule.ts";
 import { planAutoLanes, type AutoLanePlannerInput } from "../src/lib/autoLanePlanner.ts";
 import { normalizeAgentSyncState } from "../src/lib/agentJobModel.ts";
@@ -198,6 +198,40 @@ test("claims parser reads date, branch, head, version, wave, PR refs and human g
   assert.equal(claims.humanGates.length, 1);
 });
 
+test("policy headings are not treated as active human gates", () => {
+  const claims = parseStatusClaims(
+    [
+      "# Status",
+      "Stand: 2026-10-05",
+      "## Human gate policy",
+      "WAIT_HUMAN ist exceptional, not routine.",
+      "- Human Gate: Freigabe ausstehend für visuellen Release"
+    ].join("\n")
+  );
+  assert.deepEqual(claims.humanGates, ["- Human Gate: Freigabe ausstehend für visuellen Release"]);
+});
+
+test("fresh handoff truth does not inherit stale branch, PR or gate claims from old status docs", () => {
+  const merged = collectClaims([
+    doc(
+      "PROJECT_HANDOFF.md",
+      "handoff",
+      "Stand: 2026-10-05\n\n## Naechster sicherer Schritt\n- Read-only THEORG-Pfad live abnehmen"
+    ),
+    doc(
+      "PROJECT_STATUS_FLOW.md",
+      "status",
+      "Stand: 2026-07-31\nBranch: feat/windows-uia\nHEAD: 3e1b927\n- PR #208 Draft offen\n- Human Gate: Freigabe ausstehend"
+    )
+  ]);
+  assert.ok(merged);
+  assert.equal(merged.claims.updatedAt, "2026-10-05");
+  assert.equal(merged.claims.branch, null);
+  assert.equal(merged.claims.headSha, null);
+  assert.deepEqual(merged.claims.prRefs, []);
+  assert.deepEqual(merged.claims.humanGates, []);
+});
+
 test("stale status docs are reported against newer commits and offer safe choices instead of auto-fixing", () => {
   const stale = probe([doc("PROJECT_STATUS_FLOW.md", "status", "Stand: 2026-07-16\n- Branch: main\n- Aktuelle Welle: Telefon")]);
   const result = verifyProject({ probe: stale, resolutions: {}, now: NOW });
@@ -289,6 +323,26 @@ test("capsule is compact, provider-neutral, redacted and path-free", () => {
   assert.equal(/PASSWORD\s*=/.test(json), false);
   // Der Worktree ist veraendert: ehrlich "dirty", nicht "verified".
   assert.equal(capsule.lastVerification.state, "dirty_worktree");
+});
+
+test("capsule prefers the freshest singular next-safe-step handoff over historical TODO blocks", () => {
+  const p = probe([
+    doc(
+      "PROJECT_HANDOFF.md",
+      "handoff",
+      "Stand: 2026-10-05\n\n## Naechster sicherer Schritt\n- Read-only THEORG-Pfad live abnehmen",
+      { modifiedAt: "2026-10-05T09:00:00Z" }
+    ),
+    doc(
+      "PROJECT_STATUS_FLOW.md",
+      "status",
+      "Stand: 2026-07-31\n\n## Nächste Schritte\n- Alte Telefon-Aufgabe\n- Twilio Provisioning",
+      { modifiedAt: "2026-07-31T09:00:00Z" }
+    )
+  ]);
+  const verification = verifyProject({ probe: p, resolutions: {}, now: NOW });
+  const capsule = buildContextCapsule({ projectId: "kai-desktop", name: "KAI Desktop", probe: p, verification, resolutions: {}, now: NOW });
+  assert.deepEqual(capsule.nextSafeWork, ["Read-only THEORG-Pfad live abnehmen"]);
 });
 
 test("capsule switches to code truth only after the user chose it", () => {

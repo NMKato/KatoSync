@@ -72,7 +72,8 @@ function verificationGate(project: RegistryProject): ProjectWorkGate | null {
   const findings = project.verification?.findings ?? [];
   if (findings.some((finding) => !finding.resolved && finding.state === "human_gate")) return "human_gate";
   if (findings.some((finding) => !finding.resolved && finding.state === "docs_mismatch")) return "docs_mismatch";
-  if (findings.some((finding) => !finding.resolved && finding.state === "review_pending")) return "review_pending";
+  // Ein offener PR ist kein globales Projekt-Gate: Auto-Lanes koennen dependency-sichere
+  // Parallel-Arbeit in einem anderen sauberen Worktree fortsetzen. Merge-Status bleibt separat sichtbar.
   return null;
 }
 

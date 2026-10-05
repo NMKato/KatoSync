@@ -77,7 +77,10 @@ export function parseStatusClaims(content: string): StatusClaims {
         claims.prRefs.push({ ref, pending: isPr && PENDING_WORDS.test(line) && !DONE_WORDS.test(line), line: clip(line) });
       }
     }
-    if (GATE_WORDS.test(line) && !DONE_WORDS.test(line) && claims.humanGates.length < 5) claims.humanGates.push(clip(line));
+    const policyHeading = /^\s*#{1,6}\s+/.test(raw) || /\bpolicy\b/i.test(line);
+    if (!policyHeading && GATE_WORDS.test(line) && !DONE_WORDS.test(line) && claims.humanGates.length < 5) {
+      claims.humanGates.push(clip(line));
+    }
   }
   return claims;
 }
@@ -107,7 +110,15 @@ export function collectClaims(docs: DocFact[]): { claims: StatusClaims; sources:
   parsed.sort((a, b) => (dayOf(b.claims.updatedAt ?? b.doc.modifiedAt) ?? -1) - (dayOf(a.claims.updatedAt ?? a.doc.modifiedAt) ?? -1) || a.doc.path.localeCompare(b.doc.path));
   const merged: StatusClaims = { updatedAt: null, branch: null, headSha: null, version: null, waveText: null, prRefs: [], humanGates: [] };
   const refs = new Set<string>();
-  for (const { claims } of parsed) {
+  const freshestDay = dayOf(parsed[0]?.claims.updatedAt ?? parsed[0]?.doc.modifiedAt);
+  // Alte Statusdateien duerfen aktuelle Handoffs nicht mit historischen Branch-/PR-/Gate-Claims vergiften.
+  // Wenn eine frischere Quelle existiert, werden nur Quellen aus demselben 3-Tage-Fenster zusammengefuehrt.
+  const current = parsed.filter(({ claims, doc }) => {
+    if (freshestDay === null) return true;
+    const candidateDay = dayOf(claims.updatedAt ?? doc.modifiedAt);
+    return candidateDay !== null && freshestDay - candidateDay <= STATUS_STALE_DAYS;
+  });
+  for (const { claims } of current.length ? current : parsed) {
     merged.updatedAt ??= claims.updatedAt;
     merged.branch ??= claims.branch;
     merged.headSha ??= claims.headSha;

@@ -100,28 +100,38 @@ export function useProjectRegistryViewModel(deps: { config: AppConfig | null; no
     commit(reconcileLegacy(registryRef.current, { sourceRoots, projectRepos: projectRepos ?? {} }, nowIso()));
   }, [loaded, sourceRoots, projectRepos, registry.projects, commit]);
 
-  const rescan = useCallback(
-    async (projectId: string): Promise<boolean> => {
+  const rescanAtPath = useCallback(
+    async (projectId: string, path: string): Promise<ProjectRegistry | null> => {
       const project = registryRef.current.projects.find((entry) => entry.id === projectId);
-      if (!project) return false;
+      if (!project || !path.trim()) return null;
       setScanning((current) => (current.includes(projectId) ? current : [...current, projectId]));
       try {
-        const probe = await probeProject(project.rootPath);
-        commit(applyProbe(registryRef.current, projectId, probe, nowIso()));
+        const probe = await probeProject(path);
+        const next = applyProbe(registryRef.current, projectId, probe, nowIso());
+        commit(next);
         setScanErrors((current) => {
           if (!(projectId in current)) return current;
           const { [projectId]: _removed, ...rest } = current;
           return rest;
         });
-        return true;
+        return next;
       } catch (error) {
         setScanErrors((current) => ({ ...current, [projectId]: messageOf(error) }));
-        return false;
+        return null;
       } finally {
         setScanning((current) => current.filter((id) => id !== projectId));
       }
     },
     [commit]
+  );
+
+  const rescan = useCallback(
+    async (projectId: string): Promise<boolean> => {
+      const project = registryRef.current.projects.find((entry) => entry.id === projectId);
+      if (!project) return false;
+      return Boolean(await rescanAtPath(projectId, project.rootPath));
+    },
+    [rescanAtPath]
   );
 
   const rescanAll = useCallback(async () => {
@@ -326,6 +336,7 @@ export function useProjectRegistryViewModel(deps: { config: AppConfig | null; no
     cancelDiscovery,
     addSelected,
     rescan,
+    rescanAtPath,
     rescanAll,
     setFocus,
     decideFinding,

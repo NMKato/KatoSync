@@ -2098,8 +2098,24 @@ export function useKatoSyncViewModel() {
     setProjectWorkSyncBusy(true);
     try {
       const source = configRef.current;
+      let registry = projectsRegistryRef.current;
+
+      // Vor jeder AutoQ-Planung wird der explizit gewählte Runner-Worktree READ-ONLY neu geprüft.
+      // So liest AutoQ nicht den alten kanonischen Main/Audit-Stand, wenn der Nutzer einen frischeren
+      // THEORG-/Beta-/Feature-Worktree als tatsächliches Arbeitsziel festgelegt hat.
+      if (source?.projectRepos) {
+        for (const project of registry.projects) {
+          if (project.focus.status !== "active") continue;
+          const mappedPath = source.projectRepos[project.id];
+          if (!mappedPath) continue;
+          const refreshed = await projects.rescanAtPath(project.id, mappedPath);
+          if (refreshed) registry = refreshed;
+        }
+      }
+      projectsRegistryRef.current = registry;
+
       const { plans, selectedTaskIds, report } = buildProjectWorkSync(
-        projectsRegistryRef.current,
+        registry,
         source?.projectRepos,
         projectWorkPlansRef.current,
         new Date().toISOString()
@@ -2132,7 +2148,7 @@ export function useKatoSyncViewModel() {
     } finally {
       setProjectWorkSyncBusy(false);
     }
-  }, [projectWorkSyncBusy, show]);
+  }, [projectWorkSyncBusy, projects.rescanAtPath, show]);
 
   // Unterbrochene Lane (Claim/„running“ ohne laufenden Besitzer) bewusst freigeben: der Task wird
   // zurückgestellt und startet erst wieder, wenn er im Board bewusst neu eingeplant wird.
