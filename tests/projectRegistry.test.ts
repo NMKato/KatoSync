@@ -198,13 +198,14 @@ test("claims parser reads date, branch, head, version, wave, PR refs and human g
   assert.equal(claims.humanGates.length, 1);
 });
 
-test("policy headings are not treated as active human gates", () => {
+test("policy headings and guardrail references are not treated as active human gates", () => {
   const claims = parseStatusClaims(
     [
       "# Status",
       "Stand: 2026-10-05",
       "## Human gate policy",
       "WAIT_HUMAN ist exceptional, not routine.",
+      "- Human Gates nicht automatisch ueberfahren.",
       "- Human Gate: Freigabe ausstehend für visuellen Release"
     ].join("\n")
   );
@@ -230,6 +231,27 @@ test("fresh handoff truth does not inherit stale branch, PR or gate claims from 
   assert.equal(merged.claims.headSha, null);
   assert.deepEqual(merged.claims.prRefs, []);
   assert.deepEqual(merged.claims.humanGates, []);
+});
+
+test("an undated prompt with fresh checkout mtime cannot override an explicitly dated handoff", () => {
+  const merged = collectClaims([
+    doc(
+      "PROJECT_HANDOFF_AUTOQ.md",
+      "handoff",
+      "Stand: 2026-10-05\nBranch: autoq/theorg-e2e-20261005\n\n## Naechster sicherer Schritt\n- Current THEORG read-only acceptance",
+      { modifiedAt: "2026-10-05T08:00:00Z" }
+    ),
+    doc(
+      "PROJECT_HANDOFF_PROMPT.md",
+      "handoff",
+      "Branch: feat/windows-uia\nHEAD: 3e1b927\n\n## Naechster sicherer Schritt\n- Historical prompt",
+      { modifiedAt: "2026-10-05T21:43:00Z" }
+    )
+  ]);
+  assert.ok(merged);
+  assert.equal(merged.claims.updatedAt, "2026-10-05");
+  assert.equal(merged.claims.branch, "autoq/theorg-e2e-20261005");
+  assert.equal(merged.claims.headSha, null);
 });
 
 test("stale status docs are reported against newer commits and offer safe choices instead of auto-fixing", () => {
@@ -343,6 +365,26 @@ test("capsule prefers the freshest singular next-safe-step handoff over historic
   const verification = verifyProject({ probe: p, resolutions: {}, now: NOW });
   const capsule = buildContextCapsule({ projectId: "kai-desktop", name: "KAI Desktop", probe: p, verification, resolutions: {}, now: NOW });
   assert.deepEqual(capsule.nextSafeWork, ["Read-only THEORG-Pfad live abnehmen"]);
+});
+
+test("capsule ignores an undated historical prompt even when its checkout mtime is newer", () => {
+  const p = probe([
+    doc(
+      "PROJECT_HANDOFF_AUTOQ.md",
+      "handoff",
+      "Stand: 2026-10-05\n\n## Naechster sicherer Schritt\n- Current AutoQ acceptance",
+      { modifiedAt: "2026-10-05T08:00:00Z" }
+    ),
+    doc(
+      "PROJECT_HANDOFF_PROMPT.md",
+      "handoff",
+      "## Naechster sicherer Schritt\n- Historical prompt task",
+      { modifiedAt: "2026-10-05T21:43:00Z" }
+    )
+  ]);
+  const verification = verifyProject({ probe: p, resolutions: {}, now: NOW });
+  const capsule = buildContextCapsule({ projectId: "kai-desktop", name: "KAI Desktop", probe: p, verification, resolutions: {}, now: NOW });
+  assert.deepEqual(capsule.nextSafeWork, ["Current AutoQ acceptance"]);
 });
 
 test("capsule switches to code truth only after the user chose it", () => {

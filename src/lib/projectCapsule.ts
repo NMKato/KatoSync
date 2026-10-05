@@ -123,11 +123,14 @@ function freshness(doc: DocFact): number {
 }
 
 function nextWorkOf(docs: DocFact[]): string[] {
-  const candidates = readable(docs, ["status", "handoff"]).sort(
+  const readableDocs = readable(docs, ["status", "handoff"]);
+  const explicitlyDated = readableDocs.filter((doc) => parseStatusClaims(doc.content ?? "").updatedAt);
+  const candidates = (explicitlyDated.length ? explicitlyDated : readableDocs).sort(
     (a, b) => freshness(b) - freshness(a) || a.path.localeCompare(b.path)
   );
-  // Der frischeste Handoff/Status mit expliziter Next-Work-Sektion gewinnt. Historische
-  // TODO-Bloecke aus Monate alten Statusdateien duerfen AutoQ nicht wiederbeleben.
+  // Wenn ein explizit datierter aktueller Handoff existiert, darf ein undatierter Alt-Prompt
+  // nicht allein durch frische Checkout-mtime als neue Projektwahrheit erscheinen.
+  // Der frischeste Handoff/Status mit expliziter Next-Work-Sektion gewinnt.
   for (const doc of candidates) {
     const items: string[] = [];
     for (const section of sections(doc.content ?? "").filter((entry) => NEXT_HEADING.test(entry.heading))) {
