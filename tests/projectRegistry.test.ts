@@ -120,6 +120,15 @@ test("worktrees and clones of one repository collapse into a single canonical pr
   assert.deepEqual(groupDiscoveredRepos([main, wtA, wtB, other]), grouped);
 });
 
+test("KatoOs_MAA_KAI is recognised as the KatoOS Beta focus project", () => {
+  const grouped = groupDiscoveredRepos([
+    repo("/work/KatoOs_MAA_KAI", { remote: "https://github.com/NMKato/KatoOs_MAA_KAI.git" })
+  ]);
+  assert.equal(grouped.length, 1);
+  assert.equal(grouped[0].profileId, "katoos-beta");
+  assert.equal(grouped[0].id, "katoos-beta");
+});
+
 test("identity falls back to the shared git dir without a remote; linked-only discovery uses the main worktree as root", () => {
   const a = repo("/w/app", { commonDir: "/w/app/.git" });
   const linked = repo("/w/app-wt", { commonDir: "/w/app/.git", mainWorktreePath: "/w/app", isLinkedWorktree: true });

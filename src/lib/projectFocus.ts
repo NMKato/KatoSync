@@ -39,7 +39,12 @@ export interface FocusProfileEntry {
 export const DEFAULT_FOCUS_PROFILE: readonly FocusProfileEntry[] = [
   { id: "katosync", priority: "P0", scope: "KatoSync 3.0: Auto-Lanes, Control Tower, Approval Control Plane, Context Fabric", aliases: ["katosync"] },
   { id: "kai-desktop", priority: "P1", scope: "Kai Desktop/THEORG Ende-zu-Ende-Pfad", aliases: ["kai-desktop", "kai-desktop-agent"] },
-  { id: "katoos-beta", priority: "P1", scope: "KatoOS Beta: Release-, Sicherheits- und Stabilitaets-Blocker", aliases: ["katoos-beta"] },
+  {
+    id: "katoos-beta",
+    priority: "P1",
+    scope: "KatoOS Beta: Release-, Sicherheits- und Stabilitaets-Blocker",
+    aliases: ["katoos-beta", "katoos-maa-kai"]
+  },
   { id: "genxline", priority: "P1", scope: "GENXLine: aktuelle freigegebene Roadmap", aliases: ["genxline", "genx-line"] }
 ];
 

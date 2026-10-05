@@ -13,6 +13,7 @@ import {
   Loader2,
   Plus,
   RefreshCcw,
+  Search,
   ShieldCheck,
   Trash2
 } from "lucide-react";
@@ -309,36 +310,66 @@ function MissingProfile({ vm }: { vm: ViewModel }) {
   const [choice, setChoice] = useState<Record<string, string>>({});
   return (
     <div className="projects-missing">
-      <strong>{t("projects.focus.missing")}</strong>
-      <small>{t("projects.focus.missing.hint")}</small>
-      <ul>
+      <div className="projects-missing-head">
+        <div>
+          <strong>{t("projects.focus.autoTitle")}</strong>
+          <small>{t("projects.focus.autoHint")}</small>
+        </div>
+        <button
+          className="primary compact-button"
+          disabled={projects.busy !== null}
+          onClick={() => void projects.autoDiscoverFocus()}
+          type="button"
+        >
+          {projects.busy === "discover" ? <Loader2 className="spin" size={14} /> : <Search size={14} />}
+          {t("projects.focus.autoFind")}
+        </button>
+      </div>
+
+      <div className="projects-missing-summary">
         {projects.missingProfile.map((entry) => (
-          <li key={entry.id}>
+          <div className="projects-missing-chip" key={entry.id}>
             <span className={`projects-prio ${entry.priority}`}>{entry.priority}</span>
-            <strong>{entry.id}</strong>
-            <select
-              aria-label={`${entry.id} ${t("projects.focus.link")}`}
-              onChange={(event) => setChoice((current) => ({ ...current, [entry.id]: event.target.value }))}
-              value={choice[entry.id] ?? ""}
-            >
-              <option value="">{t("projects.focus.linkPick")}</option>
-              {projects.registry.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-            <button
-              className="secondary compact-button"
-              disabled={!choice[entry.id]}
-              onClick={() => projects.linkProfile(entry.id, choice[entry.id])}
-              type="button"
-            >
-              {t("projects.focus.link")}
-            </button>
-          </li>
+            <span>
+              <strong>{t(`projects.focus.profile.${entry.id}` as TKey)}</strong>
+              <small>{t("projects.focus.autoPending")}</small>
+            </span>
+          </div>
         ))}
-      </ul>
+      </div>
+
+      <details className="projects-manual-link">
+        <summary>{t("projects.focus.manual")}</summary>
+        <small>{t("projects.focus.missing.hint")}</small>
+        <ul>
+          {projects.missingProfile.map((entry) => (
+            <li key={entry.id}>
+              <span className={`projects-prio ${entry.priority}`}>{entry.priority}</span>
+              <strong>{t(`projects.focus.profile.${entry.id}` as TKey)}</strong>
+              <select
+                aria-label={`${entry.id} ${t("projects.focus.link")}`}
+                onChange={(event) => setChoice((current) => ({ ...current, [entry.id]: event.target.value }))}
+                value={choice[entry.id] ?? ""}
+              >
+                <option value="">{t("projects.focus.linkPick")}</option>
+                {projects.registry.projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="secondary compact-button"
+                disabled={!choice[entry.id]}
+                onClick={() => projects.linkProfile(entry.id, choice[entry.id])}
+                type="button"
+              >
+                {t("projects.focus.link")}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </details>
     </div>
   );
 }

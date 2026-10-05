@@ -8029,3 +8029,139 @@ button.agent-tile:hover {
     justify-content: flex-start;
   }
 }
+
+
+/* ===== Project Focus auto-match ===== */
+.projects-missing {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--agent) 22%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-2) 86%, transparent);
+}
+
+.projects-missing-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.projects-missing-head > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.projects-missing-head small {
+  max-width: 760px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.projects-missing-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.projects-missing-chip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(255,255,255,.025);
+}
+
+.projects-missing-chip > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.projects-missing-chip strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-missing-chip small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.projects-manual-link {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+}
+
+.projects-manual-link > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.projects-manual-link[open] > summary {
+  margin-bottom: 8px;
+}
+
+.projects-manual-link > small {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+}
+
+.projects-manual-link ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.projects-manual-link li {
+  display: grid;
+  grid-template-columns: auto minmax(120px, .8fr) minmax(170px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255,255,255,.02);
+}
+
+.projects-manual-link select {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 820px) {
+  .projects-missing-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .projects-missing-head .primary {
+    width: 100%;
+  }
+
+  .projects-manual-link li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .projects-manual-link li select,
+  .projects-manual-link li button {
+    grid-column: 1 / -1;
+  }
+}

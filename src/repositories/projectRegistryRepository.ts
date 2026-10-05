@@ -38,6 +38,11 @@ export async function discoverProjectRepos(root: string): Promise<DiscoveryResul
   return invoke<DiscoveryResult>("project_registry_discover", { root });
 }
 
+export async function suggestProjectWorkspaceRoots(existingProjectRoots: string[]): Promise<string[]> {
+  if (!isTauri()) throw new DesktopOnlyError();
+  return invoke<string[]>("project_registry_smart_roots", { existingProjectRoots });
+}
+
 export async function probeProject(root: string): Promise<ProjectProbe> {
   if (!isTauri()) throw new DesktopOnlyError();
   return invoke<ProjectProbe>("project_registry_scan", { root });

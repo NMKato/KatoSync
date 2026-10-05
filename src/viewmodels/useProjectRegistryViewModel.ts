@@ -29,6 +29,7 @@ import {
   openProjectFolder,
   probeProject,
   saveRegistryRaw,
+  suggestProjectWorkspaceRoots,
   type ProjectFolderKind
 } from "../repositories/projectRegistryRepository";
 
@@ -134,7 +135,7 @@ export function useProjectRegistryViewModel(deps: { config: AppConfig | null; no
   }, [notify, rescan]);
 
   const runDiscovery = useCallback(
-    async (roots: string[], source: RegistrySource) => {
+    async (roots: string[], source: RegistrySource, selectionMode: "all" | "focus" = "all") => {
       setBusy("discover");
       try {
         const byPath = new Map<string, RepoFacts>();
@@ -150,13 +151,26 @@ export function useProjectRegistryViewModel(deps: { config: AppConfig | null; no
           notify("warn", "In diesem Ordner wurde kein Git-Projekt gefunden.");
           return;
         }
+        const selectable = candidates.filter((candidate) => !candidate.alreadyRegistered);
+        const selected =
+          selectionMode === "focus"
+            ? selectable.filter((candidate) => candidate.profileId !== null).map((candidate) => candidate.id)
+            : selectable.map((candidate) => candidate.id);
         setDiscovery({
           source,
           roots,
           candidates,
-          selected: candidates.filter((candidate) => !candidate.alreadyRegistered).map((candidate) => candidate.id),
+          selected,
           truncated
         });
+        if (selectionMode === "focus") {
+          notify(
+            selected.length ? "ok" : "warn",
+            selected.length
+              ? selected.length + " passende Fokus-" + (selected.length === 1 ? "Projekt" : "Projekte") + " automatisch erkannt und vorausgewählt."
+              : "Keine eindeutigen Fokus-Projekte automatisch erkannt. Die gefundenen Projekte bleiben zur manuellen Auswahl sichtbar."
+          );
+        }
       } catch (error) {
         notify("error", messageOf(error));
       } finally {
@@ -173,6 +187,23 @@ export function useProjectRegistryViewModel(deps: { config: AppConfig | null; no
     },
     [config?.sourceRoots, runDiscovery]
   );
+
+  const autoDiscoverFocus = useCallback(async () => {
+    setBusy("discover");
+    try {
+      const knownRoots = registryRef.current.projects.map((project) => project.rootPath);
+      const roots = await suggestProjectWorkspaceRoots(knownRoots);
+      if (!roots.length) {
+        notify("warn", "Keine typischen lokalen Entwickler-Workspaces gefunden. Bitte einmal einen Workspace manuell auswählen.");
+        return;
+      }
+      await runDiscovery(roots, "discovery", "focus");
+    } catch (error) {
+      notify("error", messageOf(error));
+    } finally {
+      setBusy(null);
+    }
+  }, [notify, runDiscovery]);
 
   const scanLegacyRoots = useCallback(async () => {
     const roots = legacyScanRoots({ sourceRoots: config?.sourceRoots ?? [], projectRepos: config?.projectRepos ?? {} });
@@ -288,6 +319,7 @@ export function useProjectRegistryViewModel(deps: { config: AppConfig | null; no
     legacyStatus: registry.migration,
     projectName,
     startDiscovery,
+    autoDiscoverFocus,
     scanLegacyRoots,
     toggleCandidate,
     selectAllCandidates,

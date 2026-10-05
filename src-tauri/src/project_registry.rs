@@ -523,7 +523,14 @@ pub(crate) fn discover(root: &Path) -> Result<DiscoveryResult, String> {
             }
             if has_git_entry(&path) {
                 if let Some(facts) = probe_repo(&path, false) {
-                    if seen_repos.insert(facts.path.clone()) {
+                    // Viele parallele Worktrees desselben Repositories zaehlen fuer die Workspace-Suche
+                    // nur einmal. probe_repo liefert bereits die komplette Worktree-Liste.
+                    let identity = facts
+                        .remote
+                        .clone()
+                        .or_else(|| facts.common_dir.clone())
+                        .unwrap_or_else(|| facts.path.clone());
+                    if seen_repos.insert(identity) {
                         result.repos.push(facts);
                     }
                 }
@@ -886,7 +893,46 @@ pub(crate) fn save_registry_to(path: &Path, registry: &serde_json::Value) -> Res
     fs::rename(&temp, path).map_err(|_| "Registry konnte nicht gespeichert werden.".to_string())
 }
 
+/// Liefert wenige typische lokale Workspace-Wurzeln fuer eine explizit gestartete Auto-Suche.
+/// Kein rekursiver Home-Scan: nur bereits bekannte Projekteltern + konventionelle Entwicklerordner.
+pub(crate) fn smart_workspace_roots(existing_project_roots: &[String]) -> Vec<String> {
+    let mut roots = BTreeSet::new();
+
+    for raw in existing_project_roots {
+        let path = Path::new(raw);
+        if path.is_dir() {
+            if let Some(parent) = path.parent() {
+                if parent.is_dir() {
+                    roots.insert(real_path(parent));
+                }
+            }
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        for relative in [
+            "Projects",
+            "Developer",
+            "Development",
+            "Documents/Projects",
+            "Documents/Developer",
+        ] {
+            let candidate = home.join(relative);
+            if candidate.is_dir() {
+                roots.insert(real_path(&candidate));
+            }
+        }
+    }
+
+    roots.into_iter().take(12).collect()
+}
+
 // ===== Tauri-Commands =====
+#[tauri::command]
+pub(crate) fn project_registry_smart_roots(existing_project_roots: Vec<String>) -> Vec<String> {
+    smart_workspace_roots(&existing_project_roots)
+}
+
 #[tauri::command]
 pub(crate) async fn project_registry_discover(root: String) -> Result<DiscoveryResult, String> {
     tauri::async_runtime::spawn_blocking(move || discover(Path::new(&root)))
@@ -974,6 +1020,16 @@ mod tests {
         .unwrap();
         git(dir, &["add", "README.md"]);
         git(dir, &["commit", "-q", "-m", "init"]);
+    }
+
+    #[test]
+    fn smart_roots_include_parent_of_known_project() {
+        let parent = temp_dir("smart-roots");
+        let project = parent.join("demo");
+        fs::create_dir_all(&project).unwrap();
+        let roots = smart_workspace_roots(&[project.to_string_lossy().into_owned()]);
+        assert!(roots.contains(&real_path(&parent)));
+        let _ = fs::remove_dir_all(parent);
     }
 
     #[test]
@@ -1147,7 +1203,7 @@ mod tests {
                     .into_owned()
             })
             .collect();
-        assert_eq!(names, vec!["Alpha", "Alpha-feat-x", "Beta", "Gamma"]);
+        assert_eq!(names, vec!["Alpha", "Beta", "Gamma"]);
         assert!(result.skipped_excluded >= 2);
         let alpha = result
             .repos
@@ -1159,18 +1215,13 @@ mod tests {
             Some("https://example.com/acme/alpha.git")
         );
         assert!(!serde_json::to_string(&result).unwrap().contains("token123"));
-        let linked = result
-            .repos
-            .iter()
-            .find(|repo| repo.path.ends_with("/Alpha-feat-x"))
-            .unwrap();
-        assert!(linked.is_linked_worktree);
-        assert_eq!(linked.common_dir, alpha.common_dir);
-        assert_eq!(
-            linked.main_worktree_path.as_deref(),
-            Some(alpha.path.as_str())
-        );
+        // Linked worktrees are represented inside the canonical repository result instead of
+        // consuming a second discovery slot.
         assert_eq!(alpha.worktrees.len(), 2);
+        assert!(alpha
+            .worktrees
+            .iter()
+            .any(|worktree| worktree.path.ends_with("/Alpha-feat-x")));
 
         // Einzelnes Projekt: genau dieses Repo.
         assert_eq!(discover(&main).unwrap().repos.len(), 1);

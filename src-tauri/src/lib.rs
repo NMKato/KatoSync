@@ -283,6 +283,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             project_registry::project_registry_discover,
+            project_registry::project_registry_smart_roots,
             project_registry::project_registry_scan,
             project_registry::project_registry_load,
             project_registry::project_registry_save,
