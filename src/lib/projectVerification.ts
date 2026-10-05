@@ -78,7 +78,8 @@ export function parseStatusClaims(content: string): StatusClaims {
       }
     }
     const policyHeading = /^\s*#{1,6}\s+/.test(raw) || /\bpolicy\b/i.test(line);
-    if (!policyHeading && GATE_WORDS.test(line) && !DONE_WORDS.test(line) && claims.humanGates.length < 5) {
+    const passiveGateReference = /\b(?:guardrail|regel|nicht\s+automatisch|nicht\s+(?:ueberfahren|überfahren)|bleibt?\s+manuell|do\s+not\s+auto)/i.test(line);
+    if (!policyHeading && !passiveGateReference && GATE_WORDS.test(line) && !DONE_WORDS.test(line) && claims.humanGates.length < 5) {
       claims.humanGates.push(clip(line));
     }
   }
@@ -107,13 +108,20 @@ export function collectClaims(docs: DocFact[]): { claims: StatusClaims; sources:
   const readable = docs.filter(isStatusDoc);
   if (!readable.length) return null;
   const parsed = readable.map((doc) => ({ doc, claims: parseStatusClaims(doc.content ?? "") }));
-  parsed.sort((a, b) => (dayOf(b.claims.updatedAt ?? b.doc.modifiedAt) ?? -1) - (dayOf(a.claims.updatedAt ?? a.doc.modifiedAt) ?? -1) || a.doc.path.localeCompare(b.doc.path));
+  const explicitlyDated = parsed.filter(({ claims }) => dayOf(claims.updatedAt) !== null);
+  const freshnessPool = explicitlyDated.length ? explicitlyDated : parsed;
+  freshnessPool.sort(
+    (a, b) =>
+      (dayOf(b.claims.updatedAt ?? b.doc.modifiedAt) ?? -1) -
+        (dayOf(a.claims.updatedAt ?? a.doc.modifiedAt) ?? -1) ||
+      a.doc.path.localeCompare(b.doc.path)
+  );
   const merged: StatusClaims = { updatedAt: null, branch: null, headSha: null, version: null, waveText: null, prRefs: [], humanGates: [] };
   const refs = new Set<string>();
-  const freshestDay = dayOf(parsed[0]?.claims.updatedAt ?? parsed[0]?.doc.modifiedAt);
-  // Alte Statusdateien duerfen aktuelle Handoffs nicht mit historischen Branch-/PR-/Gate-Claims vergiften.
-  // Wenn eine frischere Quelle existiert, werden nur Quellen aus demselben 3-Tage-Fenster zusammengefuehrt.
-  const current = parsed.filter(({ claims, doc }) => {
+  const freshestDay = dayOf(freshnessPool[0]?.claims.updatedAt ?? freshnessPool[0]?.doc.modifiedAt);
+  // Wenn mindestens eine Quelle einen expliziten Stand traegt, gewinnen diese datierten Quellen.
+  // Checkout-/Copy-mtime eines undatierten alten Prompts darf nie aktuelle Projektwahrheit vortaeuschen.
+  const current = freshnessPool.filter(({ claims, doc }) => {
     if (freshestDay === null) return true;
     const candidateDay = dayOf(claims.updatedAt ?? doc.modifiedAt);
     return candidateDay !== null && freshestDay - candidateDay <= STATUS_STALE_DAYS;
@@ -127,7 +135,7 @@ export function collectClaims(docs: DocFact[]): { claims: StatusClaims; sources:
     for (const ref of claims.prRefs) if (!refs.has(ref.ref)) (refs.add(ref.ref), merged.prRefs.push(ref));
     for (const gate of claims.humanGates) if (merged.humanGates.length < 5 && !merged.humanGates.includes(gate)) merged.humanGates.push(gate);
   }
-  const best = parsed[0];
+  const best = freshnessPool[0];
   const docDay = merged.updatedAt ?? (best.doc.modifiedAt ? best.doc.modifiedAt.slice(0, 10) : null);
   return { claims: merged, sources: parsed.map((entry) => entry.doc.path), docDay };
 }
