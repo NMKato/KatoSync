@@ -318,13 +318,14 @@ function laneNodeId(id: AgentLaneId, localLaneIsBrain: boolean): string {
 const LANE_LABEL: Record<AgentLaneId, string> = {
   codex: "Codex",
   claude: "Claude",
+  api: "API Lane",
   local: "Local Model",
   remote_orchestrator: "Remote Orchestrator",
   local_control: "Local Control"
 };
 
 function providerScope(status: ProviderStatus | undefined, lane: AgentLaneId): VisionScope {
-  if (lane === "codex" || lane === "claude" || lane === "remote_orchestrator") return "cloud";
+  if (lane === "codex" || lane === "claude" || lane === "api" || lane === "remote_orchestrator") return "cloud";
   if (lane === "local_control") return "local";
   const scope = status?.endpointScope;
   if (scope === "local") return "local";

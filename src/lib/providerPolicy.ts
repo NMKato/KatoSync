@@ -3,6 +3,8 @@
 // Endpoint-Validierung und redigierte Diagnosen. Keine Seiteneffekte, keine Secrets.
 import type {
   AgentLaneId,
+  ApiProviderConfig,
+  ApiProviderPreset,
   LocalProviderConfig,
   LocalProviderKind,
   ProviderDisplayState,
@@ -13,7 +15,18 @@ import type {
   ProviderTransition
 } from "../types";
 
-export const DEFAULT_PROVIDER_PRIORITY: ProviderId[] = ["codex", "claude", "local", "local_control"];
+export const DEFAULT_PROVIDER_PRIORITY: ProviderId[] = ["codex", "claude", "api", "local", "local_control"];
+
+export const API_PROVIDER_PRESETS: Record<Exclude<ApiProviderPreset, "custom_openai">, { label: string; baseUrl: string }> = {
+  openai: { label: "OpenAI API", baseUrl: "https://api.openai.com/v1" },
+  anthropic: { label: "Anthropic API", baseUrl: "https://api.anthropic.com/v1" },
+  openrouter_global: { label: "OpenRouter Global", baseUrl: "https://openrouter.ai/api/v1" },
+  openrouter_eu: { label: "OpenRouter EU", baseUrl: "https://eu.openrouter.ai/api/v1" },
+  deepseek: { label: "DeepSeek API", baseUrl: "https://api.deepseek.com/v1" },
+  mistral: { label: "Mistral API", baseUrl: "https://api.mistral.ai/v1" },
+  xai: { label: "xAI API", baseUrl: "https://api.x.ai/v1" },
+  zai: { label: "Z.AI / GLM API", baseUrl: "https://api.z.ai/api/paas/v4" }
+};
 
 // Provider melden Kontingent-/Kapazitaetsgrenzen selten mit Reset-Zeit. Spaetestens nach zehn
 // Minuten wird der billige Auth-/Netzstatus erneuert; READY-Probes bleiben bedarfsgebunden.
@@ -64,7 +77,8 @@ export function moveProvider(priority: ProviderId[], provider: ProviderId, direc
 
 export function toProviderSettings(
   disabledProviders: ProviderId[],
-  localProvider: LocalProviderConfig
+  localProvider: LocalProviderConfig,
+  apiProviders: ApiProviderConfig[]
 ): ProviderSettings {
   return {
     disabledProviders: disabledProviders.filter((provider) => provider !== "local_control"),
@@ -72,7 +86,18 @@ export function toProviderSettings(
       kind: localProvider.kind,
       baseUrl: localProvider.baseUrl.trim(),
       model: localProvider.model.trim()
-    }
+    },
+    apiProviders: apiProviders.map((connection) => ({
+      id: connection.id,
+      label: connection.label.trim(),
+      preset: connection.preset,
+      baseUrl: connection.baseUrl.trim(),
+      model: connection.model.trim(),
+      effort: connection.effort,
+      mode: connection.mode,
+      capabilities: [...connection.capabilities],
+      enabled: connection.enabled
+    }))
   };
 }
 
@@ -108,8 +133,8 @@ export function providerDisplayState(
   connecting = false
 ): ProviderDisplayState {
   if (connecting) return "connecting";
-  if (!status) return provider === "local" ? "notConfigured" : "connect";
-  if (!status.installed) return provider === "local" ? "notConfigured" : "notInstalled";
+  if (!status) return provider === "local" || provider === "api" ? "notConfigured" : "connect";
+  if (!status.installed) return provider === "local" || provider === "api" ? "notConfigured" : "notInstalled";
   if (!status.enabled) return "disabled";
   switch (status.state) {
     case "available":
@@ -301,7 +326,7 @@ export function providerRecheckPlan(
 }
 
 // ===== Agent-Lanes: intelligente Failover-Kette + deterministisches Substrat =====
-export const AGENT_LANE_ORDER: AgentLaneId[] = ["codex", "claude", "local", "remote_orchestrator", "local_control"];
+export const AGENT_LANE_ORDER: AgentLaneId[] = ["codex", "claude", "api", "local", "remote_orchestrator", "local_control"];
 
 export function isIntelligentLane(lane: AgentLaneId): boolean {
   return lane !== "local_control";
