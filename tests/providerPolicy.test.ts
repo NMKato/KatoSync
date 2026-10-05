@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   AGENT_LANE_ORDER,
+  API_PROVIDER_PRESETS,
   PROVIDER_RECHECK_INTERVAL_MS,
   buildSanitizedProviderDiagnostics,
   isIntelligentLane,
@@ -56,39 +57,45 @@ test("failover routes only provider-class failures to the next healthy provider"
   const statuses = [
     status("codex"),
     status("claude", { state: "quota_limited", available: false }),
+    status("api"),
     status("local"),
     status("local_control")
   ];
-  const priority: ProviderId[] = ["codex", "claude", "local", "local_control"];
+  const priority: ProviderId[] = ["codex", "claude", "api", "local", "local_control"];
   // Code-/Testfehler bleiben beim aktuellen Provider (fail closed, kein stiller Wechsel).
   assert.equal(nextProviderAfterFailure(statuses, priority, "codex", "job_failed"), null);
-  // Quota bei Codex -> Claude ist selbst limitiert -> naechster gesunder Provider ist Local.
-  assert.equal(nextProviderAfterFailure(statuses, priority, "codex", "quota_limited"), "local");
-  // Deaktivierte Provider werden nie gewaehlt; Local Control bleibt der deterministische Rest.
-  const disabledLocal = statuses.map((entry) => (entry.provider === "local" ? { ...entry, enabled: false } : entry));
-  assert.equal(nextProviderAfterFailure(disabledLocal, priority, "codex", "auth_unavailable"), "local_control");
+  // Quota bei Codex -> Claude ist selbst limitiert -> die API-Lane ist der naechste gesunde Provider.
+  assert.equal(nextProviderAfterFailure(statuses, priority, "codex", "quota_limited"), "api");
+  // Deaktivierte intelligente Provider werden nie gewaehlt; Local Control bleibt der deterministische Rest.
+  const disabled = statuses.map((entry) =>
+    entry.provider === "api" || entry.provider === "local" ? { ...entry, enabled: false } : entry
+  );
+  assert.equal(nextProviderAfterFailure(disabled, priority, "codex", "auth_unavailable"), "local_control");
   assert.equal(nextProviderAfterFailure(statuses, priority, "local", "offline"), "local_control");
 });
 
 test("priority is deterministic and Local Control remains last", () => {
-  assert.deepEqual(normalizeProviderPriority(["local", "codex", "local"]), ["local", "codex", "claude", "local_control"]);
-  assert.deepEqual(normalizeProviderPriority(["local_control", "claude"]), ["claude", "codex", "local", "local_control"]);
-  assert.deepEqual(normalizeProviderPriority(undefined), ["codex", "claude", "local", "local_control"]);
-  assert.deepEqual(moveProvider(["codex", "claude", "local", "local_control"], "local", "down"), [
+  assert.deepEqual(normalizeProviderPriority(["local", "codex", "local"]), ["local", "codex", "claude", "api", "local_control"]);
+  assert.deepEqual(normalizeProviderPriority(["local_control", "claude"]), ["claude", "codex", "api", "local", "local_control"]);
+  assert.deepEqual(normalizeProviderPriority(undefined), ["codex", "claude", "api", "local", "local_control"]);
+  assert.deepEqual(moveProvider(["codex", "claude", "api", "local", "local_control"], "local", "down"), [
     "codex",
     "claude",
+    "api",
     "local",
     "local_control"
   ]);
-  assert.deepEqual(moveProvider(["codex", "claude", "local", "local_control"], "claude", "up"), [
+  assert.deepEqual(moveProvider(["codex", "claude", "api", "local", "local_control"], "claude", "up"), [
     "claude",
     "codex",
+    "api",
     "local",
     "local_control"
   ]);
-  assert.deepEqual(moveProvider(["codex", "claude", "local", "local_control"], "local_control", "up"), [
+  assert.deepEqual(moveProvider(["codex", "claude", "api", "local", "local_control"], "local_control", "up"), [
     "codex",
     "claude",
+    "api",
     "local",
     "local_control"
   ]);
@@ -159,15 +166,49 @@ test("local endpoint validation rejects credentials and injection-shaped URLs", 
   assert.equal(validateLocalEndpointInput("http://localhost:1234 ; rm -rf /"), "invalid");
 });
 
+test("API provider presets are remote HTTPS endpoints and keep EU routing explicit", () => {
+  for (const preset of Object.values(API_PROVIDER_PRESETS)) {
+    const url = new URL(preset.baseUrl);
+    assert.equal(url.protocol, "https:");
+    assert.ok(url.hostname);
+  }
+  assert.equal(API_PROVIDER_PRESETS.openrouter_eu.baseUrl, "https://eu.openrouter.ai/api/v1");
+});
+
 test("provider settings sent to Rust never contain secrets or the fallback toggle", () => {
-  const settings = toProviderSettings(["codex", "local_control"], {
-    kind: "open_ai_compatible",
-    baseUrl: "  http://127.0.0.1:8000/v1  ",
-    model: " qwen "
-  });
+  const settings = toProviderSettings(
+    ["codex", "local_control"],
+    {
+      kind: "open_ai_compatible",
+      baseUrl: "  http://127.0.0.1:8000/v1  ",
+      model: " qwen "
+    },
+    [{
+      id: "api-1",
+      label: " Primary ",
+      preset: "openrouter_eu",
+      baseUrl: "  ",
+      model: " openai/gpt-test ",
+      effort: "high",
+      mode: "auto",
+      capabilities: ["coding"],
+      enabled: true
+    }]
+  );
   assert.deepEqual(settings, {
     disabledProviders: ["codex"],
-    localProvider: { kind: "open_ai_compatible", baseUrl: "http://127.0.0.1:8000/v1", model: "qwen" }
+    localProvider: { kind: "open_ai_compatible", baseUrl: "http://127.0.0.1:8000/v1", model: "qwen" },
+    apiProviders: [{
+      id: "api-1",
+      label: "Primary",
+      preset: "openrouter_eu",
+      baseUrl: "",
+      model: "openai/gpt-test",
+      effort: "high",
+      mode: "auto",
+      capabilities: ["coding"],
+      enabled: true
+    }]
   });
   assert.equal(JSON.stringify(settings).toLowerCase().includes("key"), false);
 });
@@ -265,15 +306,17 @@ test("recheck plan keeps costly READY probes for waiting work at the reset time"
 });
 
 test("remote orchestrator is the intelligent fallback before the deterministic substrate", () => {
-  assert.deepEqual(AGENT_LANE_ORDER, ["codex", "claude", "local", "remote_orchestrator", "local_control"]);
+  assert.deepEqual(AGENT_LANE_ORDER, ["codex", "claude", "api", "local", "remote_orchestrator", "local_control"]);
+  assert.equal(isIntelligentLane("api"), true);
   assert.equal(isIntelligentLane("remote_orchestrator"), true);
   assert.equal(isIntelligentLane("local_control"), false);
   const limited = [
     status("codex", { state: "quota_limited", available: false }),
     status("claude", { state: "quota_limited", available: false }),
+    status("api", { available: false, state: "offline" }),
     status("local", { available: false, state: "offline" })
   ];
-  const priority: ProviderId[] = ["codex", "claude", "local", "local_control"];
+  const priority: ProviderId[] = ["codex", "claude", "api", "local", "local_control"];
   assert.equal(nextLaneAfterFailure(limited, priority, "codex", "quota_limited", true), "remote_orchestrator");
   assert.equal(nextLaneAfterFailure(limited, priority, "codex", "quota_limited", false), "local_control");
   assert.equal(nextLaneAfterFailure([...limited.slice(0, 1), status("claude")], priority, "codex", "quota_limited", true), "claude");
