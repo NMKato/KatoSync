@@ -7066,3 +7066,302 @@ button.agent-tile:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* ===== Project Registry + Focus Portfolio ===== */
+.agent-projects {
+  display: grid;
+  gap: 14px;
+  grid-column: 1 / -1;
+}
+
+.projects-head,
+.projects-discovery-head,
+.projects-card-top,
+.projects-head-actions,
+.projects-actions,
+.projects-discovery-actions,
+.projects-add-choices,
+.projects-finding-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.projects-head,
+.projects-discovery-head,
+.projects-card-top {
+  justify-content: space-between;
+}
+
+.projects-head-actions,
+.projects-actions,
+.projects-discovery-actions,
+.projects-finding-actions {
+  flex-wrap: wrap;
+}
+
+.projects-add-choices {
+  align-items: stretch;
+}
+
+.projects-add-choice {
+  display: grid;
+  gap: 8px;
+  flex: 1 1 260px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.projects-add-choice small,
+.projects-privacy,
+.projects-meta,
+.projects-scope {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.projects-privacy,
+.tone-warn,
+.tone-danger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.projects-candidates,
+.projects-focus-list,
+.projects-findings,
+.projects-capsule ul,
+.projects-missing ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.projects-candidates,
+.projects-findings,
+.projects-missing ul {
+  display: grid;
+  gap: 8px;
+}
+
+.projects-candidates li,
+.projects-missing li {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.projects-candidates label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.projects-candidates label > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.projects-candidates li.registered {
+  opacity: 0.7;
+}
+
+.projects-focus-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.projects-focus-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.projects-focus-list li small {
+  grid-column: 2;
+  color: var(--text-muted);
+}
+
+.projects-prio {
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px;
+  min-height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+
+.projects-prio.P0 {
+  color: var(--danger);
+}
+
+.projects-prio.P1 {
+  color: var(--warn);
+}
+
+.projects-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 12px;
+}
+
+.projects-card {
+  min-width: 0;
+}
+
+.projects-card-name,
+.projects-card-top small {
+  display: block;
+}
+
+.projects-card-top > div {
+  min-width: 0;
+}
+
+.projects-card-top small,
+.projects-scope {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-badge {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.projects-wave {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.projects-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.projects-select {
+  display: grid;
+  gap: 5px;
+}
+
+.projects-select span {
+  color: var(--text-label);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.projects-select select {
+  width: 100%;
+}
+
+.projects-finding {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.projects-finding.resolved {
+  opacity: 0.7;
+}
+
+.projects-finding-diff {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.projects-finding-diff dt {
+  color: var(--text-label);
+  font-weight: 700;
+}
+
+.projects-finding-diff dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.projects-finding-hint {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+}
+
+.projects-capsule {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.projects-capsule p,
+.projects-capsule ul {
+  margin: 0;
+  font-size: 12px;
+}
+
+.projects-capsule li + li {
+  margin-top: 4px;
+}
+
+.projects-inactive {
+  color: var(--text-muted);
+}
+
+.projects-inactive > summary {
+  cursor: pointer;
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+.tone-danger {
+  color: var(--danger);
+}
+
+@media (max-width: 760px) {
+  .projects-head,
+  .projects-card-top {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .projects-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .projects-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .projects-add-choices {
+    flex-direction: column;
+  }
+}
