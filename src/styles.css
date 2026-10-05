@@ -8265,3 +8265,159 @@ button.agent-tile:hover {
 .agent-project-chip.manual {
   opacity: .68;
 }
+
+
+/* ===== Project targets / platform-aware worktrees ===== */
+.projects-target-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.projects-target-badges .agent-mini-title {
+  margin-right: 2px;
+}
+
+.projects-target-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255,255,255,.03);
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+
+.projects-target-badge.target-windows {
+  border-color: rgba(78, 163, 255, .28);
+  background: rgba(78, 163, 255, .07);
+  color: #a9d2ff;
+}
+
+.projects-target-badge.target-macos {
+  border-color: rgba(215, 225, 238, .25);
+  background: rgba(215, 225, 238, .06);
+  color: #dce5ef;
+}
+
+.projects-target-badge.target-local-ai {
+  border-color: rgba(95, 211, 157, .28);
+  background: rgba(95, 211, 157, .07);
+  color: #a8ecc8;
+}
+
+.projects-target-badge.target-shared {
+  border-color: rgba(169, 178, 196, .20);
+  background: rgba(169, 178, 196, .04);
+  color: var(--text-muted);
+}
+
+.projects-worktree-targets {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(0,0,0,.12);
+  overflow: hidden;
+}
+
+.projects-worktree-targets > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.projects-worktree-targets > summary small {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.projects-worktree-list {
+  display: grid;
+  gap: 6px;
+  max-height: 310px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 8px 8px;
+}
+
+.projects-worktree-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255,255,255,.018);
+}
+
+.projects-worktree-row.selected {
+  border-color: color-mix(in srgb, var(--agent) 55%, var(--line));
+  background: color-mix(in srgb, var(--agent) 7%, transparent);
+}
+
+.projects-worktree-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.projects-worktree-copy > strong,
+.projects-worktree-copy > small > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-worktree-copy > strong {
+  font-size: 10px;
+  color: var(--text);
+}
+
+.projects-worktree-copy > small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.projects-worktree-copy > small > svg {
+  flex: 0 0 auto;
+}
+
+.projects-worktree-state {
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .projects-worktree-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .projects-worktree-state,
+  .projects-worktree-row > button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}

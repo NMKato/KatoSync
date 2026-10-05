@@ -1365,25 +1365,34 @@ export function useKatoSyncViewModel() {
     [config, show]
   );
 
-  // Registry-Projekt ausdruecklich als Arbeitsordner fuer Aufgaben festlegen. Die Registry waehlt nie still einen
-  // Ausfuehrungsordner: der Runner wechselt dort auf den Default-Branch und legt einen Task-Branch an.
+  // Registry-Projekt bzw. einen konkreten Worktree ausdruecklich als Arbeitsordner festlegen.
+  // Die Registry waehlt nie still einen Ausfuehrungsordner; bei mehreren Targets entscheidet der Mensch sichtbar.
   const handleUseProjectFolder = useCallback(
-    async (projectId: string) => {
+    async (projectId: string, worktreePath?: string, targetLabel?: string, dirtyCount = 0) => {
       const source = configRef.current;
       const project = projectsRegistryRef.current.projects.find((entry) => entry.id === projectId);
       if (!source || !project) return;
+      const path = worktreePath ?? project.rootPath;
+      const target = targetLabel ? `\n\nTarget: ${targetLabel}` : "";
+      const dirtyWarning =
+        dirtyCount > 0
+          ? `\n\nAchtung: Dieser Worktree hat aktuell ${dirtyCount} lokale Änderung${dirtyCount === 1 ? "" : "en"}. KatoSync wird sie nicht löschen, aber ein sauberer Worktree ist für automatische Aufgaben sicherer.`
+          : "";
       const confirmed = await askConfirm(
-        `„${project.name}“ als Arbeitsordner für Aufgaben verwenden?\n\nBeim Start einer Aufgabe wechselt der Runner in diesem Ordner auf den Standard-Branch und legt dort einen neuen Branch an. Nutze dafür am besten einen Ordner ohne offene Änderungen.`,
+        `„${project.name}“ als Arbeitsordner für Aufgaben verwenden?${target}\n\nOrdner: ${path}${dirtyWarning}\n\nBeim Start einer Aufgabe arbeitet der Runner in genau diesem Ordner. Verwende für Auto-Lanes möglichst einen sauberen, passend zum Zielsystem ausgewählten Worktree.`,
         { title: "Arbeitsordner festlegen", okLabel: "Festlegen", cancelLabel: "Abbrechen" }
       );
       if (!confirmed) return;
-      const nextConfig: AppConfig = { ...source, projectRepos: { ...(source.projectRepos ?? {}), [project.id]: project.rootPath } };
+      const nextConfig: AppConfig = {
+        ...source,
+        projectRepos: { ...(source.projectRepos ?? {}), [project.id]: path }
+      };
       try {
         setConfig(await saveConfig(nextConfig));
       } catch {
         setConfig(nextConfig);
       }
-      show("ok", `Arbeitsordner für ${project.name} festgelegt.`);
+      show("ok", `Arbeitsordner für ${project.name}${targetLabel ? ` · ${targetLabel}` : ""} festgelegt.`);
     },
     [show]
   );

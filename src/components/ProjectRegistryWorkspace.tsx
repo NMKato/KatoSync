@@ -20,6 +20,11 @@ import {
 import { useT, type TFunc, type TKey } from "../i18n";
 import { AUTO_MODES, FOCUS_PRIORITIES, FOCUS_STATUSES } from "../lib/projectFocus";
 import { normalizeRemote } from "../lib/projectExclusions";
+import {
+  classifyProjectWorktrees,
+  uniqueProjectTargets,
+  type ProjectTargetKind
+} from "../lib/projectTargets";
 import type {
   DiscoveredProject,
   FocusPriority,
@@ -388,6 +393,15 @@ function MissingProfile({ vm }: { vm: ViewModel }) {
   );
 }
 
+function targetLabel(kind: ProjectTargetKind, t: TFunc): string {
+  return t(`projects.target.${kind}` as TKey);
+}
+
+function worktreeShortName(path: string): string {
+  const clean = path.replace(/\/+$/, "");
+  return clean.split("/").pop() || clean;
+}
+
 function ProjectCard({ project, vm }: { project: RegistryProject; vm: ViewModel }) {
   const { t } = useT();
   const projects = vm.projects;
@@ -396,7 +410,10 @@ function ProjectCard({ project, vm }: { project: RegistryProject; vm: ViewModel 
   const error = projects.scanErrors[project.id];
   const state: VerificationState = project.verification?.state ?? "unscanned";
   const wave = project.capsule?.currentWave;
-  const worktreeCount = project.scan?.worktrees.length ?? 1;
+  const worktrees = project.scan?.worktrees ?? [];
+  const worktreeCount = worktrees.length || 1;
+  const worktreeTargets = classifyProjectWorktrees(project.name, worktrees);
+  const targetKinds = uniqueProjectTargets(project.name, worktrees);
   const mappedFolder = vm.config?.projectRepos?.[project.id];
   return (
     <article className={`glass agent-card projects-card status-${project.focus.status}`}>
@@ -422,6 +439,16 @@ function ProjectCard({ project, vm }: { project: RegistryProject; vm: ViewModel 
         {" · "}
         {project.scan ? t("projects.card.checked", { time: stamp(project.scan.scannedAt) }) : t("projects.card.notScanned")}
       </small>
+      {targetKinds.length ? (
+        <div className="projects-target-badges" aria-label={t("projects.targets.title")}>
+          <span className="agent-mini-title">{t("projects.targets.title")}</span>
+          {targetKinds.map((kind) => (
+            <span className={`projects-target-badge target-${kind}`} key={kind}>
+              {targetLabel(kind, t)}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {error ? <small className="tone-danger">{t("projects.card.scanError", { error })}</small> : null}
 
       <div className="projects-controls">
@@ -454,14 +481,16 @@ function ProjectCard({ project, vm }: { project: RegistryProject; vm: ViewModel 
           {scanning ? <Loader2 className="spin" size={14} /> : <RefreshCcw size={14} />}
           {t("projects.card.rescan")}
         </button>
-        <button
-          className="ghost compact-button"
-          disabled={mappedFolder === project.rootPath}
-          onClick={() => void vm.handleUseProjectFolder(project.id)}
-          type="button"
-        >
-          {mappedFolder === project.rootPath ? t("projects.card.workFolderSet") : t("projects.card.workFolder")}
-        </button>
+        {worktreeTargets.length <= 1 ? (
+          <button
+            className="ghost compact-button"
+            disabled={mappedFolder === project.rootPath}
+            onClick={() => void vm.handleUseProjectFolder(project.id)}
+            type="button"
+          >
+            {mappedFolder === project.rootPath ? t("projects.card.workFolderSet") : t("projects.card.workFolder")}
+          </button>
+        ) : null}
         <button className="ghost compact-button" onClick={() => setDetails((open) => !open)} aria-expanded={details} type="button">
           <ChevronDown size={14} />
           {t("projects.card.details")}
@@ -471,6 +500,53 @@ function ProjectCard({ project, vm }: { project: RegistryProject; vm: ViewModel 
           {t("projects.card.remove")}
         </button>
       </div>
+
+      {worktreeTargets.length > 1 ? (
+        <details className="projects-worktree-targets">
+          <summary>
+            <span>{t("projects.targets.worktrees")}</span>
+            <small>{t("projects.targets.count", { count: worktreeTargets.length })}</small>
+          </summary>
+          <div className="projects-worktree-list">
+            {worktreeTargets.map(({ kind, worktree }) => {
+              const isMapped = mappedFolder === worktree.path;
+              const dirty = (worktree.dirtyCount ?? 0) > 0;
+              return (
+                <div className={`projects-worktree-row${isMapped ? " selected" : ""}`} key={worktree.path}>
+                  <span className={`projects-target-badge target-${kind}`}>{targetLabel(kind, t)}</span>
+                  <span className="projects-worktree-copy">
+                    <strong title={worktree.path}>{worktreeShortName(worktree.path)}</strong>
+                    <small title={worktree.branch ?? worktree.path}>
+                      <GitBranch size={11} />
+                      <span>{worktree.branch ?? t("projects.targets.detached")}</span>
+                    </small>
+                  </span>
+                  <span className={dirty ? "projects-worktree-state tone-warn" : "projects-worktree-state tone-ok"}>
+                    {dirty
+                      ? t("projects.targets.dirty", { count: worktree.dirtyCount ?? 0 })
+                      : t("projects.targets.clean")}
+                  </span>
+                  <button
+                    className="ghost compact-button"
+                    disabled={isMapped}
+                    onClick={() =>
+                      void vm.handleUseProjectFolder(
+                        project.id,
+                        worktree.path,
+                        `${targetLabel(kind, t)} · ${worktree.branch ?? worktreeShortName(worktree.path)}`,
+                        worktree.dirtyCount ?? 0
+                      )
+                    }
+                    type="button"
+                  >
+                    {isMapped ? t("projects.card.workFolderSet") : t("projects.card.workFolder")}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      ) : null}
 
       {project.verification?.findings.length ? (
         <ul className="projects-findings">
