@@ -11,8 +11,8 @@ import { providerIcons } from "./ProviderManager";
 import type { AgentHandoff, AgentJob, AgentJobEvent, AgentLane, AgentLaneId, AgentSyncState, AutoLane, AutoLanePlan, AutoLaneState } from "../types";
 
 const PROVIDER_FLOW = ["installed", "authenticated", "available", "quota_limited", "auth_unavailable", "capacity_unavailable", "job_failed", "offline", "unknown"];
-const PHASES = ["execution", "approval", "queued", "review", "deferred", "failed", "complete", "blocked", "orchestrator", "scheduler_resume", "parked", "waiting_provider", "local_command"];
-const STATUSES = ["queued", "running", "waiting", "blocked", "completed", "failed"];
+const PHASES = ["execution", "implementation", "verification", "approval", "queued", "review", "deferred", "failed", "complete", "blocked", "orchestrator", "scheduler_resume", "parked", "waiting_provider", "local_command"];
+const STATUSES = ["queued", "running", "implemented", "verifying", "review_ready", "human_gate", "retry_wait", "waiting", "blocked", "completed", "failed"];
 
 export const laneIcons: Record<AgentLaneId, typeof RadioTower> = { ...providerIcons, remote_orchestrator: RadioTower };
 
@@ -627,17 +627,25 @@ export function SubstratePanel({ state }: { state: AgentSyncState }) {
 // ===== Status-Zaehler aus derselben Jobliste =====
 export function StatusCounts({ state }: { state: AgentSyncState }) {
   const { t } = useT();
-  const flow: Array<keyof AgentSyncState["counts"]> = ["queued", "running", "waiting", "completed"];
+  const ready = state.counts.queued + state.counts.waiting + state.counts.retry_wait;
+  const working = state.counts.running + state.counts.verifying;
+  const review = state.counts.implemented + state.counts.review_ready;
+  const human = state.counts.human_gate;
   return (
     <div className="agent-flow">
       <ol className="agent-flow-stages">
-        {flow.map((status, index) => (
-          <li className={`agent-flow-stage ${status}${state.counts[status] ? " has" : ""}`} key={status}>
+        {[
+          { key: "queued", value: ready, label: t("agent.status.queued") },
+          { key: "running", value: working, label: t("agent.status.running") },
+          { key: "review_ready", value: review, label: t("agent.status.review_ready") },
+          { key: "human_gate", value: human, label: t("agent.status.human_gate") }
+        ].map((entry, index) => (
+          <li className={`agent-flow-stage ${entry.key}${entry.value ? " has" : ""}`} key={entry.key}>
             {index > 0 ? (
-              <span className={`agent-flow-link${status === "running" && state.counts.running ? " flowing" : ""}`} aria-hidden="true" />
+              <span className={`agent-flow-link${entry.key === "running" && working ? " flowing" : ""}`} aria-hidden="true" />
             ) : null}
-            <strong>{state.counts[status]}</strong>
-            <span>{t(`agent.status.${status}` as TKey)}</span>
+            <strong>{entry.value}</strong>
+            <span>{entry.label}</span>
           </li>
         ))}
       </ol>
@@ -645,9 +653,7 @@ export function StatusCounts({ state }: { state: AgentSyncState }) {
         <span className={state.counts.blocked ? "warn" : ""}>
           {t("agent.status.blocked")}: <strong>{state.counts.blocked}</strong>
         </span>
-        <span className={state.counts.failed ? "danger" : ""}>
-          {t("agent.status.failed")}: <strong>{state.counts.failed}</strong>
-        </span>
+        <span>{t("agent.history.title")}: <strong>{state.counts.completed + state.counts.failed}</strong></span>
       </div>
     </div>
   );

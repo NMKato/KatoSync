@@ -573,7 +573,18 @@ export interface OrchestrationSnapshot {
 
 // Fuenf kanonische Lanes: vier intelligente Besitzer + das deterministische Substrat.
 export type AgentLaneId = "codex" | "claude" | "local" | "remote_orchestrator" | "local_control";
-export type AgentJobStatus = "queued" | "running" | "waiting" | "blocked" | "completed" | "failed";
+export type AgentJobStatus =
+  | "queued"
+  | "running"
+  | "implemented"
+  | "verifying"
+  | "review_ready"
+  | "human_gate"
+  | "retry_wait"
+  | "waiting"
+  | "blocked"
+  | "completed"
+  | "failed";
 export type AgentJobSource = "action_plan" | "runner" | "provider_router" | "continuation" | "local_control";
 export type AgentJobEventKind = "state" | "activity" | "handoff" | "evidence" | "heartbeat";
 export type AgentNextStep =

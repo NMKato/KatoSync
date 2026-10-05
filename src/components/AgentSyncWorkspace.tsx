@@ -165,6 +165,12 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   const { t } = useT();
   const readiness = buildAgentReadiness(vm);
   const state = vm.agentSync;
+  const approvalPlans = vm.actionPlans.filter(
+    (plan) => plan.status === "pending_user_review" || plan.status === "in_review"
+  );
+  const reviewJobs = state.jobs.filter(
+    (job) => job.status === "implemented" || job.status === "review_ready" || job.status === "human_gate"
+  );
 
   return (
     <section className="agent-dashboard" id="section-agent-dashboard">
@@ -176,6 +182,55 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
         onToggle={vm.handleSetAutoMode}
         plan={state.autoLanes}
       />
+
+      {(approvalPlans.length || reviewJobs.length) ? (
+        <section className="agent-approval-zone" aria-label={t("agent.approval.title")}>
+          <div className="agent-approval-head">
+            <ShieldCheck size={17} />
+            <div>
+              <h3>{t("agent.approval.title")}</h3>
+              <p>{t("agent.approval.text")}</p>
+            </div>
+          </div>
+          <div className="agent-approval-grid">
+            {approvalPlans.slice(0, 4).map((plan) => {
+              const projectIds = [...new Set(plan.tasks.map((task) => task.projectId))].filter(Boolean);
+              return (
+                <article className="glass agent-approval-card" key={plan.planId}>
+                  <span className="agent-approval-kind">{t("agent.approval.plan")}</span>
+                  <strong>{projectIds.join(" · ") || plan.agentName}</strong>
+                  <small>{plan.tasks.length} · {t(`label.risk.${plan.riskLevel}` as TKey)}</small>
+                  <p>{t("board.statusNeedApproval")}</p>
+                  <div className="agent-approval-actions">
+                    <button className="secondary compact-button" disabled={Boolean(vm.busy)} onClick={() => void vm.handleStartActionPlan(plan.planId)} type="button">
+                      <CheckCircle2 size={14} />
+                      {t("board.approvePlan")}
+                    </button>
+                    <button className="ghost compact-button" disabled={Boolean(vm.busy)} onClick={() => void vm.handleRejectActionPlan(plan.planId)} type="button">
+                      <XCircle size={14} />
+                      {t("board.rejectPlan")}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            {reviewJobs.slice(0, 4).map((job) => (
+              <article className="glass agent-approval-card" key={job.id}>
+                <span className="agent-approval-kind">{t(`agent.status.${job.status}` as TKey)}</span>
+                <strong>{job.task}</strong>
+                <small>{job.projectId} · {job.owner ? laneLabel(t, job.owner) : t("agent.job.ownerNone")}</small>
+                <p>{job.nextStep ? t(`agent.next.${job.nextStep}` as TKey) : t("agent.next.inspect_evidence")}</p>
+                <div className="agent-approval-actions">
+                  <button className="secondary compact-button" onClick={() => onNavigate("agentJobs")} type="button">
+                    <ArrowRight size={14} />
+                    {t("agent.attention.open")}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {readiness.attention.length ? (
         <ul className="agent-attention glass" aria-label={t("agent.readiness.attention")}>
@@ -298,6 +353,8 @@ function LastRunnerResult({ vm }: { vm: ViewModel }) {
 export function AgentSyncJobs({ vm, onOpenMistralTasks }: { vm: ViewModel; onOpenMistralTasks: () => void }) {
   const { t } = useT();
   const state = vm.agentSync;
+  const currentJobs = state.jobs.filter((job) => job.status !== "completed" && job.status !== "failed");
+  const historyJobs = state.jobs.filter((job) => job.status === "completed" || job.status === "failed");
   const groups = vm.boardGroups
     .map((group) => ({
       projectId: group.projectId,
@@ -335,7 +392,13 @@ export function AgentSyncJobs({ vm, onOpenMistralTasks }: { vm: ViewModel; onOpe
       <div className="glass agent-card">
         <CardTitle icon={<ListChecks size={17} />} title={t("agent.queue.title")} />
         <p className="agent-route-note">{t("agent.queue.note")}</p>
-        <AgentJobList jobs={state.jobs} limit={40} />
+        <AgentJobList jobs={currentJobs} limit={40} />
+        {historyJobs.length ? (
+          <details className="agent-job-history">
+            <summary>{t("agent.history.title")} · {historyJobs.length}</summary>
+            <AgentJobList jobs={historyJobs} limit={40} />
+          </details>
+        ) : null}
       </div>
 
       <div className="glass agent-card">

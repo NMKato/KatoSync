@@ -5279,13 +5279,10 @@ mod context_pack_pipeline_tests {
 
         let sources = context_pack_sources(&scan).unwrap();
         assert!(sources[0].secret_detected);
-        let error = context_pack::ContextPack::generate(
-            "KatoSync",
-            "2026-10-04T20:00:00Z",
-            sources,
-        )
-        .unwrap_err()
-        .to_string();
+        let error =
+            context_pack::ContextPack::generate("KatoSync", "2026-10-04T20:00:00Z", sources)
+                .unwrap_err()
+                .to_string();
         assert!(!error.contains(secret));
         assert!(!error.contains("sk-never-serialize-this-value"));
 
@@ -5327,14 +5324,8 @@ mod context_pack_pipeline_tests {
 
         let scan = scan_roots(&config).unwrap();
         let mut warnings = Vec::new();
-        let current_files = write_current_files(
-            &config,
-            &scan,
-            &output_dir,
-            &snapshot_dir,
-            &mut warnings,
-        )
-        .unwrap();
+        let current_files =
+            write_current_files(&config, &scan, &output_dir, &snapshot_dir, &mut warnings).unwrap();
         let json_path = output_dir.join(current_file_name(&config, "CURRENT_CONTEXT_PACK", "json"));
         let markdown_path =
             output_dir.join(current_file_name(&config, "CURRENT_CONTEXT_PACK", "md"));
@@ -5396,14 +5387,8 @@ mod context_pack_pipeline_tests {
             .iter()
             .any(|finding| finding.category == "status" && finding.skipped));
         let mut warnings = Vec::new();
-        let current_files = write_current_files(
-            &config,
-            &scan,
-            &output_dir,
-            &snapshot_dir,
-            &mut warnings,
-        )
-        .unwrap();
+        let current_files =
+            write_current_files(&config, &scan, &output_dir, &snapshot_dir, &mut warnings).unwrap();
 
         assert!(!json_path.exists());
         assert!(!markdown_path.exists());
@@ -5411,12 +5396,18 @@ mod context_pack_pipeline_tests {
             .iter()
             .all(|path| !path.contains("CURRENT_CONTEXT_PACK")));
         assert!(output_dir
-            .join(current_file_name(&config, "CURRENT_MISTRAL_BRIEFING_SOURCE", "md"))
+            .join(current_file_name(
+                &config,
+                "CURRENT_MISTRAL_BRIEFING_SOURCE",
+                "md"
+            ))
             .exists());
         assert!(warnings
             .iter()
             .any(|warning| warning.starts_with("Context Pack nicht erzeugt")));
-        assert!(warnings.iter().all(|warning| !warning.contains(secret_value)));
+        assert!(warnings
+            .iter()
+            .all(|warning| !warning.contains(secret_value)));
 
         fs::remove_dir_all(&temp_dir).unwrap();
     }

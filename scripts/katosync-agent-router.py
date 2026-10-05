@@ -86,8 +86,8 @@ def load_resume_item(control,args,repo,prompt_file):
     if not path.is_file() or not under(path,[queue_root]):
         fail("resume queue item outside approved fallback queue")
     item=json.loads(path.read_text())
-    if item.get("status") not in {"waiting","provider_ready"}:
-        fail("resume queue item is not waiting")
+    if item.get("status") not in {"waiting","provider_ready","retry_wait"}:
+        fail("resume queue item is not resumable")
     if pathlib.Path(item.get("repo","")).resolve()!=repo.resolve():
         fail("resume queue repo mismatch")
     if pathlib.Path(item.get("promptFile","")).resolve()!=prompt_file.resolve():
@@ -148,12 +148,32 @@ def enqueue_rdc(item,path,states):
     print("KATOSYNC_RDC_FALLBACK_QUEUED",path,flush=True)
     return path
 
-def complete_item(item,path,states,provider):
-    item["status"]="completed"
-    item["completedAt"]=now_iso()
+def mark_implemented(item,path,states,provider,reason="changes_ready"):
+    item["status"]="implemented"
+    item["implementedAt"]=now_iso()
+    item["reason"]=reason
     item["activeProvider"]=provider
     item["providerStates"]=states
     persist_item(item,path)
+
+def mark_review_ready(item,path,states,provider,reason="provider_completed_clean"):
+    item["status"]="review_ready"
+    item["reviewReadyAt"]=now_iso()
+    item["reason"]=reason
+    item["activeProvider"]=provider
+    item["providerStates"]=states
+    persist_item(item,path)
+
+def mark_retry_wait(item,path,states,provider,reason):
+    retries=int(item.get("retryCount") or 0)+1
+    item["retryCount"]=retries
+    item["maxRetries"]=int(item.get("maxRetries") or 2)
+    item["status"]="retry_wait"
+    item["reason"]=reason
+    item["activeProvider"]=provider
+    item["providerStates"]=states
+    persist_item(item,path)
+    return retries < item["maxRetries"]
 
 def fail_item(item,path,states,provider,reason):
     item["status"]="failed"
@@ -238,21 +258,34 @@ def main():
                 states.append({"provider":provider,"state":"job_failed","exitCode":22})
                 fail_item(item,item_path,states,provider,"branch_changed")
                 fail(f"branch changed unexpectedly after {provider}",22)
-            if git(repo,"status","--porcelain").stdout:
-                states.append({"provider":provider,"state":"job_failed","exitCode":22})
-                fail_item(item,item_path,states,provider,"dirty_after_success")
-                fail(f"worktree dirty after successful {provider} run",22)
+
+            dirty_after = git(repo,"status","--porcelain").stdout
             states.append({"provider":provider,"state":"completed"})
-            complete_item(item,item_path,states,provider)
-            print("KATOSYNC_PROVIDER_DONE",provider,args.name,flush=True)
+            if dirty_after:
+                # Coding agents are expected to create owned changes. A successful provider run
+                # with a dirty worktree is implementation output that must be verified, not failure.
+                mark_implemented(item,item_path,states,provider)
+                print("KATOSYNC_IMPLEMENTED_NEEDS_VERIFY",provider,args.name,flush=True)
+                return 0
+
+            # A clean worktree after a successful provider run may mean the agent committed/pushed
+            # or only completed a read/review task. It is review-ready, never automatically DONE.
+            mark_review_ready(item,item_path,states,provider)
+            print("KATOSYNC_REVIEW_READY",provider,args.name,flush=True)
             return 0
 
         state=classify_provider_failure(output)
         states.append({"provider":provider,"state":state,"exitCode":rc})
         print("KATOSYNC_PROVIDER_FAIL",provider,state,f"exit={rc}",flush=True)
         if state=="job_failed":
-            fail_item(item,item_path,states,provider,state)
-            fail(f"{provider} failed for a job reason; no provider hopping",rc or 1)
+            dirty_after_failure=git(repo,"status","--porcelain").stdout
+            reason="implementation_needs_fix" if dirty_after_failure else "job_failed_retryable"
+            retryable=mark_retry_wait(item,item_path,states,provider,reason)
+            if retryable:
+                print("KATOSYNC_RETRY_WAIT",provider,args.name,f"retry={item['retryCount']}/{item['maxRetries']}",flush=True)
+                return 75
+            fail_item(item,item_path,states,provider,"retry_exhausted")
+            fail(f"{provider} failed after bounded retries",rc or 1)
         mark_provider_switch(item,item_path,states,state)
 
     enqueue_rdc(item,item_path,states)

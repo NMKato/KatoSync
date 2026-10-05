@@ -378,6 +378,31 @@ function fallbackJobs(
       status = "completed";
       owner = completedBy;
       phase = "complete";
+    } else if (item.status === "implemented") {
+      status = "implemented";
+      owner = completedBy ?? laneFromProvider(item.activeProvider);
+      phase = "implementation";
+      nextStep = "inspect_evidence";
+    } else if (item.status === "verifying") {
+      status = "verifying";
+      owner = completedBy ?? laneFromProvider(item.activeProvider);
+      phase = "verification";
+      nextStep = "inspect_evidence";
+    } else if (item.status === "review_ready") {
+      status = "review_ready";
+      owner = completedBy ?? laneFromProvider(item.activeProvider);
+      phase = "review";
+      nextStep = "review_merge";
+    } else if (item.status === "human_gate") {
+      status = "human_gate";
+      owner = completedBy ?? laneFromProvider(item.activeProvider);
+      phase = "approval";
+      nextStep = "resolve_gate";
+    } else if (item.status === "retry_wait") {
+      status = "retry_wait";
+      owner = laneFromProvider(item.activeProvider);
+      phase = "waiting_provider";
+      nextStep = "await_intelligent_lane";
     } else if (item.status === "failed") {
       status = "failed";
       owner = laneFromProvider(last(item.providerStates)?.provider);
@@ -732,7 +757,19 @@ function startSafety(input: AgentJobModelInput, jobs: AgentJob[], lanes: AgentLa
 }
 
 // ===== Komposition =====
-const STATUS_RANK: Record<AgentJobStatus, number> = { running: 0, blocked: 1, waiting: 2, queued: 3, failed: 4, completed: 5 };
+const STATUS_RANK: Record<AgentJobStatus, number> = {
+  running: 0,
+  verifying: 1,
+  implemented: 2,
+  review_ready: 3,
+  human_gate: 4,
+  retry_wait: 5,
+  blocked: 6,
+  waiting: 7,
+  queued: 8,
+  failed: 9,
+  completed: 10
+};
 
 export function compareJobs(a: AgentJob, b: AgentJob): number {
   const byState = STATUS_RANK[a.status] - STATUS_RANK[b.status];
@@ -850,10 +887,27 @@ export function normalizeAgentSyncState(input: AgentJobModelInput): AgentSyncSta
 
   const currentJob = jobs.find((job) => job.status === "running") ?? null;
   const pending = jobs
-    .filter((job) => job.status === "queued" || (job.status === "waiting" && job.nextStep && NEXT_CANDIDATE_STEPS.has(job.nextStep)))
+    .filter(
+      (job) =>
+        job.status === "queued" ||
+        job.status === "retry_wait" ||
+        (job.status === "waiting" && job.nextStep && NEXT_CANDIDATE_STEPS.has(job.nextStep))
+    )
     .sort((a, b) => (STATUS_RANK[b.status] - STATUS_RANK[a.status]) || ((ms(a.createdAt) || 0) - (ms(b.createdAt) || 0)));
   const nextJob = pending[0] ?? null;
-  const counts = { queued: 0, running: 0, waiting: 0, blocked: 0, completed: 0, failed: 0 } as Record<AgentJobStatus, number>;
+  const counts = {
+    queued: 0,
+    running: 0,
+    implemented: 0,
+    verifying: 0,
+    review_ready: 0,
+    human_gate: 0,
+    retry_wait: 0,
+    waiting: 0,
+    blocked: 0,
+    completed: 0,
+    failed: 0
+  } as Record<AgentJobStatus, number>;
   for (const job of jobs) counts[job.status] += 1;
 
   const seen = new Set<string>();
@@ -874,7 +928,10 @@ export function normalizeAgentSyncState(input: AgentJobModelInput): AgentSyncSta
     events,
     handoffs,
     counts,
-    queueCount: counts.queued + pending.filter((job) => job.status === "waiting").length,
+    queueCount:
+      counts.queued +
+      counts.retry_wait +
+      pending.filter((job) => job.status === "waiting").length,
     startSafety: safety,
     localControl: localHealth,
     remote,
@@ -886,7 +943,14 @@ export function normalizeAgentSyncState(input: AgentJobModelInput): AgentSyncSta
 
 /** Wartet belegbar Arbeit auf einen Provider? Steuert, ob teure READY-Tests ueberhaupt noetig sind. */
 export function agentWorkWaiting(state: AgentSyncState | null): boolean {
-  return Boolean(state?.jobs.some((job) => job.status === "queued" || (job.status === "waiting" && job.source === "provider_router")));
+  return Boolean(
+    state?.jobs.some(
+      (job) =>
+        job.status === "queued" ||
+        job.status === "retry_wait" ||
+        (job.status === "waiting" && job.source === "provider_router")
+    )
+  );
 }
 
 // ===== Screen-Projektionen: alle Views lesen dieselbe Wahrheit =====

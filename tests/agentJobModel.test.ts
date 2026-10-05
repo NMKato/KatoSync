@@ -196,6 +196,71 @@ test("direct provider-router job is visible as active instead of disappearing un
   assert.equal(state.startSafety.safe, false);
 });
 
+test("successful coding output with owned changes is implemented, never failed or done", () => {
+  const state = normalizeAgentSyncState(input({
+    localControl: snapshot({
+      fallbackJobs: [fallback({
+        status: "implemented",
+        reason: "changes_ready",
+        activeProvider: "codex",
+        providerStates: [{ provider: "codex", state: "completed" }]
+      })]
+    })
+  }));
+  const job = state.jobs.find((entry) => entry.source === "provider_router");
+  assert.ok(job);
+  assert.equal(job.status, "implemented");
+  assert.equal(job.phase, "implementation");
+  assert.equal(job.nextStep, "inspect_evidence");
+  assert.equal(job.owner, "codex");
+  assert.equal(state.counts.implemented, 1);
+  assert.equal(state.counts.failed, 0);
+  assert.equal(state.counts.completed, 0);
+  assert.equal(state.currentJob, null);
+});
+
+test("clean provider completion is review-ready until integration evidence closes the product task", () => {
+  const state = normalizeAgentSyncState(input({
+    localControl: snapshot({
+      fallbackJobs: [fallback({
+        status: "review_ready",
+        reason: "provider_completed_clean",
+        activeProvider: "claude",
+        providerStates: [{ provider: "claude", state: "completed" }]
+      })]
+    })
+  }));
+  const job = state.jobs.find((entry) => entry.source === "provider_router");
+  assert.ok(job);
+  assert.equal(job.status, "review_ready");
+  assert.equal(job.phase, "review");
+  assert.equal(job.nextStep, "review_merge");
+  assert.equal(job.owner, "claude");
+  assert.equal(state.counts.review_ready, 1);
+  assert.equal(state.counts.completed, 0);
+  assert.equal(agentWorkWaiting(state), false);
+});
+
+test("retry-wait remains live work and is not mistaken for empty queue", () => {
+  const state = normalizeAgentSyncState(input({
+    localControl: snapshot({
+      fallbackJobs: [fallback({
+        status: "retry_wait",
+        reason: "test_failed_retryable",
+        activeProvider: null,
+        providerStates: [{ provider: "codex", state: "job_failed", exitCode: 1 }]
+      })]
+    })
+  }));
+  const job = state.jobs.find((entry) => entry.source === "provider_router");
+  assert.ok(job);
+  assert.equal(job.status, "retry_wait");
+  assert.equal(job.nextStep, "await_intelligent_lane");
+  assert.equal(state.queueCount, 1);
+  assert.equal(state.nextJob?.id, job.id);
+  assert.equal(agentWorkWaiting(state), true);
+});
+
 test("remote orchestrator + RDC is an intelligent fallback lane distinct from Local Control", () => {
   const attached = normalizeAgentSyncState(input({ localControl: snapshot({ fallbackJobs: [fallback()], remoteOrchestrator: lease() }) }));
   assert.equal(attached.remote.orchestrator, "attached");
