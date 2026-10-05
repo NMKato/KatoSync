@@ -6547,20 +6547,69 @@ button.agent-tile:hover {
   top: 31px;
   right: calc(50% + 30px);
   width: calc(100% - 48px);
-  height: 2px;
+  height: 6px;
   transform: translateX(-50%);
-  background: color-mix(in srgb, var(--glass-line) 90%, transparent);
   overflow: hidden;
   z-index: 1;
+  pointer-events: none;
 }
+
+.control-lane-connector::before {
+  content: "";
+  position: absolute;
+  inset: 2px 0;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--glass-line) 35%, transparent),
+      color-mix(in srgb, var(--agent) 42%, var(--glass-line)),
+      color-mix(in srgb, var(--glass-line) 35%, transparent)
+    );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--agent) 10%, transparent),
+    0 0 8px color-mix(in srgb, var(--agent) 8%, transparent);
+  opacity: 0.72;
+}
+
 .control-lane-connector i {
   position: absolute;
-  width: 28px;
-  inset-block: 0;
-  left: -30px;
-  background: linear-gradient(90deg, transparent, var(--agent-live), transparent);
-  animation: controlFlow 2.4s linear infinite;
-  opacity: 0.58;
+  top: 1px;
+  bottom: 1px;
+  left: -46px;
+  width: 44px;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--agent-live) 55%, transparent) 35%,
+      var(--agent-live) 62%,
+      transparent
+    );
+  box-shadow: 0 0 10px color-mix(in srgb, var(--agent-live) 28%, transparent);
+  opacity: 0;
+  animation: none;
+}
+
+.control-lane-node.live .control-lane-connector i,
+.control-lane-node.owner .control-lane-connector i {
+  opacity: 0.82;
+  animation: controlFlow 2.1s linear infinite;
+}
+
+.control-lane-node.ok .control-lane-connector::before {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--glass-line) 30%, transparent),
+      color-mix(in srgb, var(--ok) 30%, var(--glass-line)),
+      color-mix(in srgb, var(--glass-line) 30%, transparent)
+    );
+}
+
+.control-lane-node.off .control-lane-connector::before {
+  opacity: 0.34;
 }
 
 .control-heartbeat-grid {
@@ -6881,7 +6930,7 @@ button.agent-tile:hover {
 .agent-sync-topbar > .top-actions {
   grid-area: actions;
   align-self: start;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .agent-sync-topbar > .top-actions button {
@@ -6896,7 +6945,7 @@ button.agent-tile:hover {
 
 .control-strip {
   display: grid;
-  grid-template-columns: minmax(260px, 2fr) repeat(4, minmax(105px, 1fr));
+  grid-template-columns: minmax(260px, 2fr) repeat(5, minmax(105px, 1fr));
   gap: 8px;
   align-items: stretch;
 }
@@ -7373,7 +7422,7 @@ button.agent-tile:hover {
 
 .projects-focus-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 8px;
 }
 
@@ -7416,7 +7465,7 @@ button.agent-tile:hover {
 
 .projects-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
   gap: 12px;
 }
 
@@ -7453,11 +7502,12 @@ button.agent-tile:hover {
   margin: 0;
   color: var(--text);
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .projects-controls {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 8px;
 }
 
@@ -7999,7 +8049,7 @@ button.agent-tile:hover {
 /* ===== Agent Sync · Intelligent Project Search entry ===== */
 .agent-project-linker {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) fit-content(55%);
   gap: 12px 18px;
   align-items: center;
   padding: 14px 16px;
@@ -8054,6 +8104,10 @@ button.agent-tile:hover {
   justify-content: flex-end;
 }
 
+.agent-project-linker-actions > button {
+  min-height: 36px;
+}
+
 .agent-project-linker-status {
   grid-column: 1 / -1;
   color: var(--text-muted);
@@ -8102,7 +8156,7 @@ button.agent-tile:hover {
 
 .projects-missing-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 8px;
 }
 
@@ -8358,7 +8412,7 @@ button.agent-tile:hover {
 
 .projects-worktree-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   min-width: 0;
@@ -8408,6 +8462,11 @@ button.agent-tile:hover {
 .projects-worktree-state {
   font-size: 9px;
   white-space: nowrap;
+}
+
+.projects-worktree-row > button {
+  grid-column: 1 / -1;
+  justify-self: start;
 }
 
 @media (max-width: 900px) {
@@ -8486,6 +8545,10 @@ button.agent-tile:hover {
   border-top: 1px solid var(--line);
 }
 
+.agent-autoq-report > button {
+  justify-self: start;
+}
+
 .agent-autoq-counts {
   display: flex;
   flex-wrap: wrap;
@@ -8517,7 +8580,7 @@ button.agent-tile:hover {
 
 .agent-autoq-projects {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 7px;
 }
 
@@ -8546,6 +8609,7 @@ button.agent-tile:hover {
   color: var(--text-muted);
   font-size: 9px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .agent-autoq-project.ready {
@@ -8564,5 +8628,125 @@ button.agent-tile:hover {
   .agent-autoq-start {
     grid-column: 1 / -1;
     width: 100%;
+  }
+}
+
+
+/* ===== Agent Sync visual polish / lighter runtime motion ===== */
+.control-lane-node {
+  --lane-tone: var(--text-faint);
+  border-color: color-mix(in srgb, var(--lane-tone) 12%, var(--glass-line));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--lane-tone) 4%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface) 62%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.035),
+    inset 0 0 0 1px color-mix(in srgb, var(--lane-tone) 4%, transparent);
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.control-lane-node.live,
+.control-lane-node.owner {
+  --lane-tone: var(--agent-live);
+}
+
+.control-lane-node.ok {
+  --lane-tone: var(--ok);
+}
+
+.control-lane-node.warn {
+  --lane-tone: var(--warn);
+}
+
+.control-lane-orb {
+  border-color: color-mix(in srgb, var(--lane-tone) 34%, var(--glass-line));
+  background:
+    radial-gradient(circle at 50% 36%, color-mix(in srgb, var(--lane-tone) 10%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface-2) 92%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 0 0 4px color-mix(in srgb, var(--lane-tone) 4%, transparent);
+}
+
+.control-lane-orb::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border: 1px solid color-mix(in srgb, var(--lane-tone) 16%, transparent);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.control-lane-orb::after {
+  content: "";
+  position: absolute;
+  right: 1px;
+  bottom: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lane-tone);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--lane-tone) 42%, transparent);
+  opacity: .74;
+}
+
+.control-lane-node.off .control-lane-orb::after {
+  opacity: .2;
+}
+
+.control-lane-node.owner .control-lane-orb {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.08),
+    0 0 0 4px color-mix(in srgb, var(--agent-live) 7%, transparent),
+    0 0 20px color-mix(in srgb, var(--agent-live) 11%, transparent);
+}
+
+/* Healthy providers stay visually alive without running 35+ perpetual bar animations. */
+.control-heartbeat.ok .control-heartbeat-wave i {
+  animation: none;
+  opacity: .72;
+}
+
+.control-heartbeat.ok .control-heartbeat-wave i:nth-child(2),
+.control-heartbeat.ok .control-heartbeat-wave i:nth-child(6) {
+  transform: scaleY(.82);
+}
+
+.control-heartbeat.ok .control-heartbeat-wave i:nth-child(3),
+.control-heartbeat.ok .control-heartbeat-wave i:nth-child(5) {
+  transform: scaleY(.68);
+}
+
+.control-heartbeat.ok .control-heartbeat-wave i:nth-child(4) {
+  transform: scaleY(.92);
+}
+
+.control-lane-card,
+.control-heartbeat-card,
+.agent-autoq,
+.projects-card {
+  contain: layout;
+}
+
+.projects-finding-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1180px) {
+  .agent-sync-topbar > .top-actions button {
+    min-width: 132px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .control-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .control-strip-main {
+    grid-column: 1 / -1;
   }
 }
