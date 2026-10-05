@@ -22,6 +22,19 @@ Version 1.0 bleibt bewusst fokussiert:
 Die Business-Logik für Scan, Secret-Filter, Bündelung und Upload liegt im Rust-Core.
 Das Frontend ruft diese Funktionen nur über ein Repository auf.
 
+## Context Fabric Foundation
+
+KatoSync erzeugt lokal zusätzlich einen versionierten Context Pack aus den bereits gescannten
+Status-, Roadmap- und Memory-Quellen. Der Rust-Core bleibt dafür die einzige Business-Logik:
+
+- kanonisches JSON: `CURRENT_CONTEXT_PACK__<device>.json`
+- abgeleitete Obsidian-Markdown-Ansicht: `CURRENT_CONTEXT_PACK__<device>.md`
+- Vertrag und Consumer-/Writeback-Grenzen: [`CONTEXT_PACK.md`](CONTEXT_PACK.md)
+
+Die Dateien werden nicht hochgeladen. Secret-markierte Context-Quellen lassen nur die Pack-Erzeugung
+fail-closed abbrechen (kein Pack, alter Pack entfernt, Sync-Warnung); die bestehende Pipeline läuft weiter.
+Autonome Memory-Schreibzugriffe sind nicht Teil dieser Foundation.
+
 ## Reports Inbox für Version 1.1
 
 Die beste Erweiterung für fertige Agentenberichte ist eine **Mistral Workflow Runs API-Abfrage**.
@@ -164,3 +177,35 @@ Orchestrator-Lease ihn hält und eine intelligente Lane übernehmen kann. Kein a
 - Teure READY-Tests laufen nur, wenn Arbeit wartet: am Reset-Zeitpunkt bzw. ohne Hinweis
   höchstens alle 30 Minuten (`providerRecheckPlan`).
 - Ein billiger Check hebt Quota/Kapazität/Offline nie auf und stuft verfügbare Provider nicht herab.
+
+## Auto-Lane Planner (Auto Mode)
+
+Auto Mode macht bereits **ausgewählte + freigegebene** Action-Tasks zu autonomer, sichtbarer Arbeit.
+Es gibt keinen zweiten Scheduler: der reine Planer `lib/autoLanePlanner.ts` wird in
+`normalizeAgentSyncState` ausgewertet (`AgentSyncState.autoLanes`), der Dispatcher im ViewModel
+startet ausschließlich dessen `dispatch` über den bestehenden Runner (`runCodexTask`).
+`control/lanes.json` behält seine Bedeutung (aktive Local-Control-Jobs).
+
+- **Auto-Lane = ein Projekt.** Kopf-Task = erster offener ausgewählter `codex_cli`-Task in
+  Board-Reihenfolge; Folge-Tasks warten dahinter (`laneId = auto:<projectId>`, `lane_follow_up`).
+- **Zustände:** `planned` (Auto Mode aus), `queued` (startet beim nächsten Takt bzw. wartet auf den
+  Runner-Slot/das Repo), `running`, `waiting` (Merge, Provider, Tageslimit, Start-Gate),
+  `blocked` (Fehler, Unterbrechung, kritisch, Freigabe offen, Repo fehlt/nicht zugeordnet).
+- **Gates:** nie automatische Freigabe; kritische Tasks und ungeklärte Freigaben sperren die
+  Projektreihenfolge; `executed` wartet auf Merge, `failed` sperrt nur das eigene Projekt.
+  Globale Gates: `startSafety`, Remote-Orchestrator-Lease, Tageslimit, Runner-Routing
+  (bevorzugter Runner, sonst der andere CLI-Runner nur bei Provider-Nichtverfügbarkeit;
+  ein Jobfehler wechselt nie den Runner).
+- **Ein Writer pro Repo:** Claims und laufende Lanes belegen ihr Repo; mehrere Slots sind im
+  Planer vorbereitet (`maxConcurrent`), aktiv ist heute **1** – der Runner-Zustand ist ein
+  Singleton und `startSafety` meldet bei jedem laufenden Runner `runner_busy`.
+- **Idempotenz:** Dispatch-Claims (`katosync.autoLane.claims.v1`) werden synchron vor jedem `await`
+  persistiert und erst nach dem finalen Task-Status freigegeben. Ein Claim oder `running` ohne
+  laufenden Besitzer (Neustart, anderes Gerät) wird `blocked/interrupted_run` und nie still neu
+  gestartet; „Freigeben“ stellt den Task bewusst zurück (`deferred`).
+- **Takt:** nur bei offener App und eingeschaltetem Modus alle 15 s (frischer Local-Control-Snapshot,
+  dann Bewertung); Action-Plans und Merge-Status höchstens alle 5 min; nach Abschluss/Fehler sofort.
+- **Persistenz:** Auto Mode, Claims und Board-Auswahl liegen lokal (`lib/autoLaneStore.ts`) und werden
+  beim Logout mit den Tenant-Caches gelöscht.
+- **Auto-Merge:** bewusst nicht enthalten. `autoLanes.merge = { mode: "manual" }` ist die Naht für
+  einen späteren, verifizierten Merge-Mechanismus.

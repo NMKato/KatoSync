@@ -26,7 +26,7 @@ HEARTBEAT_FRESH = 300
 MAX_TEXT = 160
 MAX_FILE = 64 * 1024
 ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-OPEN = {"waiting", "provider_ready"}
+OPEN = {"waiting", "provider_ready", "retry_wait"}
 
 
 def now():

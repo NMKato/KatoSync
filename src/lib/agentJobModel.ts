@@ -18,6 +18,8 @@ import type {
   AgentSchedulerRuntime,
   AgentStartSafety,
   AgentSyncState,
+  AutoLaneClaim,
+  AutoLanePlan,
   CodexEvent,
   CodexRunState,
   FallbackJobSnapshot,
@@ -30,6 +32,22 @@ import type {
 // Explizite .ts-Endungen: die Node-Tests laden diese Datei ohne Bundler.
 import { jobStage, localControlHealth } from "./agentSyncCockpit.ts";
 import { AGENT_LANE_ORDER, PROVIDER_RECHECK_INTERVAL_MS, providerRetryAt } from "./providerPolicy.ts";
+import { AUTO_LANE_MAX_CONCURRENT, emptyAutoLanePlan, planAutoLanes } from "./autoLanePlanner.ts";
+
+// Auto-Lane-Eingaben aus dem ViewModel (persistierter Modus, Board-Auswahl, Claims, Repo-Zuordnung).
+export interface AgentAutoLaneInput {
+  enabled: boolean;
+  selectedOrder: string[];
+  repos: Record<string, string>;
+  missingRepos?: string[];
+  claims: AutoLaneClaim[];
+  // Vom Auto-Dispatcher gerade ausgefuehrte Tasks (zusaetzlich zu Runner/Board-Queue).
+  inFlightTaskIds: string[];
+  dailyCount: number;
+  dailyLimit: number;
+  maxConcurrent?: number;
+  lastDispatchAt?: Record<string, string>;
+}
 
 export interface AgentJobModelInput {
   actionPlans: ActionPlan[];
@@ -46,6 +64,7 @@ export interface AgentJobModelInput {
   claudeModel?: string | null;
   localModel?: string | null;
   device?: string | null;
+  autoLane?: AgentAutoLaneInput | null;
   now?: string;
 }
 
@@ -197,11 +216,13 @@ function runnerEvents(input: AgentJobModelInput, jobId: string, lane: AgentLaneI
 }
 
 function actionJobs(input: AgentJobModelInput, remote: RemoteOrchestratorRuntime, now: string): AgentJob[] {
-  const runningLane = runnerLane(input.codexRun.result?.runner ?? input.preferredRunner);
+  const runningLane = runnerLane(input.codexRun.result?.runner ?? input.codexRun.context?.runner ?? input.preferredRunner);
+  // Vom Auto-Dispatcher beanspruchte Tasks laufen ab dem Claim (noch bevor der Server-Status nachzieht).
+  const autoInFlight = new Set(input.autoLane?.inFlightTaskIds ?? []);
   return input.actionPlans.flatMap((plan) =>
     plan.tasks.flatMap((task): AgentJob[] => {
       const planned = runnerLane(task.targetRunner);
-      const stage = planned ? jobStage(task, plan, input.currentQueueTaskId) : null;
+      const stage = !planned ? null : autoInFlight.has(task.taskId) ? "running" : jobStage(task, plan, input.currentQueueTaskId);
       if (!planned || !stage) return [];
       const running = stage === "running";
       const remoteOwns = remote.leaseActive && remote.jobId === task.taskId;
@@ -277,7 +298,7 @@ function actionJobs(input: AgentJobModelInput, remote: RemoteOrchestratorRuntime
 function transientRunnerJob(input: AgentJobModelInput, knownIds: Set<string>, remote: RemoteOrchestratorRuntime, now: string): AgentJob[] {
   const context = input.codexRun.context;
   if (!context || knownIds.has(context.jobId) || input.codexRun.status === "idle") return [];
-  const owner = runnerLane(input.codexRun.result?.runner ?? input.preferredRunner);
+  const owner = runnerLane(input.codexRun.result?.runner ?? context.runner ?? input.preferredRunner);
   const status: AgentJobStatus = input.codexRun.status === "completed"
     ? "completed"
     : input.codexRun.status === "failed"
@@ -357,6 +378,31 @@ function fallbackJobs(
       status = "completed";
       owner = completedBy;
       phase = "complete";
+    } else if (item.status === "implemented") {
+      status = "implemented";
+      owner = completedBy ?? laneFromProvider(item.activeProvider);
+      phase = "implementation";
+      nextStep = "inspect_evidence";
+    } else if (item.status === "verifying") {
+      status = "verifying";
+      owner = completedBy ?? laneFromProvider(item.activeProvider);
+      phase = "verification";
+      nextStep = "inspect_evidence";
+    } else if (item.status === "review_ready") {
+      status = "review_ready";
+      owner = completedBy ?? laneFromProvider(item.activeProvider);
+      phase = "review";
+      nextStep = "review_merge";
+    } else if (item.status === "human_gate") {
+      status = "human_gate";
+      owner = completedBy ?? laneFromProvider(item.activeProvider);
+      phase = "approval";
+      nextStep = "resolve_gate";
+    } else if (item.status === "retry_wait") {
+      status = "retry_wait";
+      owner = laneFromProvider(item.activeProvider);
+      phase = "waiting_provider";
+      nextStep = "await_intelligent_lane";
     } else if (item.status === "failed") {
       status = "failed";
       owner = laneFromProvider(last(item.providerStates)?.provider);
@@ -695,7 +741,9 @@ const RESUME_NEXT: Record<AgentResumeBlock, AgentNextStep> = {
 };
 
 function startSafety(input: AgentJobModelInput, jobs: AgentJob[], lanes: AgentLane[], remote: RemoteOrchestratorRuntime): AgentStartSafety {
-  if (input.codexRun.status === "running" || input.queueRunning) return { safe: false, reason: "runner_busy" };
+  if (input.codexRun.status === "running" || input.queueRunning || input.autoLane?.inFlightTaskIds.length) {
+    return { safe: false, reason: "runner_busy" };
+  }
   if (remote.leaseActive && remote.jobId) return { safe: false, reason: "orchestrator_lease" };
   if (jobs.some((job) => job.source === "provider_router" && job.status === "running")) {
     return { safe: false, reason: "handoff_in_flight" };
@@ -709,7 +757,19 @@ function startSafety(input: AgentJobModelInput, jobs: AgentJob[], lanes: AgentLa
 }
 
 // ===== Komposition =====
-const STATUS_RANK: Record<AgentJobStatus, number> = { running: 0, blocked: 1, waiting: 2, queued: 3, failed: 4, completed: 5 };
+const STATUS_RANK: Record<AgentJobStatus, number> = {
+  running: 0,
+  verifying: 1,
+  implemented: 2,
+  review_ready: 3,
+  human_gate: 4,
+  retry_wait: 5,
+  blocked: 6,
+  waiting: 7,
+  queued: 8,
+  failed: 9,
+  completed: 10
+};
 
 export function compareJobs(a: AgentJob, b: AgentJob): number {
   const byState = STATUS_RANK[a.status] - STATUS_RANK[b.status];
@@ -725,6 +785,70 @@ function providerStateEvents(input: AgentJobModelInput, now: string): AgentJobEv
     code: `${transition.from}>${transition.to}`,
     lane: laneFromProvider(transition.provider)
   }));
+}
+
+// Tasks, die diese App-Sitzung nachweislich ausfuehrt (Einzel-Lauf, Board-Queue, Auto-Dispatcher).
+function sessionInFlight(input: AgentJobModelInput): string[] {
+  const ids = new Set(input.autoLane?.inFlightTaskIds ?? []);
+  if (input.currentQueueTaskId) ids.add(input.currentQueueTaskId);
+  if (input.codexRun.status === "running" && input.codexRun.context?.jobId) ids.add(input.codexRun.context.jobId);
+  return [...ids];
+}
+
+function autoLanePlan(input: AgentJobModelInput, lanes: AgentLane[], remote: RemoteOrchestratorRuntime, safety: AgentStartSafety): AutoLanePlan {
+  const auto = input.autoLane;
+  if (!auto) return emptyAutoLanePlan(false);
+  return planAutoLanes({
+    enabled: auto.enabled,
+    actionPlans: input.actionPlans,
+    selectedOrder: auto.selectedOrder,
+    repos: auto.repos,
+    missingRepos: auto.missingRepos,
+    claims: auto.claims,
+    inFlightTaskIds: sessionInFlight(input),
+    remoteJobId: remote.leaseActive ? remote.jobId ?? null : null,
+    startSafety: safety,
+    lanes,
+    preferredRunner: input.preferredRunner,
+    providerPriority: input.providerPriority,
+    dailyCount: auto.dailyCount,
+    dailyLimit: auto.dailyLimit,
+    maxConcurrent: auto.maxConcurrent ?? AUTO_LANE_MAX_CONCURRENT,
+    lastDispatchAt: auto.lastDispatchAt
+  });
+}
+
+// Auto-Lane-Wahrheit in die kanonischen Action-Jobs spiegeln: Kopf-Tasks tragen Lane und echten
+// Warte-/Sperrgrund, Folge-Tasks ihre Lane. Ein verwaister "running"-Task wird nicht als laufend gezeigt.
+function applyAutoLanes(jobs: AgentJob[], plan: AutoLanePlan): AgentJob[] {
+  if (!plan.lanes.length) return jobs;
+  const heads = new Map(plan.lanes.map((lane) => [lane.headTaskId, lane]));
+  const followUps = new Map(plan.lanes.flatMap((lane) => lane.taskIds.slice(1).map((taskId) => [taskId, lane] as const)));
+  return jobs.map((job) => {
+    if (job.source !== "action_plan") return job;
+    const head = heads.get(job.id);
+    if (!head) {
+      const lane = followUps.get(job.id);
+      return lane && job.status === "queued" ? { ...job, laneId: lane.id, reason: "lane_follow_up" } : job;
+    }
+    // Abgeschlossene/fehlgeschlagene Jobs behalten ihren Status; nur offene Jobs uebernehmen den Lane-Grund.
+    const open = job.status === "queued" || job.status === "waiting" || (job.status === "running" && head.state !== "running");
+    const status: AgentJobStatus | null = !open
+      ? null
+      : head.state === "blocked" ? "blocked" : head.state === "waiting" ? "waiting" : null;
+    if (head.state === "running" || !status) {
+      return { ...job, laneId: head.id, reason: job.status === "queued" ? `auto_${head.reason}` : job.reason };
+    }
+    return {
+      ...job,
+      laneId: head.id,
+      status,
+      phase: status === "blocked" ? "blocked" : job.phase,
+      reason: `auto_${head.reason}`,
+      nextStep: head.nextStep,
+      retryAt: head.retryAt ?? job.retryAt ?? null
+    };
+  });
 }
 
 const NEXT_CANDIDATE_STEPS = new Set<AgentNextStep>(["start_when_safe", "start_local_control", "await_scheduler_resume", "await_provider_reset", "await_intelligent_lane"]);
@@ -744,7 +868,7 @@ export function normalizeAgentSyncState(input: AgentJobModelInput): AgentSyncSta
 
   // Wartende Router-Jobs: Wiederaufnahme nur mit nachgewiesener Branch-/Worktree-/Lease-Sicherheit.
   const items = new Map((input.localControl?.orchestration?.fallbackJobs ?? []).map((item) => [`router:${item.id}`, item]));
-  const jobs = draft
+  const draftJobs = draft
     .map((job) => {
       if (job.source !== "provider_router" || job.status !== "waiting" || job.owner) return job;
       const resume = resumeSafety(job, items.get(job.id), draft, lanes, remote);
@@ -757,13 +881,33 @@ export function normalizeAgentSyncState(input: AgentJobModelInput): AgentSyncSta
       return { ...job, resume, nextStep };
     })
     .sort(compareJobs);
+  const safety = startSafety(input, draftJobs, lanes, remote);
+  const autoLanes = autoLanePlan(input, lanes, remote, safety);
+  const jobs = applyAutoLanes(draftJobs, autoLanes).sort(compareJobs);
 
   const currentJob = jobs.find((job) => job.status === "running") ?? null;
   const pending = jobs
-    .filter((job) => job.status === "queued" || (job.status === "waiting" && job.nextStep && NEXT_CANDIDATE_STEPS.has(job.nextStep)))
+    .filter(
+      (job) =>
+        job.status === "queued" ||
+        job.status === "retry_wait" ||
+        (job.status === "waiting" && job.nextStep && NEXT_CANDIDATE_STEPS.has(job.nextStep))
+    )
     .sort((a, b) => (STATUS_RANK[b.status] - STATUS_RANK[a.status]) || ((ms(a.createdAt) || 0) - (ms(b.createdAt) || 0)));
   const nextJob = pending[0] ?? null;
-  const counts = { queued: 0, running: 0, waiting: 0, blocked: 0, completed: 0, failed: 0 } as Record<AgentJobStatus, number>;
+  const counts = {
+    queued: 0,
+    running: 0,
+    implemented: 0,
+    verifying: 0,
+    review_ready: 0,
+    human_gate: 0,
+    retry_wait: 0,
+    waiting: 0,
+    blocked: 0,
+    completed: 0,
+    failed: 0
+  } as Record<AgentJobStatus, number>;
   for (const job of jobs) counts[job.status] += 1;
 
   const seen = new Set<string>();
@@ -784,18 +928,29 @@ export function normalizeAgentSyncState(input: AgentJobModelInput): AgentSyncSta
     events,
     handoffs,
     counts,
-    queueCount: counts.queued + pending.filter((job) => job.status === "waiting").length,
-    startSafety: startSafety(input, jobs, lanes, remote),
+    queueCount:
+      counts.queued +
+      counts.retry_wait +
+      pending.filter((job) => job.status === "waiting").length,
+    startSafety: safety,
     localControl: localHealth,
     remote,
     scheduler,
+    autoLanes,
     generatedAt: now
   };
 }
 
 /** Wartet belegbar Arbeit auf einen Provider? Steuert, ob teure READY-Tests ueberhaupt noetig sind. */
 export function agentWorkWaiting(state: AgentSyncState | null): boolean {
-  return Boolean(state?.jobs.some((job) => job.status === "queued" || (job.status === "waiting" && job.source === "provider_router")));
+  return Boolean(
+    state?.jobs.some(
+      (job) =>
+        job.status === "queued" ||
+        job.status === "retry_wait" ||
+        (job.status === "waiting" && job.source === "provider_router")
+    )
+  );
 }
 
 // ===== Screen-Projektionen: alle Views lesen dieselbe Wahrheit =====
