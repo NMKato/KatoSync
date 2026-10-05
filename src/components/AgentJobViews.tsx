@@ -4,15 +4,15 @@
 // Scheduler-Entscheidungen, nur Darstellung und Uebersetzung der Codes. Bewegung nur ueber
 // bestehende Klassen, die bei prefers-reduced-motion abgeschaltet werden.
 import type { ReactNode } from "react";
-import { ArrowRight, Clock3, GitBranch, Layers, RadioTower, ShieldAlert, ShieldCheck } from "lucide-react";
+import { ArrowRight, Clock3, GitBranch, Layers, PauseCircle, PlayCircle, RadioTower, Route, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
 import { monitorProjection, overviewProjection } from "../lib/agentJobModel";
 import { providerIcons } from "./ProviderManager";
-import type { AgentHandoff, AgentJob, AgentJobEvent, AgentLane, AgentLaneId, AgentSyncState } from "../types";
+import type { AgentHandoff, AgentJob, AgentJobEvent, AgentLane, AgentLaneId, AgentSyncState, AutoLane, AutoLanePlan, AutoLaneState } from "../types";
 
 const PROVIDER_FLOW = ["installed", "authenticated", "available", "quota_limited", "auth_unavailable", "capacity_unavailable", "job_failed", "offline", "unknown"];
-const PHASES = ["execution", "approval", "queued", "review", "deferred", "failed", "complete", "blocked", "orchestrator", "scheduler_resume", "parked", "waiting_provider", "local_command"];
-const STATUSES = ["queued", "running", "waiting", "blocked", "completed", "failed"];
+const PHASES = ["execution", "implementation", "verification", "approval", "queued", "review", "deferred", "failed", "complete", "blocked", "orchestrator", "scheduler_resume", "parked", "waiting_provider", "local_command"];
+const STATUSES = ["queued", "running", "implemented", "verifying", "review_ready", "human_gate", "retry_wait", "waiting", "blocked", "completed", "failed"];
 
 export const laneIcons: Record<AgentLaneId, typeof RadioTower> = { ...providerIcons, remote_orchestrator: RadioTower };
 
@@ -124,6 +124,13 @@ function laneStatusText(t: TFunc, lane: AgentLane): string {
 function controlTowerNext(state: AgentSyncState, t: TFunc): string {
   const current = state.currentJob;
   if (current?.nextStep) return t(`agent.next.${current.nextStep}` as TKey);
+  const auto = state.autoLanes;
+  const autoNext = auto.lanes.find((lane) => lane.headTaskId === auto.dispatch[0]?.taskId);
+  if (autoNext) return t("agent.control.autoNext", { task: autoNext.headTitle });
+  // Auto-Lanes vorhanden: der naechste Schritt folgt aus ihrem Zustand, nicht aus einem Folge-Task.
+  if (!auto.enabled && auto.counts.planned) return t("agent.next.enable_auto_mode");
+  const held = auto.enabled ? auto.lanes.find((lane) => lane.state === "queued" || lane.state === "waiting") : null;
+  if (held) return `${held.projectId}: ${autoLaneReason(t, held)}`;
   if (state.nextJob) return t("agent.control.queueNext", { task: state.nextJob.task });
   if (state.scheduler.providerHealth.nextCheckAt) {
     return t("agent.control.schedulerNext", { time: clock(state.scheduler.providerHealth.nextCheckAt) });
@@ -149,6 +156,26 @@ function controlTowerTruth(state: AgentSyncState, t: TFunc): { title: string; de
         .filter(Boolean)
         .join(" · "),
       tone: job.status === "failed" || job.status === "blocked" ? "danger" : "waiting"
+    };
+  }
+  // Geplante/eingereihte Auto-Lanes: nicht "nichts los" anzeigen, nur weil gerade kein Lauf aktiv ist.
+  const auto = state.autoLanes;
+  if (auto.lanes.length) {
+    const held = auto.counts.waiting + auto.counts.blocked;
+    if (!auto.enabled) {
+      return { title: t("agent.control.autoPlanned", { count: auto.counts.planned }), detail: t("agent.control.autoOffDetail"), tone: "idle" };
+    }
+    if (auto.counts.queued) {
+      return {
+        title: t("agent.control.autoQueued", { count: auto.counts.queued }),
+        detail: held ? t("agent.control.autoHeld", { waiting: auto.counts.waiting, blocked: auto.counts.blocked }) : t("agent.control.autoCadence"),
+        tone: "waiting"
+      };
+    }
+    return {
+      title: t("agent.control.autoWaiting"),
+      detail: t("agent.control.autoHeld", { waiting: auto.counts.waiting, blocked: auto.counts.blocked }),
+      tone: auto.counts.waiting ? "waiting" : "danger"
     };
   }
   const ready = state.lanes.filter((lane) => lane.intelligent && lane.connectivity === "connected").length;
@@ -273,6 +300,91 @@ export function ControlTower({ state }: { state: AgentSyncState }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ===== Auto-Lanes: geplante/eingereihte/laufende/wartende/gesperrte Projektarbeit =====
+const AUTO_STATES: AutoLaneState[] = ["planned", "queued", "running", "waiting", "blocked"];
+
+function autoLaneTone(lane: AutoLane): "live" | "ok" | "warn" | "neutral" {
+  if (lane.state === "running") return "live";
+  if (lane.state === "queued") return "ok";
+  if (lane.state === "waiting" || lane.state === "blocked") return "warn";
+  return "neutral";
+}
+
+function autoLaneReason(t: TFunc, lane: AutoLane): string {
+  const reason = t(`agent.auto.reason.${lane.reason}` as TKey);
+  if (lane.reason === "start_unsafe" && lane.detail) return `${reason} · ${t(`agent.safety.${lane.detail}` as TKey)}`;
+  if (lane.retryAt) return `${reason} · ${t("agent.lane.retry", { time: clock(lane.retryAt) })}`;
+  return reason;
+}
+
+export function AutoLanePanel({
+  plan,
+  busy = false,
+  onToggle,
+  onRelease
+}: {
+  plan: AutoLanePlan;
+  busy?: boolean;
+  onToggle: (enabled: boolean) => void;
+  onRelease?: (taskId: string) => void;
+}) {
+  const { t } = useT();
+  return (
+    <div className="glass control-auto-card">
+      <div className="agent-card-title control-auto-head">
+        <Route size={17} />
+        <h3>{t("agent.auto.title")}</h3>
+        <span className={`runtime-pill ${plan.enabled ? "armed" : "stopped"}`}>
+          {t("agent.auto.mode")}: <strong>{plan.enabled ? t("agent.auto.on") : t("agent.auto.off")}</strong>
+        </span>
+        <button
+          aria-pressed={plan.enabled}
+          className="secondary compact-button"
+          disabled={busy}
+          onClick={() => onToggle(!plan.enabled)}
+          type="button"
+        >
+          {plan.enabled ? <PauseCircle size={14} /> : <PlayCircle size={14} />}
+          {plan.enabled ? t("agent.auto.pause") : t("agent.auto.enable")}
+        </button>
+      </div>
+      <div className="control-auto-counts" aria-label={t("agent.auto.title")}>
+        {AUTO_STATES.map((state) => (
+          <span className={`agent-job-stage ${state}`} key={state}>
+            {t(`agent.auto.state.${state}` as TKey)} <strong>{plan.counts[state]}</strong>
+          </span>
+        ))}
+      </div>
+      {plan.lanes.length ? (
+        <ol className="control-auto-lanes">
+          {plan.lanes.map((lane) => (
+            <li className={`control-auto-lane ${lane.state}`} key={lane.id}>
+              <span className={`agent-chip-dot ${autoLaneTone(lane)}`} aria-hidden="true" />
+              <div>
+                <strong>{lane.projectId}</strong>
+                <small title={lane.headTitle}>
+                  {lane.headTitle}
+                  {lane.pendingCount > 1 ? ` · ${t("agent.auto.more", { count: lane.pendingCount - 1 })}` : ""}
+                </small>
+                <small className="control-auto-reason">{autoLaneReason(t, lane)}</small>
+              </div>
+              <span className={`agent-job-stage ${lane.state}`}>{t(`agent.auto.state.${lane.state}` as TKey)}</span>
+              {lane.reason === "interrupted_run" && onRelease ? (
+                <button className="ghost compact-button" disabled={busy} onClick={() => onRelease(lane.headTaskId)} type="button">
+                  {t("agent.auto.release")}
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="agent-empty">{t("agent.auto.empty")}</p>
+      )}
+      <p className="agent-route-note">{t("agent.auto.note")} {t("agent.auto.merge")}</p>
     </div>
   );
 }
@@ -515,17 +627,25 @@ export function SubstratePanel({ state }: { state: AgentSyncState }) {
 // ===== Status-Zaehler aus derselben Jobliste =====
 export function StatusCounts({ state }: { state: AgentSyncState }) {
   const { t } = useT();
-  const flow: Array<keyof AgentSyncState["counts"]> = ["queued", "running", "waiting", "completed"];
+  const ready = state.counts.queued + state.counts.waiting + state.counts.retry_wait;
+  const working = state.counts.running + state.counts.verifying;
+  const review = state.counts.implemented + state.counts.review_ready;
+  const human = state.counts.human_gate;
   return (
     <div className="agent-flow">
       <ol className="agent-flow-stages">
-        {flow.map((status, index) => (
-          <li className={`agent-flow-stage ${status}${state.counts[status] ? " has" : ""}`} key={status}>
+        {[
+          { key: "queued", value: ready, label: t("agent.status.queued") },
+          { key: "running", value: working, label: t("agent.status.running") },
+          { key: "review_ready", value: review, label: t("agent.status.review_ready") },
+          { key: "human_gate", value: human, label: t("agent.status.human_gate") }
+        ].map((entry, index) => (
+          <li className={`agent-flow-stage ${entry.key}${entry.value ? " has" : ""}`} key={entry.key}>
             {index > 0 ? (
-              <span className={`agent-flow-link${status === "running" && state.counts.running ? " flowing" : ""}`} aria-hidden="true" />
+              <span className={`agent-flow-link${entry.key === "running" && working ? " flowing" : ""}`} aria-hidden="true" />
             ) : null}
-            <strong>{state.counts[status]}</strong>
-            <span>{t(`agent.status.${status}` as TKey)}</span>
+            <strong>{entry.value}</strong>
+            <span>{entry.label}</span>
           </li>
         ))}
       </ol>
@@ -533,9 +653,7 @@ export function StatusCounts({ state }: { state: AgentSyncState }) {
         <span className={state.counts.blocked ? "warn" : ""}>
           {t("agent.status.blocked")}: <strong>{state.counts.blocked}</strong>
         </span>
-        <span className={state.counts.failed ? "danger" : ""}>
-          {t("agent.status.failed")}: <strong>{state.counts.failed}</strong>
-        </span>
+        <span>{t("agent.history.title")}: <strong>{state.counts.completed + state.counts.failed}</strong></span>
       </div>
     </div>
   );

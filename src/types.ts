@@ -400,6 +400,8 @@ export interface CodexRunState {
     source: "action_plan" | "briefing";
     planId?: string | null;
     createdAt?: string | null;
+    // Tatsaechlich gewaehlter Runner (Auto-Lane-Routing kann vom bevorzugten abweichen).
+    runner?: string | null;
   };
   result?: CodexRunResult;
   error?: string;
@@ -571,7 +573,18 @@ export interface OrchestrationSnapshot {
 
 // Fuenf kanonische Lanes: vier intelligente Besitzer + das deterministische Substrat.
 export type AgentLaneId = "codex" | "claude" | "local" | "remote_orchestrator" | "local_control";
-export type AgentJobStatus = "queued" | "running" | "waiting" | "blocked" | "completed" | "failed";
+export type AgentJobStatus =
+  | "queued"
+  | "running"
+  | "implemented"
+  | "verifying"
+  | "review_ready"
+  | "human_gate"
+  | "retry_wait"
+  | "waiting"
+  | "blocked"
+  | "completed"
+  | "failed";
 export type AgentJobSource = "action_plan" | "runner" | "provider_router" | "continuation" | "local_control";
 export type AgentJobEventKind = "state" | "activity" | "handoff" | "evidence" | "heartbeat";
 export type AgentNextStep =
@@ -589,7 +602,10 @@ export type AgentNextStep =
   | "release_stale_lease"
   | "prove_branch"
   | "await_worktree"
-  | "await_writer";
+  | "await_writer"
+  | "enable_auto_mode"
+  | "map_repo"
+  | "await_daily_reset";
 
 export interface AgentHandoff {
   from: AgentLaneId | null;
@@ -719,6 +735,74 @@ export interface AgentStartSafety {
   reason: AgentStartBlock;
 }
 
+// ===== Auto-Lane Planner (lib/autoLanePlanner.ts) =====
+// Eine Auto-Lane = die geordnete, freigegebene Arbeit EINES Projekts. Sie ist keine reine UI-Lane:
+// der Dispatcher im ViewModel startet genau die hier geplanten Kopf-Tasks ueber den bestehenden Runner.
+export type AutoLaneRunner = "codex_cli" | "claude_cli";
+export type AutoLaneState = "planned" | "queued" | "running" | "waiting" | "blocked";
+export type AutoLaneReason =
+  | "auto_off"
+  | "ready"
+  | "runner_slot"
+  | "repo_busy"
+  | "start_unsafe"
+  | "no_runner_lane"
+  | "daily_limit"
+  | "merge_pending"
+  | "orchestrator_owned"
+  | "active"
+  | "head_failed"
+  | "interrupted_run"
+  | "manual_gate"
+  | "approval_required"
+  | "repo_unmapped"
+  | "repo_missing";
+
+export interface AutoLane {
+  id: string;
+  projectId: string;
+  state: AutoLaneState;
+  reason: AutoLaneReason;
+  // Zusatzcode (z. B. AgentStartBlock bei start_unsafe), nie Rohtext/Pfad.
+  detail?: string | null;
+  headTaskId: string;
+  headTitle: string;
+  runner?: AutoLaneRunner | null;
+  nextStep: AgentNextStep | null;
+  // Offene Tasks dieser Lane in Ausfuehrungsreihenfolge, Kopf-Task zuerst.
+  taskIds: string[];
+  pendingCount: number;
+  retryAt?: string | null;
+}
+
+export interface AutoLaneDispatch {
+  laneId: string;
+  projectId: string;
+  taskId: string;
+  planId: string;
+  runner: AutoLaneRunner;
+}
+
+// Persistierter Dispatch-Claim: wird VOR jedem await geschrieben und erst nach dem finalen
+// Task-Status freigegeben -> kein Doppelstart bei Rerender, Tick oder App-Neustart.
+export interface AutoLaneClaim {
+  taskId: string;
+  projectId: string;
+  repoKey: string;
+  runner: AutoLaneRunner;
+  claimedAt: string;
+}
+
+export interface AutoLanePlan {
+  enabled: boolean;
+  lanes: AutoLane[];
+  dispatch: AutoLaneDispatch[];
+  counts: Record<AutoLaneState, number>;
+  maxConcurrent: number;
+  // Policy-Naht fuer Auto-Merge (Folgeschritt): heute immer manuell, kein Merge durch KatoSync.
+  merge: { mode: "manual"; reason: "no_verified_merge_mechanism" };
+}
+
 export interface AgentSyncState {
   // null = ehrlich idle: gerade laeuft nachweislich nichts.
   currentJob: AgentJob | null;
@@ -733,6 +817,7 @@ export interface AgentSyncState {
   localControl: "unknown" | "offline" | "stale" | "idle" | "busy";
   remote: RemoteOrchestratorRuntime;
   scheduler: AgentSchedulerRuntime;
+  autoLanes: AutoLanePlan;
   generatedAt: string;
 }
 

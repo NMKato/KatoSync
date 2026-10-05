@@ -589,7 +589,15 @@ fn fallback_jobs(
                 .and_then(|raw| approved_repo(Path::new(raw), home));
             let open = matches!(
                 status.as_str(),
-                "waiting" | "provider_ready" | "orchestrator_active" | "running"
+                "waiting"
+                    | "provider_ready"
+                    | "retry_wait"
+                    | "implemented"
+                    | "verifying"
+                    | "review_ready"
+                    | "human_gate"
+                    | "orchestrator_active"
+                    | "running"
             );
             let branch_matches = match (&repo, &branch) {
                 (Some(repo), Some(expected)) if open && probes < MAX_BRANCH_PROBES => {
