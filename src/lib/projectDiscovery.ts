@@ -111,6 +111,7 @@ export function groupDiscoveredRepos(repos: RepoFacts[], registry: ProjectRegist
       worktrees,
       checkoutCount: worktrees.length,
       alreadyRegistered: Boolean(known),
+      iconDataUrl: members.find((repo) => repo.iconDataUrl)?.iconDataUrl ?? null,
       profileId
     });
   }

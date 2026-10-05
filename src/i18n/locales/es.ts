@@ -19,6 +19,8 @@ const es: Record<TKey, string> = {
   "page.settings.text": "Mistral, MCP, identificador del dispositivo, reglas de sync y conexiones de runner local, todo en un mismo sitio.",
   "page.logs.title": "Actividad",
   "page.logs.text": "Registros, avisos y las últimas decisiones en un solo lugar.",
+  "page.agentProjects.title": "Proyectos",
+  "page.agentProjects.text": "Encuentra proyectos de forma inteligente, selecciónalos en una galería y define el foco de Agent Sync.",
   "sidebar.presentation": "Modo presentación",
   "sidebar.presentationOn": "Modo presentación activado",
   "sidebar.presentationTitleOn": "Desactivar el modo presentación (volver a mostrar los datos)",

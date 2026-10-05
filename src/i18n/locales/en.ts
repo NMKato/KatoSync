@@ -19,6 +19,8 @@ const en: Record<TKey, string> = {
   "page.settings.text": "Mistral, MCP, device ID, Sync rules and local runner connections all in one place.",
   "page.logs.title": "Activity",
   "page.logs.text": "Logs, notes and recent decisions in one place.",
+  "page.agentProjects.title": "Projects",
+  "page.agentProjects.text": "Find projects intelligently, select them in a gallery and set the Agent Sync focus.",
   "sidebar.presentation": "Presentation mode",
   "sidebar.presentationOn": "Presentation mode on",
   "sidebar.presentationTitleOn": "Turn presentation mode off (show data again)",

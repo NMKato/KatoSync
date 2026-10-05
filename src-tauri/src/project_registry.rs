@@ -6,6 +6,7 @@
 //   betreten; Dateien mit Secret-Mustern werden nicht ausgeliefert.
 // - Remote-URLs verlassen diesen Adapter ohne Zugangsdaten.
 // Die fachliche Auswertung (Gruppierung, Verifikation, Capsule, Fokus) liegt rein in src/lib/project*.ts.
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -31,6 +32,7 @@ const MAX_DOC_BYTES: u64 = 256 * 1024;
 const MAX_DOC_READ: u64 = 64 * 1024;
 const MAX_DOCS: usize = 24;
 const MAX_REGISTRY_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_ICON_BYTES: u64 = 512 * 1024;
 
 // Spiegel von src/lib/projectExclusions.ts (EXCLUDED_DIR_NAMES). Versteckte Ordner sind generell tabu.
 const EXCLUDED_DIR_NAMES: &[&str] = &[
@@ -122,6 +124,7 @@ pub struct RepoFacts {
     behind: Option<usize>,
     recent_shas: Vec<String>,
     worktrees: Vec<WorktreeFact>,
+    icon_data_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -312,6 +315,64 @@ pub(crate) fn parse_worktrees(text: &str) -> Vec<WorktreeFact> {
     result
 }
 
+/// Finds a small, presentation-only project logo without walking the repository.
+/// Only a fixed allow-list of conventional logo/icon locations is considered.
+fn project_icon_data_url(root: &Path) -> Option<String> {
+    const CANDIDATES: &[&str] = &[
+        "docs/images/logo.png",
+        "public/logo.png",
+        "public/icon.png",
+        "public/app-icon.png",
+        "public/katoos_icon_logo_trans.png",
+        "apps/desktop/public/kai-logo.png",
+        "src/assets/logo.png",
+        "src/assets/icon.png",
+        "assets/logo.png",
+        "assets/icon.png",
+        "src-tauri/icons/128x128.png",
+        "src-tauri/icons/icon.png",
+        "public/logo.webp",
+        "public/icon.webp",
+        "assets/logo.webp",
+        "assets/icon.webp",
+        "public/logo.svg",
+        "public/icon.svg",
+        "assets/logo.svg",
+        "assets/icon.svg",
+    ];
+
+    for relative in CANDIDATES {
+        let path = root.join(relative);
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_ICON_BYTES {
+            continue;
+        }
+        let mime = match path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+        {
+            Some(ext) if ext == "png" => "image/png",
+            Some(ext) if ext == "webp" => "image/webp",
+            Some(ext) if ext == "jpg" || ext == "jpeg" => "image/jpeg",
+            Some(ext) if ext == "svg" => "image/svg+xml",
+            _ => continue,
+        };
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        return Some(format!(
+            "data:{mime};base64,{}",
+            BASE64_STANDARD.encode(bytes)
+        ));
+    }
+    None
+}
+
 /// Liest die Git-Fakten eines Checkouts. `status_all` = auch Aenderungen der anderen Worktrees zaehlen.
 fn probe_repo(path: &Path, status_all: bool) -> Option<RepoFacts> {
     let top = git_text(path, &["rev-parse", "--show-toplevel"])?;
@@ -399,6 +460,7 @@ fn probe_repo(path: &Path, status_all: bool) -> Option<RepoFacts> {
         behind,
         recent_shas,
         worktrees,
+        icon_data_url: project_icon_data_url(&top_path),
     })
 }
 

@@ -22,6 +22,8 @@ const de = {
   "page.settings.text": "Mistral, MCP, Gerätekennung, Sync-Regeln und lokale Runner-Verbindungen gebündelt.",
   "page.logs.title": "Aktivitäten",
   "page.logs.text": "Protokolle, Hinweise und letzte Entscheidungen an einem Ort.",
+  "page.agentProjects.title": "Projekte",
+  "page.agentProjects.text": "Projekte intelligent finden, als Galerie auswählen und den Fokus für Agent Sync festlegen.",
 
   // Sidebar-Fußzeile + Sprachschalter
   "sidebar.presentation": "Präsentationsmodus",

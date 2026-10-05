@@ -891,6 +891,7 @@ export interface RepoFacts {
   behind: number | null;
   recentShas: string[];
   worktrees: WorktreeFact[];
+  iconDataUrl: string | null;
 }
 
 export interface DocFact {
@@ -939,6 +940,7 @@ export interface DiscoveredProject {
   worktrees: WorktreeFact[];
   checkoutCount: number;
   alreadyRegistered: boolean;
+  iconDataUrl: string | null;
   // Bekannte Fokus-Projekt-ID aus dem Standardprofil, falls erkannt.
   profileId: string | null;
 }

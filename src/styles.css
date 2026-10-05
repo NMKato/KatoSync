@@ -7141,14 +7141,12 @@ button.agent-tile:hover {
   list-style: none;
 }
 
-.projects-candidates,
 .projects-findings,
 .projects-missing ul {
   display: grid;
   gap: 8px;
 }
 
-.projects-candidates li,
 .projects-missing li {
   padding: 10px 12px;
   border: 1px solid var(--line);
@@ -7156,20 +7154,182 @@ button.agent-tile:hover {
   background: var(--surface-2);
 }
 
-.projects-candidates label {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
+/* Discovery is a compact project gallery, not a filesystem-style vertical dump. */
+.projects-discovery {
+  min-width: 0;
+  overflow: hidden;
 }
 
-.projects-candidates label > span {
+.projects-candidates {
   display: grid;
-  gap: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  max-height: min(58vh, 620px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px 4px 4px 2px;
+  scrollbar-gutter: stable;
+}
+
+.projects-candidates li {
   min-width: 0;
+  min-height: 158px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.045), rgba(255,255,255,.015)),
+    var(--surface-2);
+  transition:
+    border-color var(--m) ease,
+    background var(--m) ease,
+    transform var(--m-fast) ease,
+    box-shadow var(--m) ease;
+}
+
+.projects-candidates li:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--agent) 28%, var(--line));
+  box-shadow: var(--e-1);
+}
+
+.projects-candidates li.selected {
+  border-color: color-mix(in srgb, var(--agent) 62%, var(--line));
+  background:
+    radial-gradient(circle at 15% 5%, color-mix(in srgb, var(--agent) 13%, transparent), transparent 48%),
+    var(--surface-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent) 18%, transparent);
 }
 
 .projects-candidates li.registered {
-  opacity: 0.7;
+  opacity: 0.72;
+}
+
+.projects-candidate-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 14px;
+  cursor: pointer;
+}
+
+.projects-candidate-card > input[type="checkbox"] {
+  position: absolute;
+  top: 11px;
+  right: 11px;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+.projects-candidate-card > input[type="checkbox"]:disabled {
+  cursor: default;
+}
+
+.projects-candidate-visual {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--agent) 22%, var(--line));
+  border-radius: 14px;
+  background: rgba(7, 10, 14, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+.projects-candidate-visual img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.projects-candidate-monogram {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  color: var(--agent);
+}
+
+.projects-candidate-monogram b {
+  max-width: 44px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-candidate-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding-right: 22px;
+}
+
+.projects-candidate-copy > strong,
+.projects-candidate-repo {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-candidate-copy > strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.projects-candidate-repo {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.projects-candidate-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.projects-candidate-meta small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 2px 7px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,.025);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-candidate-known {
+  color: var(--agent) !important;
+}
+
+.projects-discovery-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: 10px;
+  padding-top: 10px;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--surface) 94%, transparent) 28%);
 }
 
 .projects-focus-list {
@@ -7363,6 +7523,9 @@ button.agent-tile:hover {
 
   .projects-add-choices {
     flex-direction: column;
+  }
+}
+
 /* Managed Kato Local Brain — one-click lane inside Local Provider */
 .local-brain-card {
   display: grid;

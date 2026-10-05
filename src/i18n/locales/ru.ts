@@ -19,6 +19,8 @@ const ru: Record<TKey, string> = {
   "page.settings.text": "Mistral, MCP, идентификатор устройства, правила sync и локальные подключения runner — в одном месте.",
   "page.logs.title": "Активность",
   "page.logs.text": "Журналы, подсказки и последние решения в одном месте.",
+  "page.agentProjects.title": "Проекты",
+  "page.agentProjects.text": "Интеллектуально находите проекты, выбирайте их в галерее и задавайте фокус Agent Sync.",
   "sidebar.presentation": "Режим презентации",
   "sidebar.presentationOn": "Режим презентации включён",
   "sidebar.presentationTitleOn": "Выключить режим презентации (данные снова видны)",

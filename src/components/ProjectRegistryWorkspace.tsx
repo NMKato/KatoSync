@@ -20,6 +20,7 @@ import { useT, type TFunc, type TKey } from "../i18n";
 import { AUTO_MODES, FOCUS_PRIORITIES, FOCUS_STATUSES } from "../lib/projectFocus";
 import { normalizeRemote } from "../lib/projectExclusions";
 import type {
+  DiscoveredProject,
   FocusPriority,
   FocusStatus,
   MismatchChoice,
@@ -49,6 +50,38 @@ function stamp(value: string | null | undefined): string {
 
 function repoLabel(project: RegistryProject): string {
   return normalizeRemote(project.remote)?.split("/").slice(-2).join("/") ?? project.rootPath.split("/").pop() ?? project.name;
+}
+
+function repoCandidateLabel(project: DiscoveredProject): string {
+  return normalizeRemote(project.remote)?.split("/").slice(-2).join("/") ?? project.rootPath.split("/").pop() ?? project.name;
+}
+
+function projectInitials(name: string): string {
+  const parts = name
+    .replace(/[-_]+/g, " ")
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.length) return "P";
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+function ProjectCandidateVisual({ candidate }: { candidate: DiscoveredProject }) {
+  return (
+    <span className="projects-candidate-visual" aria-hidden="true">
+      {candidate.iconDataUrl ? (
+        <img alt="" src={candidate.iconDataUrl} />
+      ) : (
+        <span className="projects-candidate-monogram">
+          <FolderGit2 size={18} />
+          <b>{projectInitials(candidate.name)}</b>
+        </span>
+      )}
+    </span>
+  );
 }
 
 export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
@@ -215,30 +248,43 @@ function DiscoveryList({ vm }: { vm: ViewModel }) {
           <AlertTriangle size={13} /> {t("projects.discover.truncated")}
         </small>
       ) : null}
-      <ul className="projects-candidates">
-        {discovery.candidates.map((candidate) => (
-          <li className={candidate.alreadyRegistered ? "registered" : ""} key={candidate.id}>
-            <label>
-              <input
-                checked={candidate.alreadyRegistered || discovery.selected.includes(candidate.id)}
-                disabled={candidate.alreadyRegistered}
-                onChange={() => projects.toggleCandidate(candidate.id)}
-                type="checkbox"
-              />
-              <span>
-                <strong>{candidate.name}</strong>
-                <small>
-                  <GitBranch size={12} /> {candidate.branch ?? "—"}
-                  {candidate.headSha ? ` @ ${candidate.headSha.slice(0, 7)}` : ""}
-                  {candidate.checkoutCount > 1 ? ` · ${t("projects.discover.worktrees", { count: candidate.checkoutCount })}` : ""}
-                  {candidate.dirtyCount > 0 ? ` · ${t("projects.discover.dirty", { count: candidate.dirtyCount })}` : ""}
-                  {candidate.alreadyRegistered ? ` · ${t("projects.discover.registered")}` : ""}
-                  {candidate.profileId ? ` · ${t("projects.discover.known", { id: candidate.profileId })}` : ""}
-                </small>
-              </span>
-            </label>
-          </li>
-        ))}
+      <ul className="projects-candidates" aria-label={t("projects.discover.title")}>
+        {discovery.candidates.map((candidate) => {
+          const selected = candidate.alreadyRegistered || discovery.selected.includes(candidate.id);
+          return (
+            <li
+              className={`${candidate.alreadyRegistered ? "registered " : ""}${selected ? "selected" : ""}`.trim()}
+              key={candidate.id}
+            >
+              <label className="projects-candidate-card">
+                <input
+                  aria-label={candidate.name}
+                  checked={selected}
+                  disabled={candidate.alreadyRegistered}
+                  onChange={() => projects.toggleCandidate(candidate.id)}
+                  type="checkbox"
+                />
+                <ProjectCandidateVisual candidate={candidate} />
+                <span className="projects-candidate-copy">
+                  <strong title={candidate.name}>{candidate.name}</strong>
+                  <small className="projects-candidate-repo" title={candidate.rootPath}>
+                    {repoCandidateLabel(candidate)}
+                  </small>
+                  <span className="projects-candidate-meta">
+                    <small>
+                      <GitBranch size={12} /> {candidate.branch ?? "—"}
+                      {candidate.headSha ? ` @ ${candidate.headSha.slice(0, 7)}` : ""}
+                    </small>
+                    {candidate.checkoutCount > 1 ? <small>{t("projects.discover.worktrees", { count: candidate.checkoutCount })}</small> : null}
+                    {candidate.dirtyCount > 0 ? <small className="tone-warn">{t("projects.discover.dirty", { count: candidate.dirtyCount })}</small> : null}
+                    {candidate.alreadyRegistered ? <small>{t("projects.discover.registered")}</small> : null}
+                    {candidate.profileId ? <small className="projects-candidate-known">{t("projects.discover.known", { id: candidate.profileId })}</small> : null}
+                  </span>
+                </span>
+              </label>
+            </li>
+          );
+        })}
       </ul>
       <div className="projects-discovery-actions">
         <button
