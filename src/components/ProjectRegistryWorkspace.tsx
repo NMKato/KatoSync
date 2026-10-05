@@ -272,14 +272,28 @@ function DiscoveryList({ vm }: { vm: ViewModel }) {
                     {repoCandidateLabel(candidate)}
                   </small>
                   <span className="projects-candidate-meta">
-                    <small>
-                      <GitBranch size={12} /> {candidate.branch ?? "—"}
-                      {candidate.headSha ? ` @ ${candidate.headSha.slice(0, 7)}` : ""}
+                    <small
+                      className="projects-candidate-branch"
+                      title={`${candidate.branch ?? "—"}${candidate.headSha ? ` @ ${candidate.headSha.slice(0, 7)}` : ""}`}
+                    >
+                      <GitBranch size={12} />
+                      <span>
+                        {candidate.branch ?? "—"}
+                        {candidate.headSha ? ` @ ${candidate.headSha.slice(0, 7)}` : ""}
+                      </span>
                     </small>
-                    {candidate.checkoutCount > 1 ? <small>{t("projects.discover.worktrees", { count: candidate.checkoutCount })}</small> : null}
-                    {candidate.dirtyCount > 0 ? <small className="tone-warn">{t("projects.discover.dirty", { count: candidate.dirtyCount })}</small> : null}
-                    {candidate.alreadyRegistered ? <small>{t("projects.discover.registered")}</small> : null}
-                    {candidate.profileId ? <small className="projects-candidate-known">{t("projects.discover.known", { id: candidate.profileId })}</small> : null}
+                    <span className="projects-candidate-stats">
+                      {candidate.checkoutCount > 1 ? <small>{t("projects.discover.worktrees", { count: candidate.checkoutCount })}</small> : null}
+                      {candidate.dirtyCount > 0 ? <small className="tone-warn">{t("projects.discover.dirty", { count: candidate.dirtyCount })}</small> : null}
+                      {candidate.alreadyRegistered ? <small>{t("projects.discover.registered")}</small> : null}
+                    </span>
+                    {candidate.profileId ? (
+                      <small className="projects-candidate-known" title={candidate.profileId}>
+                        {t("projects.discover.known", {
+                          id: t(`projects.focus.profile.${candidate.profileId}` as TKey)
+                        })}
+                      </small>
+                    ) : null}
                   </span>
                 </span>
               </label>

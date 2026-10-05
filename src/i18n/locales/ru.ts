@@ -1059,7 +1059,7 @@ const ru: Record<TKey, string> = {
   "projects.discover.truncated": "Поиск ограничен — при необходимости выберите папку поменьше.",
   "projects.discover.worktrees": "Worktree: {count}",
   "projects.discover.dirty": "Изменений: {count}",
-  "projects.discover.known": "Известный проект фокуса: {id}",
+  "projects.discover.known": "Фокус · {id}",
   "projects.legacy.title": "Найдены старые папки-источники",
   "projects.legacy.text": "Эти папки взяты из прежней настройки. Импортируйте их как проекты — старая настройка не меняется, пока импорт не завершён.",
   "projects.legacy.button": "Проверить старые папки",

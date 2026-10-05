@@ -1059,7 +1059,7 @@ const es: Record<TKey, string> = {
   "projects.discover.truncated": "La búsqueda se limitó: elige una carpeta más pequeña si hace falta.",
   "projects.discover.worktrees": "{count} worktrees",
   "projects.discover.dirty": "{count} cambios",
-  "projects.discover.known": "Proyecto de foco conocido: {id}",
+  "projects.discover.known": "Foco · {id}",
   "projects.legacy.title": "Carpetas de origen antiguas encontradas",
   "projects.legacy.text": "Estas carpetas vienen del ajuste anterior. Impórtalas como proyectos: el ajuste antiguo no cambia hasta completar la importación.",
   "projects.legacy.button": "Revisar carpetas antiguas",

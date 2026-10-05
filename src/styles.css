@@ -7174,6 +7174,7 @@ button.agent-tile:hover {
 .projects-candidates li {
   min-width: 0;
   min-height: 158px;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 16px;
   background:
@@ -7274,31 +7275,36 @@ button.agent-tile:hover {
   display: grid;
   gap: 5px;
   min-width: 0;
-  padding-right: 22px;
+  padding-right: 24px;
 }
 
-.projects-candidate-copy > strong,
-.projects-candidate-repo {
+.projects-candidate-copy > strong {
+  display: -webkit-box;
+  min-width: 0;
+  min-height: 32px;
   overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.projects-candidate-repo {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.projects-candidate-copy > strong {
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.25;
-}
-
-.projects-candidate-repo {
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
 .projects-candidate-meta {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 5px;
+  min-width: 0;
   margin-top: 3px;
 }
 
@@ -7306,7 +7312,7 @@ button.agent-tile:hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: 100%;
+  min-width: 0;
   min-height: 22px;
   padding: 2px 7px;
   overflow: hidden;
@@ -7319,8 +7325,41 @@ button.agent-tile:hover {
   white-space: nowrap;
 }
 
+.projects-candidate-branch {
+  width: 100%;
+  max-width: 100%;
+}
+
+.projects-candidate-branch > svg {
+  flex: 0 0 auto;
+}
+
+.projects-candidate-branch > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-candidate-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.projects-candidate-stats:empty {
+  display: none;
+}
+
 .projects-candidate-known {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
   color: var(--agent) !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .projects-discovery-actions {

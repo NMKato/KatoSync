@@ -1080,7 +1080,7 @@ const de = {
   "projects.discover.truncated": "Die Suche wurde begrenzt – wähle bei Bedarf einen kleineren Ordner.",
   "projects.discover.worktrees": "{count} Worktrees",
   "projects.discover.dirty": "{count} Änderungen",
-  "projects.discover.known": "Bekanntes Fokus-Projekt: {id}",
+  "projects.discover.known": "Fokus · {id}",
   "projects.legacy.title": "Alte Quellordner gefunden",
   "projects.legacy.text": "Diese Ordner stammen aus der früheren Einstellung. Übernimm sie als Projekte – die alte Einstellung bleibt unverändert bestehen, bis die Übernahme abgeschlossen ist.",
   "projects.legacy.button": "Alte Ordner prüfen",

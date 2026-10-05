@@ -1059,7 +1059,7 @@ const en: Record<TKey, string> = {
   "projects.discover.truncated": "The search was limited – pick a smaller folder if needed.",
   "projects.discover.worktrees": "{count} worktrees",
   "projects.discover.dirty": "{count} changes",
-  "projects.discover.known": "Known focus project: {id}",
+  "projects.discover.known": "Focus · {id}",
   "projects.legacy.title": "Old source folders found",
   "projects.legacy.text": "These folders come from the earlier setting. Import them as projects – the old setting stays unchanged until the import is complete.",
   "projects.legacy.button": "Check old folders",
