@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { evaluateFocus } from "../lib/projectFocus";
+import { buildRepoMap, canonicalProjectId, repoPathFor } from "../lib/projectRegistry";
+import type { ProjectRegistry } from "../types";
+import { useProjectRegistryViewModel } from "./useProjectRegistryViewModel";
 import {
   askConfirm,
   buildCodexPromptFromBriefing,
@@ -150,6 +154,7 @@ export type StepId =
   | "agentJobs"
   | "agentProviders"
   | "agentMonitor"
+  | "agentProjects"
   | "agentHistory"
   | "agentSettings";
 
@@ -254,6 +259,13 @@ export function useKatoSyncViewModel() {
   // Letzte in die Cloud gesicherte library_id -> Push beim Speichern nur, wenn sie sich aenderte.
 
   const show = useCallback((kind: Notice["kind"], text: string) => setNotice({ kind, text }), []);
+
+  // Project Registry + Focus Portfolio (eigener ViewModel, hier nur komponiert).
+  const projects = useProjectRegistryViewModel({ config, notify: show });
+  const projectsRegistryRef = useRef<ProjectRegistry>(projects.registry);
+  projectsRegistryRef.current = projects.registry;
+  const focusPolicyRef = useRef(projects.focusPolicy);
+  focusPolicyRef.current = projects.focusPolicy;
 
   const applyProviderSnapshot = useCallback((next: ProviderStatus[]) => {
     const transitions = providerTransitions(providerStatusesRef.current, next);
@@ -1187,7 +1199,7 @@ export function useKatoSyncViewModel() {
   const resolveRepoForProject = useCallback(
     async (projectId: string): Promise<string | null> => {
       if (!config) return null;
-      const stored = config.projectRepos?.[projectId];
+      const stored = repoPathFor(projectsRegistryRef.current, config.projectRepos, projectId) ?? undefined;
       if (stored && (await dirExists(stored))) return stored;
       // Sicherheit (Multi-Rechner): kein gemerkter Ordner auf DIESEM Rechner. Statt still den
       // Ordner-Dialog zu oeffnen (und ggf. im falschen Ordner loszulaufen) erst bewusst rueckfragen —
@@ -1239,6 +1251,29 @@ export function useKatoSyncViewModel() {
       show("info", "Projekt-Ordner entfernt. Beim nächsten Lauf fragt KatoSync erneut.");
     },
     [config, show]
+  );
+
+  // Registry-Projekt ausdruecklich als Arbeitsordner fuer Aufgaben festlegen. Die Registry waehlt nie still einen
+  // Ausfuehrungsordner: der Runner wechselt dort auf den Default-Branch und legt einen Task-Branch an.
+  const handleUseProjectFolder = useCallback(
+    async (projectId: string) => {
+      const source = configRef.current;
+      const project = projectsRegistryRef.current.projects.find((entry) => entry.id === projectId);
+      if (!source || !project) return;
+      const confirmed = await askConfirm(
+        `„${project.name}“ als Arbeitsordner für Aufgaben verwenden?\n\nBeim Start einer Aufgabe wechselt der Runner in diesem Ordner auf den Standard-Branch und legt dort einen neuen Branch an. Nutze dafür am besten einen Ordner ohne offene Änderungen.`,
+        { title: "Arbeitsordner festlegen", okLabel: "Festlegen", cancelLabel: "Abbrechen" }
+      );
+      if (!confirmed) return;
+      const nextConfig: AppConfig = { ...source, projectRepos: { ...(source.projectRepos ?? {}), [project.id]: project.rootPath } };
+      try {
+        setConfig(await saveConfig(nextConfig));
+      } catch {
+        setConfig(nextConfig);
+      }
+      show("ok", `Arbeitsordner für ${project.name} festgelegt.`);
+    },
+    [show]
   );
 
   // Kern-Codex-Lauf OHNE Ordnerdialog (vom Einzel-Button UND vom Board-Executor genutzt).
@@ -1430,8 +1465,8 @@ export function useKatoSyncViewModel() {
 
   // ===== Projekt-Board =====
   const boardGroups = useMemo<BoardGroup[]>(
-    () => groupTasksByProject(actionPlans, boardSelection, boardOrder),
-    [actionPlans, boardSelection, boardOrder]
+    () => groupTasksByProject(actionPlans, boardSelection, boardOrder, projects.registry),
+    [actionPlans, boardSelection, boardOrder, projects.registry]
   );
 
   const boardDailyLimit = useMemo(() => {
@@ -1574,7 +1609,7 @@ export function useKatoSyncViewModel() {
       if (!config) return;
       setBusy("check-completions");
       try {
-        const repoPath = config.projectRepos?.[task.projectId] ?? "";
+        const repoPath = repoPathFor(projectsRegistryRef.current, config.projectRepos, task.projectId) ?? "";
         const state = await checkCodexTask(repoPath, task.branch ?? "", task.prUrl ?? "");
         if (state === "merged") {
           setActionPlans(await updateActionTaskStatus(config, task.taskId, "completed"));
@@ -1607,7 +1642,7 @@ export function useKatoSyncViewModel() {
       try {
         let changed = 0;
         for (const task of executed) {
-          const repoPath = config.projectRepos?.[task.projectId] ?? "";
+          const repoPath = repoPathFor(projectsRegistryRef.current, config.projectRepos, task.projectId) ?? "";
           const state = await checkCodexTask(repoPath, task.branch ?? "", task.prUrl ?? "");
           if (state === "merged") {
             await updateActionTaskStatus(config, task.taskId, "completed");
@@ -1774,10 +1809,12 @@ export function useKatoSyncViewModel() {
     if (readDailyCount() >= boardDailyLimit) return;
     // Zweite Sperre neben dem Planer: der persistierte Ledger (z. B. aus einem anderen Render-Zyklus).
     if (readAutoLaneClaims().some((claim) => claim.taskId === next.taskId)) return;
-    const repoPath = source.projectRepos?.[next.projectId];
+    const repoPath = repoPathFor(projectsRegistryRef.current, source.projectRepos, next.projectId);
     const plan = actionPlansRef.current.find((entry) => entry.planId === next.planId);
     const task = plan?.tasks.find((entry) => entry.taskId === next.taskId);
     if (!repoPath || !plan || !task) return;
+    // Zweite Sperre neben dem Planer: Fokus-Portfolio (geparkt/archiviert/manuell/unbekannt startet nie autonom).
+    if (!evaluateFocus(focusPolicyRef.current, task.projectId).allowed) return;
 
     autoDispatchingRef.current = true;
     const claimedAt = new Date().toISOString();
@@ -1999,6 +2036,11 @@ export function useKatoSyncViewModel() {
     [setupGates]
   );
 
+  const planProjectIds = useMemo(
+    () => [...new Set(actionPlans.flatMap((plan) => plan.tasks.map((task) => task.projectId)).filter(Boolean))],
+    [actionPlans]
+  );
+
   const agentSync = useMemo(
     () => normalizeAgentSyncState({
       actionPlans,
@@ -2015,10 +2057,11 @@ export function useKatoSyncViewModel() {
       claudeModel: config?.claudeModel,
       localModel: config?.localProvider.model,
       device: config?.device.deviceName,
+      focus: projects.focusPolicy,
       autoLane: {
         enabled: autoMode.enabled,
         selectedOrder: boardOrder,
-        repos: config?.projectRepos ?? {},
+        repos: buildRepoMap(projects.registry, config?.projectRepos, planProjectIds),
         missingRepos: autoMissingRepos,
         claims: autoClaims,
         inFlightTaskIds: autoInFlight,
@@ -2047,6 +2090,9 @@ export function useKatoSyncViewModel() {
       config?.projectRepos,
       config?.providerPriority,
       currentQueueTaskId,
+      planProjectIds,
+      projects.focusPolicy,
+      projects.registry,
       dailyCount,
       localControlMonitor,
       providerHistory,
@@ -2130,6 +2176,8 @@ export function useKatoSyncViewModel() {
     handleDeleteMcpConnectorToken,
     handleDisconnectProvider,
     handleForgetProjectRepo,
+    handleUseProjectFolder,
+    projects,
     handleChooseReferenceRoot,
     handleGenerateConnectorToken,
     handleRejectTask,
@@ -2234,7 +2282,8 @@ const BOARD_PLAN_STATUSES: ActionPlanStatus[] = [
 function groupTasksByProject(
   plans: ActionPlan[],
   selection: string[],
-  order: string[]
+  order: string[],
+  registry: ProjectRegistry | null = null
 ): BoardGroup[] {
   const selectionSet = new Set(selection);
   const groups = new Map<string, BoardTask[]>();
@@ -2254,7 +2303,8 @@ function groupTasksByProject(
         selected: selectionSet.has(task.taskId),
         orderIndex: order.indexOf(task.taskId)
       };
-      const key = task.projectId || NO_PROJECT_ID;
+      // Registry-Aufloesung: bekannte Alias-/Repo-IDs landen unter ihrer kanonischen ID, "Ohne Projekt" nur bei echt Unbekanntem.
+      const key = task.projectId ? canonicalProjectId(registry, task.projectId) : NO_PROJECT_ID;
       const bucket = groups.get(key) ?? [];
       bucket.push(boardTask);
       groups.set(key, bucket);

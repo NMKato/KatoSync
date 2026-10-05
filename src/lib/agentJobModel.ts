@@ -23,6 +23,7 @@ import type {
   CodexEvent,
   CodexRunState,
   FallbackJobSnapshot,
+  FocusPolicy,
   LocalControlMonitorSnapshot,
   ProviderId,
   ProviderStatus,
@@ -33,6 +34,7 @@ import type {
 import { jobStage, localControlHealth } from "./agentSyncCockpit.ts";
 import { AGENT_LANE_ORDER, PROVIDER_RECHECK_INTERVAL_MS, providerRetryAt } from "./providerPolicy.ts";
 import { AUTO_LANE_MAX_CONCURRENT, emptyAutoLanePlan, planAutoLanes } from "./autoLanePlanner.ts";
+import { evaluateFocus, hasFocusProfile } from "./projectFocus.ts";
 
 // Auto-Lane-Eingaben aus dem ViewModel (persistierter Modus, Board-Auswahl, Claims, Repo-Zuordnung).
 export interface AgentAutoLaneInput {
@@ -65,6 +67,9 @@ export interface AgentJobModelInput {
   localModel?: string | null;
   device?: string | null;
   autoLane?: AgentAutoLaneInput | null;
+  // Fokus-Portfolio (Project Registry). Gesetzt: Auto-Dispatch nur fuer aktive Projekte; Empfehlungen
+  // ("naechster Job") nur fuer Fokus-Projekte, sobald die Registry Projekte kennt.
+  focus?: FocusPolicy | null;
   now?: string;
 }
 
@@ -814,7 +819,8 @@ function autoLanePlan(input: AgentJobModelInput, lanes: AgentLane[], remote: Rem
     dailyCount: auto.dailyCount,
     dailyLimit: auto.dailyLimit,
     maxConcurrent: auto.maxConcurrent ?? AUTO_LANE_MAX_CONCURRENT,
-    lastDispatchAt: auto.lastDispatchAt
+    lastDispatchAt: auto.lastDispatchAt,
+    focus: input.focus
   });
 }
 
@@ -851,6 +857,18 @@ function applyAutoLanes(jobs: AgentJob[], plan: AutoLanePlan): AgentJob[] {
   });
 }
 
+// Aufgaben ausserhalb des aktiven Fokus bleiben sichtbar (Backlog/Verlauf), werden aber nie als
+// "naechster Job" empfohlen. Greift erst, wenn die Registry Projekte kennt.
+function markOutOfFocus(jobs: AgentJob[], focus: FocusPolicy | null | undefined): AgentJob[] {
+  if (!hasFocusProfile(focus)) return jobs;
+  return jobs.map((job) => {
+    if (job.source !== "action_plan") return job;
+    const decision = evaluateFocus(focus, job.projectId);
+    // Manuelle Projekte (Auto aus) sind im Fokus und duerfen empfohlen werden; nur Auto-Dispatch ist gesperrt.
+    return decision.allowed || decision.reason === "project_manual" ? job : { ...job, focus: decision.reason };
+  });
+}
+
 const NEXT_CANDIDATE_STEPS = new Set<AgentNextStep>(["start_when_safe", "start_local_control", "await_scheduler_resume", "await_provider_reset", "await_intelligent_lane"]);
 
 export function normalizeAgentSyncState(input: AgentJobModelInput): AgentSyncState {
@@ -883,10 +901,11 @@ export function normalizeAgentSyncState(input: AgentJobModelInput): AgentSyncSta
     .sort(compareJobs);
   const safety = startSafety(input, draftJobs, lanes, remote);
   const autoLanes = autoLanePlan(input, lanes, remote, safety);
-  const jobs = applyAutoLanes(draftJobs, autoLanes).sort(compareJobs);
+  const jobs = markOutOfFocus(applyAutoLanes(draftJobs, autoLanes), input.focus).sort(compareJobs);
 
   const currentJob = jobs.find((job) => job.status === "running") ?? null;
   const pending = jobs
+    .filter((job) => !job.focus)
     .filter(
       (job) =>
         job.status === "queued" ||

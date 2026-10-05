@@ -664,6 +664,8 @@ export interface AgentJob {
   retryAt?: string | null;
   handoffs: AgentHandoff[];
   resume?: { safe: boolean; reason: AgentResumeBlock } | null;
+  // Gesetzt = ausserhalb des aktiven Fokus (geparkt/archiviert/unbekannt): sichtbar, nie empfohlen.
+  focus?: FocusBlockReason | null;
   events: AgentJobEvent[];
 }
 
@@ -799,6 +801,8 @@ export interface AutoLanePlan {
   dispatch: AutoLaneDispatch[];
   counts: Record<AutoLaneState, number>;
   maxConcurrent: number;
+  // Tasks, die der Fokus-Filter VOR dem Ranking ausgeschlossen hat (sichtbar, nie dispatchbar).
+  excluded: AutoLaneExclusion[];
   // Policy-Naht fuer Auto-Merge (Folgeschritt): heute immer manuell, kein Merge durch KatoSync.
   merge: { mode: "manual"; reason: "no_verified_merge_mechanism" };
 }
@@ -826,6 +830,209 @@ export interface LaunchAgentStatus {
   loaded: boolean;
   plistPath: string;
   message: string;
+}
+
+// ===== Project Registry + Focus Portfolio (lokal, read-only gegenueber den Projekten) =====
+export type FocusStatus = "active" | "parked" | "archived";
+export type FocusPriority = "P0" | "P1" | "P2";
+// inherit = folgt dem globalen Auto-Schalter, on = ausdruecklich automatisch (wenn global an), off = nur manuell.
+export type ProjectAutoMode = "inherit" | "on" | "off";
+
+export interface FocusEntry {
+  status: FocusStatus;
+  priority: FocusPriority;
+  autoMode: ProjectAutoMode;
+  // Freitext-Eingrenzung ("nur E2E-Pfad"), rein informativ; die harte Grenze ist status/autoMode.
+  scope?: string | null;
+  origin: "default_profile" | "user" | "migration";
+  updatedAt: string;
+}
+
+// Serialisierbare Sicht fuer Planer/Job-Modell: kanonische ID -> Fokus, Alias (normalisiert) -> kanonische ID.
+export interface FocusPolicy {
+  entries: Record<string, FocusEntry>;
+  aliases: Record<string, string>;
+}
+
+export type FocusBlockReason = "unmapped" | "not_in_focus" | "parked" | "archived" | "project_manual";
+
+export interface AutoLaneExclusion {
+  projectId: string;
+  reason: FocusBlockReason;
+  taskIds: string[];
+}
+
+export type ProjectDocKind = "agents" | "readme" | "status" | "handoff" | "memory" | "rack" | "context" | "architecture";
+export type DocExclusion = "secret_pattern" | "secret_name" | "too_large" | "unreadable";
+
+export interface WorktreeFact {
+  path: string;
+  branch: string | null;
+  headSha: string | null;
+  detached: boolean;
+  locked: boolean;
+  dirtyCount: number | null;
+}
+
+// Rohfakten aus dem Rust-Adapter (nur lesend ermittelt, Remote ohne Zugangsdaten).
+export interface RepoFacts {
+  path: string;
+  commonDir: string | null;
+  mainWorktreePath: string | null;
+  isLinkedWorktree: boolean;
+  remote: string | null;
+  branch: string | null;
+  detached: boolean;
+  headSha: string | null;
+  headDate: string | null;
+  dirtyCount: number;
+  untrackedCount: number;
+  ahead: number | null;
+  behind: number | null;
+  recentShas: string[];
+  worktrees: WorktreeFact[];
+}
+
+export interface DocFact {
+  path: string; // relativ zum Projektordner
+  kind: ProjectDocKind;
+  bytes: number;
+  modifiedAt: string | null;
+  // null, wenn ausgeschlossen. Wird nie persistiert.
+  content: string | null;
+  excluded: DocExclusion | null;
+}
+
+export interface ManifestFact {
+  kind: string;
+  path: string;
+  name: string | null;
+  version: string | null;
+  hints: string[];
+}
+
+export interface ProjectProbe {
+  repo: RepoFacts;
+  docs: DocFact[];
+  manifests: ManifestFact[];
+  scannedAt: string;
+}
+
+export interface DiscoveryResult {
+  root: string;
+  repos: RepoFacts[];
+  scannedDirs: number;
+  truncated: boolean;
+  skippedExcluded: number;
+}
+
+export interface DiscoveredProject {
+  id: string;
+  name: string;
+  identityKey: string;
+  remote: string | null;
+  rootPath: string;
+  commonDir: string | null;
+  branch: string | null;
+  headSha: string | null;
+  dirtyCount: number;
+  worktrees: WorktreeFact[];
+  checkoutCount: number;
+  alreadyRegistered: boolean;
+  // Bekannte Fokus-Projekt-ID aus dem Standardprofil, falls erkannt.
+  profileId: string | null;
+}
+
+export type VerificationState =
+  | "verified"
+  | "status_stale"
+  | "dirty_worktree"
+  | "review_pending"
+  | "human_gate"
+  | "docs_mismatch"
+  | "no_status_doc"
+  | "unscanned";
+
+export type MismatchChoice = "use_code_truth" | "keep_docs_baseline" | "inspect";
+
+export interface VerificationFinding {
+  id: string;
+  state: VerificationState;
+  severity: "info" | "warn" | "danger";
+  detail: string;
+  docValue?: string | null;
+  codeValue?: string | null;
+  choices: MismatchChoice[];
+  resolved?: "use_code_truth" | "keep_docs_baseline" | null;
+}
+
+export interface ProjectVerification {
+  state: VerificationState;
+  findings: VerificationFinding[];
+  checkedAt: string;
+  headSha: string | null;
+}
+
+export interface MismatchResolution {
+  choice: "use_code_truth" | "keep_docs_baseline";
+  at: string;
+  headSha: string | null;
+}
+
+export interface ContextCapsule {
+  schema: "katosync.project-capsule/v1";
+  projectId: string;
+  name: string;
+  generatedAt: string;
+  purpose: string;
+  architecture: string[];
+  guardrails: string[];
+  currentWave: { text: string | null; basis: "documented" | "code_truth" | "none" };
+  branches: Array<{ name: string; branch: string | null; dirty: boolean }>;
+  lastVerification: { state: VerificationState; checkedAt: string; headSha: string | null };
+  nextSafeWork: string[];
+  sources: string[];
+}
+
+export interface ProjectScanSummary {
+  scannedAt: string;
+  branch: string | null;
+  headSha: string | null;
+  headDate: string | null;
+  dirtyCount: number;
+  worktrees: WorktreeFact[];
+  docs: Array<{ path: string; kind: ProjectDocKind; modifiedAt: string | null; excluded: DocExclusion | null }>;
+  manifests: ManifestFact[];
+}
+
+export interface RegistryProject {
+  id: string; // stabil, wird nie aus dem Pfad neu berechnet
+  name: string;
+  identityKey: string;
+  aliases: string[];
+  rootPath: string;
+  commonDir: string | null;
+  remote: string | null;
+  addedAt: string;
+  source: "discovery" | "migration";
+  focus: FocusEntry;
+  scan: ProjectScanSummary | null;
+  verification: ProjectVerification | null;
+  capsule: ContextCapsule | null;
+  resolutions: Record<string, MismatchResolution>;
+}
+
+export interface RegistryMigration {
+  // Alte Einzel-Quellordner (config.sourceRoots) bleiben unveraendert bestehen, bis sie abgedeckt sind.
+  sourceRoots: { status: "none" | "pending" | "done"; roots: string[]; checkedAt: string | null };
+  projectRepos: { status: "none" | "pending" | "done"; checkedAt: string | null };
+}
+
+export interface ProjectRegistry {
+  schemaVersion: 1;
+  projects: RegistryProject[];
+  migration: RegistryMigration;
+  updatedAt: string;
 }
 
 declare global {

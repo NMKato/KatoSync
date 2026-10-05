@@ -28,6 +28,7 @@ use walkdir::{DirEntry, WalkDir};
 mod context_pack;
 mod local_control;
 mod orchestration;
+mod project_registry;
 mod provider_manager;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
@@ -280,6 +281,11 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            project_registry::project_registry_discover,
+            project_registry::project_registry_scan,
+            project_registry::project_registry_load,
+            project_registry::project_registry_save,
+            project_registry::project_registry_open,
             load_config,
             save_config,
             save_api_key,
