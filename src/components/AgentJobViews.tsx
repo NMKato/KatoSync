@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { ArrowRight, Clock3, GitBranch, Layers, PauseCircle, PlayCircle, RadioTower, Route, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
 import { monitorProjection, overviewProjection } from "../lib/agentJobModel";
+import { agentLaneBrand, agentLaneDisplayModel, agentLaneDisplayStatus, splitAgentLaneTitle } from "../lib/agentLanePresentation";
 import { providerIcons } from "./ProviderManager";
 import type { AgentHandoff, AgentJob, AgentJobEvent, AgentLane, AgentLaneId, AgentSyncState, AutoLane, AutoLanePlan, AutoLaneState } from "../types";
 
@@ -113,12 +114,39 @@ function heartbeatTone(lane: AgentLane): "live" | "ok" | "warn" | "off" {
 }
 
 function laneStatusText(t: TFunc, lane: AgentLane): string {
-  if (lane.activity === "active") return t("agent.laneAct.active");
-  if (lane.connectivity === "limited") return t("agent.conn.limited");
-  if (lane.connectivity === "not_configured") return t("agent.conn.not_configured");
-  if (lane.connectivity === "disconnected" || lane.activity === "offline") return t("agent.conn.disconnected");
-  if (lane.connectivity === "connected") return t("agent.laneAct.idle");
-  return t("agent.conn.unknown");
+  const status = agentLaneDisplayStatus(lane);
+  if (status === "quota_limited") return t("providers.flow.quota_limited");
+  if (status === "sign_in_required") return t("providers.flow.auth_unavailable");
+  if (status === "overloaded") return t("providers.flow.capacity_unavailable");
+  return t(`agent.userStatus.${status}` as TKey);
+}
+
+const brandAssets = {
+  openai: "/agent-openai.png",
+  claude: "/agent-claude.png",
+  kai: "/kai-ai-icon.png",
+  katosync: "/katoos_icon_logo_trans.png"
+} as const;
+
+function LaneBrandIcon({ lane, size = 20 }: { lane: AgentLane; size?: number }) {
+  const brand = agentLaneBrand(lane);
+  const src = brand === "remote" ? null : brandAssets[brand];
+  if (!src) {
+    const Icon = laneIcons[lane.id];
+    return <Icon size={size} aria-hidden="true" />;
+  }
+  return <img className="agent-lane-brand-image" src={src} width={size} height={size} alt="" aria-hidden="true" />;
+}
+
+function LaneTitle({ t, lane }: { t: TFunc; lane: AgentLane }) {
+  const label = laneLabel(t, lane.id);
+  const parts = splitAgentLaneTitle(label);
+  return (
+    <strong className="agent-lane-title" title={label}>
+      <span>{parts.primary}</span>
+      {parts.secondary ? <span>{parts.secondary}</span> : null}
+    </strong>
+  );
 }
 
 function controlTowerNext(state: AgentSyncState, t: TFunc): string {
@@ -261,19 +289,23 @@ export function ControlTower({ state }: { state: AgentSyncState }) {
           ) : null}
           <ol className="control-lane-map">
             {state.lanes.map((lane, index) => {
-              const Icon = laneIcons[lane.id];
               const owner = lane.id === currentOwner;
               const tone = heartbeatTone(lane);
+              const displayModel = agentLaneDisplayModel(lane);
               return (
                 <li className={`control-lane-node ${tone}${owner ? " owner" : ""}`} key={lane.id}>
                   {index > 0 ? <span className="control-lane-connector" aria-hidden="true"><i /></span> : null}
                   <div className="control-lane-orb">
-                    <Icon size={20} />
+                    <LaneBrandIcon lane={lane} size={26} />
                     <span className="control-lane-pulse" aria-hidden="true" />
                   </div>
-                  <strong>{laneLabel(t, lane.id)}</strong>
+                  <LaneTitle t={t} lane={lane} />
                   <small>{laneStatusText(t, lane)}</small>
-                  {owner && state.currentJob ? <em title={state.currentJob.task}>{state.currentJob.task}</em> : lane.model ? <em title={lane.model}>{lane.model}</em> : null}
+                  {owner && state.currentJob ? (
+                    <em title={state.currentJob.task}>{state.currentJob.task}</em>
+                  ) : displayModel ? (
+                    <em title={lane.model ?? displayModel}>{displayModel}</em>
+                  ) : null}
                 </li>
               );
             })}
@@ -508,33 +540,23 @@ export function LaneRoute({ state }: { state: AgentSyncState }) {
       </div>
       <ol className={`agent-route${state.currentJob ? " working" : ""}`} aria-label={t("providers.routeAria")}>
         {state.lanes.map((lane) => {
-          const Icon = laneIcons[lane.id];
           const isOwner = lane.id === owner;
           const lit = ownerRank >= 0 && lane.rank <= ownerRank;
+          const displayModel = agentLaneDisplayModel(lane);
           return (
             <li className={`agent-route-step${lit ? " lit" : ""}${lane.rank === 0 ? " first" : ""}`} key={lane.id}>
               {lane.rank > 0 ? <span className={`agent-route-link${lit ? " lit" : " fallback"}`} aria-hidden="true" /> : null}
               <div className={`agent-route-node ${connectivityTone(lane)}${isOwner ? " owner" : ""}${ownerRank > lane.rank ? " passed" : ""}`}>
                 <span className="agent-route-rank">{lane.rank + 1}</span>
-                <span className="agent-route-icon"><Icon size={18} /></span>
-                <strong>{laneLabel(t, lane.id)}</strong>
-                <small>
-                  {t(`agent.conn.${lane.connectivity}` as TKey)} · {t(`agent.laneAct.${lane.activity}` as TKey)}
-                </small>
+                <span className="agent-route-icon"><LaneBrandIcon lane={lane} size={22} /></span>
+                <LaneTitle t={t} lane={lane} />
+                <small>{laneStatusText(t, lane)}</small>
                 <span className="agent-route-kind">{t(`agent.lane.kind.${lane.kind}` as TKey)}</span>
                 {lane.id === "local" && lane.connectivity === "not_configured" ? (
                   <span className="agent-route-kind">{t("agent.lane.localBrainSeam")}</span>
                 ) : null}
-                {lane.id === "local" && lane.model ? (
-                  <span
-                    className={"agent-local-brain-mark" + (lane.activity === "active" ? " active" : "")}
-                    title={lane.model}
-                    aria-label={"Local Brain · " + lane.model}
-                  >
-                    <img src="/kai-ai-icon.png" alt="" aria-hidden="true" />
-                  </span>
-                ) : lane.model ? (
-                  <span className="agent-route-kind" title={lane.model}>{lane.model}</span>
+                {displayModel ? (
+                  <span className="agent-route-kind" title={lane.model ?? displayModel}>{displayModel}</span>
                 ) : null}
                 {lane.retryAt ? <span className="agent-route-kind">{t("agent.lane.retry", { time: clock(lane.retryAt) })}</span> : null}
                 {isOwner ? (
