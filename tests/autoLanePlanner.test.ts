@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   addAutoLaneClaim,
+  hasAutoLaneClaimConflict,
   pickAutoLaneRunner,
   planAutoLanes,
   pruneAutoLaneClaims,
+  pruneAutoLaneClaimsInScope,
   releaseAutoLaneClaim,
   type AutoLanePlannerInput
 } from "../src/lib/autoLanePlanner.ts";
@@ -200,12 +202,21 @@ test("duplicate prevention: claims and in-flight runs are never dispatched again
   // Claim-Ledger ist idempotent und gibt nur erledigte Tasks frei.
   const twice = addAutoLaneClaim(addAutoLaneClaim([], claim), { ...claim, claimedAt: "later" });
   assert.equal(twice.length, 1);
+  assert.equal(hasAutoLaneClaimConflict(twice, "other-task", "repo-alpha"), true);
+  assert.equal(addAutoLaneClaim(twice, { ...claim, taskId: "other-task" }).length, 1);
   assert.deepEqual(releaseAutoLaneClaim(twice, "a1"), []);
   const plans = [plan("p1", [task("a1", "alpha", { status: "running" }), task("a2", "alpha", { status: "executed" })])];
   const ledger = [claim, { ...claim, taskId: "a2" }, { ...claim, taskId: "gone" }];
   assert.deepEqual(pruneAutoLaneClaims(ledger, plans).map((entry) => entry.taskId), ["a1"]);
   // Ohne geladene Plans wird nichts verworfen (kein Freigeben auf Verdacht).
   assert.equal(pruneAutoLaneClaims(ledger, []).length, 3);
+  // Ein erfolgreicher autoritativer Refresh darf verschwundene/abgeschlossene Claims freigeben.
+  assert.deepEqual(pruneAutoLaneClaims(ledger, [], true), []);
+  const remoteClaim = { ...claim, taskId: "remote", repoKey: "repo-remote" };
+  assert.deepEqual(
+    pruneAutoLaneClaimsInScope([...ledger, remoteClaim], [], ["a1", "a2", "gone"]),
+    [remoteClaim]
+  );
 });
 
 test("a failed or blocked project does not freeze an independent project", () => {

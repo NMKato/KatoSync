@@ -64,6 +64,7 @@ import { RichMarkdown } from "./components/RichMarkdown";
 import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
 import { AgentLiveMonitor } from "./components/AgentJobViews";
 import { ProviderManager } from "./components/ProviderManager";
+import { ProjectRegistryWorkspace } from "./components/ProjectRegistryWorkspace";
 import { ModeGateway, ModeSwitch } from "./components/ModeGateway";
 import {
   AgentReadinessStrip,
@@ -125,6 +126,7 @@ const agentSyncSteps: Array<{ id: StepId; icon: typeof Activity }> = [
   { id: "agentJobs", icon: Workflow },
   { id: "agentProviders", icon: Bot },
   { id: "agentMonitor", icon: Activity },
+  { id: "agentProjects", icon: FolderOpen },
   { id: "agentHistory", icon: History },
   { id: "agentSettings", icon: Settings }
 ];
@@ -152,6 +154,7 @@ const sectionByStep: Record<StepId, string> = {
   agentJobs: "section-agent-jobs",
   agentProviders: "section-agent-sync",
   agentMonitor: "section-agent-monitor",
+  agentProjects: "section-agent-projects",
   agentHistory: "section-agent-history",
   agentSettings: "section-agent-settings"
 };
@@ -822,6 +825,7 @@ export default function App() {
               />
             </section>
           ) : null}
+          {visibleStep === "agentProjects" ? <ProjectRegistryWorkspace vm={vm} /> : null}
           {visibleStep === "agentHistory" ? <AgentSyncHistory vm={vm} /> : null}
           {visibleStep === "agentSettings" ? (
             <section className="agent-settings-page" id="section-agent-settings">

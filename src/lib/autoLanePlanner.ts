@@ -12,12 +12,15 @@ import type {
   AutoLane,
   AutoLaneClaim,
   AutoLaneDispatch,
+  AutoLaneExclusion,
+  FocusPolicy,
   AutoLanePlan,
   AutoLaneReason,
   AutoLaneRunner,
   AutoLaneState,
   ProviderId
 } from "../types";
+import { evaluateFocus } from "./projectFocus.ts";
 
 // Takt des Dispatchers bei offener App: begrenzt, kein Busy-Loop.
 export const AUTO_LANE_TICK_MS = 15_000;
@@ -50,6 +53,9 @@ export interface AutoLanePlannerInput {
   maxConcurrent?: number;
   // Fairness: zuletzt gestartete Projekte kommen spaeter wieder dran (Round-Robin).
   lastDispatchAt?: Record<string, string>;
+  // Fokus-Portfolio der Project Registry. Gesetzt = HARTE Grenze VOR Kandidaten-Gruppierung und Ranking:
+  // nur aktive, bekannte Projekte mit Auto-Modus != off. Undefined = keine Fokus-Pruefung (Altverhalten).
+  focus?: FocusPolicy | null;
 }
 
 const TERMINAL_SKIP = new Set<ActionTask["status"]>(["completed", "rejected", "deferred"]);
@@ -82,6 +88,7 @@ export function emptyAutoLanePlan(enabled = false, maxConcurrent = AUTO_LANE_MAX
     dispatch: [],
     counts: { planned: 0, queued: 0, running: 0, waiting: 0, blocked: 0 },
     maxConcurrent,
+    excluded: [],
     merge: { mode: "manual", reason: "no_verified_merge_mechanism" }
   };
 }
@@ -133,7 +140,13 @@ interface LaneDraft {
   fixed: { state: AutoLaneState; reason: AutoLaneReason } | null;
 }
 
-function draftLanes(input: AutoLanePlannerInput): LaneDraft[] {
+interface Drafted {
+  drafts: LaneDraft[];
+  excluded: AutoLaneExclusion[];
+}
+
+function draftLanes(input: AutoLanePlannerInput): Drafted {
+  const excludedBy = new Map<string, AutoLaneExclusion>();
   const order = new Map(input.selectedOrder.map((id, index) => [id, index]));
   const live = new Set(input.inFlightTaskIds);
   const claimed = new Set(input.claims.map((claim) => claim.taskId));
@@ -141,6 +154,18 @@ function draftLanes(input: AutoLanePlannerInput): LaneDraft[] {
   for (const plan of input.actionPlans) {
     for (const task of plan.tasks) {
       if (!order.has(task.taskId) || !runnable(task) || TERMINAL_SKIP.has(task.status)) continue;
+      // Fokus-Gate vor Gruppierung/Ranking: ausgeschlossene Tasks bilden keine Lane und keine Empfehlung.
+      if (input.focus) {
+        const decision = evaluateFocus(input.focus, task.projectId);
+        if (!decision.allowed && decision.reason) {
+          const projectId = decision.canonicalId ?? task.projectId;
+          const key = `${projectId}\u0000${decision.reason}`;
+          const entry = excludedBy.get(key) ?? { projectId, reason: decision.reason, taskIds: [] };
+          entry.taskIds.push(task.taskId);
+          excludedBy.set(key, entry);
+          continue;
+        }
+      }
       const bucket = byProject.get(task.projectId) ?? [];
       bucket.push({ task, plan });
       byProject.set(task.projectId, bucket);
@@ -165,13 +190,15 @@ function draftLanes(input: AutoLanePlannerInput): LaneDraft[] {
     else if (input.missingRepos?.includes(projectId)) fixed = { state: "blocked", reason: "repo_missing" };
     drafts.push({ projectId, head, planId: plan.planId, taskIds: entries.map((entry) => entry.task.taskId), fixed });
   }
-  return drafts;
+  const excluded = [...excludedBy.values()].sort((a, b) => a.projectId.localeCompare(b.projectId) || a.reason.localeCompare(b.reason));
+  return { drafts, excluded };
 }
 
 export function planAutoLanes(input: AutoLanePlannerInput): AutoLanePlan {
   const maxConcurrent = Math.max(1, Math.floor(input.maxConcurrent ?? AUTO_LANE_MAX_CONCURRENT));
   const plan = emptyAutoLanePlan(input.enabled, maxConcurrent);
-  const drafts = draftLanes(input);
+  const { drafts, excluded } = draftLanes(input);
+  plan.excluded = excluded;
   const lanes = new Map<string, AutoLane>();
   const make = (draft: LaneDraft, state: AutoLaneState, reason: AutoLaneReason, extra: Partial<AutoLane> = {}): AutoLane => ({
     id: autoLaneId(draft.projectId),
@@ -256,7 +283,12 @@ export function planAutoLanes(input: AutoLanePlannerInput): AutoLanePlan {
 
 // ===== Claim-Ledger (rein; Persistenz liegt im ViewModel) =====
 export function addAutoLaneClaim(claims: AutoLaneClaim[], claim: AutoLaneClaim): AutoLaneClaim[] {
-  return claims.some((entry) => entry.taskId === claim.taskId) ? claims : [...claims, claim];
+  return hasAutoLaneClaimConflict(claims, claim.taskId, claim.repoKey) ? claims : [...claims, claim];
+}
+
+/** Ein Task oder Worktree darf zu jedem Zeitpunkt hoechstens einen Writer-Claim besitzen. */
+export function hasAutoLaneClaimConflict(claims: AutoLaneClaim[], taskId: string, repoKey: string): boolean {
+  return claims.some((entry) => entry.taskId === taskId || entry.repoKey === repoKey);
 }
 
 export function releaseAutoLaneClaim(claims: AutoLaneClaim[], taskId: string): AutoLaneClaim[] {
@@ -264,11 +296,29 @@ export function releaseAutoLaneClaim(claims: AutoLaneClaim[], taskId: string): A
 }
 
 /** Claims, deren Task inzwischen einen eindeutigen Endstatus hat oder verschwunden ist, sind erledigt. */
-export function pruneAutoLaneClaims(claims: AutoLaneClaim[], plans: ActionPlan[]): AutoLaneClaim[] {
-  if (!plans.length) return claims;
+export function pruneAutoLaneClaims(claims: AutoLaneClaim[], plans: ActionPlan[], authoritative = false): AutoLaneClaim[] {
+  // Ein leerer, noch nicht geladener Planstand darf nie Claims freigeben. Nach einem erfolgreichen,
+  // autoritativen AutoQ-Refresh ist ein leerer Stand dagegen echte Wahrheit: verschwundene/erledigte
+  // Claims sind dann sicher freizugeben.
+  if (!plans.length && !authoritative) return claims;
   const status = new Map(plans.flatMap((plan) => plan.tasks.map((task) => [task.taskId, task.status] as const)));
   return claims.filter((claim) => {
     const current = status.get(claim.taskId);
     return current !== undefined && !CLAIM_RESOLVED.has(current);
   });
+}
+
+/**
+ * Bereinigt nur Claims eines autoritativ erneuerten Teil-Ledgers. Claims anderer Planquellen bleiben
+ * unangetastet, weil ein AutoQ-Refresh keine Aussage ueber deren Writer-Eigentum treffen darf.
+ */
+export function pruneAutoLaneClaimsInScope(
+  claims: AutoLaneClaim[],
+  plans: ActionPlan[],
+  scopedTaskIds: Iterable<string>
+): AutoLaneClaim[] {
+  const scope = new Set(scopedTaskIds);
+  const scopedClaims = claims.filter((claim) => scope.has(claim.taskId));
+  const retained = new Set(pruneAutoLaneClaims(scopedClaims, plans, true).map((claim) => claim.taskId));
+  return claims.filter((claim) => !scope.has(claim.taskId) || retained.has(claim.taskId));
 }

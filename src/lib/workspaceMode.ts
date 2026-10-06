@@ -15,6 +15,7 @@ export const AGENT_SYNC_STEPS: StepId[] = [
   "agentJobs",
   "agentProviders",
   "agentMonitor",
+  "agentProjects",
   "agentHistory",
   "agentSettings"
 ];

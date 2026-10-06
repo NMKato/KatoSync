@@ -10,10 +10,13 @@ import {
   CheckCircle2,
   Clock3,
   ExternalLink,
+  FolderPlus,
+  FolderSearch,
   GitBranch,
   History,
   ListChecks,
   PlayCircle,
+  RefreshCcw,
   ShieldCheck,
   StopCircle,
   TerminalSquare,
@@ -22,6 +25,7 @@ import {
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
 import { providerDisplayState } from "../lib/providerPolicy";
+import { isInActiveFocus } from "../lib/projectFocus";
 import {
   agentReadiness,
   jobStage,
@@ -165,19 +169,94 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   const { t } = useT();
   const readiness = buildAgentReadiness(vm);
   const state = vm.agentSync;
-  const approvalPlans = vm.actionPlans.filter(
-    (plan) => plan.status === "pending_user_review" || plan.status === "in_review"
-  );
-  const reviewJobs = state.jobs.filter(
-    (job) => job.status === "implemented" || job.status === "review_ready" || job.status === "human_gate"
-  );
+  const hasLinkedProjects = vm.projects.registry.projects.length > 0;
+  const approvalPlans = hasLinkedProjects
+    ? vm.actionPlans.filter(
+        (plan) =>
+          (plan.status === "pending_user_review" || plan.status === "in_review") &&
+          plan.tasks.some((task) => isInActiveFocus(vm.projects.focusPolicy, task.projectId))
+      )
+    : [];
+  const reviewJobs = hasLinkedProjects
+    ? state.jobs.filter(
+        (job) =>
+          (job.status === "implemented" || job.status === "review_ready" || job.status === "human_gate") &&
+          isInActiveFocus(vm.projects.focusPolicy, job.projectId)
+      )
+    : [];
 
   return (
     <section className="agent-dashboard" id="section-agent-dashboard">
       <ControlTower state={state} />
 
+      <section className="glass agent-project-linker" aria-label={t("agent.projects.quickTitle")}>
+        <div className="agent-project-linker-copy">
+          <span className="agent-project-linker-icon" aria-hidden="true">
+            <FolderSearch size={19} />
+          </span>
+          <div>
+            <strong>{t("agent.projects.quickTitle")}</strong>
+            <p>{t("agent.projects.quickText")}</p>
+          </div>
+        </div>
+        <div className="agent-project-linker-actions">
+          <button
+            className="primary"
+            disabled={vm.projects.busy !== null}
+            onClick={() => {
+              void vm.projects.startDiscovery("project").then(() => onNavigate("agentProjects"));
+            }}
+            type="button"
+          >
+            <FolderPlus size={15} />
+            {t("projects.add")}
+          </button>
+          <button
+            className="secondary"
+            disabled={vm.projects.busy !== null}
+            onClick={() => {
+              void vm.projects.startDiscovery("workspace").then(() => onNavigate("agentProjects"));
+            }}
+            type="button"
+          >
+            <FolderSearch size={15} />
+            {t("agent.projects.quickWorkspace")}
+          </button>
+          <button className="ghost compact-button" onClick={() => onNavigate("agentProjects")} type="button">
+            {t("agent.projects.quickOpen")}
+            <ArrowRight size={14} />
+          </button>
+        </div>
+        <div className="agent-project-linker-status">
+          <small>
+            {vm.projects.registry.projects.length
+              ? t("agent.projects.quickConnected", { count: vm.projects.registry.projects.length })
+              : t("agent.projects.quickEmpty")}
+          </small>
+          {vm.projects.registry.projects.length ? (
+            <div className="agent-project-linker-chips">
+              {vm.projects.portfolio.map((project) => (
+                <button
+                  className={`agent-project-chip ${project.focus.autoMode === "off" ? "manual" : ""}`}
+                  key={project.id}
+                  onClick={() => onNavigate("agentProjects")}
+                  title={project.name}
+                  type="button"
+                >
+                  <span>{project.name}</span>
+                  <b>{project.focus.priority}</b>
+                  {project.focus.autoMode === "off" ? <em>{t("projects.auto.off")}</em> : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <AutoQStarter vm={vm} onOpenProjects={() => onNavigate("agentProjects")} />
+
       <AutoLanePanel
-        busy={Boolean(vm.busy)}
+        busy={Boolean(vm.busy) || vm.projectWorkSyncBusy}
         onRelease={(taskId) => void vm.handleReleaseAutoLane(taskId)}
         onToggle={vm.handleSetAutoMode}
         plan={state.autoLanes}
@@ -277,6 +356,67 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   );
 }
 
+function AutoQStarter({ vm, onOpenProjects }: { vm: ViewModel; onOpenProjects: () => void }) {
+  const { t } = useT();
+  const report = vm.projectWorkSyncReport;
+  return (
+    <section className="glass agent-autoq" aria-label={t("agent.autoq.title")}>
+      <div className="agent-autoq-main">
+        <span className="agent-autoq-icon" aria-hidden="true">
+          <Workflow size={18} />
+        </span>
+        <div className="agent-autoq-copy">
+          <strong>{t("agent.autoq.title")}</strong>
+          <p>{t("agent.autoq.text")}</p>
+        </div>
+        <button
+          className="primary agent-autoq-start"
+          disabled={vm.projectWorkSyncBusy || Boolean(vm.busy)}
+          onClick={() => void vm.handleStartAutoQ()}
+          type="button"
+        >
+          {vm.projectWorkSyncBusy ? <RefreshCcw className="spin" size={15} /> : <PlayCircle size={15} />}
+          {vm.projectWorkSyncBusy ? t("agent.autoq.syncing") : t("agent.autoq.start")}
+        </button>
+      </div>
+
+      {report ? (
+        <div className="agent-autoq-report">
+          <div className="agent-autoq-counts">
+            <span className="ok">{t("agent.autoq.ready", { count: report.readyCount })}</span>
+            <span className="warn">{t("agent.autoq.gated", { count: report.gatedCount })}</span>
+            <span>{t("agent.autoq.empty", { count: report.emptyCount })}</span>
+          </div>
+          <div className="agent-autoq-projects">
+            {report.projects.map((project) => (
+              <div
+                className={`agent-autoq-project ${project.ready > 0 ? "ready" : project.gated ? "gated" : "empty"}`}
+                key={project.projectId}
+              >
+                <span className="projects-prio">{project.priority}</span>
+                <strong>{project.name}</strong>
+                <small>
+                  {project.ready > 0
+                    ? t("agent.autoq.projectReady", { count: project.ready })
+                    : project.detail ?? t("agent.autoq.projectEmpty")}
+                </small>
+              </div>
+            ))}
+          </div>
+          {report.readyCount === 0 && report.gatedCount > 0 ? (
+            <button className="ghost compact-button" onClick={onOpenProjects} type="button">
+              {t("agent.autoq.resolve")}
+              <ArrowRight size={13} />
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <small className="agent-autoq-hint">{t("agent.autoq.hint")}</small>
+      )}
+    </section>
+  );
+}
+
 function CardTitle({ icon, title }: { icon: ReactNode; title: string }) {
   return (
     <div className="agent-card-title">
@@ -361,7 +501,7 @@ export function AgentSyncJobs({ vm, onOpenMistralTasks }: { vm: ViewModel; onOpe
       jobs: group.tasks
         .filter((task) => task.targetRunner === "codex_cli")
         .map((task) => {
-          const plan = vm.actionPlans.find((entry) => entry.planId === task.planId);
+          const plan = vm.agentActionPlans.find((entry) => entry.planId === task.planId);
           return { task, stage: plan ? jobStage(task, plan, vm.currentQueueTaskId) : null };
         })
         .filter((job): job is { task: typeof job.task; stage: JobStage } => job.stage !== null)
@@ -475,7 +615,7 @@ export function AgentSyncJobs({ vm, onOpenMistralTasks }: { vm: ViewModel; onOpe
 // ===== Verlauf & Nachweise (nur echter Zustand) =====
 export function AgentSyncHistory({ vm }: { vm: ViewModel }) {
   const { t } = useT();
-  const finished = vm.actionPlans
+  const finished = vm.agentActionPlans
     .flatMap((plan) => plan.tasks.map((task) => ({ task, stage: jobStage(task, plan, vm.currentQueueTaskId) })))
     .filter((job) => job.task.targetRunner === "codex_cli")
     .filter((job) => job.stage === "executed" || job.stage === "completed" || job.stage === "failed");

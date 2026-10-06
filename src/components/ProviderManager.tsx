@@ -9,6 +9,7 @@ import {
   Cloud,
   Copy,
   Cpu,
+  Download,
   ExternalLink,
   KeyRound,
   Loader2,
@@ -17,6 +18,9 @@ import {
   RefreshCcw,
   Search,
   ShieldCheck,
+  Play,
+  Square,
+  Trash2,
   Unplug,
   X
 } from "lucide-react";
@@ -265,7 +269,7 @@ function ProviderCard({
   }, [connecting]);
 
   return (
-    <article className={`provider-card ${tone}`} aria-busy={Boolean(action)}>
+    <article className={`provider-card provider-card-${provider} ${tone}`} aria-busy={Boolean(action)}>
       <header>
         <div className="provider-mark"><Icon size={24} /></div>
         <div className="provider-card-title">
@@ -296,7 +300,15 @@ function ProviderCard({
       </header>
 
       {isLocal ? (
-        <LocalProviderForm status={status} vm={vm} />
+        <>
+          <LocalBrainInstaller vm={vm} />
+          <details className="local-provider-advanced">
+            <summary>{t("providers.localBrain.advanced")}</summary>
+            <div className="local-provider-advanced-body">
+              <LocalProviderForm status={status} vm={vm} />
+            </div>
+          </details>
+        </>
       ) : (
         <p className="provider-auth-note">{t(`providers.${provider}.authNote` as TKey)}</p>
       )}
@@ -441,6 +453,93 @@ function ProviderCard({
         ) : null}
       </footer>
     </article>
+  );
+}
+
+function LocalBrainInstaller({ vm }: { vm: ViewModel }) {
+  const { t } = useT();
+  const brain = vm.localBrainStatus;
+  const progress = vm.localBrainProgress;
+  const busy = vm.localBrainBusy;
+  const installed = Boolean(brain?.runtimeInstalled && brain?.modelInstalled);
+  const running = Boolean(brain?.running);
+  const percent = progress?.percent == null ? null : Math.max(0, Math.min(100, progress.percent));
+  const sizeGb = brain ? (brain.modelSizeBytes / 1_000_000_000).toFixed(2) : "4.59";
+  const ramText = brain?.ramGb ? `${brain.ramGb} GB` : t("providers.localBrain.unknown");
+  const fitKey = brain?.ramFit ?? "unknown";
+
+  return (
+    <section className={`local-brain-card ${running ? "running" : installed ? "installed" : ""}`}>
+      <div className="local-brain-head">
+        <div className="local-brain-icon"><Cpu size={19} /></div>
+        <div className="local-brain-copy">
+          <span>{t("providers.localBrain.recommended")}</span>
+          <strong>{brain?.modelName ?? "Kato Local Brain · Gemma 4 E4B"}</strong>
+          <small>{t("providers.localBrain.subtitle")}</small>
+        </div>
+        <span className={`local-brain-state ${running ? "live" : installed ? "ok" : ""}`}>
+          {running
+            ? t("providers.localBrain.running")
+            : installed
+              ? t("providers.localBrain.installed")
+              : t("providers.localBrain.notInstalled")}
+        </span>
+      </div>
+
+      <div className="local-brain-facts">
+        <span><strong>{sizeGb} GB</strong>{t("providers.localBrain.download")}</span>
+        <span><strong>{brain?.quantization ?? "Q4_0"}</strong>{t("providers.localBrain.quantization")}</span>
+        <span><strong>{ramText}</strong>{t(`providers.localBrain.fit.${fitKey}` as TKey)}</span>
+      </div>
+
+      {progress && busy === "install" ? (
+        <div className="local-brain-progress" role="status" aria-live="polite">
+          <div>
+            <span>{progress.label}</span>
+            <strong>{percent == null ? "…" : `${percent.toFixed(0)}%`}</strong>
+          </div>
+          <div className="local-brain-progress-track" aria-hidden="true">
+            <span style={{ width: `${percent ?? 4}%` }} />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="local-brain-actions">
+        {!installed ? (
+          <button
+            className="primary"
+            disabled={Boolean(busy) || brain?.supported === false}
+            onClick={() => void vm.handleInstallLocalBrain()}
+            type="button"
+          >
+            {busy === "install" ? <Loader2 className="spin" size={15} /> : <Download size={15} />}
+            {t("providers.localBrain.install")}
+          </button>
+        ) : running ? (
+          <button className="secondary" disabled={Boolean(busy)} onClick={() => void vm.handleStopLocalBrain()} type="button">
+            {busy === "stop" ? <Loader2 className="spin" size={15} /> : <Square size={14} />}
+            {t("providers.localBrain.stop")}
+          </button>
+        ) : (
+          <button className="primary" disabled={Boolean(busy)} onClick={() => void vm.handleStartLocalBrain()} type="button">
+            {busy === "start" ? <Loader2 className="spin" size={15} /> : <Play size={15} />}
+            {t("providers.localBrain.start")}
+          </button>
+        )}
+        {installed ? (
+          <button className="ghost" disabled={Boolean(busy)} onClick={() => void vm.handleRemoveLocalBrain()} type="button">
+            {busy === "remove" ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+            {t("providers.localBrain.remove")}
+          </button>
+        ) : null}
+      </div>
+
+      {brain?.supported === false ? (
+        <span className="provider-field-error">{t("providers.localBrain.unsupported")}</span>
+      ) : (
+        <span className="provider-safe-note">{t("providers.localBrain.safe")}</span>
+      )}
+    </section>
   );
 }
 
