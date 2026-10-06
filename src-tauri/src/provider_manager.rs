@@ -47,6 +47,9 @@ const MAX_API_WORKER_PROMPT_BYTES: usize = 32 * 1024;
 const MAX_API_WORKER_CONTEXT_BYTES: usize = 128 * 1024;
 const DISCOVERY_TIMEOUT: Duration = Duration::from_millis(1500);
 const MAX_LOCAL_RESPONSE_BYTES: usize = 1_048_576;
+// Remote-Modellkataloge (z. B. OpenRouter) sind deutlich groesser als lokale Listen.
+const MAX_API_CATALOG_BYTES: usize = 8 * 1_048_576;
+const MAX_API_CATALOG_MODELS: usize = 2_000;
 const MAX_CAPTURED_BYTES: usize = 262_144;
 const LOCAL_CONTROL_HEARTBEAT_MAX_AGE_SECS: i64 = 90;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -142,6 +145,7 @@ pub enum ProviderReason {
     SecretStoreUnavailable,
     LocalControlRunning,
     LocalControlQueueOnly,
+    ApiKeyProviderMismatch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -237,6 +241,9 @@ pub struct ApiProviderConfig {
     pub capabilities: Vec<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    // Optionales Monatsbudget in USD; Durchsetzung ueber das Usage-Ledger der App.
+    #[serde(default)]
+    pub monthly_budget_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -842,9 +849,11 @@ pub fn redact(value: &str) -> String {
     let mut result = value.replace(['\r', '\n', '\t'], " ");
     let patterns = [
         (
-            r"(?i)\b(?:sk|sess|oauth|token|rk|pk|ghp|gho|xox[a-z])[-_][A-Za-z0-9._-]{8,}",
+            r"(?i)\b(?:sk|sess|oauth|token|rk|pk|ghp|gho|xai|xox[a-z])[-_][A-Za-z0-9._-]{8,}",
             "<redacted>",
         ),
+        // Z.AI-Keyform `<hex>.<token>`.
+        (r"\b[0-9a-f]{32}\.[A-Za-z0-9]{16}\b", "<redacted>"),
         (r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer <redacted>"),
         (
             r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+",
@@ -1506,6 +1515,21 @@ fn extract_model_ids(value: &Value, kind: LocalProviderKind) -> Vec<String> {
         .collect()
 }
 
+fn extract_api_model_ids(value: &Value) -> Vec<String> {
+    let mut models = value
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .filter(|name| is_safe_model_name(name))
+        .map(str::to_string)
+        .take(MAX_API_CATALOG_MODELS)
+        .collect::<Vec<_>>();
+    models.dedup();
+    models
+}
+
 fn http_client(limit: Duration) -> Option<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(limit)
@@ -1642,6 +1666,38 @@ fn load_api_key_for(config: &ApiProviderConfig) -> Result<Option<String>, Provid
     Ok(None)
 }
 
+/// Provider-Familie, die ein Key mit exklusivem Praefix zwingend verlangt. Spiegelt
+/// `src/lib/apiKeyInference.ts`; alles ohne eindeutiges Praefix bleibt Nutzerentscheidung.
+fn strong_key_family(api_key: &str) -> Option<&'static [ApiProviderPreset]> {
+    const RULES: [(&str, &[ApiProviderPreset]); 5] = [
+        ("sk-ant-", &[ApiProviderPreset::Anthropic]),
+        (
+            "sk-or-",
+            &[
+                ApiProviderPreset::OpenrouterEu,
+                ApiProviderPreset::OpenrouterGlobal,
+            ],
+        ),
+        ("sk-proj-", &[ApiProviderPreset::Openai]),
+        ("sk-svcacct-", &[ApiProviderPreset::Openai]),
+        ("xai-", &[ApiProviderPreset::Xai]),
+    ];
+    let key = api_key.trim();
+    RULES
+        .iter()
+        .find(|(prefix, _)| key.starts_with(prefix))
+        .map(|(_, family)| *family)
+}
+
+/// Ein eindeutig zuordenbarer Key wird nie an einen fremden Preset-Provider gesendet.
+/// Custom-Endpunkte (eigene Gateways) bleiben bewusst Nutzerentscheidung.
+fn key_conflicts_with_preset(api_key: &str, preset: ApiProviderPreset) -> bool {
+    if preset == ApiProviderPreset::CustomOpenai {
+        return false;
+    }
+    strong_key_family(api_key).is_some_and(|family| !family.contains(&preset))
+}
+
 pub fn save_api_provider_key(
     config: &ApiProviderConfig,
     api_key: &str,
@@ -1649,6 +1705,9 @@ pub fn save_api_provider_key(
     let base = api_base_url(config)?;
     if !validate_api_key(api_key) {
         return Err(ProviderReason::EndpointAuthRequired);
+    }
+    if key_conflicts_with_preset(api_key, config.preset) {
+        return Err(ProviderReason::ApiKeyProviderMismatch);
     }
     let account = api_key_account(&config.id)?;
     store_origin_key(
@@ -1757,16 +1816,18 @@ pub async fn api_provider_models(
     let endpoint = api_models_url(&base).ok_or(ProviderReason::InvalidEndpoint)?;
     let client = http_client(API_TIMEOUT).ok_or(ProviderReason::Offline)?;
     let request = api_auth_request(client.get(endpoint), config.preset, &key);
-    let body = fetch_json(request).await.map_err(|failure| match failure {
-        HttpFailure::Status(401 | 403) => ProviderReason::EndpointAuthRequired,
-        HttpFailure::Status(429) => ProviderReason::QuotaLimited,
-        HttpFailure::Timeout => ProviderReason::TimedOut,
-        HttpFailure::Unreachable => ProviderReason::Offline,
-        HttpFailure::Status(code) if code >= 500 => ProviderReason::CapacityLimited,
-        HttpFailure::Status(_) => ProviderReason::EndpointError,
-        HttpFailure::TooLarge | HttpFailure::Invalid => ProviderReason::EndpointInvalidResponse,
-    })?;
-    let models = extract_model_ids(&body, LocalProviderKind::OpenAiCompatible);
+    let body = fetch_json_limited(request, MAX_API_CATALOG_BYTES)
+        .await
+        .map_err(|failure| match failure {
+            HttpFailure::Status(401 | 403) => ProviderReason::EndpointAuthRequired,
+            HttpFailure::Status(429) => ProviderReason::QuotaLimited,
+            HttpFailure::Timeout => ProviderReason::TimedOut,
+            HttpFailure::Unreachable => ProviderReason::Offline,
+            HttpFailure::Status(code) if code >= 500 => ProviderReason::CapacityLimited,
+            HttpFailure::Status(_) => ProviderReason::EndpointError,
+            HttpFailure::TooLarge | HttpFailure::Invalid => ProviderReason::EndpointInvalidResponse,
+        })?;
+    let models = extract_api_model_ids(&body);
     if models.is_empty() {
         return Err(ProviderReason::NoModels);
     }
@@ -2017,8 +2078,8 @@ async fn api_status(
         return status;
     };
     let request = api_auth_request(client.get(endpoint), config.preset, &api_key);
-    let models = match fetch_json(request).await {
-        Ok(body) => extract_model_ids(&body, LocalProviderKind::OpenAiCompatible),
+    let models = match fetch_json_limited(request, MAX_API_CATALOG_BYTES).await {
+        Ok(body) => extract_api_model_ids(&body),
         Err(failure) => {
             apply_http_failure(&mut status, failure);
             return status;
@@ -2074,6 +2135,60 @@ async fn api_status(
         Err(failure) => apply_http_failure(&mut status, failure),
     }
     status
+}
+
+/// Spiegelt `MAX_API_MONTHLY_BUDGET_USD` im Frontend. Ungueltig/<=0 = kein Budget.
+const MAX_API_MONTHLY_BUDGET_USD: f64 = 50_000.0;
+
+pub fn normalize_api_budget(value: Option<f64>) -> Option<f64> {
+    value
+        .filter(|amount| amount.is_finite() && *amount > 0.0)
+        .map(|amount| (amount.min(MAX_API_MONTHLY_BUDGET_USD) * 100.0).round() / 100.0)
+}
+
+fn api_connection_routable(connection: &ApiProviderConfig) -> bool {
+    connection.enabled && !connection.model.trim().is_empty()
+}
+
+/// Waehlt genau einen API-Slot fuer einen Worker-Lauf. Fail-closed: eine explizite oder
+/// projektbezogene Wahl wird nie still auf einen anderen bezahlten Provider umgeleitet.
+/// Auto nimmt den ersten regulaeren Slot, "fallback"-Slots erst ohne Alternative.
+pub fn select_api_connection<'a>(
+    connections: &'a [ApiProviderConfig],
+    project_preferences: &std::collections::HashMap<String, String>,
+    connection_id: Option<&str>,
+    project_id: Option<&str>,
+) -> Result<&'a ApiProviderConfig, ProviderReason> {
+    let pinned = connection_id.map(str::trim).filter(|id| !id.is_empty());
+    let preferred = pinned.or_else(|| {
+        project_id
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .and_then(|project| project_preferences.get(project))
+            .map(String::as_str)
+    });
+    if let Some(id) = preferred {
+        return connections
+            .iter()
+            .find(|item| item.id == id && api_connection_routable(item))
+            .ok_or(ProviderReason::NotConfigured);
+    }
+    let mut routable = connections
+        .iter()
+        .filter(|item| api_connection_routable(item));
+    let first = routable
+        .clone()
+        .next()
+        .ok_or(ProviderReason::NotConfigured)?;
+    Ok(routable
+        .find(|item| item.mode != ApiConnectionMode::Fallback)
+        .unwrap_or(first))
+}
+
+/// Prueft genau EINEN API-Slot (Key aus dem Schluesselbund, Modellliste, READY) beim eigenen
+/// Provider. Kein Pool-Fan-out: andere Slots/Provider werden dabei nie kontaktiert.
+pub async fn test_api_connection(config: &ApiProviderConfig) -> ProviderStatus {
+    api_status(config, config.enabled, true).await
 }
 
 async fn api_pool_status(
@@ -2280,6 +2395,13 @@ enum HttpFailure {
 }
 
 async fn fetch_json(request: reqwest::RequestBuilder) -> Result<Value, HttpFailure> {
+    fetch_json_limited(request, MAX_LOCAL_RESPONSE_BYTES).await
+}
+
+async fn fetch_json_limited(
+    request: reqwest::RequestBuilder,
+    max_bytes: usize,
+) -> Result<Value, HttpFailure> {
     let response = request.send().await.map_err(|error| {
         if error.is_timeout() {
             HttpFailure::Timeout
@@ -2292,12 +2414,12 @@ async fn fetch_json(request: reqwest::RequestBuilder) -> Result<Value, HttpFailu
     }
     if response
         .content_length()
-        .is_some_and(|length| length as usize > MAX_LOCAL_RESPONSE_BYTES)
+        .is_some_and(|length| length as usize > max_bytes)
     {
         return Err(HttpFailure::TooLarge);
     }
     let bytes = response.bytes().await.map_err(|_| HttpFailure::Invalid)?;
-    if bytes.len() > MAX_LOCAL_RESPONSE_BYTES {
+    if bytes.len() > max_bytes {
         return Err(HttpFailure::TooLarge);
     }
     serde_json::from_slice(&bytes).map_err(|_| HttpFailure::Invalid)
@@ -2975,5 +3097,200 @@ mod tests {
             status.reason,
             ProviderReason::LocalControlRunning | ProviderReason::LocalControlQueueOnly
         ));
+    }
+    fn api_slot(id: &str, preset: ApiProviderPreset, model: &str) -> ApiProviderConfig {
+        ApiProviderConfig {
+            id: id.to_string(),
+            preset,
+            model: model.to_string(),
+            enabled: true,
+            ..ApiProviderConfig::default()
+        }
+    }
+
+    #[test]
+    fn strong_key_prefixes_map_to_exactly_one_provider_family() {
+        // Synthetische, nicht echte Testwerte.
+        assert_eq!(
+            strong_key_family("sk-ant-api03-EXAMPLEONLY0000"),
+            Some(&[ApiProviderPreset::Anthropic][..])
+        );
+        assert_eq!(
+            strong_key_family("sk-proj-EXAMPLEONLY0000"),
+            Some(&[ApiProviderPreset::Openai][..])
+        );
+        assert_eq!(
+            strong_key_family("xai-EXAMPLEONLY00000000"),
+            Some(&[ApiProviderPreset::Xai][..])
+        );
+        assert!(strong_key_family("sk-or-v1-EXAMPLEONLY0000")
+            .is_some_and(|family| family.contains(&ApiProviderPreset::OpenrouterEu)));
+        // Generisches sk- (OpenAI-Legacy, DeepSeek, Gateways) ist nie eindeutig.
+        assert_eq!(strong_key_family("sk-EXAMPLEONLY000000000000"), None);
+        assert_eq!(strong_key_family("EXAMPLEONLY0000000000000000000000"), None);
+    }
+
+    #[test]
+    fn keys_of_another_provider_are_never_stored_for_a_foreign_preset() {
+        let anthropic_key = "sk-ant-api03-EXAMPLEONLY0000";
+        assert!(key_conflicts_with_preset(
+            anthropic_key,
+            ApiProviderPreset::Openai
+        ));
+        assert!(!key_conflicts_with_preset(
+            anthropic_key,
+            ApiProviderPreset::Anthropic
+        ));
+        // Eigene Gateways bleiben bewusst Nutzerentscheidung.
+        assert!(!key_conflicts_with_preset(
+            anthropic_key,
+            ApiProviderPreset::CustomOpenai
+        ));
+        // Mehrdeutige Keys werden nicht blockiert, nur nicht automatisch zugeordnet.
+        assert!(!key_conflicts_with_preset(
+            "sk-EXAMPLEONLY000000000000",
+            ApiProviderPreset::Deepseek
+        ));
+        let slot = api_slot("api-1", ApiProviderPreset::Openai, "");
+        assert_eq!(
+            save_api_provider_key(&slot, anthropic_key),
+            Err(ProviderReason::ApiKeyProviderMismatch)
+        );
+    }
+
+    #[test]
+    fn api_errors_never_echo_key_material() {
+        let key = "sk-ant-api03-EXAMPLEONLY0000SECRET";
+        let reason = save_api_provider_key(&api_slot("api-1", ApiProviderPreset::Openai, ""), key)
+            .expect_err("mismatch must fail closed");
+        let serialized = serde_json::to_string(&reason).unwrap();
+        assert_eq!(serialized, "\"api_key_provider_mismatch\"");
+        assert!(!serialized.contains("EXAMPLEONLY"));
+        for sample in [
+            format!("auth failed for {key}"),
+            "xai-EXAMPLEONLY00000000 rejected".to_string(),
+            "zai key 0123456789abcdef0123456789abcdef.EXAMPLEONLY00000 bad".to_string(),
+        ] {
+            assert!(
+                !redact(&sample).contains("EXAMPLEONLY"),
+                "{}",
+                redact(&sample)
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_slot_ids_cannot_address_foreign_keychain_accounts() {
+        assert_eq!(
+            api_key_account("api-1").as_deref(),
+            Ok("api-provider-api-key:api-1")
+        );
+        for bad in ["", "../local-provider-api-key", "api 1", &"a".repeat(65)] {
+            assert_eq!(api_key_account(bad), Err(ProviderReason::InvalidEndpoint));
+        }
+    }
+
+    #[test]
+    fn remote_api_presets_require_https_and_custom_must_not_be_local() {
+        let mut custom = api_slot("api-1", ApiProviderPreset::CustomOpenai, "m");
+        custom.base_url = "http://api.example.com/v1".to_string();
+        assert_eq!(
+            api_base_url(&custom).err(),
+            Some(ProviderReason::InsecureRemoteKey)
+        );
+        custom.base_url = "https://127.0.0.1:8443/v1".to_string();
+        assert_eq!(
+            api_base_url(&custom).err(),
+            Some(ProviderReason::InsecureRemoteKey)
+        );
+        custom.base_url = "https://gateway.example.com/v1".to_string();
+        assert!(api_base_url(&custom).is_ok());
+        let zai = api_slot("api-2", ApiProviderPreset::Zai, "glm");
+        assert_eq!(
+            api_generation_url(&api_base_url(&zai).unwrap(), zai.preset)
+                .unwrap()
+                .as_str(),
+            "https://api.z.ai/api/paas/v4/chat/completions"
+        );
+    }
+
+    #[test]
+    fn effort_is_only_sent_where_the_provider_wiring_supports_it() {
+        let mut openai = api_slot("api-1", ApiProviderPreset::Openai, "gpt-5.6-sol");
+        openai.effort = ApiEffort::High;
+        let body = api_generation_body(&openai, "gpt-5.6-sol", None, "hi", 16);
+        assert_eq!(body["reasoning"]["effort"], "high");
+
+        let mut anthropic = api_slot("api-2", ApiProviderPreset::Anthropic, "claude-opus-5-5");
+        anthropic.effort = ApiEffort::High;
+        let body = api_generation_body(&anthropic, "claude-opus-5-5", None, "hi", 16);
+        assert!(body.get("reasoning").is_none());
+        assert!(body.get("reasoning_effort").is_none());
+
+        let mut auto = openai.clone();
+        auto.effort = ApiEffort::Auto;
+        let body = api_generation_body(&auto, "gpt-5.6-sol", None, "hi", 16);
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn api_slot_selection_fails_closed_and_never_hops_providers() {
+        let mut fallback = api_slot("api-1", ApiProviderPreset::Deepseek, "deepseek-v4-flash");
+        fallback.mode = ApiConnectionMode::Fallback;
+        let regular = api_slot("api-2", ApiProviderPreset::Mistral, "mistral-small-latest");
+        let mut disabled = api_slot("api-3", ApiProviderPreset::Openai, "gpt-5.6-sol");
+        disabled.enabled = false;
+        let slots = vec![fallback, regular, disabled];
+        let mut prefs = std::collections::HashMap::new();
+        prefs.insert("proj-a".to_string(), "api-3".to_string());
+
+        // Auto bevorzugt regulaere Slots vor "fallback".
+        assert_eq!(
+            select_api_connection(&slots, &prefs, None, None)
+                .unwrap()
+                .id,
+            "api-2"
+        );
+        // Explizit gewaehlter, deaktivierter Slot -> Fehler statt stiller Providerwechsel.
+        assert_eq!(
+            select_api_connection(&slots, &prefs, Some("api-3"), None).err(),
+            Some(ProviderReason::NotConfigured)
+        );
+        // Projektvorwahl auf deaktivierten Slot ebenfalls fail-closed.
+        assert_eq!(
+            select_api_connection(&slots, &prefs, None, Some("proj-a")).err(),
+            Some(ProviderReason::NotConfigured)
+        );
+        assert_eq!(
+            select_api_connection(&slots, &prefs, Some("api-1"), None)
+                .unwrap()
+                .id,
+            "api-1"
+        );
+        assert_eq!(
+            select_api_connection(&[], &prefs, None, None).err(),
+            Some(ProviderReason::NotConfigured)
+        );
+    }
+
+    #[test]
+    fn api_budget_normalization_rejects_nonsense() {
+        assert_eq!(normalize_api_budget(None), None);
+        assert_eq!(normalize_api_budget(Some(0.0)), None);
+        assert_eq!(normalize_api_budget(Some(-5.0)), None);
+        assert_eq!(normalize_api_budget(Some(f64::NAN)), None);
+        assert_eq!(normalize_api_budget(Some(25.555)), Some(25.56));
+        assert_eq!(normalize_api_budget(Some(1e9)), Some(50_000.0));
+    }
+
+    #[test]
+    fn api_model_catalog_is_bounded_and_filters_unsafe_ids() {
+        let entries = (0..2_500)
+            .map(|index| serde_json::json!({ "id": format!("vendor/model-{index}") }))
+            .chain([serde_json::json!({ "id": "bad id; rm -rf" })])
+            .collect::<Vec<_>>();
+        let models = extract_api_model_ids(&serde_json::json!({ "data": entries }));
+        assert_eq!(models.len(), MAX_API_CATALOG_MODELS);
+        assert!(models.iter().all(|model| is_safe_model_name(model)));
     }
 }

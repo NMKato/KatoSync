@@ -664,6 +664,8 @@ function providerConnectivity(status: ProviderStatus | undefined): AgentLaneConn
   if (!status) return "unknown";
   if (!status.installed) return "not_configured";
   if (!status.enabled) return "disabled";
+  // Leerer API-Pool: Adapter ist vorhanden, aber kein Slot eingerichtet.
+  if (status.reason === "not_configured") return "not_configured";
   if (status.available) return "connected";
   if (status.state === "quota_limited" || status.state === "capacity_unavailable") return "limited";
   if (status.state === "authenticated") return "connected";

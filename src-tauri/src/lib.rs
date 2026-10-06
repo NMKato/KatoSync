@@ -364,6 +364,7 @@ pub fn run() {
             save_local_provider_key,
             save_api_provider_key,
             disconnect_api_provider_key,
+            test_api_connection,
             api_provider_models,
             run_api_worker,
             discover_local_providers,
@@ -534,6 +535,14 @@ fn save_api_provider_key(
     result
 }
 
+/// Prueft genau einen API-Slot beim eigenen Provider (kein Pool-Fan-out, kein Key im Frontend).
+#[tauri::command]
+async fn test_api_connection(
+    config: provider_manager::ApiProviderConfig,
+) -> provider_manager::ProviderStatus {
+    provider_manager::test_api_connection(&config).await
+}
+
 /// Loescht ausschliesslich den Key eines API-Slots. Andere Connections bleiben unangetastet.
 #[tauri::command]
 fn disconnect_api_provider_key(
@@ -567,27 +576,12 @@ async fn run_api_worker(
     ));
     let context = fs::read_to_string(context_path)
         .map_err(|_| provider_manager::ProviderReason::NotConfigured)?;
-    let preferred_id = connection_id.or_else(|| {
-        project_id
-            .as_deref()
-            .and_then(|project| config.api_project_preferences.get(project))
-            .cloned()
-    });
-    let connection = preferred_id
-        .as_deref()
-        .and_then(|id| {
-            config
-                .api_providers
-                .iter()
-                .find(|item| item.id == id && item.enabled)
-        })
-        .or_else(|| {
-            config
-                .api_providers
-                .iter()
-                .find(|item| item.enabled && !item.model.trim().is_empty())
-        })
-        .ok_or(provider_manager::ProviderReason::NotConfigured)?;
+    let connection = provider_manager::select_api_connection(
+        &config.api_providers,
+        &config.api_project_preferences,
+        connection_id.as_deref(),
+        project_id.as_deref(),
+    )?;
     provider_manager::run_api_worker(connection, &prompt, &context).await
 }
 
@@ -4864,6 +4858,8 @@ fn normalize_config(config: &mut AppConfig) {
         connection.label = connection.label.trim().chars().take(80).collect();
         connection.base_url = connection.base_url.trim().to_string();
         connection.model = connection.model.trim().to_string();
+        connection.monthly_budget_usd =
+            provider_manager::normalize_api_budget(connection.monthly_budget_usd);
         used_ids.push(connection.id.clone());
     }
     config

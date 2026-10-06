@@ -1,7 +1,12 @@
 // Created by NMKato Solutions
 // Zentraler, versionierter Modellkatalog fuer UX/Planung. Preise werden nur aufgenommen,
 // wenn sie aus einer verifizierten Providerquelle stammen. Unbekannt bleibt bewusst null.
-import type { ApiCapability, ApiEffort, ApiModelProfile, ApiProviderPreset } from "../types";
+// Der Katalog ist bewusst begrenzt und datiert: er annotiert die live vom Provider gelieferte
+// Modellliste (Preis, Effort, Tempo), erfindet aber keine Modell-IDs.
+import type { ApiCapability, ApiEffort, ApiModelProfile, ApiProviderConfig, ApiProviderPreset } from "../types";
+
+/** Stand der eingebauten Preis-/Faehigkeitsdaten. Wird in der UI als Quelle angezeigt. */
+export const API_CATALOG_AS_OF = "2026-10-05";
 
 type CatalogEntry = Omit<ApiModelProfile, "id"> & { matches: RegExp };
 
@@ -201,8 +206,62 @@ export function apiModelProfile(preset: ApiProviderPreset, model: string): ApiMo
   };
 }
 
-export function formatApiPrice(profile: ApiModelProfile): string {
+/** Preis-Kurztext oder null, wenn der Katalog keinen verifizierten Preis kennt. */
+export function formatApiPrice(profile: ApiModelProfile): string | null {
   const price = profile.pricing;
-  if (!price || price.inputPerMillion === null || price.outputPerMillion === null) return "Preis dynamisch / unbekannt";
+  if (!price || price.inputPerMillion === null || price.outputPerMillion === null) return null;
   return `$${price.inputPerMillion}/M in · $${price.outputPerMillion}/M out`;
+}
+
+// Nur dort, wo provider_manager::api_generation_body den Effort tatsaechlich sendet. Alle anderen
+// Provider entscheiden selbst; die UI darf dort keinen wirkungslosen Regler anbieten.
+const EFFORT_WIRED_PRESETS = new Set<ApiProviderPreset>(["openai", "openrouter_global", "openrouter_eu", "xai"]);
+
+export function apiEffortSupported(preset: ApiProviderPreset): boolean {
+  return EFFORT_WIRED_PRESETS.has(preset);
+}
+
+/** Waehlbare Effort-Stufen fuer Provider+Modell. Immer mindestens `auto`. */
+export function apiEffortOptions(preset: ApiProviderPreset, model: string): ApiEffort[] {
+  if (!apiEffortSupported(preset) || !model.trim()) return ["auto"];
+  const efforts = apiModelProfile(preset, model).supportedEfforts;
+  return efforts.includes("auto") ? [...efforts] : ["auto", ...efforts];
+}
+
+/** Effort, der real beim Provider ankommt (nicht unterstuetzte Stufen fallen auf `auto`). */
+export function effectiveApiEffort(connection: Pick<ApiProviderConfig, "preset" | "model" | "effort">): ApiEffort {
+  return apiEffortOptions(connection.preset, connection.model).includes(connection.effort) ? connection.effort : "auto";
+}
+
+export interface ApiModelChoices {
+  // Live vom Provider gemeldet und im eingebauten Katalog mit Preis/Faehigkeiten bekannt.
+  recommended: ApiModelProfile[];
+  // Live vom Provider gemeldet, aber ohne verifizierte Katalogdaten (Preis unbekannt).
+  other: string[];
+  source: "live" | "unavailable";
+}
+
+const SPEED_ORDER: Record<ApiModelProfile["speed"], number> = { balanced: 0, deep: 1, fast: 2, unknown: 3 };
+
+/** Gruppiert die Live-Modellliste eines Providers. Ohne Live-Liste gibt es keine erfundenen IDs. */
+export function apiModelChoices(preset: ApiProviderPreset, liveModels: string[] | null | undefined): ApiModelChoices {
+  if (!liveModels?.length) return { recommended: [], other: [], source: "unavailable" };
+  const unique = [...new Set(liveModels)];
+  const recommended = unique
+    .map((model) => apiModelProfile(preset, model))
+    .filter((profile) => profile.pricing !== null)
+    .sort((a, b) => SPEED_ORDER[a.speed] - SPEED_ORDER[b.speed] || a.id.localeCompare(b.id));
+  const known = new Set(recommended.map((profile) => profile.id));
+  return { recommended, other: unique.filter((model) => !known.has(model)), source: "live" };
+}
+
+/** Startmodell nach erfolgreicher Pruefung: ausgewogenes Katalogmodell, sonst erstes Live-Modell. */
+export function defaultApiModel(preset: ApiProviderPreset, liveModels: string[] | null | undefined): string {
+  const choices = apiModelChoices(preset, liveModels);
+  return choices.recommended[0]?.id ?? choices.other[0] ?? "";
+}
+
+/** Eingebaute Modellfamilien eines Providers (nur Anzeige, wenn keine Live-Liste vorliegt). */
+export function builtInModelFamilies(preset: ApiProviderPreset): string[] {
+  return (CATALOG[preset] ?? []).map((entry) => entry.displayName);
 }

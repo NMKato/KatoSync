@@ -37,9 +37,14 @@ import type {
   SupabaseSessionStatus,
   SyncReport
 } from "../types";
-import { normalizeProviderPriority, toProviderSettings } from "../lib/providerPolicy";
+import {
+  normalizeApiBudget,
+  normalizeProviderPriority,
+  resolveApiConnection,
+  toProviderSettings
+} from "../lib/providerPolicy";
 import { emptyWarmupState } from "../lib/providerWarmupPolicy";
-import { recordApiUsage } from "../lib/apiUsageLedger";
+import { apiMonthSpendByConnection, recordApiUsage } from "../lib/apiUsageLedger";
 import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 
 const mockConfigKey = "katosync.config";
@@ -443,6 +448,23 @@ export async function fetchApiProviderModels(config: ApiProviderConfig): Promise
   return invoke<ApiProviderCatalog>("api_provider_models", { config });
 }
 
+// Prueft genau EINEN API-Slot (Modellliste + READY) beim eigenen Provider. Kein Pool-Fan-out.
+export async function testApiConnection(config: ApiProviderConfig): Promise<ProviderStatus> {
+  if (!isTauri()) {
+    return demoStatus("api", {
+      state: config.model ? "authenticated" : "unknown",
+      reason: config.model ? "ready_test_pending" : "not_configured",
+      installed: true,
+      authenticated: Boolean(config.model),
+      enabled: config.enabled,
+      model: config.model || null,
+      endpointScope: "remote",
+      capabilities: ["text_code_agent", "remote_api"]
+    });
+  }
+  return invoke<ProviderStatus>("test_api_connection", { config });
+}
+
 export async function removeApiProviderKey(connectionId: string): Promise<void> {
   if (!isTauri()) return;
   await invoke("disconnect_api_provider_key", { connectionId });
@@ -453,12 +475,24 @@ export async function runApiWorker(
   options: { connectionId?: string | null; projectId?: string | null } = {}
 ): Promise<ApiWorkerResult> {
   if (!isTauri()) throw new Error("api_worker_unavailable");
+  // Route + Budget werden vor dem Lauf entschieden; Rust erhaelt immer eine konkrete Slot-ID und
+  // weicht nie still auf einen anderen bezahlten Provider aus.
+  const config = await loadConfig();
+  const route = resolveApiConnection(
+    config.apiProviders,
+    {
+      connectionId: options.connectionId,
+      projectId: options.projectId,
+      projectPreferences: config.apiProjectPreferences
+    },
+    apiMonthSpendByConnection()
+  );
+  if (!route.connection) throw new Error(route.block ?? "api_not_configured");
   const result = await invoke<ApiWorkerResult>("run_api_worker", {
     prompt,
-    connectionId: options.connectionId ?? null,
+    connectionId: route.connection.id,
     projectId: options.projectId ?? null
   });
-  const config = await loadConfig();
   const connection = config.apiProviders.find((item) => item.id === result.connectionId);
   if (connection) {
     recordApiUsage(connection, result, options.projectId ?? null);
@@ -1616,7 +1650,8 @@ function normalizeConfig(config: AppConfig): AppConfig {
     effort: allowedEfforts.has(connection.effort) ? connection.effort : "auto",
     mode: allowedModes.has(connection.mode) ? connection.mode : "auto",
     capabilities: Array.isArray(connection.capabilities) ? connection.capabilities : [],
-    enabled: connection.enabled !== false
+    enabled: connection.enabled !== false,
+    monthlyBudgetUsd: normalizeApiBudget(connection.monthlyBudgetUsd)
   })) as ApiProviderConfig[];
   const { apiProvider: _legacyApiProvider, ...withoutLegacy } = config;
 

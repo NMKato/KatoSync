@@ -8,7 +8,7 @@ import type {
   ApiModelProfile,
   ApiProviderConfig
 } from "../types";
-import { apiModelProfile } from "./apiModelCatalog.ts";
+import { apiModelProfile, effectiveApiEffort } from "./apiModelCatalog.ts";
 
 export type ApiOptimizationMode = "balanced" | "lowest_cost" | "fastest" | "best_quality";
 
@@ -18,6 +18,43 @@ export interface ApiTaskEstimate {
   required: ApiCapability[];
   inputTokens: number;
   outputTokens: number;
+}
+
+export type ApiBudgetStatus = "none" | "ok" | "warning" | "would_exceed" | "exceeded";
+
+export interface ApiBudgetState {
+  status: ApiBudgetStatus;
+  budgetUsd: number | null;
+  spentUsd: number;
+  // Anteil inkl. geplanter Kosten (0..n); null ohne Budget.
+  ratio: number | null;
+}
+
+// Ab diesem Anteil wird gewarnt, aber noch geroutet.
+export const API_BUDGET_WARNING_RATIO = 0.8;
+
+/**
+ * Budgetlage eines API-Slots. `spentUsd` stammt aus dem lokalen Ledger (gemeldet oder geschaetzt),
+ * `plannedUsd` aus der Prognose. Unbekannte Kosten (null) koennen ein Budget nie "freigeben".
+ */
+export function apiBudgetState(
+  budgetUsd: number | null | undefined,
+  spentUsd: number,
+  plannedUsd: number | null = 0
+): ApiBudgetState {
+  const spent = Number.isFinite(spentUsd) && spentUsd > 0 ? spentUsd : 0;
+  if (budgetUsd == null || !Number.isFinite(budgetUsd) || budgetUsd <= 0) {
+    return { status: "none", budgetUsd: null, spentUsd: spent, ratio: null };
+  }
+  if (spent >= budgetUsd) return { status: "exceeded", budgetUsd, spentUsd: spent, ratio: spent / budgetUsd };
+  const projected = spent + (plannedUsd ?? 0);
+  const ratio = projected / budgetUsd;
+  if (projected > budgetUsd) return { status: "would_exceed", budgetUsd, spentUsd: spent, ratio };
+  return { status: ratio >= API_BUDGET_WARNING_RATIO ? "warning" : "ok", budgetUsd, spentUsd: spent, ratio };
+}
+
+export function apiBudgetBlocks(state: ApiBudgetState): boolean {
+  return state.status === "exceeded" || state.status === "would_exceed";
 }
 
 export interface ApiPlanOption {
@@ -34,6 +71,11 @@ export interface ApiPlanOption {
   supported: boolean;
   qualityScore: number;
   valueScore: number;
+  // Planwerte sind immer Schaetzungen; echte Kosten kommen nur aus Provider-Usage.
+  costBasis: "estimate";
+  budget: ApiBudgetState;
+  // Gesperrt fuer Auto-Empfehlungen (fail-closed), bleibt aber zum Vergleich sichtbar.
+  blocked: "over_budget" | null;
 }
 
 export interface ApiTaskPlan {
@@ -117,20 +159,23 @@ function buildOption(
   connection: ApiProviderConfig,
   required: Set<ApiCapability>,
   baseInput: number,
-  baseOutput: number
+  baseOutput: number,
+  spentUsd: number
 ): ApiPlanOption {
   const profile = apiModelProfile(connection.preset, connection.model);
-  const factor = EFFORT[connection.effort];
+  const effort = effectiveApiEffort(connection);
+  const factor = EFFORT[effort];
   const inputTokens = Math.round(baseInput * factor);
   const outputTokens = Math.round(baseOutput * factor);
   const fit = fitScore(profile, required);
   const estimatedCostUsd = cost(profile, inputTokens, outputTokens);
-  const quality = qualityScore(profile, fit, connection.effort);
+  const quality = qualityScore(profile, fit, effort);
+  const budget = apiBudgetState(connection.monthlyBudgetUsd, spentUsd, estimatedCostUsd);
   const option: ApiPlanOption = {
     connectionId: connection.id,
     providerLabel: connection.label || connection.preset,
     model: connection.model,
-    effort: connection.effort,
+    effort,
     fit,
     speed: profile.speed,
     estimatedCostUsd,
@@ -139,15 +184,22 @@ function buildOption(
     pricingKnown: Boolean(profile.pricing),
     supported: fit >= 60,
     qualityScore: quality,
-    valueScore: 0
+    valueScore: 0,
+    costBasis: "estimate",
+    budget,
+    blocked: apiBudgetBlocks(budget) ? "over_budget" : null
   };
   option.valueScore = valueScore(option);
   return option;
 }
 
+function eligible(option: ApiPlanOption): boolean {
+  return option.supported && option.blocked === null;
+}
+
 function sortOptions(options: ApiPlanOption[]): ApiPlanOption[] {
   return [...options].sort((a, b) => {
-    if (a.supported !== b.supported) return a.supported ? -1 : 1;
+    if (eligible(a) !== eligible(b)) return eligible(a) ? -1 : 1;
     if (a.fit !== b.fit) return b.fit - a.fit;
     if (a.estimatedCostUsd === null && b.estimatedCostUsd !== null) return 1;
     if (a.estimatedCostUsd !== null && b.estimatedCostUsd === null) return -1;
@@ -157,44 +209,46 @@ function sortOptions(options: ApiPlanOption[]): ApiPlanOption[] {
 
 function cheapest(options: ApiPlanOption[]): ApiPlanOption | null {
   return [...options]
-    .filter((option) => option.supported && option.estimatedCostUsd !== null)
+    .filter((option) => eligible(option) && option.estimatedCostUsd !== null)
     .sort((a, b) => (a.estimatedCostUsd ?? Infinity) - (b.estimatedCostUsd ?? Infinity))[0] ?? null;
 }
 
 function fastest(options: ApiPlanOption[]): ApiPlanOption | null {
   return [...options]
-    .filter((option) => option.supported)
+    .filter(eligible)
     .sort((a, b) => SPEED_SCORE[b.speed] - SPEED_SCORE[a.speed] || b.fit - a.fit)[0] ?? null;
 }
 
 function bestFit(options: ApiPlanOption[]): ApiPlanOption | null {
   return [...options]
-    .filter((option) => option.supported)
+    .filter(eligible)
     .sort((a, b) => b.qualityScore - a.qualityScore || b.fit - a.fit || (a.estimatedCostUsd ?? Infinity) - (b.estimatedCostUsd ?? Infinity))[0] ?? null;
 }
 
 function balanced(options: ApiPlanOption[]): ApiPlanOption | null {
   return [...options]
-    .filter((option) => option.supported)
+    .filter(eligible)
     .sort((a, b) => b.valueScore - a.valueScore || (a.estimatedCostUsd ?? Infinity) - (b.estimatedCostUsd ?? Infinity))[0] ?? null;
 }
 
 export function estimateProject(
   projectId: string,
   tasks: ActionTask[],
-  connections: ApiProviderConfig[]
+  connections: ApiProviderConfig[],
+  // Monatsausgaben je connectionId aus dem Ledger (gemeldet oder geschaetzt).
+  monthSpendUsd: Record<string, number> = {}
 ): ApiProjectEstimate {
   const active = connections.filter((connection) => connection.enabled && connection.model.trim());
   const taskEstimates = tasks.map(estimateTaskDemand);
   const required = new Set(taskEstimates.flatMap((task) => task.required));
   const baseInput = taskEstimates.reduce((sum, task) => sum + task.inputTokens, 0);
   const baseOutput = taskEstimates.reduce((sum, task) => sum + task.outputTokens, 0);
-  const options = sortOptions(active.map((connection) => buildOption(connection, required, baseInput, baseOutput)));
+  const options = sortOptions(active.map((connection) => buildOption(connection, required, baseInput, baseOutput, monthSpendUsd[connection.id] ?? 0)));
 
   const taskPlans = taskEstimates.map((task): ApiTaskPlan => {
     const taskRequired = new Set(task.required);
     const taskOptions = sortOptions(active.map((connection) =>
-      buildOption(connection, taskRequired, task.inputTokens, task.outputTokens)
+      buildOption(connection, taskRequired, task.inputTokens, task.outputTokens, monthSpendUsd[connection.id] ?? 0)
     ));
     return {
       task,

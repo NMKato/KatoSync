@@ -18,6 +18,7 @@ import {
   fetchApiProviderModels,
   saveApiProviderKey,
   removeApiProviderKey,
+  testApiConnection,
   getLocalBrainStatus,
   installLocalBrain,
   startLocalBrain,
@@ -75,14 +76,18 @@ import {
   deleteBriefing
 } from "../repositories/katoSyncRepository";
 import {
+  apiErrorCode,
   mergeCheapProviderHealth,
   mergeProviderStatus,
   moveProvider,
   normalizeProviderPriority,
   providerRecheckPlan,
   providerTransitions,
+  validateCustomApiEndpointInput,
   validateLocalEndpointInput
 } from "../lib/providerPolicy";
+import { inferApiProviderFromKey, keyConflictsWithPreset, normalizeApiKeyInput } from "../lib/apiKeyInference";
+import { defaultApiModel } from "../lib/apiModelCatalog";
 import { agentWorkWaiting, normalizeAgentSyncState } from "../lib/agentJobModel";
 import { providerWarmupPlan, warmupSuppressedByWork } from "../lib/providerWarmupPolicy";
 import {
@@ -123,6 +128,7 @@ import type {
   AgentSyncState,
   ApiProviderCatalog,
   ApiProviderConfig,
+  ApiProviderPreset,
   ActionPlanStatus,
   ActionTask,
   ActionTaskStatus,
@@ -272,6 +278,14 @@ export function useKatoSyncViewModel() {
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({});
   const [apiKeyErrors, setApiKeyErrors] = useState<Record<string, string | null>>({});
   const [apiCatalogs, setApiCatalogs] = useState<Record<string, ApiProviderCatalog>>({});
+  // Ergebnis des letzten Einzeltests je Slot (nie Pool-Fan-out).
+  const [apiConnectionStatuses, setApiConnectionStatuses] = useState<Record<string, ProviderStatus>>({});
+  // Setup-Flow "Key einfuegen": Rohkey lebt nur hier im Speicher und wird nach dem Speichern
+  // in den OS-Schluesselbund sofort geleert. Nie in Config, localStorage oder Logs.
+  const [apiSetupKey, setApiSetupKey] = useState("");
+  const [apiSetupProvider, setApiSetupProvider] = useState<ApiProviderPreset | null>(null);
+  const [apiSetupBaseUrl, setApiSetupBaseUrl] = useState("");
+  const [apiSetupError, setApiSetupError] = useState<string | null>(null);
   const [localBrainStatus, setLocalBrainStatus] = useState<LocalBrainStatus | null>(null);
   const [localBrainProgress, setLocalBrainProgress] = useState<LocalBrainProgress | null>(null);
   const [localBrainBusy, setLocalBrainBusy] = useState<"install" | "start" | "stop" | "remove" | null>(null);
@@ -846,6 +860,44 @@ export function useKatoSyncViewModel() {
     [apiProviderDrafts, config]
   );
 
+  const dropApiEntry = useCallback((connectionId: string) => {
+    const without = <T,>(current: Record<string, T>) => {
+      const next = { ...current };
+      delete next[connectionId];
+      return next;
+    };
+    setApiProviderDrafts(without);
+    setApiCatalogs(without);
+    setApiKeyErrors(without);
+    setApiKeyInputs(without);
+    setApiConnectionStatuses(without);
+  }, []);
+
+  // Pool-Status ohne READY-Probes erneuern (kein Token-Verbrauch, kein Smoke-Fan-out). Ein frisch
+  // erfolgreich getesteter Slot macht den Pool direkt verfuegbar.
+  const refreshApiPoolStatus = useCallback(
+    async (saved: AppConfig, tested?: ProviderStatus) => {
+      if (tested?.available) {
+        mergeProvider(tested, saved.providerPriority);
+        return;
+      }
+      const pool = (await getProviderStatuses(saved, false)).find((entry) => entry.provider === "api");
+      if (pool) mergeProvider(pool, saved.providerPriority);
+    },
+    [mergeProvider]
+  );
+
+  // Testet genau einen Slot beim eigenen Provider und spiegelt das Ergebnis in Slot + Pool.
+  const verifyApiConnection = useCallback(
+    async (saved: AppConfig, connection: ApiProviderConfig) => {
+      const status = await testApiConnection(connection);
+      setApiConnectionStatuses((current) => ({ ...current, [connection.id]: status }));
+      await refreshApiPoolStatus(saved, status);
+      return status;
+    },
+    [refreshApiPoolStatus]
+  );
+
   const setApiKeyInput = useCallback((connectionId: string, value: string) => {
     setApiKeyInputs((current) => ({ ...current, [connectionId]: value }));
   }, []);
@@ -855,45 +907,133 @@ export function useKatoSyncViewModel() {
       const base = apiProviderDrafts[connectionId] ?? config?.apiProviders.find((connection) => connection.id === connectionId);
       if (!base) return;
       setApiProviderDrafts((current) => ({ ...current, [connectionId]: { ...base, ...patch } }));
-      setApiCatalogs((current) => {
-        const next = { ...current };
-        delete next[connectionId];
-        return next;
-      });
+      // Nur ein Wechsel des Ziel-Endpunkts macht die geladene Modellliste ungueltig.
+      if (patch.preset !== undefined || patch.baseUrl !== undefined) {
+        setApiCatalogs((current) => {
+          const next = { ...current };
+          delete next[connectionId];
+          return next;
+        });
+      }
       setApiKeyErrors((current) => ({ ...current, [connectionId]: null }));
     },
     [apiProviderDrafts, config]
   );
 
-  const handleAddApiProvider = useCallback(async () => {
-    if (!config || config.apiProviders.length >= 3 || providerBusy.api) return;
+  const updateApiSetupKey = useCallback((value: string) => {
+    setApiSetupKey(value);
+    setApiSetupError(null);
+    // Neuer Key = neue Erkennung; eine fruehere Providerwahl gilt nicht automatisch weiter.
+    setApiSetupProvider(null);
+  }, []);
+
+  const chooseApiSetupProvider = useCallback((preset: ApiProviderPreset | null) => {
+    setApiSetupProvider(preset);
+    setApiSetupError(null);
+  }, []);
+
+  const resetApiSetup = useCallback(() => {
+    setApiSetupKey("");
+    setApiSetupProvider(null);
+    setApiSetupBaseUrl("");
+    setApiSetupError(null);
+  }, []);
+
+  // Owner-Flow: Key einfuegen -> lokal erkennen oder kurz waehlen -> Key in den Schluesselbund ->
+  // nur beim bestaetigten Provider Modelle laden + READY pruefen -> Slot anlegen.
+  const handleConnectApiKey = useCallback(async () => {
+    if (!config || providerBusy.api) return;
+    if (config.apiProviders.length >= 3) return;
+    const apiKey = normalizeApiKeyInput(apiSetupKey);
+    const inference = inferApiProviderFromKey(apiKey);
+    if (inference.status === "empty" || inference.status === "invalid") {
+      setApiSetupError("api_key_invalid");
+      return;
+    }
+    const preset = apiSetupProvider ?? inference.suggested;
+    if (!preset) {
+      setApiSetupError("api_provider_choice_required");
+      return;
+    }
+    if (keyConflictsWithPreset(apiKey, preset)) {
+      setApiSetupError("api_key_provider_mismatch");
+      return;
+    }
+    if (preset === "custom_openai" && validateCustomApiEndpointInput(apiSetupBaseUrl)) {
+      setApiSetupError("invalid_endpoint");
+      return;
+    }
+
     let slot = 1;
     const ids = new Set(config.apiProviders.map((connection) => connection.id));
     while (ids.has(`api-${slot}`)) slot += 1;
     const connection: ApiProviderConfig = {
       id: `api-${slot}`,
       label: "",
-      preset: "openrouter_eu",
-      baseUrl: "",
+      preset,
+      baseUrl: preset === "custom_openai" ? apiSetupBaseUrl.trim() : "",
       model: "",
       effort: "auto",
       mode: "auto",
       capabilities: [],
-      enabled: true
+      enabled: true,
+      monthlyBudgetUsd: null
     };
-    const saved = await persistProviderFields({
-      disabledProviders: config.disabledProviders.filter((entry) => entry !== "api"),
-      apiProviders: [...config.apiProviders, connection]
-    });
-    setApiProviderDrafts((current) => ({ ...current, [connection.id]: connection }));
-    mergeProvider(await testProvider(saved, "api"), saved.providerPriority);
-  }, [config, mergeProvider, persistProviderFields, providerBusy.api]);
+
+    setApiSetupError(null);
+    setProviderAction("api", "key");
+    let stored = false;
+    let persisted = false;
+    try {
+      await saveApiProviderKey(connection, apiKey);
+      stored = true;
+      // Ab hier liegt der Key nur noch im OS-Schluesselbund.
+      setApiSetupKey("");
+      const catalog = await fetchApiProviderModels(connection);
+      const next = { ...connection, model: defaultApiModel(preset, catalog.models) };
+      const saved = await persistProviderFields({
+        disabledProviders: config.disabledProviders.filter((entry) => entry !== "api"),
+        apiProviders: [...config.apiProviders, next]
+      });
+      persisted = true;
+      setApiCatalogs((current) => ({ ...current, [next.id]: catalog }));
+      resetApiSetup();
+      await verifyApiConnection(saved, next);
+    } catch (error) {
+      // Fail-closed: Ein nicht verifizierter Key bleibt nicht verwaist im Schluesselbund liegen.
+      if (stored && !persisted) await removeApiProviderKey(connection.id).catch(() => undefined);
+      setApiSetupError(apiErrorCode(error));
+    } finally {
+      // Nach jedem Netz-/Keychain-Versuch ist der Rohkey aus dem UI-Speicher entfernt.
+      setApiSetupKey("");
+      setProviderAction("api", null);
+    }
+  }, [
+    apiSetupBaseUrl,
+    apiSetupKey,
+    apiSetupProvider,
+    config,
+    persistProviderFields,
+    providerBusy.api,
+    resetApiSetup,
+    setProviderAction,
+    verifyApiConnection
+  ]);
 
   const handleSaveApiProviderKey = useCallback(async (connectionId: string) => {
     if (!config || providerBusy.api) return;
     const draft = getApiProviderDraft(connectionId);
-    const apiKey = apiKeyInputs[connectionId] ?? "";
-    if (!draft || !apiKey.trim()) return;
+    const apiKey = normalizeApiKeyInput(apiKeyInputs[connectionId] ?? "");
+    if (!draft || !apiKey) return;
+    const inference = inferApiProviderFromKey(apiKey);
+    if (inference.status === "invalid") {
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: "api_key_invalid" }));
+      return;
+    }
+    if (keyConflictsWithPreset(apiKey, draft.preset)) {
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: "api_key_provider_mismatch" }));
+      return;
+    }
     setApiKeyErrors((current) => ({ ...current, [connectionId]: null }));
     setProviderAction("api", "key");
     try {
@@ -903,7 +1043,7 @@ export function useKatoSyncViewModel() {
       setApiCatalogs((current) => ({ ...current, [connectionId]: catalog }));
       const nextDraft = {
         ...draft,
-        model: draft.model && catalog.models.includes(draft.model) ? draft.model : (catalog.models[0] ?? "")
+        model: draft.model && catalog.models.includes(draft.model) ? draft.model : defaultApiModel(draft.preset, catalog.models)
       };
       const apiProviders = config.apiProviders.map((connection) => connection.id === connectionId ? nextDraft : connection);
       const saved = await persistProviderFields({
@@ -915,14 +1055,14 @@ export function useKatoSyncViewModel() {
         delete next[connectionId];
         return next;
       });
-      mergeProvider(await testProvider(saved, "api"), saved.providerPriority);
+      await verifyApiConnection(saved, nextDraft);
     } catch (error) {
-      setApiKeyInputs((current) => ({ ...current, [connectionId]: "" }));
-      setApiKeyErrors((current) => ({ ...current, [connectionId]: getMessage(error) }));
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: apiErrorCode(error) }));
     } finally {
+      setApiKeyInputs((current) => ({ ...current, [connectionId]: "" }));
       setProviderAction("api", null);
     }
-  }, [apiKeyInputs, config, getApiProviderDraft, mergeProvider, persistProviderFields, providerBusy.api, setProviderAction]);
+  }, [apiKeyInputs, config, getApiProviderDraft, persistProviderFields, providerBusy.api, setProviderAction, verifyApiConnection]);
 
   const handleRefreshApiModels = useCallback(async (connectionId: string) => {
     if (!config || providerBusy.api) return;
@@ -933,14 +1073,14 @@ export function useKatoSyncViewModel() {
     try {
       const catalog = await fetchApiProviderModels(draft);
       setApiCatalogs((current) => ({ ...current, [connectionId]: catalog }));
-      if (!draft.model && catalog.models[0]) {
+      if (!draft.model && catalog.models.length) {
         setApiProviderDrafts((current) => ({
           ...current,
-          [connectionId]: { ...draft, model: catalog.models[0] }
+          [connectionId]: { ...draft, model: defaultApiModel(draft.preset, catalog.models) }
         }));
       }
     } catch (error) {
-      setApiKeyErrors((current) => ({ ...current, [connectionId]: getMessage(error) }));
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: apiErrorCode(error) }));
     } finally {
       setProviderAction("api", null);
     }
@@ -963,13 +1103,14 @@ export function useKatoSyncViewModel() {
         delete next[connectionId];
         return next;
       });
-      mergeProvider(await testProvider(saved, "api"), saved.providerPriority);
+      const persisted = saved.apiProviders.find((connection) => connection.id === connectionId);
+      if (persisted) await verifyApiConnection(saved, persisted);
     } catch (error) {
-      setApiKeyErrors((current) => ({ ...current, [connectionId]: getMessage(error) }));
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: apiErrorCode(error) }));
     } finally {
       setProviderAction("api", null);
     }
-  }, [config, getApiProviderDraft, mergeProvider, persistProviderFields, providerBusy.api, setProviderAction]);
+  }, [config, getApiProviderDraft, persistProviderFields, providerBusy.api, setProviderAction, verifyApiConnection]);
 
   const handleRemoveApiProviderKey = useCallback(async (connectionId: string) => {
     if (!config || providerBusy.api) return;
@@ -981,13 +1122,18 @@ export function useKatoSyncViewModel() {
         delete next[connectionId];
         return next;
       });
-      mergeProvider(await testProvider(config, "api"), config.providerPriority);
+      setApiConnectionStatuses((current) => {
+        const next = { ...current };
+        delete next[connectionId];
+        return next;
+      });
+      await refreshApiPoolStatus(config);
     } catch (error) {
-      setApiKeyErrors((current) => ({ ...current, [connectionId]: getMessage(error) }));
+      setApiKeyErrors((current) => ({ ...current, [connectionId]: apiErrorCode(error) }));
     } finally {
       setProviderAction("api", null);
     }
-  }, [config, mergeProvider, providerBusy.api, setProviderAction]);
+  }, [config, providerBusy.api, refreshApiPoolStatus, setProviderAction]);
 
   const handleDeleteApiProvider = useCallback(async (connectionId: string) => {
     if (!config || providerBusy.api) return;
@@ -998,29 +1144,19 @@ export function useKatoSyncViewModel() {
       // Das Entfernen des nicht-geheimen Slots darf nicht an einem bereits fehlenden Key scheitern.
     }
     try {
+      // Projekt-Vorwahlen auf diesen Slot fallen auf Auto zurueck statt ins Leere zu zeigen.
       const saved = await persistProviderFields({
-        apiProviders: config.apiProviders.filter((connection) => connection.id !== connectionId)
+        apiProviders: config.apiProviders.filter((connection) => connection.id !== connectionId),
+        apiProjectPreferences: Object.fromEntries(
+          Object.entries(config.apiProjectPreferences).filter(([, id]) => id !== connectionId)
+        )
       });
-      setApiProviderDrafts((current) => {
-        const next = { ...current };
-        delete next[connectionId];
-        return next;
-      });
-      setApiCatalogs((current) => {
-        const next = { ...current };
-        delete next[connectionId];
-        return next;
-      });
-      setApiKeyErrors((current) => {
-        const next = { ...current };
-        delete next[connectionId];
-        return next;
-      });
-      mergeProvider(await testProvider(saved, "api"), saved.providerPriority);
+      dropApiEntry(connectionId);
+      await refreshApiPoolStatus(saved);
     } finally {
       setProviderAction("api", null);
     }
-  }, [config, mergeProvider, persistProviderFields, providerBusy.api, setProviderAction]);
+  }, [config, dropApiEntry, persistProviderFields, providerBusy.api, refreshApiPoolStatus, setProviderAction]);
 
   const handleSetProjectApiPreference = useCallback(
     async (projectId: string, connectionId: string | null) => {
@@ -2830,6 +2966,16 @@ export function useKatoSyncViewModel() {
     apiKeyInputs,
     apiKeyErrors,
     apiCatalogs,
+    apiConnectionStatuses,
+    apiSetupKey,
+    apiSetupProvider,
+    apiSetupBaseUrl,
+    apiSetupError,
+    updateApiSetupKey,
+    chooseApiSetupProvider,
+    setApiSetupBaseUrl,
+    resetApiSetup,
+    handleConnectApiKey,
     localBrainStatus,
     localBrainProgress,
     localBrainBusy,
@@ -2878,7 +3024,6 @@ export function useKatoSyncViewModel() {
     handleDiscoverLocalProviders,
     handleSaveLocalProviderKey,
     handleRemoveLocalProviderKey,
-    handleAddApiProvider,
     handleSaveApiProviderKey,
     handleRefreshApiModels,
     handleSaveApiProvider,
