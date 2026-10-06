@@ -4,6 +4,11 @@ import test from "node:test";
 import {
   AGENT_LANE_ORDER,
   API_PROVIDER_PRESETS,
+  MAX_API_MONTHLY_BUDGET_USD,
+  apiErrorCode,
+  normalizeApiBudget,
+  resolveApiConnection,
+  validateCustomApiEndpointInput,
   PROVIDER_RECHECK_INTERVAL_MS,
   buildSanitizedProviderDiagnostics,
   isIntelligentLane,
@@ -25,7 +30,7 @@ import {
   toProviderSettings,
   validateLocalEndpointInput
 } from "../src/lib/providerPolicy.ts";
-import type { ProviderId, ProviderStatus } from "../src/types.ts";
+import type { ApiProviderConfig, ProviderId, ProviderStatus } from "../src/types.ts";
 
 function status(provider: ProviderId, patch: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
@@ -192,7 +197,8 @@ test("provider settings sent to Rust never contain secrets or the fallback toggl
       effort: "high",
       mode: "auto",
       capabilities: ["coding"],
-      enabled: true
+      enabled: true,
+      monthlyBudgetUsd: 12.345
     }]
   );
   assert.deepEqual(settings, {
@@ -207,7 +213,8 @@ test("provider settings sent to Rust never contain secrets or the fallback toggl
       effort: "high",
       mode: "auto",
       capabilities: ["coding"],
-      enabled: true
+      enabled: true,
+      monthlyBudgetUsd: 12.35
     }]
   });
   assert.equal(JSON.stringify(settings).toLowerCase().includes("key"), false);
@@ -322,4 +329,102 @@ test("remote orchestrator is the intelligent fallback before the deterministic s
   assert.equal(nextLaneAfterFailure([...limited.slice(0, 1), status("claude")], priority, "codex", "quota_limited", true), "claude");
   assert.equal(nextLaneAfterFailure(limited, priority, "remote_orchestrator", "offline", true), "local_control");
   assert.equal(nextLaneAfterFailure(limited, priority, "codex", "job_failed", true), null);
+});
+
+function apiSlot(id: string, patch: Partial<ApiProviderConfig> = {}): ApiProviderConfig {
+  return {
+    id,
+    label: "",
+    preset: "openai",
+    baseUrl: "",
+    model: "gpt-5.6-sol",
+    effort: "auto",
+    mode: "auto",
+    capabilities: [],
+    enabled: true,
+    monthlyBudgetUsd: null,
+    ...patch
+  };
+}
+
+test("API routing: explicit and project choices fail closed instead of hopping to another paid provider", () => {
+  const slots = [
+    apiSlot("api-1", { preset: "deepseek", model: "deepseek-v4-flash", mode: "fallback" }),
+    apiSlot("api-2", { preset: "mistral", model: "mistral-small-latest" }),
+    apiSlot("api-3", { enabled: false })
+  ];
+  const projectPreferences = { "proj-a": "api-3", "proj-b": "api-1" };
+
+  assert.deepEqual(resolveApiConnection(slots, { connectionId: "api-3" }), {
+    connection: null,
+    source: "explicit",
+    block: "api_connection_unavailable"
+  });
+  assert.equal(resolveApiConnection(slots, { connectionId: "missing" }).block, "api_connection_unavailable");
+  assert.deepEqual(resolveApiConnection(slots, { projectId: "proj-a", projectPreferences }), {
+    connection: null,
+    source: "project",
+    block: "api_connection_unavailable"
+  });
+  assert.equal(resolveApiConnection(slots, { projectId: "proj-b", projectPreferences }).connection?.id, "api-1");
+  // Auto: regulaerer Slot vor "fallback".
+  const auto = resolveApiConnection(slots, { projectId: "proj-unset", projectPreferences });
+  assert.equal(auto.source, "auto");
+  assert.equal(auto.connection?.id, "api-2");
+  assert.equal(resolveApiConnection([], {}).block, "api_not_configured");
+  assert.equal(resolveApiConnection([apiSlot("api-9", { model: " " })], {}).block, "api_not_configured");
+});
+
+test("API routing: budgets block over-spent slots without silent provider switches", () => {
+  const slots = [
+    apiSlot("api-1", { monthlyBudgetUsd: 10 }),
+    apiSlot("api-2", { preset: "mistral", model: "mistral-small-latest", monthlyBudgetUsd: 50 })
+  ];
+  // Explizite Wahl ueber Budget -> Stopp, kein Ausweichen auf api-2.
+  assert.deepEqual(resolveApiConnection(slots, { connectionId: "api-1" }, { "api-1": 10 }), {
+    connection: null,
+    source: "explicit",
+    block: "api_budget_exceeded"
+  });
+  // Auto nimmt nur Slots im Budget.
+  assert.equal(resolveApiConnection(slots, {}, { "api-1": 12 }).connection?.id, "api-2");
+  assert.equal(resolveApiConnection(slots, {}, { "api-1": 12, "api-2": 60 }).block, "api_budget_exceeded");
+  assert.equal(resolveApiConnection(slots, {}, { "api-1": 9.99 }).connection?.id, "api-1");
+});
+
+test("API budgets normalize to a positive, capped amount", () => {
+  assert.equal(normalizeApiBudget(null), null);
+  assert.equal(normalizeApiBudget(""), null);
+  assert.equal(normalizeApiBudget("0"), null);
+  assert.equal(normalizeApiBudget(-3), null);
+  assert.equal(normalizeApiBudget("12,5"), 12.5);
+  assert.equal(normalizeApiBudget(1e9), MAX_API_MONTHLY_BUDGET_USD);
+  assert.equal(normalizeApiBudget(Number.POSITIVE_INFINITY), null);
+});
+
+test("custom OpenAI-compatible endpoints must be https without credentials or query", () => {
+  assert.equal(validateCustomApiEndpointInput("https://gateway.example.com/v1"), null);
+  assert.equal(validateCustomApiEndpointInput("http://gateway.example.com/v1"), "https_required");
+  assert.equal(validateCustomApiEndpointInput("https://user:pw@gateway.example.com/v1"), "credentials");
+  assert.equal(validateCustomApiEndpointInput("https://gateway.example.com/v1?key=x"), "query");
+  assert.equal(validateCustomApiEndpointInput(""), "missing");
+});
+
+test("API error codes are allow-listed and never echo raw messages or secrets", () => {
+  const secret = "sk-ant-api03-EXAMPLEONLYSECRET0000";
+  assert.equal(apiErrorCode("endpoint_auth_required"), "endpoint_auth_required");
+  assert.equal(apiErrorCode("api_key_provider_mismatch"), "api_key_provider_mismatch");
+  assert.equal(apiErrorCode(new Error("api_budget_exceeded")), "api_budget_exceeded");
+  for (const raw of [new Error(`401 invalid key ${secret}`), `bad ${secret}`, { key: secret }, null]) {
+    const code = apiErrorCode(raw);
+    assert.equal(code, "api_request_failed");
+    assert.equal(code.includes("EXAMPLEONLY"), false);
+  }
+});
+
+test("diagnostic redaction also covers xAI and Z.AI key shapes", () => {
+  const redacted = redactDiagnostic(
+    "xai-EXAMPLEONLY00000000 and 0123456789abcdef0123456789abcdef.EXAMPLEONLY00000 and sk-ant-api03-EXAMPLEONLY0000"
+  );
+  assert.equal(redacted.includes("EXAMPLEONLY"), false, redacted);
 });

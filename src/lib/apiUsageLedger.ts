@@ -102,10 +102,29 @@ export function apiUsageSummary(connectionId: string): ApiUsageSummary {
     estimatedCostUsd: records.reduce((sum, record) => sum + (record.estimatedCostUsd ?? 0), 0),
     todayCostUsd: todayRecords.reduce((sum, record) => sum + recordCost(record), 0),
     monthCostUsd: monthRecords.reduce((sum, record) => sum + recordCost(record), 0),
+    // Getrennte Wahrheit: vom Provider gemeldete Kosten vs. lokale Schaetzung aus Preis-Snapshot.
+    monthReportedCostUsd: monthRecords.reduce((sum, record) => sum + (record.reportedCostUsd ?? 0), 0),
+    monthEstimatedCostUsd: monthRecords
+      .filter((record) => record.reportedCostUsd == null)
+      .reduce((sum, record) => sum + (record.estimatedCostUsd ?? 0), 0),
+    monthUnpricedRequests: monthRecords.filter(
+      (record) => record.reportedCostUsd == null && record.estimatedCostUsd == null
+    ).length,
     todayCostIsEstimate: todayRecords.some((record) => record.reportedCostUsd == null),
     monthCostIsEstimate: monthRecords.some((record) => record.reportedCostUsd == null),
     updatedAt: records.length ? records[records.length - 1].createdAt : null
   };
+}
+
+/** Monatsausgaben je Slot (gemeldet, sonst geschaetzt) fuer Budget- und Routing-Entscheidungen. */
+export function apiMonthSpendByConnection(now: Date = new Date()): Record<string, number> {
+  const month = now.toISOString().slice(0, 7);
+  const spend: Record<string, number> = {};
+  for (const record of readRecords()) {
+    if (record.createdAt.slice(0, 7) !== month) continue;
+    spend[record.connectionId] = (spend[record.connectionId] ?? 0) + recordCost(record);
+  }
+  return spend;
 }
 
 export function apiUsageRecords(connectionId?: string): ApiUsageRecord[] {

@@ -28,6 +28,7 @@ import { useT, type TFunc, type TKey } from "../i18n";
 import { providerDisplayState } from "../lib/providerPolicy";
 import { isInActiveFocus } from "../lib/projectFocus";
 import { balancedOption, bestFitOption, cheapestKnownOption, estimateProject, fastestOption } from "../lib/apiCostPlanner";
+import { apiMonthSpendByConnection } from "../lib/apiUsageLedger";
 import {
   agentReadiness,
   jobStage,
@@ -500,6 +501,7 @@ function formatEstimateUsd(value: number | null): string {
 function ProjectCostPlanner({ vm }: { vm: ViewModel }) {
   const { t } = useT();
   const configuredApis = vm.apiProviders.filter((connection) => connection.enabled && connection.model.trim());
+  const monthSpend = apiMonthSpendByConnection();
   const taskGroups = new Map<string, ActionTask[]>();
 
   vm.actionPlans
@@ -525,7 +527,7 @@ function ProjectCostPlanner({ vm }: { vm: ViewModel }) {
       ) : (
         <div className="api-cost-projects">
           {[...taskGroups.entries()].map(([projectId, tasks]) => {
-            const estimate = estimateProject(projectId, tasks, configuredApis);
+            const estimate = estimateProject(projectId, tasks, configuredApis, monthSpend);
             const best = bestFitOption(estimate);
             const cheapest = cheapestKnownOption(estimate);
             const fastest = fastestOption(estimate);
@@ -582,7 +584,7 @@ function ProjectCostPlanner({ vm }: { vm: ViewModel }) {
                 <div className="api-cost-options" role="table" aria-label={t("agent.cost.compare")}>
                   {estimate.options.map((option) => (
                     <div
-                      className={`api-cost-option${preferredId === option.connectionId ? " selected" : ""}${option.supported ? "" : " weak"}`}
+                      className={`api-cost-option${preferredId === option.connectionId ? " selected" : ""}${option.supported && !option.blocked ? "" : " weak"}`}
                       key={option.connectionId}
                       role="row"
                     >
@@ -596,16 +598,19 @@ function ProjectCostPlanner({ vm }: { vm: ViewModel }) {
                       </span>
                       <span>
                         <small>{t("agent.cost.effort")}</small>
-                        <strong>{option.effort}</strong>
+                        <strong>{t(`providers.api.effort.${option.effort}` as TKey)}</strong>
                       </span>
                       <span>
                         <small>{t("agent.cost.speed")}</small>
                         <strong>{t(`providers.api.speed.${option.speed}` as TKey)}</strong>
                       </span>
                       <span>
-                        <small>{t("agent.cost.estimate")}</small>
-                        <strong>{formatEstimateUsd(option.estimatedCostUsd)}</strong>
+                        <small>{t("agent.cost.estimate")} · {t("agent.cost.estimateBadge")}</small>
+                        <strong>≈ {formatEstimateUsd(option.estimatedCostUsd)}</strong>
                       </span>
+                      {option.blocked === "over_budget" ? (
+                        <span className="api-cost-blocked">{t("agent.cost.overBudget")}</span>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -646,7 +651,7 @@ function ProjectCostPlanner({ vm }: { vm: ViewModel }) {
                   </div>
                 </details>
 
-                <p className="api-cost-disclaimer">{t("agent.cost.disclaimer")}</p>
+                <p className="api-cost-disclaimer">{t("agent.cost.planOnly")} {t("agent.cost.disclaimer")}</p>
               </section>
             );
           })}

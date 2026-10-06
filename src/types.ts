@@ -121,6 +121,9 @@ export interface ApiProviderConfig {
   mode: ApiConnectionMode;
   capabilities: ApiCapability[];
   enabled: boolean;
+  // Optionales Monatsbudget (USD) nur fuer diesen API-Slot. null = kein Budget gesetzt.
+  // Wird gegen das lokale Usage-Ledger geprueft (Provider-Rechnung bleibt massgeblich).
+  monthlyBudgetUsd: number | null;
 }
 
 export interface ApiProviderCatalog {
@@ -176,6 +179,10 @@ export interface ApiUsageSummary {
   estimatedCostUsd: number;
   todayCostUsd: number;
   monthCostUsd: number;
+  monthReportedCostUsd: number;
+  monthEstimatedCostUsd: number;
+  // Requests ohne gemeldete Kosten und ohne Katalogpreis: Kosten unbekannt.
+  monthUnpricedRequests: number;
   todayCostIsEstimate: boolean;
   monthCostIsEstimate: boolean;
   updatedAt: string | null;
@@ -227,7 +234,8 @@ export type ProviderReason =
   | "insecure_remote_key"
   | "secret_store_unavailable"
   | "local_control_running"
-  | "local_control_queue_only";
+  | "local_control_queue_only"
+  | "api_key_provider_mismatch";
 
 // Normalisierter, redigierter Provider-Status aus dem Rust-Adapter. Enthaelt nie Tokens/E-Mails.
 export interface ProviderStatus {
