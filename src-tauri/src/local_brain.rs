@@ -1,13 +1,14 @@
 // Created by NMKato Solutions
+use crate::model_distribution::{
+    self as dist, release_gate_blockers, Channel, DistributionBase, ExpectedArtifact, ModelPackage,
+    OriginPolicy, PackagePublication, PackageStore, UpdateState,
+};
 use anyhow::{anyhow, Context, Result};
 use flate2::read::GzDecoder;
-use reqwest::{header::RANGE, StatusCode};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Mutex, OnceLock},
@@ -22,14 +23,26 @@ const HEALTH_URL: &str = "http://127.0.0.1:17842/health";
 const MODELS_URL: &str = "http://127.0.0.1:17842/v1/models";
 const PROBE_BODY_LIMIT: usize = 64 * 1024;
 const PORT: &str = "17842";
+const MANIFEST_SCHEMA_VERSION: u32 = 2;
 static CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
+static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Manifest {
     schema_version: u32,
+    distribution: DistributionConfig,
     runtime: RuntimeManifest,
     models: Vec<ModelManifest>,
+}
+
+/// Verteilkanal fuer Modellgewichte. `baseUrl` zeigt spaeter auf die R2 Custom Domain;
+/// ohne Base (oder ohne Lizenzfreigabe) wird nur der gepinnte Upstream genutzt.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DistributionConfig {
+    base_url: Option<String>,
+    allowed_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -62,12 +75,38 @@ struct ModelManifest {
     sha256: String,
     size_bytes: u64,
     quantization: String,
-    license: String,
     minimum_ram_gb: u64,
     preferred_ram_gb: u64,
     recommended: bool,
     vision_projection_required: bool,
     capabilities: ModelCapabilities,
+    package: PackagePublication,
+}
+
+impl ModelManifest {
+    /// Vollstaendiger Paketvertrag (entspricht `packages/<id>/<version>/manifest.json`).
+    fn to_package(&self) -> ModelPackage {
+        let publication = &self.package;
+        ModelPackage {
+            schema: dist::PACKAGE_SCHEMA.to_string(),
+            package_id: publication.package_id.clone(),
+            version: publication.version.clone(),
+            channel: publication.channel,
+            release_state: publication.release_state,
+            file_name: self.file_name.clone(),
+            size_bytes: self.size_bytes,
+            sha256: self.sha256.clone(),
+            quantization: self.quantization.clone(),
+            minimum_ram_gb: self.minimum_ram_gb,
+            preferred_ram_gb: self.preferred_ram_gb,
+            context_tokens: publication.context_tokens,
+            platforms: publication.platforms.clone(),
+            runtime: publication.runtime.clone(),
+            license: publication.license.clone(),
+            object_key: publication.object_key.clone(),
+            upstream_url: Some(self.url.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -105,6 +144,15 @@ pub struct LocalBrainStatus {
     endpoint: String,
     model_alias: String,
     vision_ready: bool,
+    package_id: String,
+    package_version: String,
+    package_channel: Channel,
+    release_state: dist::ReleaseState,
+    release_blockers: Vec<String>,
+    installed_version: Option<String>,
+    previous_version: Option<String>,
+    pinned_version: Option<String>,
+    update_state: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,15 +169,57 @@ fn child_slot() -> &'static Mutex<Option<Child>> {
     CHILD.get_or_init(|| Mutex::new(None))
 }
 
-fn manifest() -> Result<Manifest> {
+fn parse_manifest(json: &str) -> Result<Manifest> {
     let parsed: Manifest =
-        serde_json::from_str(MANIFEST_JSON).context("Local-Brain-Manifest ist ungueltig")?;
-    if parsed.schema_version != 1 || parsed.models.is_empty() {
+        serde_json::from_str(json).context("Local-Brain-Manifest ist ungueltig")?;
+    if parsed.schema_version != MANIFEST_SCHEMA_VERSION || parsed.models.is_empty() {
         return Err(anyhow!(
             "Local-Brain-Manifest hat eine nicht unterstuetzte Version"
         ));
     }
+    let policy = origin_policy(&parsed)?;
+    if let Some(base) = &parsed.distribution.base_url {
+        DistributionBase::parse(base, &policy)?;
+    }
+    for target in parsed.runtime.targets.values() {
+        policy.check(&target.url)?;
+        dist::validate_sha256(&target.sha256)?;
+    }
+    for model in &parsed.models {
+        let package = model.to_package();
+        package.validate(&policy)?;
+        if package.runtime.id != parsed.runtime.id
+            || !package.runtime.versions.contains(&parsed.runtime.version)
+        {
+            return Err(anyhow!(
+                "{} ist nicht mit Runtime {} {} kompatibel",
+                package.package_id,
+                parsed.runtime.id,
+                parsed.runtime.version
+            ));
+        }
+    }
     Ok(parsed)
+}
+
+fn manifest() -> Result<Manifest> {
+    parse_manifest(MANIFEST_JSON)
+}
+
+fn origin_policy(manifest: &Manifest) -> Result<OriginPolicy> {
+    OriginPolicy::new(&manifest.distribution.allowed_hosts)
+}
+
+fn distribution_base(
+    manifest: &Manifest,
+    policy: &OriginPolicy,
+) -> Result<Option<DistributionBase>> {
+    manifest
+        .distribution
+        .base_url
+        .as_deref()
+        .map(|base| DistributionBase::parse(base, policy))
+        .transpose()
 }
 
 fn target_key() -> String {
@@ -153,23 +243,36 @@ fn runtime_dir(app: &AppHandle, manifest: &Manifest) -> Result<PathBuf> {
     Ok(root(app)?.join("runtime").join(&manifest.runtime.version))
 }
 
-fn model_path(app: &AppHandle, model: &ModelManifest) -> Result<PathBuf> {
-    Ok(root(app)?.join("models").join(&model.file_name))
+fn package_store(app: &AppHandle) -> Result<PackageStore> {
+    Ok(PackageStore::new(root(app)?))
 }
 
-fn archive_path(
-    app: &AppHandle,
-    runtime: &RuntimeManifest,
-    target: &RuntimeTarget,
-) -> Result<PathBuf> {
-    let ext = if target.archive == "zip" {
-        "zip"
-    } else {
-        "tar.gz"
-    };
-    Ok(root(app)?
-        .join("downloads")
-        .join(format!("{}-{}.{}", runtime.id, runtime.version, ext)))
+/// Vor-Paket-Layout (`models/<file>`): wurde vom frueheren Installer nur nach SHA-Pruefung
+/// umbenannt, wird aber vor Nutzung erneut verifiziert und in den Paketbaum uebernommen.
+fn legacy_model_path(root: &Path, model: &ModelManifest) -> PathBuf {
+    root.join("models").join(&model.file_name)
+}
+
+/// Verschiebt Altbestand (fertig oder `.part`) als Teil-Download ins Staging, damit er
+/// denselben Verifikations-/Resume-Pfad durchlaeuft. Liefert true, wenn etwas uebernommen wurde.
+fn stage_legacy_model(root: &Path, model: &ModelManifest, staging: &Path) -> Result<bool> {
+    let part = dist::staging_part_path(staging, &model.sha256);
+    if part.exists() {
+        return Ok(false);
+    }
+    let legacy = legacy_model_path(root, model);
+    let legacy_part = PathBuf::from(format!("{}.part", legacy.display()));
+    for candidate in [legacy, legacy_part] {
+        if fs::symlink_metadata(&candidate).is_ok_and(|meta| meta.file_type().is_file()) {
+            fs::create_dir_all(staging)?;
+            fs::rename(&candidate, &part)?;
+            if let Some(dir) = candidate.parent() {
+                fs::remove_dir(dir).ok();
+            }
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn detect_ram_gb() -> Option<u64> {
@@ -251,8 +354,13 @@ fn owned_child_alive() -> bool {
 fn snapshot(app: &AppHandle) -> Result<LocalBrainStatus> {
     let manifest = manifest()?;
     let model = recommended_model(&manifest)?;
+    let package = model.to_package();
     let key = target_key();
-    let target = manifest.runtime.targets.get(&key);
+    let target = manifest
+        .runtime
+        .targets
+        .get(&key)
+        .filter(|_| package.supports(&key, &manifest.runtime.version));
     let runtime_installed = target
         .and_then(|target| {
             runtime_dir(app, &manifest)
@@ -260,7 +368,23 @@ fn snapshot(app: &AppHandle) -> Result<LocalBrainStatus> {
                 .and_then(|dir| find_runtime_binary(&dir, &target.executable))
         })
         .is_some();
-    let model_installed = model_path(app, model)?.is_file();
+    let local_root = root(app)?;
+    let store = PackageStore::new(local_root.clone());
+    // Beschaedigtes Ledger = nicht installiert (fail closed); Entfernen setzt es zurueck.
+    let ledger = store.load_ledger(&package.package_id).ok().flatten();
+    let active_installed = store
+        .active_installed(&package.package_id)
+        .ok()
+        .flatten()
+        .is_some();
+    let model_installed = active_installed || legacy_model_path(&local_root, model).is_file();
+    let update_state = if active_installed {
+        dist::plan_update(ledger.as_ref(), &package.version)?
+    } else if model_installed {
+        UpdateState::Current
+    } else {
+        UpdateState::NotInstalled
+    };
     let ram = detect_ram_gb();
     let ram_fit = match ram {
         Some(value) if value < model.minimum_ram_gb => "unsupported",
@@ -286,7 +410,7 @@ fn snapshot(app: &AppHandle) -> Result<LocalBrainStatus> {
         model_installed,
         model_size_bytes: model.size_bytes,
         quantization: model.quantization.clone(),
-        license: model.license.clone(),
+        license: package.license.spdx.clone(),
         source_repo: model.source_repo.clone(),
         source_revision: model.source_revision.clone(),
         text_ready: model.capabilities.text,
@@ -297,6 +421,21 @@ fn snapshot(app: &AppHandle) -> Result<LocalBrainStatus> {
         endpoint: ENDPOINT.to_string(),
         model_alias: model.alias.clone(),
         vision_ready: model.capabilities.image && !model.vision_projection_required,
+        release_blockers: release_gate_blockers(&package)
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        installed_version: ledger
+            .as_ref()
+            .and_then(|l| l.active.clone())
+            .filter(|_| active_installed),
+        previous_version: ledger.as_ref().and_then(|l| l.previous.clone()),
+        pinned_version: ledger.as_ref().and_then(|l| l.pinned.clone()),
+        update_state: update_state.as_str().to_string(),
+        package_id: package.package_id,
+        package_version: package.version,
+        package_channel: package.channel,
+        release_state: package.release_state,
     })
 }
 
@@ -466,80 +605,13 @@ fn emit_progress(app: &AppHandle, phase: &str, label: &str, downloaded: u64, tot
     );
 }
 
-fn sha256_file(path: &Path) -> Result<String> {
-    let mut file =
-        File::open(path).with_context(|| format!("Hash-Datei fehlt: {}", path.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 1024 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-async fn download_verified(
-    app: &AppHandle,
-    phase: &str,
-    label: &str,
-    url: &str,
-    destination: &Path,
-    expected_sha256: &str,
-    total_hint: Option<u64>,
-) -> Result<()> {
-    if destination.is_file() && sha256_file(destination)?.eq_ignore_ascii_case(expected_sha256) {
-        emit_progress(app, phase, label, total_hint.unwrap_or(0), total_hint);
-        return Ok(());
-    }
-
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let part = PathBuf::from(format!("{}.part", destination.display()));
-    let existing = fs::metadata(&part).map(|meta| meta.len()).unwrap_or(0);
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(20))
-        .timeout(Duration::from_secs(60 * 60 * 6))
-        .build()?;
-    let mut request = client.get(url);
-    if existing > 0 {
-        request = request.header(RANGE, format!("bytes={existing}-"));
-    }
-    let mut response = request.send().await?.error_for_status()?;
-    let partial = response.status() == StatusCode::PARTIAL_CONTENT;
-    let mut offset = if partial { existing } else { 0 };
-    let response_total = response.content_length().map(|length| length + offset);
-    let total = total_hint.or(response_total);
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(partial)
-        .truncate(!partial)
-        .open(&part)?;
-    emit_progress(app, phase, label, offset, total);
-
-    while let Some(chunk) = response.chunk().await? {
-        file.write_all(&chunk)?;
-        offset += chunk.len() as u64;
-        emit_progress(app, phase, label, offset, total);
-    }
-    file.flush()?;
-    drop(file);
-
-    let actual = sha256_file(&part)?;
-    if !actual.eq_ignore_ascii_case(expected_sha256) {
-        let _ = fs::remove_file(&part);
-        return Err(anyhow!(
-            "SHA256-Mismatch fuer {label}: erwartet {expected_sha256}, erhalten {actual}"
-        ));
-    }
-    fs::rename(&part, destination)?;
-    emit_progress(app, phase, label, offset, total.or(Some(offset)));
-    Ok(())
+/// Progress-Callback fuer den verifizierten Download.
+fn progress_reporter<'a>(
+    app: &'a AppHandle,
+    phase: &'a str,
+    label: &'a str,
+) -> impl FnMut(u64, Option<u64>) + Send + 'a {
+    move |downloaded, total| emit_progress(app, phase, label, downloaded, total)
 }
 
 fn extract_runtime(archive: &Path, target: &RuntimeTarget, destination: &Path) -> Result<()> {
@@ -598,13 +670,18 @@ fn extract_runtime(archive: &Path, target: &RuntimeTarget, destination: &Path) -
 }
 
 pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
+    let _guard = INSTALL_LOCK
+        .try_lock()
+        .map_err(|_| anyhow!("Local-Brain-Installation laeuft bereits"))?;
     let manifest = manifest()?;
     let model = recommended_model(&manifest)?;
+    let package = model.to_package();
     let key = target_key();
     let target = manifest
         .runtime
         .targets
         .get(&key)
+        .filter(|_| package.supports(&key, &manifest.runtime.version))
         .ok_or_else(|| anyhow!("Local Brain wird auf {key} noch nicht unterstuetzt"))?;
 
     if let Some(ram) = detect_ram_gb() {
@@ -618,35 +695,67 @@ pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
         }
     }
 
+    let policy = origin_policy(&manifest)?;
+    let client = policy.http_client()?;
+    let local_root = root(app)?;
+    let store = PackageStore::new(local_root.clone());
+
     let runtime_dir = runtime_dir(app, &manifest)?;
     if find_runtime_binary(&runtime_dir, &target.executable).is_none() {
-        emit_progress(app, "runtime", "llama.cpp Runtime", 0, None);
-        let archive = archive_path(app, &manifest.runtime, target)?;
-        download_verified(
-            app,
-            "runtime",
-            "llama.cpp Runtime",
-            &target.url,
-            &archive,
-            &target.sha256,
-            None,
+        let label = "llama.cpp Runtime";
+        emit_progress(app, "runtime", label, 0, None);
+        let archive = dist::fetch_verified(
+            &client,
+            &[policy.check(&target.url)?],
+            &store.staging_dir(),
+            ExpectedArtifact {
+                sha256: &target.sha256,
+                size_bytes: None,
+            },
+            &mut progress_reporter(app, "runtime", label),
         )
         .await?;
-        extract_runtime(&archive, target, &runtime_dir)?;
+        extract_runtime(archive.path(), target, &runtime_dir)?;
+        fs::remove_file(archive.path()).ok();
     }
 
-    let model_path = model_path(app, model)?;
-    emit_progress(app, "model", &model.display_name, 0, Some(model.size_bytes));
-    download_verified(
-        app,
-        "model",
-        &model.display_name,
-        &model.url,
-        &model_path,
-        &model.sha256,
-        Some(model.size_bytes),
-    )
-    .await?;
+    let ledger = store.load_ledger(&package.package_id).context(
+        "Modellpaket-Ledger ist beschaedigt; Local Brain entfernen und neu installieren",
+    )?;
+    let healthy = store.active_installed(&package.package_id)?.is_some();
+    let needs_download = match dist::plan_update(ledger.as_ref(), &package.version)? {
+        UpdateState::NotInstalled | UpdateState::UpdateAvailable => true,
+        UpdateState::Current | UpdateState::NewerInstalled => !healthy,
+        UpdateState::Pinned if healthy => false,
+        UpdateState::Pinned => {
+            return Err(anyhow!(
+                "Gepinnte Modellversion ist nicht mehr intakt; Pin aufheben und neu installieren"
+            ))
+        }
+    };
+
+    if needs_download {
+        let staging = store.staging_dir();
+        stage_legacy_model(&local_root, model, &staging)?;
+        let sources = dist::download_sources(
+            &package,
+            distribution_base(&manifest, &policy)?.as_ref(),
+            &policy,
+        )?;
+        emit_progress(app, "model", &model.display_name, 0, Some(model.size_bytes));
+        let verified = dist::fetch_verified(
+            &client,
+            &sources,
+            &staging,
+            ExpectedArtifact {
+                sha256: &package.sha256,
+                size_bytes: Some(package.size_bytes),
+            },
+            &mut progress_reporter(app, "model", &model.display_name),
+        )
+        .await?;
+        store.promote(&package, verified)?;
+    }
 
     emit_progress(
         app,
@@ -656,6 +765,33 @@ pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
         Some(model.size_bytes),
     );
     status(app).await
+}
+
+/// Liefert ausschliesslich verifizierte Gewichte; Altbestand wird vorher geprueft und uebernommen.
+async fn verified_model_for_launch(app: &AppHandle, model: &ModelManifest) -> Result<PathBuf> {
+    let package = model.to_package();
+    let local_root = root(app)?;
+    let model = model.clone();
+    tokio::task::spawn_blocking(move || -> Result<PathBuf> {
+        let store = PackageStore::new(local_root.clone());
+        if store.load_ledger(&package.package_id)?.is_none()
+            && stage_legacy_model(&local_root, &model, &store.staging_dir())?
+        {
+            let part = dist::staging_part_path(&store.staging_dir(), &package.sha256);
+            let verified = dist::verify_or_discard(
+                &part,
+                ExpectedArtifact {
+                    sha256: &package.sha256,
+                    size_bytes: Some(package.size_bytes),
+                },
+            )?;
+            store.promote(&package, verified)?;
+        }
+        store.resolve_for_launch(&package.package_id)
+    })
+    .await
+    .map_err(|err| anyhow!("Modellpruefung abgebrochen: {err}"))?
+    .context("Local-Brain-Modell ist nicht installiert oder nicht verifiziert")
 }
 
 pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
@@ -670,15 +806,12 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
     let runtime = runtime_dir(app, &manifest)?;
     let binary = find_runtime_binary(&runtime, &target.executable)
         .ok_or_else(|| anyhow!("llama.cpp Runtime ist nicht installiert"))?;
-    let model_file = model_path(app, model)?;
-    if !model_file.is_file() {
-        return Err(anyhow!("Local-Brain-Modell ist nicht installiert"));
-    }
-
     if owned_child_alive() || serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
         return status(app).await;
     }
 
+    let model_file = verified_model_for_launch(app, model).await?;
+    let context_tokens = model.package.context_tokens.to_string();
     let logs = root(app)?.join("logs");
     fs::create_dir_all(&logs)?;
     let log = OpenOptions::new()
@@ -696,7 +829,7 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
             "--port",
             PORT,
             "--ctx-size",
-            "8192",
+            &context_tokens,
             "--alias",
             &model.alias,
         ])
@@ -751,6 +884,41 @@ pub async fn stop(app: &AppHandle) -> Result<LocalBrainStatus> {
     status(app).await
 }
 
+fn active_package_id() -> Result<String> {
+    Ok(recommended_model(&manifest()?)?.package.package_id.clone())
+}
+
+/// Aktiviert die vorherige Modellversion und pinnt sie. Eine eigene Runtime wird vorher
+/// gestoppt, damit nie die abgeloeste Version weiterlaeuft.
+pub async fn rollback_model(app: &AppHandle) -> Result<LocalBrainStatus> {
+    let _guard = INSTALL_LOCK
+        .try_lock()
+        .map_err(|_| anyhow!("Local-Brain-Installation laeuft gerade"))?;
+    stop_owned()?;
+    package_store(app)?.rollback(&active_package_id()?)?;
+    status(app).await
+}
+
+pub async fn set_model_pin(app: &AppHandle, version: Option<String>) -> Result<LocalBrainStatus> {
+    let _guard = INSTALL_LOCK
+        .try_lock()
+        .map_err(|_| anyhow!("Local-Brain-Installation laeuft gerade"))?;
+    package_store(app)?.set_pin(&active_package_id()?, version.as_deref())?;
+    status(app).await
+}
+
+/// Entfernt genau eine installierte Modellversion; die aktive nur, wenn sie nicht laeuft.
+pub async fn remove_model_version(app: &AppHandle, version: String) -> Result<LocalBrainStatus> {
+    let _guard = INSTALL_LOCK
+        .try_lock()
+        .map_err(|_| anyhow!("Local-Brain-Installation laeuft gerade"))?;
+    let manifest = manifest()?;
+    let model = recommended_model(&manifest)?;
+    let in_use = owned_child_alive() || serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await;
+    package_store(app)?.remove_version(&model.package.package_id, &version, in_use)?;
+    status(app).await
+}
+
 pub async fn remove(app: &AppHandle) -> Result<LocalBrainStatus> {
     let _ = stop_owned();
     let local_root = root(app)?;
@@ -763,11 +931,12 @@ pub async fn remove(app: &AppHandle) -> Result<LocalBrainStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn embedded_manifest_is_versioned_and_has_recommended_model() {
         let manifest = manifest().unwrap();
-        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.schema_version, MANIFEST_SCHEMA_VERSION);
         let model = recommended_model(&manifest).unwrap();
         assert_eq!(model.id, "gemma-4-e4b-it-q4_0");
         assert_eq!(model.alias, "kato-local-brain");
@@ -780,6 +949,125 @@ mod tests {
     }
 
     #[test]
+    fn embedded_package_is_valid_but_not_public_until_license_review() {
+        let manifest = manifest().unwrap();
+        let package = recommended_model(&manifest).unwrap().to_package();
+        package
+            .validate(&origin_policy(&manifest).unwrap())
+            .unwrap();
+        assert_eq!(package.version, "1.0.0");
+        assert_eq!(package.channel, Channel::Stable);
+        assert_ne!(package.release_state, dist::ReleaseState::Public);
+        assert!(release_gate_blockers(&package).contains(&"redistribution_not_approved"));
+        assert!(package.supports("macos-aarch64", &manifest.runtime.version));
+        assert!(manifest.distribution.base_url.is_none());
+        // Nicht oeffentlich → nie ueber den eigenen Kanal, nur gepinnter Upstream.
+        let policy = origin_policy(&manifest).unwrap();
+        let base = DistributionBase::parse("https://github.com/placeholder", &policy).unwrap();
+        let sources = dist::download_sources(&package, Some(&base), &policy).unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].host_str(), Some("huggingface.co"));
+    }
+
+    fn mutated_manifest(edit: impl FnOnce(&mut serde_json::Value)) -> Result<Manifest> {
+        let mut value: serde_json::Value = serde_json::from_str(MANIFEST_JSON).unwrap();
+        edit(&mut value);
+        parse_manifest(&value.to_string())
+    }
+
+    #[test]
+    fn manifest_rejects_unsafe_or_ungated_packages() {
+        assert!(mutated_manifest(|_| {}).is_ok());
+        type Edit = Box<dyn FnOnce(&mut serde_json::Value)>;
+        let cases: Vec<(&str, Edit)> = vec![
+            (
+                "public ohne Freigabe",
+                Box::new(|v| {
+                    v["models"][0]["package"]["releaseState"] = "public".into();
+                }),
+            ),
+            (
+                "Traversal im Objekt-Schluessel",
+                Box::new(|v| {
+                    v["models"][0]["package"]["objectKey"] = "packages/../../secret.gguf".into();
+                }),
+            ),
+            (
+                "HTTP-Upstream",
+                Box::new(|v| {
+                    v["models"][0]["url"] = "http://huggingface.co/x.gguf".into();
+                }),
+            ),
+            (
+                "signierte URL",
+                Box::new(|v| {
+                    v["models"][0]["url"] =
+                        "https://huggingface.co/x.gguf?X-Amz-Credential=abc".into();
+                }),
+            ),
+            (
+                "fremder Host",
+                Box::new(|v| {
+                    v["models"][0]["url"] = "https://evil.example.com/x.gguf".into();
+                }),
+            ),
+            (
+                "Base mit Token",
+                Box::new(|v| {
+                    v["distribution"]["baseUrl"] = "https://huggingface.co/?token=abc".into();
+                }),
+            ),
+            (
+                "Base ausserhalb Allowlist",
+                Box::new(|v| {
+                    v["distribution"]["baseUrl"] = "https://models.example.org/".into();
+                }),
+            ),
+            (
+                "inkompatible Runtime",
+                Box::new(|v| {
+                    v["models"][0]["package"]["runtime"]["versions"] = serde_json::json!(["b1"]);
+                }),
+            ),
+            (
+                "Schema 1",
+                Box::new(|v| {
+                    v["schemaVersion"] = 1.into();
+                }),
+            ),
+        ];
+        for (label, edit) in cases {
+            assert!(mutated_manifest(edit).is_err(), "{label} muss scheitern");
+        }
+    }
+
+    #[test]
+    fn legacy_download_is_staged_for_reverification_not_trusted() {
+        let manifest = manifest().unwrap();
+        let model = recommended_model(&manifest).unwrap();
+        let root =
+            std::env::temp_dir().join(format!("katosync-legacy-{}", uuid::Uuid::new_v4().simple()));
+        let staging = root.join("staging");
+        fs::create_dir_all(root.join("models")).unwrap();
+        fs::write(legacy_model_path(&root, model), b"not the real weights").unwrap();
+
+        assert!(stage_legacy_model(&root, model, &staging).unwrap());
+        assert!(!legacy_model_path(&root, model).exists());
+        let part = dist::staging_part_path(&staging, &model.sha256);
+        assert!(part.exists());
+        let verdict = dist::verify_or_discard(
+            &part,
+            ExpectedArtifact {
+                sha256: &model.sha256,
+                size_bytes: Some(model.size_bytes),
+            },
+        );
+        assert!(verdict.is_err());
+        assert!(!part.exists(), "unverifizierte Gewichte werden verworfen");
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
     fn supported_targets_have_pinned_hashes_and_loopback_runtime() {
         let manifest = manifest().unwrap();
         for (key, target) in &manifest.runtime.targets {
@@ -788,6 +1076,10 @@ mod tests {
             assert!(target
                 .url
                 .starts_with("https://github.com/ggml-org/llama.cpp/releases/download/"));
+            origin_policy(&manifest)
+                .unwrap()
+                .check(&target.url)
+                .unwrap();
             assert!(target.executable.starts_with("llama-server"));
         }
     }

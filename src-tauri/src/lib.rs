@@ -29,6 +29,7 @@ mod context_pack;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
+mod model_distribution;
 mod orchestration;
 mod project_registry;
 mod provider_manager;
@@ -359,6 +360,9 @@ pub fn run() {
             start_local_brain,
             stop_local_brain,
             remove_local_brain,
+            rollback_local_brain_model,
+            set_local_brain_model_pin,
+            remove_local_brain_model_version,
             test_provider,
             quit_app
         ])
@@ -535,6 +539,35 @@ async fn stop_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatu
 #[tauri::command]
 async fn remove_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
     local_brain::remove(&app).await.map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn rollback_local_brain_model(
+    app: AppHandle,
+) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::rollback_model(&app)
+        .await
+        .map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn set_local_brain_model_pin(
+    app: AppHandle,
+    version: Option<String>,
+) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::set_model_pin(&app, version)
+        .await
+        .map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn remove_local_brain_model_version(
+    app: AppHandle,
+    version: String,
+) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::remove_model_version(&app, version)
+        .await
+        .map_err(error_to_string)
 }
 
 fn provider_warmup_path() -> Result<PathBuf> {

@@ -36,3 +36,7 @@ Screenshots/
 /docs/release-env.example.sh
 
 docs/KATOSYNC_3_0_ARCHITECTURE.md
+
+# Modellgewichte werden nie eingecheckt (Verteilung ueber den R2-Modellkanal)
+*.gguf
+*.gguf.part
