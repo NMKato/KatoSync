@@ -503,8 +503,8 @@ async fn discover_local_providers() -> Vec<provider_manager::DiscoveredLocalProv
 }
 
 #[tauri::command]
-fn local_brain_status(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
-    local_brain::status(&app).map_err(error_to_string)
+async fn local_brain_status(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::status(&app).await.map_err(error_to_string)
 }
 
 #[tauri::command]
@@ -518,13 +518,13 @@ async fn start_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStat
 }
 
 #[tauri::command]
-fn stop_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
-    local_brain::stop(&app).map_err(error_to_string)
+async fn stop_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::stop(&app).await.map_err(error_to_string)
 }
 
 #[tauri::command]
-fn remove_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
-    local_brain::remove(&app).map_err(error_to_string)
+async fn remove_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::remove(&app).await.map_err(error_to_string)
 }
 
 fn provider_warmup_path() -> Result<PathBuf> {
@@ -3431,7 +3431,7 @@ fn open_output_dir() -> Result<String, String> {
 fn quit_app(app: tauri::AppHandle) {
     // Fenster-Schließen lässt KatoSync absichtlich weiterlaufen. Nur der explizite
     // "Programm beenden"-Pfad beendet auch die von KatoSync verwaltete Local-Brain-Runtime.
-    let _ = local_brain::stop(&app);
+    let _ = local_brain::stop_owned();
     app.exit(0);
 }
 

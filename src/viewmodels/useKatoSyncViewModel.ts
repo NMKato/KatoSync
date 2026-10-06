@@ -111,6 +111,7 @@ import {
   writeProjectWorkPlans,
   type ProjectWorkSyncReport
 } from "../lib/projectWorkSync";
+import { localBrainProviderConfig, shouldAdoptLocalBrain } from "../lib/localBrainCatalog";
 import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 import { modeForStep } from "../lib/workspaceMode";
 import type { Notice } from "../components/Primitives";
@@ -617,7 +618,19 @@ export function useKatoSyncViewModel() {
       const cards: ProviderId[] = ["codex", "claude", "local"];
       cards.forEach((provider) => setProviderAction(provider, "test"));
       try {
-        applyProviderSnapshot(await getProviderStatuses(config, runSmoke));
+        const snapshot = await getProviderStatuses(config, runSmoke);
+        // Wurde die lokale Lane waehrenddessen neu konfiguriert (z. B. Local-Brain-Uebernahme),
+        // bleibt deren frischerer Status statt des Snapshots der alten Konfiguration.
+        const latestLocal = configRef.current?.localProvider;
+        const localChanged =
+          latestLocal &&
+          (latestLocal.baseUrl !== config.localProvider.baseUrl || latestLocal.model !== config.localProvider.model);
+        const currentLocal = providerStatusesRef.current.find((status) => status.provider === "local");
+        applyProviderSnapshot(
+          localChanged && currentLocal
+            ? snapshot.map((status) => (status.provider === "local" ? currentLocal : status))
+            : snapshot
+        );
         if (runSmoke) providerSmokeCheckedRef.current = true;
       } catch (error) {
         show("error", getMessage(error));
@@ -815,12 +828,8 @@ export function useKatoSyncViewModel() {
 
   const registerLocalBrainProvider = useCallback(
     async (brain: LocalBrainStatus) => {
-      if (!config || !brain.running) return;
-      const localProvider: LocalProviderConfig = {
-        kind: "open_ai_compatible",
-        baseUrl: brain.endpoint,
-        model: brain.modelAlias
-      };
+      const localProvider = localBrainProviderConfig(brain);
+      if (!config || !localProvider) return;
       const saved = await persistProviderFields({ localProvider });
       setLocalProviderDraft(null);
       mergeProvider(await testProvider(saved, "local"), saved.providerPriority);
@@ -915,11 +924,26 @@ export function useKatoSyncViewModel() {
     };
   }, []);
 
+  // Ein bereits gesund laufender Local Brain (z. B. aus einer frueheren Sitzung) wird einmal pro
+  // Sitzung als lokale Lane uebernommen, sonst bliebe Agent Sync faelschlich "Nicht eingerichtet".
+  const localBrainAdoptedRef = useRef(false);
+  useEffect(() => {
+    if (!config || localBrainBusy || localBrainAdoptedRef.current) return;
+    if (!localBrainStatus || !shouldAdoptLocalBrain(localBrainStatus, config.localProvider)) return;
+    localBrainAdoptedRef.current = true;
+    void registerLocalBrainProvider(localBrainStatus).catch((error) => show("error", getMessage(error)));
+  }, [config, localBrainBusy, localBrainStatus, registerLocalBrainProvider, show]);
+
   // Einmal pro App-Sitzung beim Oeffnen des Agent-Sync-Workspace real pruefen (Auth + READY).
   useEffect(() => {
     if (modeForStep(activeStep) !== "agentSync" || providerSmokeCheckedRef.current || !config) return;
     providerSmokeCheckedRef.current = true;
     void handleRefreshProviders(true);
+    void getLocalBrainStatus()
+      .then((brain) => {
+        if (brain) setLocalBrainStatus(brain);
+      })
+      .catch(() => undefined);
   }, [activeStep, config, handleRefreshProviders]);
 
   // Fallback-Link, falls der Browser beim offiziellen Login nicht automatisch aufgeht.
