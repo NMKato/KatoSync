@@ -16,6 +16,7 @@ import {
   parseRegistry,
   projectDisplayName,
   reconcileLegacy,
+  registryErrorMessage,
   removeProject,
   resolveFinding,
   updateFocus,
@@ -45,7 +46,7 @@ export interface DiscoveryState {
 
 export type RegistryBusy = null | "discover" | "add" | "scan";
 
-const messageOf = (error: unknown) => (error instanceof Error && error.message ? error.message : "Unbekannter Fehler.");
+const messageOf = registryErrorMessage;
 const nowIso = () => new Date().toISOString();
 
 export function useProjectRegistryViewModel(deps: { config: AppConfig | null; notify: (kind: NoticeKind, text: string) => void }) {
