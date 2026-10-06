@@ -22,6 +22,7 @@ import type {
   KeyStatus,
   LaunchAgentStatus,
   LocalControlMonitorSnapshot,
+  MemoryFabricOverview,
   DiscoveredLocalProvider,
   ProviderId,
   ProviderLoginUrlEvent,
@@ -420,6 +421,17 @@ export async function saveLocalProviderKey(baseUrl: string, apiKey: string): Pro
 export async function discoverLocalProviders(): Promise<DiscoveredLocalProvider[]> {
   if (isTauri()) return invoke<DiscoveredLocalProvider[]>("discover_local_providers");
   return [];
+}
+
+/** Laeuft KatoSync als Desktop-App (Tauri)? Im Browser-Preview sind Live-Quellen nicht verfuegbar. */
+export function isNativeRuntime(): boolean {
+  return isTauri();
+}
+
+/** Read-only Memory-Fabric-Uebersicht (nur Zaehler/Wahrheitsstufen); Browser-Preview: null. */
+export async function getMemoryFabricOverview(): Promise<MemoryFabricOverview | null> {
+  if (!isTauri()) return null;
+  return invoke<MemoryFabricOverview>("memory_fabric_overview");
 }
 
 export async function getLocalBrainStatus(): Promise<LocalBrainStatus | null> {

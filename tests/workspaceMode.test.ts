@@ -57,6 +57,16 @@ test("navigation trees are disjoint and Agent Sync is not a Mistral menu item", 
   assert.equal(defaultStepForMode("agentSync"), "agentDashboard");
 });
 
+test("Vision sits directly under the Agent Sync overview and stays in its workspace", () => {
+  assert.equal(AGENT_SYNC_STEPS[0], "agentDashboard");
+  assert.equal(AGENT_SYNC_STEPS[1], "agentVision");
+  assert.equal(modeForStep("agentVision"), "agentSync");
+  assert.equal(stepForMode("agentVision", "agentSync"), "agentVision");
+  assert.equal(stepForMode("agentVision", "mistral"), "dashboard");
+  assert.ok(!MISTRAL_STEPS.includes("agentVision"));
+  assert.equal(new Set(AGENT_SYNC_STEPS).size, AGENT_SYNC_STEPS.length);
+});
+
 test("foreign or hidden setup steps fall back to the active workspace home", () => {
   assert.equal(modeForStep("api"), "mistral");
   assert.equal(modeForStep("schedule"), "mistral");

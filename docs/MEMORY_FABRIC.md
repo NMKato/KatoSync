@@ -64,6 +64,10 @@ The live acceptance gate verifies both:
 - a fact present only in verified Memory Fabric context is answered correctly;
 - a missing fact returns NOT_IN_MEMORY.
 
+## Vision overview
+
+The Vision system graph (`docs/VISION.md`) reads only a counts-based, read-only overview (`memory_fabric_overview`): per-project source/chunk counts, truth-level mix, stored HEAD and index time, plus registered node identities. It never returns content or paths and never creates the store.
+
 ## Obsidian
 
 Obsidian/Markdown is a generated human view of structured memory.

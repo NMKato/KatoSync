@@ -11,6 +11,7 @@
 mod assemble;
 mod identity;
 mod ingest;
+mod overview;
 mod projection;
 mod retrieve;
 mod store;
@@ -37,6 +38,11 @@ pub(crate) use identity::{
 #[allow(unused_imports)]
 pub(crate) use ingest::{
     collect_project_sources, probe_live_state, redact_for_memory, MemorySource,
+};
+#[allow(unused_imports)]
+pub(crate) use overview::{
+    MemoryFabricOverview, NodeIdentityOverview, ProjectMemoryOverview,
+    MEMORY_OVERVIEW_SCHEMA_VERSION,
 };
 #[allow(unused_imports)]
 pub(crate) use projection::{
@@ -224,6 +230,22 @@ fn live_state_for(store: &MemoryStore, project_id: &str, root: &str) -> Result<L
 }
 
 // ===== Tauri-Commands (noch nicht in der UI verdrahtet; siehe docs/MEMORY_FABRIC.md) =====
+
+/// Read-only Zaehler-Uebersicht fuer die Vision-Ansicht; legt keinen Store an, liefert keine Inhalte.
+#[tauri::command]
+pub(crate) async fn memory_fabric_overview() -> Result<MemoryFabricOverview, String> {
+    blocking(|| {
+        let path = crate::app_support_dir()
+            .map_err(crate::error_to_string)?
+            .join(STORE_DIR)
+            .join(STORE_FILE);
+        match MemoryStore::open_read_only(&path)? {
+            Some(store) => store.overview(),
+            None => Ok(MemoryFabricOverview::unavailable()),
+        }
+    })
+    .await
+}
 
 #[tauri::command]
 pub(crate) async fn memory_fabric_identity_get(

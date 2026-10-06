@@ -175,6 +175,8 @@ export type StepId =
   | "logs"
   // Agent-Sync-Workspace (eigener Navigationsbaum, siehe lib/workspaceMode.ts)
   | "agentDashboard"
+  // Vision: visueller Systemgraph (nicht die spaetere multimodale Sight-Runtime)
+  | "agentVision"
   | "agentJobs"
   | "agentProviders"
   | "agentMonitor"

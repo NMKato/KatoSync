@@ -8,8 +8,8 @@ use super::{
     },
     projection::{export_projection, is_pristine_projection, project_markdown, ProjectionTarget},
     retrieve::{query_terms, LexicalOnly, MemoryQuery, MAX_LIMIT},
-    DirectoryTarget, Freshness, IngestBatch, LiveState, MemoryStore, NameOrigin,
-    NamedIdentityProposal, NodeIdentityKind, ProjectIdentity, Promotion, TruthLevel,
+    DirectoryTarget, Freshness, IngestBatch, LiveState, MemoryFabricOverview, MemoryStore,
+    NameOrigin, NamedIdentityProposal, NodeIdentityKind, ProjectIdentity, Promotion, TruthLevel,
     PROJECTION_MARKER, REX_MAIN_NAME,
 };
 use crate::context_pack::ContextSourceInput;
@@ -1182,4 +1182,82 @@ async fn live_local_brain_uses_verified_rag_and_refuses_missing_fact() {
     assert_eq!(missing, "NOT_IN_MEMORY");
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn overview_is_read_only_counts_only_and_never_creates_a_store() {
+    let dir = temp_dir("overview");
+    let path = dir.join("memory.sqlite3");
+    assert!(MemoryStore::open_read_only(&path).unwrap().is_none());
+    assert!(!path.exists(), "overview must never create the store");
+    assert!(!MemoryFabricOverview::unavailable().available);
+
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store
+            .ingest(batch(
+                "alpha",
+                Some(HEAD),
+                vec![
+                    source(
+                        "STATUS.md",
+                        "status",
+                        "# Status\nSecret-free fact one",
+                        true,
+                    ),
+                    source(
+                        "HANDOFF.md",
+                        "handoff",
+                        "# Handoff\nUncommitted note",
+                        false,
+                    ),
+                ],
+            ))
+            .unwrap();
+        promote(
+            &mut store,
+            "alpha",
+            "STATUS.md",
+            "# Status\nSecret-free fact one",
+        );
+        store
+            .register_rex_main(
+                "ks-11111111-1111-1111-1111-111111111111",
+                None,
+                "2026-10-06T17:10:00Z",
+            )
+            .unwrap();
+    }
+
+    let store = MemoryStore::open_read_only(&path)
+        .unwrap()
+        .expect("store exists");
+    let overview = store.overview().unwrap();
+    assert!(overview.available);
+    assert_eq!(overview.projects.len(), 1);
+    let alpha = &overview.projects[0];
+    assert_eq!(alpha.project_id, "alpha");
+    assert_eq!(alpha.git_head.as_deref(), Some(HEAD));
+    assert_eq!(alpha.sources, 2);
+    assert!(alpha.chunks >= 2);
+    assert_eq!((alpha.observed, alpha.verified, alpha.canonical), (1, 0, 1));
+    assert_eq!(overview.identities.len(), 1);
+    assert_eq!(overview.identities[0].display_name, REX_MAIN_NAME);
+    assert_eq!(overview.identities[0].kind, NodeIdentityKind::RexMain);
+
+    let json = serde_json::to_string(&overview).unwrap();
+    assert!(json.contains("\"projectId\":\"alpha\""));
+    assert!(
+        !json.contains("Secret-free fact"),
+        "no chunk content in the overview"
+    );
+    assert!(
+        !json.contains("STATUS.md"),
+        "no source paths in the overview"
+    );
+    assert!(
+        !json.contains("/fixture/"),
+        "no machine paths in the overview"
+    );
+    fs::remove_dir_all(dir).unwrap();
 }

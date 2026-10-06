@@ -13,7 +13,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBeha
 use serde::Serialize;
 use std::{collections::BTreeSet, path::Path, time::Duration};
 
-const SCHEMA_USER_VERSION: i64 = 1;
+pub(super) const SCHEMA_USER_VERSION: i64 = 1;
 
 const SCHEMA: &str = r#"
 CREATE TABLE node_identities (

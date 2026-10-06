@@ -12,6 +12,7 @@ export const MISTRAL_STEPS: StepId[] = ["dashboard", "projectBoard", "briefings"
 
 export const AGENT_SYNC_STEPS: StepId[] = [
   "agentDashboard",
+  "agentVision",
   "agentJobs",
   "agentProviders",
   "agentMonitor",
