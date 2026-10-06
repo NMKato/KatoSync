@@ -33,7 +33,7 @@ import type {
 // Explizite .ts-Endungen: die Node-Tests laden diese Datei ohne Bundler.
 import { jobStage, localControlHealth } from "./agentSyncCockpit.ts";
 import { AGENT_LANE_ORDER, PROVIDER_RECHECK_INTERVAL_MS, providerRetryAt } from "./providerPolicy.ts";
-import { AUTO_LANE_MAX_CONCURRENT, emptyAutoLanePlan, planAutoLanes } from "./autoLanePlanner.ts";
+import { AUTO_LANE_MAX_CONCURRENT, AUTO_LANE_PER_RUNNER, emptyAutoLanePlan, planAutoLanes } from "./autoLanePlanner.ts";
 import { evaluateFocus, hasFocusProfile } from "./projectFocus.ts";
 
 // Auto-Lane-Eingaben aus dem ViewModel (persistierter Modus, Board-Auswahl, Claims, Repo-Zuordnung).
@@ -224,6 +224,7 @@ function actionJobs(input: AgentJobModelInput, remote: RemoteOrchestratorRuntime
   const runningLane = runnerLane(input.codexRun.result?.runner ?? input.codexRun.context?.runner ?? input.preferredRunner);
   // Vom Auto-Dispatcher beanspruchte Tasks laufen ab dem Claim (noch bevor der Server-Status nachzieht).
   const autoInFlight = new Set(input.autoLane?.inFlightTaskIds ?? []);
+  const autoClaims = new Map((input.autoLane?.claims ?? []).map((claim) => [claim.taskId, claim]));
   return input.actionPlans.flatMap((plan) =>
     plan.tasks.flatMap((task): AgentJob[] => {
       const planned = runnerLane(task.targetRunner);
@@ -231,10 +232,14 @@ function actionJobs(input: AgentJobModelInput, remote: RemoteOrchestratorRuntime
       if (!planned || !stage) return [];
       const running = stage === "running";
       const remoteOwns = remote.leaseActive && remote.jobId === task.taskId;
+      const autoClaim = autoClaims.get(task.taskId);
+      const claimedLane = runnerLane(autoClaim?.runner);
+      const primaryRunOwns = input.codexRun.status === "running" &&
+        (input.codexRun.context?.jobId === task.taskId || input.currentQueueTaskId === task.taskId);
       const owner: AgentLaneId | null = remoteOwns
         ? "remote_orchestrator"
         : running
-          ? runningLane ?? planned
+          ? claimedLane ?? (primaryRunOwns ? runningLane : null) ?? planned
           : ["executed", "completed", "failed"].includes(stage)
             ? planned
             : null;
@@ -291,8 +296,8 @@ function actionJobs(input: AgentJobModelInput, remote: RemoteOrchestratorRuntime
       return [{
         ...base,
         ...state,
-        startedAt: running ? input.codexRun.startedAt ?? null : null,
-        lastActivityAt: lastEvent ?? (running ? input.codexRun.lastActivityAt ?? input.codexRun.startedAt ?? null : plan.createdAt),
+        startedAt: running ? autoClaim?.claimedAt ?? (primaryRunOwns ? input.codexRun.startedAt ?? null : null) : null,
+        lastActivityAt: lastEvent ?? (running ? autoClaim?.claimedAt ?? input.codexRun.lastActivityAt ?? input.codexRun.startedAt ?? null : plan.createdAt),
         completedAt: state.status === "completed" ? input.codexRun.lastActivityAt ?? null : null,
         blocker: state.status === "failed" ? task.summary ?? null : null
       }];
@@ -819,6 +824,7 @@ function autoLanePlan(input: AgentJobModelInput, lanes: AgentLane[], remote: Rem
     dailyCount: auto.dailyCount,
     dailyLimit: auto.dailyLimit,
     maxConcurrent: auto.maxConcurrent ?? AUTO_LANE_MAX_CONCURRENT,
+    perRunnerLimit: AUTO_LANE_PER_RUNNER,
     lastDispatchAt: auto.lastDispatchAt,
     focus: input.focus
   });

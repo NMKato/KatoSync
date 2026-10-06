@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  AUTO_LANE_PER_RUNNER,
   addAutoLaneClaim,
   hasAutoLaneClaimConflict,
   pickAutoLaneRunner,
@@ -175,6 +176,61 @@ test("independent projects are parallel-eligible, one writer per repo", () => {
   assert.deepEqual(fair.dispatch.map((entry) => entry.projectId), ["beta"]);
 });
 
+test("two healthy subscription providers dispatch two independent READY jobs on visible provider lanes", () => {
+  // Canonical Agent Sync planning (production defaults), not a hand-tuned planner input.
+  const planned = normalizeAgentSyncState(model()).autoLanes;
+  assert.deepEqual(
+    planned.dispatch.map((entry) => [entry.taskId, entry.runner]),
+    [["a1", "codex_cli"], ["b1", "claude_cli"]]
+  );
+
+  const claims = planned.dispatch.map((dispatch) => ({
+    taskId: dispatch.taskId,
+    projectId: dispatch.projectId,
+    repoKey: `repo-${dispatch.projectId}`,
+    runner: dispatch.runner,
+    claimedAt: NOW
+  }));
+  const base = model();
+  const state = normalizeAgentSyncState(model({
+    autoLane: {
+      ...base.autoLane!,
+      claims,
+      inFlightTaskIds: planned.dispatch.map((entry) => entry.taskId)
+    }
+  }));
+  assert.equal(state.counts.running, 2);
+  assert.equal(state.lanes.find((entry) => entry.id === "codex")?.activity, "active");
+  assert.equal(state.lanes.find((entry) => entry.id === "claude")?.activity, "active");
+  assert.deepEqual(
+    state.jobs.filter((entry) => entry.status === "running").map((entry) => [entry.id, entry.owner]).sort(),
+    [["a1", "codex"], ["b1", "claude"]]
+  );
+  assert.equal(new Set(claims.map((entry) => entry.repoKey)).size, 2);
+});
+
+test("one healthy provider keeps one auto job per provider; the other READY lane is visibly queued", () => {
+  const planned = planAutoLanes(input({
+    maxConcurrent: undefined,
+    perRunnerLimit: AUTO_LANE_PER_RUNNER,
+    lanes: [lane("codex", false), lane("claude", true), lane("local_control", true)]
+  }));
+  assert.deepEqual(planned.dispatch.map((entry) => [entry.taskId, entry.runner]), [["a1", "claude_cli"]]);
+  assert.equal(laneOf(planned, "beta")?.state, "queued");
+  assert.equal(laneOf(planned, "beta")?.reason, "runner_slot");
+  // Preferred runner stays usable even when the user priority omits it (unchanged routing contract).
+  const canonical = normalizeAgentSyncState(model({
+    providerStatuses: [{ ...provider("codex"), state: "limited", available: false }, provider("claude")]
+  })).autoLanes;
+  assert.deepEqual(canonical.dispatch.map((entry) => [entry.taskId, entry.runner]), [["a1", "claude_cli"]]);
+  // Batch dispatch never overshoots the daily limit across providers.
+  const lastDailySlot = planAutoLanes(input({ maxConcurrent: undefined, dailyCount: 4, dailyLimit: 5 }));
+  assert.deepEqual(lastDailySlot.dispatch.map((entry) => entry.taskId), ["a1"]);
+  assert.equal(laneOf(lastDailySlot, "beta")?.reason, "daily_limit");
+  const preferredOnly = planAutoLanes(input({ maxConcurrent: undefined, perRunnerLimit: AUTO_LANE_PER_RUNNER, providerPriority: ["claude"] }));
+  assert.deepEqual(preferredOnly.dispatch.map((entry) => entry.runner), ["codex_cli", "claude_cli"]);
+});
+
 test("duplicate prevention: claims and in-flight runs are never dispatched again", () => {
   const claim: AutoLaneClaim = { taskId: "a1", projectId: "alpha", repoKey: "repo-alpha", runner: "codex_cli", claimedAt: NOW };
   const running = planAutoLanes(input({ claims: [claim], inFlightTaskIds: ["a1"], startSafety: { safe: false, reason: "runner_busy" } }));
@@ -329,7 +385,7 @@ test("canonical state exposes planned work instead of looking idle", () => {
   assert.equal(state.currentJob, null);
   assert.equal(state.autoLanes.enabled, true);
   assert.equal(state.autoLanes.counts.queued, 2);
-  assert.equal(state.autoLanes.dispatch.length, 1);
+  assert.equal(state.autoLanes.dispatch.length, 2);
   const head = state.jobs.find((job) => job.id === state.autoLanes.dispatch[0].taskId);
   assert.equal(head?.laneId, `auto:${state.autoLanes.dispatch[0].projectId}`);
   assert.equal(state.jobs.find((job) => job.id === "a2")?.reason, "lane_follow_up");
