@@ -146,6 +146,37 @@ pub struct FallbackJobSnapshot {
     worktree_busy: bool,
 }
 
+impl OrchestrationSnapshot {
+    /// Laeuft oder wartet externe Agent-Arbeit (Scheduler-Wiederaufnahme, Continuation-Welle,
+    /// gueltige Orchestrator-Lease, offene Router-Jobs)? Konservative Sperre fuer Provider-Warm-ups.
+    pub fn work_active(&self, now: DateTime<Utc>) -> bool {
+        let resume = self
+            .provider_health
+            .as_ref()
+            .is_some_and(|health| health.resume_in_flight.is_some());
+        let continuation = self.continuation.as_ref().is_some_and(|wave| {
+            wave.enabled && wave.status == "running" && wave.active_job_id.is_some()
+        });
+        let lease = self.remote_orchestrator.as_ref().is_some_and(|remote| {
+            remote.state != "detached"
+                && DateTime::parse_from_rfc3339(&remote.lease_expires_at)
+                    .is_ok_and(|expires| expires.with_timezone(&Utc) > now)
+        });
+        let router = self.fallback_jobs.iter().any(|job| {
+            matches!(
+                job.status.as_str(),
+                "waiting"
+                    | "provider_ready"
+                    | "retry_wait"
+                    | "orchestrator_active"
+                    | "running"
+                    | "verifying"
+            )
+        });
+        resume || continuation || lease || router
+    }
+}
+
 /// Liest alle Orchestrierungsquellen. `active_cwds` sind kanonische Worktree-Pfade aktiver
 /// Local-Control-Lanes; sie bleiben im Backend und werden nur fuer `worktree_busy` verglichen.
 pub fn snapshot(root: &Path, active_cwds: &[String]) -> OrchestrationSnapshot {

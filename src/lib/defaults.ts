@@ -54,7 +54,8 @@ export const defaultConfig: AppConfig = {
     kind: "ollama",
     baseUrl: "",
     model: ""
-  }
+  },
+  providerWarmupEnabled: true
 };
 
 export const weekdayLabels: Record<string, string> = {

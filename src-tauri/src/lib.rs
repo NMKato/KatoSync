@@ -31,6 +31,7 @@ mod local_control;
 mod orchestration;
 mod project_registry;
 mod provider_manager;
+mod provider_warmup;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -106,6 +107,11 @@ pub struct AppConfig {
     // Nur nicht-geheime Endpoint-Metadaten; API-Keys werden in diesem Slice nicht angenommen.
     #[serde(default)]
     local_provider: provider_manager::LocalProviderConfig,
+    // Begrenzter Warm-up fuer Abo-CLIs (Codex/ChatGPT, Claude/claude.ai): ein winziger READY-Prompt
+    // je Provider und ~5-h-Fenster. Standard AN (auch fuer Alt-Configs); API-Key-Logins, Local
+    // Brain und Local Control werden unabhaengig davon nie aufgewaermt.
+    #[serde(default = "default_true")]
+    provider_warmup_enabled: bool,
 }
 
 fn default_true() -> bool {
@@ -329,6 +335,8 @@ pub fn run() {
             open_output_dir,
             resume_runner_session,
             provider_statuses,
+            provider_warmup_state,
+            warm_up_provider,
             connect_provider,
             open_provider_login_url,
             cancel_provider_login,
@@ -517,6 +525,48 @@ fn stop_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, Str
 #[tauri::command]
 fn remove_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
     local_brain::remove(&app).map_err(error_to_string)
+}
+
+fn provider_warmup_path() -> Result<PathBuf> {
+    Ok(app_support_dir()?.join("provider-warmup.json"))
+}
+
+/// Persistierte Warm-up-Zeitstempel (nur Zeiten + Ergebnis-Codes), damit das Frontend plant.
+#[tauri::command]
+fn provider_warmup_state() -> Result<provider_warmup::ProviderWarmupState, String> {
+    let path = provider_warmup_path().map_err(error_to_string)?;
+    Ok(provider_warmup::load_state(&path))
+}
+
+/// Begrenzter Warm-up eines Abo-Providers. Config, Runner-Aktivitaet und Cooldown werden hier
+/// unabhaengig vom Frontend erneut geprueft; das Ergebnis aendert keine Provider-Karte.
+#[tauri::command]
+async fn warm_up_provider(
+    provider: provider_manager::ProviderId,
+) -> Result<provider_warmup::WarmupReport, String> {
+    let config = load_config_inner().map_err(error_to_string)?;
+    let path = provider_warmup_path().map_err(error_to_string)?;
+    let external_work_active = tauri::async_runtime::spawn_blocking(local_control::work_active)
+        .await
+        // Kann die Sperre nicht geprueft werden, gilt Arbeit als aktiv (kein Warm-up).
+        .unwrap_or(true);
+    let settings = provider_warmup::WarmupSettings {
+        feature_enabled: config.provider_warmup_enabled,
+        provider_enabled: !config.disabled_providers.contains(&provider),
+        external_work_active,
+    };
+    let report = provider_warmup::run(provider, &path, settings).await;
+    if matches!(
+        report.outcome,
+        provider_warmup::WarmupOutcome::Warmed | provider_warmup::WarmupOutcome::Failed
+    ) {
+        // Nur Provider + Ergebnis-Code; nie Prompt-Antworten, Tokens oder Account-Daten.
+        let _ = write_log(
+            "info",
+            &format!("Provider-Warm-up {provider:?}: {:?}", report.outcome),
+        );
+    }
+    Ok(report)
 }
 
 /// Fuehrt einen begrenzten Einzeltest aus, ohne einen Login zu starten.
@@ -2256,6 +2306,8 @@ async fn run_codex_task(
     app: tauri::AppHandle,
 ) -> Result<CodexRunResult, String> {
     let started = std::time::Instant::now();
+    // Solange ein echter Runner-Job lebt, startet kein Provider-Warm-up.
+    let _runner_activity = provider_warmup::RunnerActivity::begin();
     let run_stamp = Local::now().format("%Y%m%d%H%M%S").to_string();
     let repo_path = req.repo_path.trim().to_string();
 
@@ -4711,6 +4763,7 @@ fn default_config() -> Result<AppConfig> {
         provider_priority: default_provider_priority(),
         disabled_providers: Vec::new(),
         local_provider: provider_manager::LocalProviderConfig::default(),
+        provider_warmup_enabled: true,
     })
 }
 

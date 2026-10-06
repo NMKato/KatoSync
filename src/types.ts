@@ -57,6 +57,9 @@ export interface AppConfig {
   disabledProviders: ProviderId[];
   // Ausschliesslich nicht-geheime Endpoint-Metadaten.
   localProvider: LocalProviderConfig;
+  // Begrenzter Warm-up fuer Abo-CLIs (Codex/ChatGPT, Claude/claude.ai). Standard an; API-Key-Logins,
+  // Local Brain und Local Control werden nie aufgewaermt.
+  providerWarmupEnabled: boolean;
 }
 
 export type ProviderId = "codex" | "claude" | "local" | "local_control";
@@ -123,6 +126,8 @@ export interface ProviderStatus {
   reason: ProviderReason;
   installed: boolean;
   authenticated: boolean;
+  // Nur Codex/Claude: Anmeldeart der CLI (nie der Key selbst).
+  authKind?: ProviderAuthKind | null;
   available: boolean;
   enabled: boolean;
   failoverAllowed: boolean;
@@ -137,6 +142,46 @@ export interface ProviderStatus {
   healthCheckedAt?: string | null;
   secretStored: boolean;
   detail?: string | null;
+}
+
+export type ProviderAuthKind = "subscription" | "api_key" | "unknown";
+
+// ===== Provider-Warm-up (Rust provider_warmup.rs) =====
+export type WarmUpResult = "warmed" | "not_installed" | "not_authenticated" | "not_subscription" | "failed";
+
+export interface ProviderWarmupEntry {
+  lastSuccessAt?: string | null;
+  lastAttemptAt?: string | null;
+  lastResult?: WarmUpResult | null;
+}
+
+// Persistierte Zeitstempel (nur Zeiten + Ergebnis-Codes), ueberlebt App-Neustarts.
+export interface ProviderWarmupState {
+  schemaVersion: number;
+  codex: ProviderWarmupEntry;
+  claude: ProviderWarmupEntry;
+}
+
+export type WarmupOutcome =
+  | "warmed"
+  | "failed"
+  | "skipped_unsupported"
+  | "skipped_feature_disabled"
+  | "skipped_provider_disabled"
+  | "skipped_cooldown"
+  | "skipped_backoff"
+  | "skipped_runner_busy"
+  | "skipped_work_active"
+  | "skipped_in_flight"
+  | "skipped_not_installed"
+  | "skipped_not_authenticated"
+  | "skipped_not_subscription"
+  | "skipped_state_unavailable";
+
+export interface WarmupReport {
+  provider: ProviderId;
+  outcome: WarmupOutcome;
+  state: ProviderWarmupState;
 }
 
 // UI-Zustand einer Providerkarte (menschlich lesbar, siehe providerPolicy.providerDisplayState).

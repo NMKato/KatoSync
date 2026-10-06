@@ -106,6 +106,16 @@ pub struct LocalControlQueuedJobSnapshot {
     require_clean_git: bool,
 }
 
+/// Echte Agent-Arbeit aktiv oder wartend: Local-Control-Lanes/Inbox oder externe Orchestrierung.
+/// Ohne lesbaren Control-Root gibt es keinen Daemon und damit keine externe Arbeit.
+pub fn work_active() -> bool {
+    monitor_snapshot().is_ok_and(|snapshot| {
+        !snapshot.active_lanes.is_empty()
+            || !snapshot.queued_jobs.is_empty()
+            || snapshot.orchestration.work_active(chrono::Utc::now())
+    })
+}
+
 pub fn monitor_snapshot() -> Result<LocalControlMonitorSnapshot, String> {
     let root = control_root()?;
     ensure_dirs(&root)?;
