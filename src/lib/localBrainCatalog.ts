@@ -1,5 +1,6 @@
 // Created by NMKato Solutions
 import manifest from "./localBrainManifest.json" with { type: "json" };
+import type { LocalProviderConfig } from "../types";
 
 export type LocalBrainRuntime = "llama_cpp";
 export type LocalBrainQuantization = "Q4_0" | "Q8_0" | "BF16";
@@ -113,4 +114,26 @@ export function localBrainFit(
 
 export function localBrainDownloadGb(entry: LocalBrainModelDefinition): number {
   return Math.round((entry.textArtifact.sizeBytes / 1_000_000_000) * 100) / 100;
+}
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/// Lokale-Lane-Konfiguration fuer einen real laufenden Local Brain; null ohne verifizierte
+/// Loopback-Runtime (nie Bereitschaft erfinden, nie auf LAN/Cloud ausweichen).
+export function localBrainProviderConfig(brain: LocalBrainStatus | null): LocalProviderConfig | null {
+  if (!brain?.running || !brain.runtimeInstalled || !brain.modelInstalled || !brain.modelAlias.trim()) return null;
+  let url: URL;
+  try {
+    url = new URL(brain.endpoint);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" || !LOOPBACK_HOSTS.has(url.hostname) || url.username || url.password) return null;
+  return { kind: "open_ai_compatible", baseUrl: brain.endpoint, model: brain.modelAlias };
+}
+
+/// Ein laufender Local Brain wird nur dann als lokale Lane uebernommen, wenn noch kein
+/// eigener lokaler Endpoint konfiguriert ist; Nutzerkonfiguration wird nie ueberschrieben.
+export function shouldAdoptLocalBrain(brain: LocalBrainStatus | null, current: LocalProviderConfig): boolean {
+  return localBrainProviderConfig(brain) !== null && !current.baseUrl.trim();
 }

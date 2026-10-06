@@ -145,6 +145,27 @@ test("truthful idle: no running source means no current job, but lanes stay sepa
   assert.equal(state.lanes.find((lane) => lane.id === "local_control")?.connectivity, "connected");
 });
 
+test("local lane reflects verified Local Brain truth: ready => connected, unreachable => disconnected", () => {
+  const withLocal = (local: ProviderStatus) => [limited[0], limited[1], local, limited[3]];
+  const ready = normalizeAgentSyncState(
+    input({ providerStatuses: withLocal(provider("local", { model: "kato-local-brain", endpointScope: "local" })) })
+  ).lanes.find((lane) => lane.id === "local");
+  assert.equal(ready?.connectivity, "connected");
+  assert.equal(ready?.activity, "idle");
+  assert.equal(ready?.eligible, true);
+
+  const offline = normalizeAgentSyncState(
+    input({
+      providerStatuses: withLocal(
+        provider("local", { state: "offline", reason: "offline", authenticated: false, available: false })
+      )
+    })
+  ).lanes.find((lane) => lane.id === "local");
+  assert.equal(offline?.connectivity, "disconnected");
+  assert.equal(offline?.activity, "offline");
+  assert.equal(offline?.eligible, false);
+});
+
 test("router fallback job keeps the failover reason, retry time and handoff chain", () => {
   const state = normalizeAgentSyncState(input({ localControl: snapshot({ fallbackJobs: [fallback()] }) }));
   const job = state.jobs.find((entry) => entry.source === "provider_router");

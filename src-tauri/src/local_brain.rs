@@ -19,6 +19,8 @@ use walkdir::WalkDir;
 const MANIFEST_JSON: &str = include_str!("../../src/lib/localBrainManifest.json");
 const ENDPOINT: &str = "http://127.0.0.1:17842/v1";
 const HEALTH_URL: &str = "http://127.0.0.1:17842/health";
+const MODELS_URL: &str = "http://127.0.0.1:17842/v1/models";
+const PROBE_BODY_LIMIT: usize = 64 * 1024;
 const PORT: &str = "17842";
 static CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
 
@@ -230,7 +232,7 @@ fn find_runtime_binary(dir: &Path, executable: &str) -> Option<PathBuf> {
         .map(|entry| entry.into_path())
 }
 
-fn running() -> bool {
+fn owned_child_alive() -> bool {
     let Ok(mut guard) = child_slot().lock() else {
         return false;
     };
@@ -246,7 +248,7 @@ fn running() -> bool {
     }
 }
 
-pub fn status(app: &AppHandle) -> Result<LocalBrainStatus> {
+fn snapshot(app: &AppHandle) -> Result<LocalBrainStatus> {
     let manifest = manifest()?;
     let model = recommended_model(&manifest)?;
     let key = target_key();
@@ -291,11 +293,77 @@ pub fn status(app: &AppHandle) -> Result<LocalBrainStatus> {
         code_ready: model.capabilities.code,
         tools_ready: model.capabilities.tools,
         audio_ready: model.capabilities.audio,
-        running: running(),
+        running: false,
         endpoint: ENDPOINT.to_string(),
         model_alias: model.alias.clone(),
         vision_ready: model.capabilities.image && !model.vision_projection_required,
     })
+}
+
+fn models_include_alias(body: &serde_json::Value, alias: &str) -> bool {
+    body.get("data")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|models| {
+            models
+                .iter()
+                .any(|model| model.get("id").and_then(serde_json::Value::as_str) == Some(alias))
+        })
+}
+
+fn is_loopback_probe_url(value: &str) -> bool {
+    reqwest::Url::parse(value).is_ok_and(|url| {
+        url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.username().is_empty()
+    })
+}
+
+/// Belegt einen laufenden Local Brain nur, wenn der Loopback-Server gesund ist UND das
+/// gepinnte Modell-Alias ausliefert. Fremde Server auf dem Port gelten nicht als bereit.
+async fn serves_alias(health_url: &str, models_url: &str, alias: &str) -> bool {
+    if !is_loopback_probe_url(health_url) || !is_loopback_probe_url(models_url) {
+        return false;
+    }
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .build()
+    else {
+        return false;
+    };
+    let healthy = client
+        .get(health_url)
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success());
+    if !healthy {
+        return false;
+    }
+    let Ok(response) = client.get(models_url).send().await else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    let Ok(bytes) = response.bytes().await else {
+        return false;
+    };
+    if bytes.len() > PROBE_BODY_LIMIT {
+        return false;
+    }
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .is_ok_and(|body| models_include_alias(&body, alias))
+}
+
+/// Laufzeitwahrheit: eigener Prozess lebt, oder die installierte Runtime + Modell werden
+/// bereits von einem gesunden Loopback-Server mit dem gepinnten Alias ausgeliefert
+/// (z. B. aus einer frueheren Sitzung gestartet).
+pub async fn status(app: &AppHandle) -> Result<LocalBrainStatus> {
+    let mut status = snapshot(app)?;
+    status.running = owned_child_alive()
+        || (status.runtime_installed
+            && status.model_installed
+            && serves_alias(HEALTH_URL, MODELS_URL, &status.model_alias).await);
+    Ok(status)
 }
 
 fn emit_progress(app: &AppHandle, phase: &str, label: &str, downloaded: u64, total: Option<u64>) {
@@ -503,7 +571,7 @@ pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
         model.size_bytes,
         Some(model.size_bytes),
     );
-    status(app)
+    status(app).await
 }
 
 pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
@@ -523,8 +591,8 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
         return Err(anyhow!("Local-Brain-Modell ist nicht installiert"));
     }
 
-    if running() {
-        return status(app);
+    if owned_child_alive() || serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
+        return status(app).await;
     }
 
     let logs = root(app)?.join("logs");
@@ -569,19 +637,20 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
     for _ in 0..45 {
         if let Ok(response) = client.get(HEALTH_URL).send().await {
             if response.status().is_success() {
-                return status(app);
+                return status(app).await;
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    let _ = stop(app);
+    let _ = stop_owned();
     Err(anyhow!(
         "Local Brain wurde gestartet, aber der Health-Check blieb 45 Sekunden lang rot"
     ))
 }
 
-pub fn stop(app: &AppHandle) -> Result<LocalBrainStatus> {
+/// Beendet ausschliesslich die von dieser KatoSync-Sitzung gestartete Runtime.
+pub fn stop_owned() -> Result<()> {
     let mut guard = child_slot()
         .lock()
         .map_err(|_| anyhow!("Local-Brain-Prozesslock ist beschaedigt"))?;
@@ -590,17 +659,21 @@ pub fn stop(app: &AppHandle) -> Result<LocalBrainStatus> {
         let _ = child.wait();
     }
     *guard = None;
-    drop(guard);
-    status(app)
+    Ok(())
 }
 
-pub fn remove(app: &AppHandle) -> Result<LocalBrainStatus> {
-    let _ = stop(app);
+pub async fn stop(app: &AppHandle) -> Result<LocalBrainStatus> {
+    stop_owned()?;
+    status(app).await
+}
+
+pub async fn remove(app: &AppHandle) -> Result<LocalBrainStatus> {
+    let _ = stop_owned();
     let local_root = root(app)?;
     if local_root.exists() {
         fs::remove_dir_all(&local_root)?;
     }
-    status(app)
+    status(app).await
 }
 
 #[cfg(test)]
@@ -633,5 +706,111 @@ mod tests {
                 .starts_with("https://github.com/ggml-org/llama.cpp/releases/download/"));
             assert!(target.executable.starts_with("llama-server"));
         }
+    }
+
+    /// Minimaler Loopback-HTTP-Server: beantwortet /health und /v1/models mit festen Antworten.
+    fn mock_llama_server(health_status: u16, models_body: &'static str) -> String {
+        use std::io::{BufRead, BufReader};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(2) {
+                let Ok(mut stream) = stream else { return };
+                let mut request_line = String::new();
+                let _ = BufReader::new(&stream).read_line(&mut request_line);
+                let (code, body) = if request_line.contains("/health") {
+                    (health_status, r#"{"status":"ok"}"#)
+                } else {
+                    (200, models_body)
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {code} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        base
+    }
+
+    const KATO_MODELS: &str =
+        r#"{"object":"list","data":[{"id":"kato-local-brain","object":"model"}]}"#;
+
+    #[tokio::test]
+    async fn healthy_loopback_runtime_with_pinned_alias_counts_as_running() {
+        let base = mock_llama_server(200, KATO_MODELS);
+        assert!(
+            serves_alias(
+                &format!("{base}/health"),
+                &format!("{base}/v1/models"),
+                "kato-local-brain"
+            )
+            .await
+        );
+    }
+
+    #[tokio::test]
+    async fn unhealthy_foreign_or_absent_runtime_is_not_running() {
+        let unhealthy = mock_llama_server(503, KATO_MODELS);
+        assert!(
+            !serves_alias(
+                &format!("{unhealthy}/health"),
+                &format!("{unhealthy}/v1/models"),
+                "kato-local-brain"
+            )
+            .await
+        );
+
+        let foreign = mock_llama_server(200, r#"{"data":[{"id":"other-model"}]}"#);
+        assert!(
+            !serves_alias(
+                &format!("{foreign}/health"),
+                &format!("{foreign}/v1/models"),
+                "kato-local-brain"
+            )
+            .await
+        );
+
+        let absent = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            format!("http://{}", listener.local_addr().unwrap())
+        };
+        assert!(
+            !serves_alias(
+                &format!("{absent}/health"),
+                &format!("{absent}/v1/models"),
+                "kato-local-brain"
+            )
+            .await
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_refuses_non_loopback_endpoints() {
+        assert!(!is_loopback_probe_url("http://192.168.1.10:17842/health"));
+        assert!(!is_loopback_probe_url("https://example.com/health"));
+        assert!(!is_loopback_probe_url("http://user@127.0.0.1:17842/health"));
+        assert!(is_loopback_probe_url(HEALTH_URL));
+        assert!(is_loopback_probe_url(MODELS_URL));
+        assert!(
+            !serves_alias(
+                "http://example.com/health",
+                "http://example.com/v1/models",
+                "kato-local-brain"
+            )
+            .await
+        );
+    }
+
+    #[test]
+    fn models_alias_match_is_exact() {
+        let body: serde_json::Value = serde_json::from_str(KATO_MODELS).unwrap();
+        assert!(models_include_alias(&body, "kato-local-brain"));
+        assert!(!models_include_alias(&body, "kato-local"));
+        assert!(!models_include_alias(
+            &serde_json::json!({}),
+            "kato-local-brain"
+        ));
     }
 }
