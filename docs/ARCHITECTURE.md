@@ -225,3 +225,12 @@ startet ausschließlich dessen `dispatch` über den bestehenden Runner (`runCode
   beim Logout mit den Tenant-Caches gelöscht.
 - **Auto-Merge:** bewusst nicht enthalten. `autoLanes.merge = { mode: "manual" }` ist die Naht für
   einen späteren, verifizierten Merge-Mechanismus.
+
+## Local-Brain-Modellpakete
+
+Runtime und Modellgewichte sind getrennt: KatoSync verwaltet die gepinnte llama.cpp-Runtime, die
+Gewichte kommen als versioniertes Paket (`kato-model-package/1`) aus einem R2-faehigen
+Verteilkanal oder dem gepinnten Upstream. Gewichte werden erst nach exakter Groessen- und
+SHA-256-Pruefung atomar installiert; Update, Pin, Rollback und Entfernen laufen ueber ein Ledger
+ohne URLs oder Tokens. Ein Lizenz-/Redistribution-Gate verhindert, dass ein Paket ohne Freigabe
+oeffentlich wird. Vertrag, R2-Layout und Release-Checkliste: [`MODEL_DISTRIBUTION.md`](MODEL_DISTRIBUTION.md)

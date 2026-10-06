@@ -447,6 +447,21 @@ export async function removeLocalBrain(): Promise<LocalBrainStatus> {
   return invoke<LocalBrainStatus>("remove_local_brain");
 }
 
+export async function rollbackLocalBrainModel(): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("rollback_local_brain_model");
+}
+
+export async function setLocalBrainModelPin(version: string | null): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("set_local_brain_model_pin", { version });
+}
+
+export async function removeLocalBrainModelVersion(version: string): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("remove_local_brain_model_version", { version });
+}
+
 export async function listenLocalBrainProgress(cb: (progress: LocalBrainProgress) => void): Promise<() => void> {
   if (!isTauri()) return () => {};
   return listen<LocalBrainProgress>("local-brain-progress", (event) => cb(event.payload));

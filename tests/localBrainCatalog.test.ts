@@ -1,11 +1,13 @@
 // Created by NMKato Solutions
 import assert from "node:assert/strict";
 import test from "node:test";
+import manifest from "../src/lib/localBrainManifest.json" with { type: "json" };
 import {
   GEMMA_4_E4B_IT_Q4,
   localBrainDownloadGb,
   localBrainFit,
   localBrainProviderConfig,
+  localBrainReleaseBlockers,
   recommendedLocalBrain,
   shouldAdoptLocalBrain,
   type LocalBrainStatus
@@ -34,6 +36,55 @@ test("text package is not falsely advertised as complete multimodal install", ()
   assert.equal(GEMMA_4_E4B_IT_Q4.capabilities.image, false);
 });
 
+test("model package metadata is versioned, separate from the runtime and layout-pinned", () => {
+  const pkg = GEMMA_4_E4B_IT_Q4.package;
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
+  assert.equal(pkg.channel, "stable");
+  assert.equal(pkg.objectKey, `packages/${pkg.packageId}/${pkg.version}/${GEMMA_4_E4B_IT_Q4.textArtifact.fileName}`);
+  assert.deepEqual(pkg.runtime.versions, [manifest.runtime.version]);
+  assert.deepEqual([...pkg.platforms].sort(), Object.keys(manifest.runtime.targets).sort());
+  assert.equal(pkg.license.spdx, "Apache-2.0");
+});
+
+test("embedded manifest carries no credentials, signed URLs or own-channel base yet", () => {
+  assert.equal(manifest.distribution.baseUrl, null);
+  const urls = [...manifest.models.map((entry) => entry.url), ...Object.values(manifest.runtime.targets).map((t) => t.url)];
+  for (const raw of urls) {
+    const url = new URL(raw);
+    assert.equal(url.protocol, "https:");
+    assert.equal(url.search, "");
+    assert.equal(url.username + url.password, "");
+    assert.ok(manifest.distribution.allowedHosts.includes(url.hostname), url.hostname);
+  }
+  assert.doesNotMatch(JSON.stringify(manifest), /secret|signature|password|bearer|api.?key|account.?id|access.?key|x-amz-|[?&]token=/i);
+});
+
+test("release gate keeps the package non-public until license and redistribution review", () => {
+  const pkg = GEMMA_4_E4B_IT_Q4.package;
+  const blockers = localBrainReleaseBlockers(pkg);
+  assert.ok(blockers.includes("redistribution_not_approved"));
+  assert.notEqual(pkg.releaseState, "public");
+
+  const reviewed = {
+    ...pkg,
+    license: {
+      ...pkg.license,
+      noticeRefs: [`packages/${pkg.packageId}/${pkg.version}/NOTICE`],
+      redistribution: {
+        status: "approved" as const,
+        reviewedBy: "NMKato",
+        reviewedAt: "2026-10-06",
+        basis: "Apache-2.0 mit NOTICE"
+      }
+    }
+  };
+  assert.deepEqual(localBrainReleaseBlockers(reviewed), []);
+  assert.deepEqual(
+    localBrainReleaseBlockers({ ...reviewed, license: { ...reviewed.license, userAcceptanceRequired: true } }),
+    ["acceptance_text_missing"]
+  );
+});
+
 function brain(patch: Partial<LocalBrainStatus> = {}): LocalBrainStatus {
   return {
     supported: true,
@@ -59,6 +110,15 @@ function brain(patch: Partial<LocalBrainStatus> = {}): LocalBrainStatus {
     endpoint: "http://127.0.0.1:17842/v1",
     modelAlias: "kato-local-brain",
     visionReady: false,
+    packageId: "kato-local-brain-gemma-4-e4b",
+    packageVersion: "1.0.0",
+    packageChannel: "stable",
+    releaseState: "internal",
+    releaseBlockers: ["redistribution_not_approved"],
+    installedVersion: "1.0.0",
+    previousVersion: null,
+    pinnedVersion: null,
+    updateState: "current",
     ...patch
   };
 }

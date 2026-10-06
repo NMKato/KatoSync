@@ -13,6 +13,34 @@ export interface LocalBrainArtifact {
   sizeBytes: number;
 }
 
+export type ModelPackageChannel = "stable" | "beta";
+export type ModelPackageReleaseState = "draft" | "internal" | "public";
+export type ModelPackageUpdateState = "not_installed" | "current" | "update_available" | "pinned" | "newer_installed";
+
+/// Versionierter Paketvertrag der Modellgewichte (getrennt von der llama.cpp-Runtime).
+export interface LocalBrainPackage {
+  packageId: string;
+  version: string;
+  channel: ModelPackageChannel;
+  releaseState: ModelPackageReleaseState;
+  objectKey: string;
+  platforms: string[];
+  runtime: { id: string; versions: string[] };
+  contextTokens: number;
+  license: {
+    spdx: string;
+    noticeRefs: string[];
+    userAcceptanceRequired: boolean;
+    acceptanceTextRef: string | null;
+    redistribution: {
+      status: "pending_review" | "approved" | "denied";
+      reviewedBy: string | null;
+      reviewedAt: string | null;
+      basis: string | null;
+    };
+  };
+}
+
 export interface LocalBrainModelDefinition {
   id: string;
   displayName: string;
@@ -25,6 +53,7 @@ export interface LocalBrainModelDefinition {
   preferredRamGb: number;
   textArtifact: LocalBrainArtifact;
   visionProjectionRequired: boolean;
+  package: LocalBrainPackage;
   capabilities: {
     text: boolean;
     code: boolean;
@@ -58,6 +87,15 @@ export interface LocalBrainStatus {
   endpoint: string;
   modelAlias: string;
   visionReady: boolean;
+  packageId: string;
+  packageVersion: string;
+  packageChannel: ModelPackageChannel;
+  releaseState: ModelPackageReleaseState;
+  releaseBlockers: string[];
+  installedVersion: string | null;
+  previousVersion: string | null;
+  pinnedVersion: string | null;
+  updateState: ModelPackageUpdateState;
 }
 
 export interface LocalBrainProgress {
@@ -78,7 +116,7 @@ function toDefinition(entry: ManifestModel): LocalBrainModelDefinition {
     runtime: "llama_cpp",
     protocol: "open_ai_compatible",
     quantization: entry.quantization as LocalBrainQuantization,
-    license: entry.license as "Apache-2.0",
+    license: entry.package.license.spdx as "Apache-2.0",
     recommended: entry.recommended,
     minimumRamGb: entry.minimumRamGb,
     preferredRamGb: entry.preferredRamGb,
@@ -92,6 +130,7 @@ function toDefinition(entry: ManifestModel): LocalBrainModelDefinition {
     // Vision/MMProj bleibt absichtlich separat, damit die UI keinen falschen
     // "voll multimodal installiert"-Status anzeigt, bevor das Projektor-Paket verifiziert ist.
     visionProjectionRequired: entry.visionProjectionRequired,
+    package: entry.package as LocalBrainPackage,
     capabilities: entry.capabilities
   };
 }
@@ -114,6 +153,23 @@ export function localBrainFit(
 
 export function localBrainDownloadGb(entry: LocalBrainModelDefinition): number {
   return Math.round((entry.textArtifact.sizeBytes / 1_000_000_000) * 100) / 100;
+}
+
+/// Spiegel des Rust-Release-Gates: ein Paket darf erst "public" werden (und ueber den eigenen
+/// R2-Kanal verteilt werden), wenn Lizenz, NOTICE und Redistribution-Review vollstaendig sind.
+export function localBrainReleaseBlockers(pkg: LocalBrainPackage): string[] {
+  const { license } = pkg;
+  const review = license.redistribution;
+  const filled = (value: string | null) => Boolean(value?.trim());
+  const blockers: string[] = [];
+  if (!license.spdx.trim()) blockers.push("license_spdx_missing");
+  if (!license.noticeRefs.some(filled)) blockers.push("license_notice_missing");
+  if (license.userAcceptanceRequired && !filled(license.acceptanceTextRef)) blockers.push("acceptance_text_missing");
+  if (review.status !== "approved") blockers.push("redistribution_not_approved");
+  if (!filled(review.reviewedBy) || !filled(review.reviewedAt) || !filled(review.basis)) {
+    blockers.push("redistribution_review_incomplete");
+  }
+  return blockers;
 }
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
