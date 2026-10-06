@@ -24,6 +24,7 @@ import {
   XCircle
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
+import { jobActivityPresentation } from "../lib/agentJobPresentation";
 import { providerDisplayState } from "../lib/providerPolicy";
 import { isInActiveFocus } from "../lib/projectFocus";
 import {
@@ -128,7 +129,7 @@ export function AgentReadinessStrip({ vm, onNavigate }: { vm: ViewModel; onNavig
       <button className="agent-ready-chip control-strip-main" onClick={() => onNavigate("agentDashboard")} type="button">
         <span className={`agent-chip-dot ${currentTone}`} aria-hidden="true" />
         <span>{current?.owner ? laneLabel(t, current.owner) : t("agent.control.eyebrow")}</span>
-        <strong title={current?.task}>{current ? current.task : t("agent.control.idle")}</strong>
+        <strong title={current ? jobActivityPresentation(current).tooltip : undefined}>{current ? jobActivityPresentation(current).title : t("agent.control.idle")}</strong>
       </button>
       <button className="agent-ready-chip" onClick={() => onNavigate("agentProviders")} type="button">
         <span className={`agent-chip-dot ${readiness.connected.length ? "ok" : "neutral"}`} aria-hidden="true" />
@@ -296,7 +297,7 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
             {reviewJobs.slice(0, 4).map((job) => (
               <article className="glass agent-approval-card" key={job.id}>
                 <span className="agent-approval-kind">{t(`agent.status.${job.status}` as TKey)}</span>
-                <strong>{job.task}</strong>
+                <strong title={jobActivityPresentation(job).tooltip}>{jobActivityPresentation(job).title}</strong>
                 <small>{job.projectId} · {job.owner ? laneLabel(t, job.owner) : t("agent.job.ownerNone")}</small>
                 <p>{job.nextStep ? t(`agent.next.${job.nextStep}` as TKey) : t("agent.next.inspect_evidence")}</p>
                 <div className="agent-approval-actions">

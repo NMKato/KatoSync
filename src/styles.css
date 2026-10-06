@@ -9581,3 +9581,15 @@ button.agent-tile:hover {
 .control-lane-node > em {
   min-height: 1.2em;
 }
+
+/* Live Control activity: humanized title + one compact next-step line under the owning lane. */
+.control-lane-step {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: 9px;
+  line-height: 1.2;
+}
