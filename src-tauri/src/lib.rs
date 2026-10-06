@@ -296,6 +296,7 @@ pub fn run() {
             project_registry::project_registry_load,
             project_registry::project_registry_save,
             project_registry::project_registry_open,
+            memory_fabric::memory_fabric_overview,
             memory_fabric::memory_fabric_identity_get,
             memory_fabric::memory_fabric_identity_set_rex,
             memory_fabric::memory_fabric_identity_set_named,

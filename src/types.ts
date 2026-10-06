@@ -1093,6 +1093,35 @@ export interface ProjectRegistry {
   updatedAt: string;
 }
 
+// ===== Memory Fabric Overview (Rust: memory_fabric/overview.rs) – nur Zaehler, nie Inhalte/Pfade =====
+export interface ProjectMemoryOverview {
+  projectId: string;
+  name: string;
+  gitHead: string | null;
+  gitBranch: string | null;
+  indexedAt: string;
+  sources: number;
+  chunks: number;
+  observed: number;
+  verified: number;
+  canonical: number;
+}
+
+export interface NodeIdentityOverview {
+  nodeId: string;
+  displayName: string;
+  kind: "rex_main" | "named_node";
+}
+
+export interface MemoryFabricOverview {
+  schemaVersion: "katosync.memory-overview/v1";
+  fabricSchemaVersion: string;
+  // false = noch kein Store bzw. unbekannte Schema-Version.
+  available: boolean;
+  projects: ProjectMemoryOverview[];
+  identities: NodeIdentityOverview[];
+}
+
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown;

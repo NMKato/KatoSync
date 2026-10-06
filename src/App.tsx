@@ -32,6 +32,7 @@ import {
   Loader2,
   LogOut,
   Moon,
+  Orbit,
   Power,
   PlayCircle,
   RefreshCcw,
@@ -66,6 +67,7 @@ import { AgentLiveMonitor } from "./components/AgentJobViews";
 import { ProviderManager } from "./components/ProviderManager";
 import { ProjectRegistryWorkspace } from "./components/ProjectRegistryWorkspace";
 import { ModeGateway, ModeSwitch } from "./components/ModeGateway";
+import { VisionWorkspace } from "./components/VisionWorkspace";
 import {
   AgentReadinessStrip,
   AgentSyncDashboard,
@@ -123,6 +125,7 @@ const mistralSteps: Array<{ id: StepId; icon: typeof Activity }> = [
 
 const agentSyncSteps: Array<{ id: StepId; icon: typeof Activity }> = [
   { id: "agentDashboard", icon: Gauge },
+  { id: "agentVision", icon: Orbit },
   { id: "agentJobs", icon: Workflow },
   { id: "agentProviders", icon: Bot },
   { id: "agentMonitor", icon: Activity },
@@ -151,6 +154,7 @@ const sectionByStep: Record<StepId, string> = {
   settings: "section-api",
   logs: "section-activities",
   agentDashboard: "section-agent-dashboard",
+  agentVision: "section-agent-vision",
   agentJobs: "section-agent-jobs",
   agentProviders: "section-agent-sync",
   agentMonitor: "section-agent-monitor",
@@ -811,6 +815,7 @@ export default function App() {
           {visibleStep === "agentDashboard" ? (
             <AgentSyncDashboard vm={vm} onNavigate={handleStepSelect} />
           ) : null}
+          {visibleStep === "agentVision" ? <VisionWorkspace vm={vm} /> : null}
           {visibleStep === "agentJobs" ? (
             <AgentSyncJobs vm={vm} onOpenMistralTasks={() => enterModeAt("mistral", "projectBoard")} />
           ) : null}
