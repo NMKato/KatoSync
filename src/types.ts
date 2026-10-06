@@ -552,6 +552,8 @@ export interface ProviderHealthSnapshot {
 export interface ContinuationSnapshot {
   planId: string;
   enabled: boolean;
+  // LaunchAgent-/Worker-Wahrheit; unabhaengig vom Zustand des zuletzt ausgefuehrten Plans.
+  workerState?: "running" | "loaded" | "stopped" | "unknown";
   status: string;
   cursor: number;
   waveCount: number;
@@ -739,6 +741,9 @@ export interface RemoteOrchestratorRuntime {
   transport: "online" | "stale" | "unknown";
   transportAt?: string | null;
   orchestrator: "attached" | "working" | "stale" | "detached" | "unavailable";
+  // Ein attached Heartbeat beaufsichtigt nur. KatoSync-Arbeit ist erst mit passendem Queue-Claim
+  // (Session-Owner + beide Leases) eine eigene Lane.
+  ownership: "external_supervisor" | "katosync_lane" | "unverified" | "stale" | "none";
   attachedAt?: string | null;
   heartbeatAt?: string | null;
   leaseExpiresAt?: string | null;
@@ -759,8 +764,14 @@ export interface AgentSchedulerRuntime {
     resumeJob?: string | null;
     waitingJobs: number;
   };
+  supervisor: {
+    state: "active" | "stale" | "inactive" | "unknown";
+    heartbeatAt?: string | null;
+    activity?: string | null;
+  };
   continuation: {
-    state: "armed" | "waiting_daemon" | "stopped" | "idle" | "unknown";
+    state: "armed" | "waiting_daemon" | "failed" | "idle" | "unknown";
+    workerState: "running" | "loaded" | "stopped" | "unknown";
     planId?: string | null;
     activeWave?: string | null;
     cursor?: number | null;

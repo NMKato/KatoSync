@@ -286,23 +286,34 @@ test("remote orchestrator + RDC is an intelligent fallback lane distinct from Lo
   const attached = normalizeAgentSyncState(input({ localControl: snapshot({ fallbackJobs: [fallback()], remoteOrchestrator: lease() }) }));
   assert.equal(attached.remote.orchestrator, "attached");
   assert.equal(attached.remote.transport, "online");
+  assert.equal(attached.remote.ownership, "external_supervisor");
   assert.equal(attached.remote.eligible, true);
+  assert.equal(attached.scheduler.supervisor.state, "active");
   const remoteLane = attached.lanes.find((lane) => lane.id === "remote_orchestrator");
   assert.equal(remoteLane?.kind, "orchestrator");
   assert.equal(remoteLane?.eligible, true);
+  assert.equal(remoteLane?.activity, "idle", "a supervisor heartbeat is not an owned KatoSync job");
   const waiting = attached.jobs.find((job) => job.source === "provider_router");
   assert.equal(waiting?.resume?.safe, true);
   assert.equal(waiting?.nextStep, "await_intelligent_lane");
 
   const working = normalizeAgentSyncState(input({
-    localControl: snapshot({ fallbackJobs: [fallback()], remoteOrchestrator: lease({ state: "working", jobId: "katosync-27", activity: "running tests" }) })
+    localControl: snapshot({
+      fallbackJobs: [fallback({
+        status: "orchestrator_active",
+        leaseOwner: "rdc-1",
+        leaseExpiresAt: ahead(9)
+      })],
+      remoteOrchestrator: lease({ state: "working", jobId: "katosync-27", activity: "running tests" })
+    })
   }));
+  assert.equal(working.remote.ownership, "katosync_lane");
   assert.equal(working.currentJob?.owner, "remote_orchestrator");
   assert.equal(working.currentJob?.status, "running");
   assert.equal(working.currentJob?.model, "remote-assistant");
   assert.equal(working.currentJob?.device, "studio");
-  // Laufzeit ab Claim/Anbindung, nicht ab dem letzten Heartbeat.
-  assert.equal(working.currentJob?.startedAt, ago(30));
+  // Laufzeit ab kanonischem Claim, nicht ab dem letzten Heartbeat oder der alten Anbindung.
+  assert.equal(working.currentJob?.startedAt, ago(9));
   assert.equal(working.startSafety.reason, "orchestrator_lease");
   assert.ok(working.events.some((event) => event.kind === "heartbeat" && event.message === "running tests"));
 
@@ -312,14 +323,30 @@ test("remote orchestrator + RDC is an intelligent fallback lane distinct from Lo
   assert.equal(stale.remote.orchestrator, "stale");
   assert.equal(stale.remote.leaseActive, true, "an unexpired lease still blocks other writers");
   assert.equal(stale.remote.eligible, false);
+  assert.equal(stale.scheduler.supervisor.state, "stale");
+
+  const unverified = normalizeAgentSyncState(input({
+    localControl: snapshot({
+      fallbackJobs: [fallback()],
+      remoteOrchestrator: lease({ state: "working", jobId: "katosync-27", activity: "unverified work" })
+    })
+  }));
+  assert.equal(unverified.remote.ownership, "unverified");
+  assert.equal(unverified.currentJob, null, "a heartbeat alone must never invent owned work");
+  assert.notEqual(unverified.lanes.find((lane) => lane.id === "remote_orchestrator")?.activity, "active");
 
   const expired = normalizeAgentSyncState(input({
     localControl: snapshot({
-      fallbackJobs: [fallback({ status: "orchestrator_active" })],
+      fallbackJobs: [fallback({
+        status: "orchestrator_active",
+        leaseOwner: "rdc-1",
+        leaseExpiresAt: ago(10)
+      })],
       remoteOrchestrator: lease({ heartbeatAt: ago(20), leaseExpiresAt: ago(10), jobId: "katosync-27" })
     })
   }));
   assert.equal(expired.remote.leaseActive, false);
+  assert.equal(expired.remote.ownership, "stale");
   const blocked = expired.jobs.find((job) => job.source === "provider_router");
   assert.equal(blocked?.status, "blocked");
   assert.equal(blocked?.nextStep, "release_stale_lease");
@@ -375,13 +402,18 @@ test("health scheduler is armed only with a fresh 10-minute check", () => {
   assert.equal(stale.scheduler.providerHealth.state, "stale");
   assert.equal(normalizeAgentSyncState(input()).scheduler.providerHealth.state, "unknown");
 
-  const continuation = (status: string, enabled = true) =>
-    normalizeAgentSyncState(input({ localControl: snapshot({ continuation: { planId: "p", enabled, status, cursor: 1, waveCount: 3, activeWaveName: "w2" } }) }))
-      .scheduler.continuation.state;
-  assert.equal(continuation("running"), "armed");
-  assert.equal(continuation("running", false), "idle");
-  assert.equal(continuation("failed"), "stopped");
-  assert.equal(continuation("daemon_unavailable"), "waiting_daemon");
+  const continuation = (status: string, enabled = true, workerState: "running" | "loaded" | "stopped" | "unknown" = "running") =>
+    normalizeAgentSyncState(input({
+      localControl: snapshot({
+        continuation: { planId: "p", enabled, status, cursor: 1, waveCount: 3, activeWaveName: "w2", workerState }
+      })
+    })).scheduler.continuation;
+  assert.equal(continuation("running").state, "armed");
+  assert.equal(continuation("running", false).state, "idle");
+  assert.equal(continuation("failed").state, "failed", "a failed plan is not a stopped watchdog");
+  assert.equal(continuation("failed").workerState, "running");
+  assert.equal(continuation("daemon_unavailable").state, "waiting_daemon");
+  assert.equal(continuation("failed", true, "stopped").workerState, "stopped");
 });
 
 test("Local Control jobs are deterministic substrate work, labelled by continuation wave when known", () => {
@@ -410,12 +442,22 @@ test("one job id never has two running owners", () => {
   const state = normalizeAgentSyncState(input({
     actionPlans: [plan(tasks, "running")],
     currentQueueTaskId: "task-1",
-    localControl: snapshot({ remoteOrchestrator: lease({ state: "working", jobId: "task-1" }) })
+    localControl: snapshot({
+      fallbackJobs: [fallback({
+        id: "task-1",
+        name: "task-1",
+        status: "orchestrator_active",
+        leaseOwner: "rdc-1",
+        leaseExpiresAt: ahead(9)
+      })],
+      remoteOrchestrator: lease({ state: "working", jobId: "task-1" })
+    })
   }));
   const rows = state.jobs.filter((job) => job.externalId === "task-1");
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].status, "blocked");
-  assert.equal(rows[0].reason, "duplicate_owner");
+  assert.equal(rows.filter((job) => job.status === "running").length, 1);
+  const action = rows.find((job) => job.source === "action_plan");
+  assert.equal(action?.status, "blocked");
+  assert.equal(action?.reason, "duplicate_owner");
 });
 
 test("Overview, Jobs & Queue and Live Monitor project the same job truth", () => {

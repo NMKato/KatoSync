@@ -23,6 +23,7 @@ const MAX_QUEUE_FILES: usize = 200;
 const MAX_FALLBACK_ITEMS: usize = 40;
 const MAX_BRANCH_PROBES: usize = 8;
 const BRANCH_CACHE_TTL: Duration = Duration::from_secs(20);
+const WORKER_STATE_CACHE_TTL: Duration = Duration::from_secs(10);
 const MAX_TEXT: usize = 160;
 const MAX_EVIDENCE: usize = 12;
 const MIN_LEASE_SECS: i64 = 30;
@@ -30,6 +31,7 @@ const MAX_LEASE_SECS: i64 = 1800;
 const DEFAULT_LEASE_SECS: i64 = 300;
 // Heartbeats weiter in der Zukunft sind Uhr-/Schreibfehler und begruenden keine Lease.
 const MAX_FUTURE_SKEW_SECS: i64 = 120;
+const CONTINUATION_WATCHDOG_LABEL: &str = "com.nmkato.katosync.continuation-watchdog";
 
 /// Lease-Datei des Remote Orchestrators (Schema siehe docs/ARCHITECTURE.md).
 pub const REMOTE_ORCHESTRATOR_FILE: &str = "remote-orchestrator.json";
@@ -76,6 +78,8 @@ pub struct ProviderHealthSnapshot {
 pub struct ContinuationSnapshot {
     plan_id: String,
     enabled: bool,
+    /// Zustand des kanonischen LaunchAgents; getrennt vom Zustand des aktuellen Plans.
+    worker_state: String,
     status: String,
     cursor: u64,
     wave_count: u64,
@@ -157,11 +161,15 @@ impl OrchestrationSnapshot {
         let continuation = self.continuation.as_ref().is_some_and(|wave| {
             wave.enabled && wave.status == "running" && wave.active_job_id.is_some()
         });
+        // Ein reiner Supervisor-Heartbeat (`attached`, ohne Job) ist keine Arbeit. Jeder Claim –
+        // bestaetigt oder nicht – blockiert fail-closed, solange seine Lease gueltig ist.
         let lease = self.remote_orchestrator.as_ref().is_some_and(|remote| {
             remote.state != "detached"
+                && (remote.state == "working" || remote.job_id.is_some())
                 && DateTime::parse_from_rfc3339(&remote.lease_expires_at)
                     .is_ok_and(|expires| expires.with_timezone(&Utc) > now)
         });
+        // `orchestrator_active` bleibt offen, bis die Lease freigegeben/zurueckgefordert ist.
         let router = self.fallback_jobs.iter().any(|job| {
             matches!(
                 job.status.as_str(),
@@ -365,6 +373,84 @@ fn parse_health_log(tail: &str) -> (Option<String>, Option<ResumeInFlight>) {
 // Continuation-Watchdog (continuation/plan.json + state.json)
 // ---------------------------------------------------------------------------------------------
 
+fn parse_launchctl_state(stdout: &str) -> &'static str {
+    if stdout.lines().any(|line| line.trim() == "state = running") {
+        "running"
+    } else if stdout
+        .lines()
+        .any(|line| line.trim() == "state = not running")
+    {
+        "loaded"
+    } else {
+        "unknown"
+    }
+}
+
+/// Fragt ausschliesslich den kanonischen macOS-Control-State ab. Ein Planfehler ist kein
+/// Worker-Stopp; auf anderen Plattformen oder bei nicht belegbarem Zustand gilt fail-closed
+/// `unknown`.
+fn continuation_worker_state() -> String {
+    static CACHE: OnceLock<Mutex<Option<(Instant, String)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    if let Ok(guard) = cache.lock() {
+        if let Some((checked_at, state)) = guard.as_ref() {
+            if checked_at.elapsed() < WORKER_STATE_CACHE_TTL {
+                return state.clone();
+            }
+        }
+    }
+    let state = probe_continuation_worker_state();
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some((Instant::now(), state.clone()));
+    }
+    state
+}
+
+fn probe_continuation_worker_state() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let Ok(uid_output) = Command::new("/usr/bin/id")
+            .arg("-u")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+        else {
+            return "unknown".to_string();
+        };
+        if !uid_output.status.success() {
+            return "unknown".to_string();
+        }
+        let uid = String::from_utf8_lossy(&uid_output.stdout)
+            .trim()
+            .to_string();
+        if uid.is_empty() || !uid.chars().all(|value| value.is_ascii_digit()) {
+            return "unknown".to_string();
+        }
+        let target = format!("gui/{uid}/{CONTINUATION_WATCHDOG_LABEL}");
+        let Ok(output) = Command::new("/bin/launchctl")
+            .args(["print", target.as_str()])
+            .stdin(Stdio::null())
+            .output()
+        else {
+            return "unknown".to_string();
+        };
+        if output.status.success() {
+            return parse_launchctl_state(&String::from_utf8_lossy(&output.stdout)).to_string();
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("Could not find service") {
+            "stopped".to_string()
+        } else {
+            "unknown".to_string()
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = CONTINUATION_WATCHDOG_LABEL;
+        "unknown".to_string()
+    }
+}
+
 fn continuation(root: &Path, home: Option<&Path>) -> Option<ContinuationSnapshot> {
     let dir = root.join("continuation");
     let state = read_json(&dir.join("state.json"))?;
@@ -377,6 +463,7 @@ fn continuation(root: &Path, home: Option<&Path>) -> Option<ContinuationSnapshot
         .is_some_and(|id| redact_text(id, home) == plan_id);
     let last = state.get("lastResult");
     Some(ContinuationSnapshot {
+        worker_state: continuation_worker_state(),
         enabled: same_plan
             && plan
                 .as_ref()
@@ -711,6 +798,19 @@ mod tests {
     }
 
     #[test]
+    fn launchctl_state_keeps_worker_truth_separate_from_plan_truth() {
+        assert_eq!(
+            parse_launchctl_state("state = running\nruns = 4\nlast exit code = 0\n"),
+            "running"
+        );
+        assert_eq!(
+            parse_launchctl_state("state = not running\nruns = 4\nlast exit code = 0\n"),
+            "loaded"
+        );
+        assert_eq!(parse_launchctl_state("runs = 4\n"), "unknown");
+    }
+
+    #[test]
     fn remote_orchestrator_lease_is_validated_and_bounded() {
         let now = DateTime::parse_from_rfc3339("2026-10-04T10:01:00Z")
             .unwrap()
@@ -743,6 +843,74 @@ mod tests {
         ] {
             assert!(parse_remote_orchestrator(&invalid, None, now).is_none());
         }
+    }
+
+    #[test]
+    fn work_active_separates_supervisor_heartbeat_from_claims() {
+        let now = Utc::now();
+        let expires = (now + ChronoDuration::minutes(5)).to_rfc3339();
+        let remote = RemoteOrchestratorSnapshot {
+            session_id: "rdc-1".to_string(),
+            state: "working".to_string(),
+            transport: Some("rdc".to_string()),
+            attached_at: Some(now.to_rfc3339()),
+            heartbeat_at: now.to_rfc3339(),
+            lease_seconds: 300,
+            lease_expires_at: expires.clone(),
+            transport_heartbeat_at: Some(now.to_rfc3339()),
+            job_id: Some("job-1".to_string()),
+            device: None,
+            model: None,
+            activity: None,
+            next_step: None,
+        };
+        let claim = FallbackJobSnapshot {
+            id: "job-1".to_string(),
+            name: "job".to_string(),
+            branch: None,
+            worktree: None,
+            status: "orchestrator_active".to_string(),
+            reason: None,
+            created_at: None,
+            updated_at: None,
+            completed_at: None,
+            failed_at: None,
+            timeout_seconds: None,
+            active_provider: None,
+            lease_owner: Some("rdc-1".to_string()),
+            lease_expires_at: Some(expires),
+            provider_states: Vec::new(),
+            evidence: Vec::new(),
+            branch_matches: None,
+            worktree_busy: false,
+        };
+        let stale_claim = claim.clone();
+        let mut snapshot = OrchestrationSnapshot {
+            remote_orchestrator: Some(remote),
+            fallback_jobs: vec![claim],
+            ..Default::default()
+        };
+        assert!(snapshot.work_active(now));
+        snapshot.fallback_jobs.clear();
+        assert!(
+            snapshot.work_active(now),
+            "an unverified claim under a live lease still blocks fail-closed"
+        );
+        let remote = snapshot.remote_orchestrator.as_mut().unwrap();
+        remote.state = "attached".to_string();
+        remote.job_id = None;
+        assert!(
+            !snapshot.work_active(now),
+            "an external supervisor heartbeat is not an active KatoSync lane"
+        );
+        snapshot.fallback_jobs.push(FallbackJobSnapshot {
+            lease_expires_at: Some((now - ChronoDuration::seconds(1)).to_rfc3339()),
+            ..stale_claim
+        });
+        assert!(
+            snapshot.work_active(now),
+            "an expired but unreleased claim stays blocking until it is reclaimed"
+        );
     }
 
     #[test]

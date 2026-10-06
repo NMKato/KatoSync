@@ -171,6 +171,15 @@ def heartbeat(args, root, state=None, job=None):
     return data
 
 
+def detach_state(current):
+    """Beendet Lease und RDC-Liveness, ohne einen neuen Heartbeat zu erfinden."""
+    current.update({"state": "detached", "jobId": None})
+    current.pop("transport", None)
+    current.pop("activity", None)
+    current.pop("nextStep", None)
+    return {key: value for key, value in current.items() if value is not None}
+
+
 def cmd_heartbeat(args, root):
     data = heartbeat(args, root)
     print(json.dumps({"state": data["state"], "heartbeatAt": data["heartbeatAt"], "leaseSeconds": data["leaseSeconds"]}))
@@ -181,8 +190,8 @@ def cmd_detach(args, root):
     current = read_json(path)
     if not isinstance(current, dict) or current.get("sessionId") != args.session:
         fail("no lease for this session", 4)
-    current.update({"state": "detached", "heartbeatAt": iso(now()), "jobId": None})
-    write_json(path, {key: value for key, value in current.items() if value is not None})
+    current["heartbeatAt"] = iso(now())
+    write_json(path, detach_state(current))
     print("detached")
 
 
@@ -216,6 +225,7 @@ def cmd_release(args, root):
     expired = args.if_expired and (expires is None or at >= expires)
     if item.get("status") != "orchestrator_active" or not (owned or expired):
         fail("item is not claimed by this session (use --if-expired for stale leases)", 8)
+    previous_owner = item.get("leaseOwner")
     item.pop("leaseOwner", None)
     item.pop("leaseExpiresAt", None)
     item.update({"status": args.status, "updatedAt": iso(at)})
@@ -227,8 +237,13 @@ def cmd_release(args, root):
         item["reason"] = ident(args.reason, "reason")
     write_json(path, item)
     lease = read_json(root / "remote-orchestrator.json")
-    if isinstance(lease, dict) and lease.get("sessionId") == args.session and lease.get("jobId") in (item.get("id"), item.get("name")):
+    matching_remote_job = isinstance(lease, dict) and lease.get("jobId") in (item.get("id"), item.get("name"))
+    if matching_remote_job and lease.get("sessionId") == args.session:
         heartbeat(args, root, state="attached", job=None)
+    elif expired and matching_remote_job and lease.get("sessionId") == previous_owner:
+        # Ein fremder Supervisor darf den alten Owner nicht als frisch angebunden ausgeben. Er
+        # zaeunt ausschliesslich dessen abgelaufenen Besitz ein; neue Arbeit entsteht dabei nicht.
+        write_json(root / "remote-orchestrator.json", detach_state(lease))
     print(f"released {item.get('id')} -> {args.status}")
 
 
