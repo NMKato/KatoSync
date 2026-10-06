@@ -28,6 +28,7 @@ use walkdir::{DirEntry, WalkDir};
 mod context_pack;
 mod local_brain;
 mod local_control;
+mod memory_fabric;
 mod orchestration;
 mod project_registry;
 mod provider_manager;
@@ -294,6 +295,15 @@ pub fn run() {
             project_registry::project_registry_load,
             project_registry::project_registry_save,
             project_registry::project_registry_open,
+            memory_fabric::memory_fabric_identity_get,
+            memory_fabric::memory_fabric_identity_set_rex,
+            memory_fabric::memory_fabric_identity_set_named,
+            memory_fabric::memory_fabric_index,
+            memory_fabric::memory_fabric_query,
+            memory_fabric::memory_fabric_context,
+            memory_fabric::memory_fabric_answer,
+            memory_fabric::memory_fabric_promote,
+            memory_fabric::memory_fabric_export,
             load_config,
             save_config,
             save_api_key,

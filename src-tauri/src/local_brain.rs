@@ -357,6 +357,90 @@ async fn serves_alias(health_url: &str, models_url: &str, alias: &str) -> bool {
 /// Laufzeitwahrheit: eigener Prozess lebt, oder die installierte Runtime + Modell werden
 /// bereits von einem gesunden Loopback-Server mit dem gepinnten Alias ausgeliefert
 /// (z. B. aus einer frueheren Sitzung gestartet).
+
+#[derive(Debug, Deserialize)]
+struct GroundedChatResponse {
+    choices: Vec<GroundedChatChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GroundedChatChoice {
+    message: GroundedChatMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct GroundedChatMessage {
+    #[serde(default)]
+    content: String,
+}
+
+/// Providerneutraler, lokal gebundener RAG-Fast-Path.
+/// Nutzt ausschliesslich die gepinnte Kato-Local-Brain-Alias auf Loopback und gibt nie
+/// reasoning_content weiter. Fuer belegte RAG-Fakten ist Thinking explizit deaktiviert.
+pub(crate) async fn grounded_chat(context: &str, question: &str) -> Result<String> {
+    let manifest = manifest()?;
+    let model = recommended_model(&manifest)?;
+    if !serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
+        return Err(anyhow!(
+            "Local Brain ist nicht bereit oder bedient nicht das erwartete Modell"
+        ));
+    }
+
+    let context = crate::context_pack::bounded_text(context.trim(), 16_000);
+    let question = crate::context_pack::bounded_text(question.trim(), 2_000);
+    if question.is_empty() {
+        return Err(anyhow!("Local-Brain-Frage darf nicht leer sein"));
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+    let response = client
+        .post(format!("{ENDPOINT}/chat/completions"))
+        .json(&serde_json::json!({
+            "model": model.alias,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": format!(
+                        "You are REX, the local KatoSync brain. Use ONLY the verified memory block below.                          If the answer is not explicitly covered by the memory, answer exactly NOT_IN_MEMORY.\n\n{context}"
+                    )
+                },
+                {"role": "user", "content": question}
+            ],
+            "temperature": 0,
+            "reasoning": "off",
+            "reasoning_budget": 0,
+            "reasoning_effort": "none",
+            "chat_template_kwargs": {"enable_thinking": false},
+            "max_tokens": 384
+        }))
+        .send()
+        .await
+        .context("Local-Brain-RAG-Anfrage fehlgeschlagen")?;
+
+    if !response.status().is_success() {
+        return Err(anyhow!(
+            "Local Brain hat die RAG-Anfrage abgelehnt ({})",
+            response.status()
+        ));
+    }
+    let body: GroundedChatResponse = response
+        .json()
+        .await
+        .context("Local-Brain-RAG-Antwort ist ungueltig")?;
+    let answer = body
+        .choices
+        .first()
+        .map(|choice| choice.message.content.trim())
+        .unwrap_or_default();
+    if answer.is_empty() {
+        return Err(anyhow!("Local Brain lieferte keine belegte Antwort"));
+    }
+    Ok(crate::context_pack::bounded_text(answer, 4_000))
+}
+
 pub async fn status(app: &AppHandle) -> Result<LocalBrainStatus> {
     let mut status = snapshot(app)?;
     status.running = owned_child_alive()

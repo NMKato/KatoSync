@@ -436,12 +436,12 @@ fn push_evidence(items: &mut Vec<Evidence>, value: &str, source: &str) {
     }
 }
 
-fn bounded_text(value: &str, max_chars: usize) -> String {
+pub(crate) fn bounded_text(value: &str, max_chars: usize) -> String {
     let clean = value.split_whitespace().collect::<Vec<_>>().join(" ");
     bounded_with_flag(&clean, max_chars).0
 }
 
-fn bounded_with_flag(value: &str, max_chars: usize) -> (String, bool) {
+pub(crate) fn bounded_with_flag(value: &str, max_chars: usize) -> (String, bool) {
     let mut iter = value.chars();
     let bounded = iter.by_ref().take(max_chars).collect::<String>();
     let truncated = iter.next().is_some();

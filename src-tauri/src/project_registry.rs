@@ -109,14 +109,14 @@ pub struct WorktreeFact {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoFacts {
-    path: String,
+    pub(crate) path: String,
     common_dir: Option<String>,
     main_worktree_path: Option<String>,
     is_linked_worktree: bool,
-    remote: Option<String>,
-    branch: Option<String>,
+    pub(crate) remote: Option<String>,
+    pub(crate) branch: Option<String>,
     detached: bool,
-    head_sha: Option<String>,
+    pub(crate) head_sha: Option<String>,
     head_date: Option<String>,
     dirty_count: usize,
     untracked_count: usize,
@@ -130,12 +130,12 @@ pub struct RepoFacts {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DocFact {
-    path: String,
-    kind: String,
-    bytes: u64,
-    modified_at: Option<String>,
-    content: Option<String>,
-    excluded: Option<String>,
+    pub(crate) path: String,
+    pub(crate) kind: String,
+    pub(crate) bytes: u64,
+    pub(crate) modified_at: Option<String>,
+    pub(crate) content: Option<String>,
+    pub(crate) excluded: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -183,7 +183,7 @@ fn git_bin() -> String {
 
 /// Fuehrt einen lesenden Git-Befehl strukturiert aus (kein Shell-String). `core.fsmonitor=false` verhindert,
 /// dass eine Repo-Konfiguration beim Scan fremden Code startet; Locks werden nicht genommen.
-fn run_git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
+pub(crate) fn run_git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
     let mut child = Command::new(git_bin())
         .arg("-c")
         .arg("core.fsmonitor=false")
@@ -262,7 +262,7 @@ fn status_counts(dir: &Path) -> Option<(usize, usize)> {
     Some(count_status(&raw))
 }
 
-fn real_path(path: &Path) -> String {
+pub(crate) fn real_path(path: &Path) -> String {
     fs::canonicalize(path)
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
@@ -374,7 +374,7 @@ fn project_icon_data_url(root: &Path) -> Option<String> {
 }
 
 /// Liest die Git-Fakten eines Checkouts. `status_all` = auch Aenderungen der anderen Worktrees zaehlen.
-fn probe_repo(path: &Path, status_all: bool) -> Option<RepoFacts> {
+pub(crate) fn probe_repo(path: &Path, status_all: bool) -> Option<RepoFacts> {
     let top = git_text(path, &["rev-parse", "--show-toplevel"])?;
     let top_path = PathBuf::from(real_path(Path::new(&top)));
     let top_string = top_path.to_string_lossy().into_owned();
@@ -465,7 +465,7 @@ fn probe_repo(path: &Path, status_all: bool) -> Option<RepoFacts> {
 }
 
 // ===== Discovery =====
-fn is_real_dir(path: &Path) -> bool {
+pub(crate) fn is_real_dir(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .map(|meta| meta.is_dir())
         .unwrap_or(false)
@@ -595,7 +595,7 @@ fn iso_time(time: SystemTime) -> Option<String> {
     Some(datetime.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
 }
 
-fn read_doc(root: &Path, relative: &str, kind: &str) -> DocFact {
+pub(crate) fn read_doc(root: &Path, relative: &str, kind: &str) -> DocFact {
     let path = root.join(relative);
     let mut fact = DocFact {
         path: relative.to_string(),
@@ -643,7 +643,7 @@ fn read_doc(root: &Path, relative: &str, kind: &str) -> DocFact {
     fact
 }
 
-fn collect_docs(root: &Path) -> Vec<DocFact> {
+pub(crate) fn collect_docs(root: &Path) -> Vec<DocFact> {
     let mut found: Vec<(String, &'static str)> = Vec::new();
     for folder in ["", "docs"] {
         let dir = if folder.is_empty() {
