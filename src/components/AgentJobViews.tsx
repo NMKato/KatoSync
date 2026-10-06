@@ -525,7 +525,17 @@ export function LaneRoute({ state }: { state: AgentSyncState }) {
                 {lane.id === "local" && lane.connectivity === "not_configured" ? (
                   <span className="agent-route-kind">{t("agent.lane.localBrainSeam")}</span>
                 ) : null}
-                {lane.model ? <span className="agent-route-kind" title={lane.model}>{lane.model}</span> : null}
+                {lane.id === "local" && lane.model ? (
+                  <span
+                    className={"agent-local-brain-mark" + (lane.activity === "active" ? " active" : "")}
+                    title={lane.model}
+                    aria-label={"Local Brain · " + lane.model}
+                  >
+                    <img src="/kai-ai-icon.png" alt="" aria-hidden="true" />
+                  </span>
+                ) : lane.model ? (
+                  <span className="agent-route-kind" title={lane.model}>{lane.model}</span>
+                ) : null}
                 {lane.retryAt ? <span className="agent-route-kind">{t("agent.lane.retry", { time: clock(lane.retryAt) })}</span> : null}
                 {isOwner ? (
                   <em>{t("agent.lane.ownsJob")}</em>

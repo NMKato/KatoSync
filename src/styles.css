@@ -6150,6 +6150,51 @@ button.agent-tile:hover {
 /* ===== Kanonischer Job/Lane-Zustand (Issue #27) ===== */
 .agent-route > li.first { grid-template-columns: minmax(0, 1fr); }
 
+.agent-local-brain-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-top: 2px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--agent-live) 28%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--agent-live) 8%, transparent);
+  overflow: hidden;
+}
+
+.agent-local-brain-mark img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  display: block;
+}
+
+.agent-local-brain-mark.active {
+  animation: localBrainKaiPulse 1.45s ease-in-out infinite;
+}
+
+@keyframes localBrainKaiPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--agent-live) 14%, transparent),
+      0 0 8px color-mix(in srgb, var(--agent-live) 16%, transparent);
+  }
+  50% {
+    transform: scale(1.075);
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--agent-live) 9%, transparent),
+      0 0 18px color-mix(in srgb, var(--agent-live) 42%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-local-brain-mark.active {
+    animation: none;
+  }
+}
+
 .agent-route-kind {
   max-width: 100%;
   overflow: hidden;
