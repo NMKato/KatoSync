@@ -105,6 +105,7 @@ import { defaultConfig } from "../lib/defaults";
 import {
   buildProjectWorkSync,
   isProjectWorkPlan,
+  projectWorkTruthSignature,
   readProjectWorkPlans,
   updateProjectWorkTask,
   writeProjectWorkPlans,
@@ -1474,25 +1475,33 @@ export function useKatoSyncViewModel() {
 
   // Kern-Codex-Lauf OHNE Ordnerdialog (vom Einzel-Button UND vom Board-Executor genutzt).
   const runCodexForTaskWithRepo = useCallback(
-    async (plan: ActionPlan, task: ActionTask, repoPath: string, runner?: AutoLaneRunner): Promise<CodexRunResult> => {
+    async (
+      plan: ActionPlan,
+      task: ActionTask,
+      repoPath: string,
+      runner?: AutoLaneRunner,
+      trackPrimaryRun = true
+    ): Promise<CodexRunResult> => {
       if (!config) throw new Error("Keine Konfiguration geladen.");
       const selectedRunner = runner ?? config.codexPreferredRunner;
       const startedAt = new Date().toISOString();
-      setCodexEvents([]);
-      setCodexRun({
-        status: "running",
-        startedAt,
-        lastActivityAt: startedAt,
-        context: {
-          jobId: task.taskId,
-          projectId: task.projectId,
-          task: task.title,
-          source: "action_plan",
-          planId: plan.planId,
-          createdAt: plan.createdAt,
-          runner: selectedRunner
-        }
-      });
+      if (trackPrimaryRun) {
+        setCodexEvents([]);
+        setCodexRun({
+          status: "running",
+          startedAt,
+          lastActivityAt: startedAt,
+          context: {
+            jobId: task.taskId,
+            projectId: task.projectId,
+            task: task.title,
+            source: "action_plan",
+            planId: plan.planId,
+            createdAt: plan.createdAt,
+            runner: selectedRunner
+          }
+        });
+      }
       const result = await runCodexTask({
         baseUrl: config.mcp.baseUrl,
         repoPath,
@@ -1518,12 +1527,14 @@ export function useKatoSyncViewModel() {
         },
         runner: selectedRunner
       });
-      setCodexRun((current) => ({
-        ...current,
-        status: result.status === "completed" ? "completed" : "failed",
-        lastActivityAt: new Date().toISOString(),
-        result
-      }));
+      if (trackPrimaryRun) {
+        setCodexRun((current) => ({
+          ...current,
+          status: result.status === "completed" ? "completed" : "failed",
+          lastActivityAt: new Date().toISOString(),
+          result
+        }));
+      }
       return result;
     },
     [config]
@@ -2011,6 +2022,7 @@ export function useKatoSyncViewModel() {
   );
   const lastAutoPlanRefreshRef = useRef(0);
   const lastAutoQRefreshRef = useRef(0);
+  const lastAutoQTruthSignatureRef = useRef("");
 
   const commitAutoClaims = useCallback((update: (claims: AutoLaneClaim[]) => AutoLaneClaim[]) => {
     const next = update(readAutoLaneClaims());
@@ -2022,88 +2034,131 @@ export function useKatoSyncViewModel() {
   const dispatchAutoLane = useCallback(async () => {
     const source = configRef.current;
     const state = agentSyncRef.current;
-    const next = state?.autoLanes.dispatch[0];
-    if (!source || !state?.autoLanes.enabled || !autoModeRef.current.enabled || !next) return;
+    const planned = state?.autoLanes.dispatch ?? [];
+    if (!source || !state?.autoLanes.enabled || !autoModeRef.current.enabled || !planned.length) return;
     if (autoDispatchingRef.current || queueStartingRef.current || manualRunRef.current > 0 || !state.startSafety.safe) return;
     if (readDailyCount() >= boardDailyLimit) return;
-    // Zweite Sperre neben dem Planer: der persistierte Ledger (z. B. aus einem anderen Render-Zyklus).
-    const repoPath = repoPathFor(projectsRegistryRef.current, source.projectRepos, next.projectId);
-    const plan = actionPlansRef.current.find((entry) => entry.planId === next.planId);
-    const task = plan?.tasks.find((entry) => entry.taskId === next.taskId);
-    if (!repoPath || !plan || !task) return;
-    if (hasAutoLaneClaimConflict(readAutoLaneClaims(), next.taskId, repoPath)) return;
-    const localProjectWork = isProjectWorkPlan(plan);
-    // Zweite Sperre neben dem Planer: Fokus-Portfolio (geparkt/archiviert/manuell/unbekannt startet nie autonom).
-    if (!evaluateFocus(focusPolicyRef.current, task.projectId).allowed) return;
-
     autoDispatchingRef.current = true;
     const claimedAt = new Date().toISOString();
+    // Alle Batch-Claims werden synchron vor dem ersten await reserviert. Dadurch koennen weder ein
+    // zweiter Tick noch zwei Kandidaten denselben Task/Worktree als Writer uebernehmen.
+    const candidates: Array<{
+      dispatch: (typeof planned)[number];
+      plan: ActionPlan;
+      task: ActionTask;
+      repoPath: string;
+      localProjectWork: boolean;
+    }> = [];
+    let reserved = readAutoLaneClaims();
+    for (const dispatch of planned) {
+      const repoPath = repoPathFor(projectsRegistryRef.current, source.projectRepos, dispatch.projectId);
+      const plan = actionPlansRef.current.find((entry) => entry.planId === dispatch.planId);
+      const task = plan?.tasks.find((entry) => entry.taskId === dispatch.taskId);
+      if (!repoPath || !plan || !task || hasAutoLaneClaimConflict(reserved, dispatch.taskId, repoPath)) continue;
+      // Defense in depth: Fokuswechsel zwischen Planung und Claim startet nie autonom.
+      if (!evaluateFocus(focusPolicyRef.current, task.projectId).allowed) continue;
+      reserved = addAutoLaneClaim(reserved, {
+        taskId: task.taskId,
+        projectId: task.projectId,
+        repoKey: repoPath,
+        runner: dispatch.runner,
+        claimedAt
+      });
+      candidates.push({ dispatch, plan, task, repoPath, localProjectWork: isProjectWorkPlan(plan) });
+    }
     const committedClaims = commitAutoClaims((claims) =>
-      addAutoLaneClaim(claims, { taskId: task.taskId, projectId: task.projectId, repoKey: repoPath, runner: next.runner, claimedAt })
+      candidates.reduce(
+        (ledger, candidate) => addAutoLaneClaim(ledger, {
+          taskId: candidate.task.taskId,
+          projectId: candidate.task.projectId,
+          repoKey: candidate.repoPath,
+          runner: candidate.dispatch.runner,
+          claimedAt
+        }),
+        claims
+      )
     );
-    // Letzte synchrone Sicherung gegen einen zwischen Planung und Claim eingetragenen Repo-Writer.
-    if (!committedClaims.some((claim) => claim.taskId === task.taskId && claim.repoKey === repoPath)) {
+    const accepted = candidates.filter((candidate) => committedClaims.some((claim) =>
+      claim.taskId === candidate.task.taskId &&
+      claim.repoKey === candidate.repoPath &&
+      claim.runner === candidate.dispatch.runner
+    ));
+    if (!accepted.length) {
       autoDispatchingRef.current = false;
       return;
     }
-    setAutoLastDispatch((current) => ({ ...current, [task.projectId]: claimedAt }));
-    setAutoInFlight([task.taskId]);
-    let releaseClaim = true;
+    setCodexEvents([]);
+    setAutoLastDispatch((current) => ({
+      ...current,
+      ...Object.fromEntries(accepted.map(({ task }) => [task.projectId, claimedAt]))
+    }));
+    setAutoInFlight(accepted.map(({ task }) => task.taskId));
+
+    const runCandidate = async ({ dispatch, plan, task, repoPath, localProjectWork }: (typeof accepted)[number]) => {
+      let releaseClaim = true;
+      try {
+        if (!(await dirExists(repoPath))) {
+          setAutoMissingRepos((current) => (current.includes(task.projectId) ? current : [...current, task.projectId]));
+          show("warn", `Auto Mode: Projektordner für ${task.projectId} fehlt auf diesem Rechner. Lane gesperrt.`);
+          return;
+        }
+        try {
+          if (localProjectWork) {
+            commitProjectWorkPlans((plans) => updateProjectWorkTask(plans, task.taskId, "running"));
+          } else {
+            await updateActionTaskStatus(source, task.taskId, "running");
+          }
+        } catch {
+          releaseClaim = false;
+          show("warn", `Auto Mode: Status für „${task.title}“ nicht gespeichert. Lane bleibt gesperrt.`);
+          return;
+        }
+        let finalStatus: ActionTaskStatus = "failed";
+        let extra: { prUrl: string | null; branch: string | null } | undefined;
+        try {
+          // Auto-Jobs leben im kanonischen Claim-/In-Flight-Ledger. Der manuelle Singleton-Runstate
+          // bleibt frei, damit zwei Provider nicht gegenseitig Besitzer/Events ueberschreiben.
+          const result = await runCodexForTaskWithRepo(plan, task, repoPath, dispatch.runner, false);
+          if (result.status === "completed") {
+            const isFileMode = result.fileMode ?? !source.codexCodingMode;
+            finalStatus = isFileMode ? "completed" : "executed";
+            extra = { prUrl: result.prUrl ?? null, branch: result.branch ?? null };
+            const done = readDailyCount() + 1;
+            writeDailyCount(done);
+            setDailyCount(done);
+          } else {
+            // Jobfehler: kein Providerwechsel; nur diese Projekt-Lane pausiert sichtbar.
+            show("warn", `Auto Mode: „${task.title}“ fehlgeschlagen. Diese Projekt-Lane pausiert, andere laufen weiter.`);
+          }
+        } catch (error) {
+          show("warn", `Auto Mode: „${task.title}“ abgebrochen (${getMessage(error)}). Diese Projekt-Lane pausiert, andere laufen weiter.`);
+        }
+        try {
+          if (localProjectWork) {
+            commitProjectWorkPlans((plans) =>
+              updateProjectWorkTask(plans, task.taskId, finalStatus, {
+                prUrl: extra?.prUrl ?? null,
+                branch: extra?.branch ?? null
+              })
+            );
+          } else {
+            await updateActionTaskStatus(source, task.taskId, finalStatus, extra);
+          }
+        } catch {
+          releaseClaim = false;
+          show("warn", `Auto Mode: Endstatus für „${task.title}“ nicht gespeichert. Lane bleibt gesperrt.`);
+        }
+      } finally {
+        if (releaseClaim) commitAutoClaims((claims) => releaseAutoLaneClaim(claims, task.taskId));
+        setAutoInFlight((current) => current.filter((taskId) => taskId !== task.taskId));
+      }
+    };
+
     try {
-      if (!(await dirExists(repoPath))) {
-        setAutoMissingRepos((current) => (current.includes(task.projectId) ? current : [...current, task.projectId]));
-        show("warn", `Auto Mode: Projektordner für ${task.projectId} fehlt auf diesem Rechner. Lane gesperrt.`);
-        return;
-      }
-      try {
-        if (localProjectWork) {
-          commitProjectWorkPlans((plans) => updateProjectWorkTask(plans, task.taskId, "running"));
-        } else {
-          setActionPlans(await updateActionTaskStatus(source, task.taskId, "running"));
-        }
-      } catch {
-        releaseClaim = false;
-        show("warn", `Auto Mode: Status für „${task.title}“ nicht gespeichert. Lane bleibt gesperrt.`);
-        return;
-      }
-      let finalStatus: ActionTaskStatus = "failed";
-      let extra: { prUrl: string | null; branch: string | null } | undefined;
-      try {
-        const result = await runCodexForTaskWithRepo(plan, task, repoPath, next.runner);
-        if (result.status === "completed") {
-          const isFileMode = result.fileMode ?? !source.codexCodingMode;
-          finalStatus = isFileMode ? "completed" : "executed";
-          extra = { prUrl: result.prUrl ?? null, branch: result.branch ?? null };
-          const done = readDailyCount() + 1;
-          writeDailyCount(done);
-          setDailyCount(done);
-        } else {
-          // Jobfehler: Task bleibt failed, die Projekt-Lane wartet auf Pruefung. Kein Providerwechsel.
-          show("warn", `Auto Mode: „${task.title}“ fehlgeschlagen. Diese Projekt-Lane pausiert, andere laufen weiter.`);
-        }
-      } catch (error) {
-        setCodexRun((current) => ({ ...current, status: "failed", lastActivityAt: new Date().toISOString(), error: getMessage(error) }));
-        show("warn", `Auto Mode: „${task.title}“ abgebrochen. Diese Projekt-Lane pausiert, andere laufen weiter.`);
-      }
-      try {
-        if (localProjectWork) {
-          commitProjectWorkPlans((plans) =>
-            updateProjectWorkTask(plans, task.taskId, finalStatus, {
-              prUrl: extra?.prUrl ?? null,
-              branch: extra?.branch ?? null
-            })
-          );
-        } else {
-          setActionPlans(await updateActionTaskStatus(source, task.taskId, finalStatus, extra));
-        }
-      } catch {
-        releaseClaim = false;
-        show("warn", `Auto Mode: Endstatus für „${task.title}“ nicht gespeichert. Lane bleibt gesperrt.`);
-      }
+      // allSettled: der Batch-Lock faellt erst, wenn wirklich jeder Provider-Lauf beendet ist.
+      await Promise.allSettled(accepted.map((candidate) => runCandidate(candidate)));
     } finally {
-      if (releaseClaim) commitAutoClaims((claims) => releaseAutoLaneClaim(claims, task.taskId));
-      setAutoInFlight([]);
-      if (!localProjectWork) {
+      if (accepted.some((candidate) => !candidate.localProjectWork)) {
         try {
           setActionPlans(await loadActionPlans(source));
         } catch {
@@ -2111,7 +2166,7 @@ export function useKatoSyncViewModel() {
         }
       }
       autoDispatchingRef.current = false;
-      // Nach Abschluss/Fehler sofort neu bewerten, ohne erneuten Klick.
+      // Nach Abschluss/Fehler des Batches sofort neu bewerten, ohne erneuten Klick.
       void autoTickRef.current();
     }
   }, [boardDailyLimit, commitAutoClaims, commitProjectWorkPlans, runCodexForTaskWithRepo, show]);
@@ -2152,6 +2207,9 @@ export function useKatoSyncViewModel() {
       syncing: projectWorkSyncingRef.current,
       writerActive: ownershipBusy,
       laneCount: state?.autoLanes.lanes.length ?? 0,
+      projectTruthChanged: source
+        ? projectWorkTruthSignature(projectsRegistryRef.current, source.projectRepos) !== lastAutoQTruthSignatureRef.current
+        : false,
       lastRefreshAt: lastAutoQRefreshRef.current,
       now: Date.now()
     });
@@ -2224,6 +2282,7 @@ export function useKatoSyncViewModel() {
       }
 
       lastAutoQRefreshRef.current = Date.now();
+      lastAutoQTruthSignatureRef.current = projectWorkTruthSignature(registry, source.projectRepos);
 
       if (armAutoMode) {
         const mode: AutoLaneMode = { enabled: true, updatedAt: new Date().toISOString() };

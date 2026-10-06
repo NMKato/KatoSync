@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { autoQRefreshReason } from "../src/lib/autoQRuntime.ts";
 import { addAutoLaneClaim, planAutoLanes, pruneAutoLaneClaims } from "../src/lib/autoLanePlanner.ts";
-import { buildProjectWorkSync, updateProjectWorkTask } from "../src/lib/projectWorkSync.ts";
+import { buildProjectWorkSync, projectWorkTruthSignature, updateProjectWorkTask } from "../src/lib/projectWorkSync.ts";
 import type { AgentLane, AutoLaneClaim, ProjectRegistry, RegistryProject } from "../src/types.ts";
 
 const NOW = "2026-10-05T22:00:00.000Z";
@@ -150,6 +150,16 @@ test("runtime refresh is bounded, writer-safe and replenishes an emptied queue",
     now: 99_000,
     emptyRefreshMs: 30_000
   }), null);
+  assert.equal(autoQRefreshReason({
+    enabled: true,
+    syncing: false,
+    writerActive: false,
+    laneCount: 0,
+    lastRefreshAt: 30_999,
+    now: 31_000,
+    emptyRefreshMs: 30_000,
+    projectTruthChanged: true
+  }), "queue_empty", "fresh READY project truth must not sit idle behind the empty-queue cooldown");
 
   const firstProject = project("acceptance-a", "Initial work");
   const first = buildProjectWorkSync(registry([firstProject]), { "acceptance-a": firstProject.rootPath }, [], NOW);
@@ -163,4 +173,55 @@ test("runtime refresh is bounded, writer-safe and replenishes an emptied queue",
   );
   assert.equal(replenished.report.readyCount, 1);
   assert.equal(replenished.plans[0].tasks[0].title, "Fresh dependency-safe READY work");
+});
+
+test("empty queue + fresh READY project truth replenishes instead of idling behind the cooldown", () => {
+  const before = project("acceptance-a", "Initial work");
+  const repos = { "acceptance-a": before.rootPath };
+  const synced = projectWorkTruthSignature(registry([before]), repos);
+  assert.equal(projectWorkTruthSignature(registry([project("acceptance-a", "Initial work")]), repos), synced);
+  // A re-scan that only refreshes timestamps is not new truth.
+  const rescanned = project("acceptance-a", "Initial work");
+  rescanned.capsule = { ...rescanned.capsule!, generatedAt: "2026-10-05T23:00:00.000Z" };
+  rescanned.verification = { ...rescanned.verification!, checkedAt: "2026-10-05T23:00:00.000Z" };
+  assert.equal(projectWorkTruthSignature(registry([rescanned]), repos), synced);
+
+  const fresh = project("acceptance-a", "Fresh READY work");
+  const changed = projectWorkTruthSignature(registry([fresh]), repos) !== synced;
+  assert.equal(changed, true);
+  // Parked projects are not AutoQ truth and never force a refresh.
+  const parked = { ...fresh, focus: { ...fresh.focus, status: "parked" as const } };
+  assert.equal(projectWorkTruthSignature(registry([parked]), repos), projectWorkTruthSignature(registry([]), repos));
+
+  const reason = (projectTruthChanged: boolean, laneCount = 0) => autoQRefreshReason({
+    enabled: true,
+    syncing: false,
+    writerActive: false,
+    laneCount,
+    projectTruthChanged,
+    lastRefreshAt: 10_000,
+    now: 10_500,
+    emptyRefreshMs: 30_000
+  });
+  assert.equal(reason(false), null, "unchanged truth keeps the empty-queue cooldown");
+  assert.equal(reason(changed), "queue_empty");
+  assert.equal(reason(changed, 1), null, "a non-empty queue is never churned by truth changes");
+
+  const replenished = buildProjectWorkSync(registry([fresh]), repos, [], NOW);
+  assert.equal(replenished.report.readyCount, 1);
+  const planned = planAutoLanes({
+    enabled: true,
+    actionPlans: replenished.plans,
+    selectedOrder: replenished.selectedTaskIds,
+    repos,
+    claims: [],
+    inFlightTaskIds: [],
+    startSafety: { safe: true, reason: "safe" },
+    lanes: [lane("codex", true, "connected"), lane("claude", true, "connected"), lane("local_control", true, "connected")],
+    preferredRunner: "codex_cli",
+    providerPriority: ["codex", "claude", "local_control"],
+    dailyCount: 0,
+    dailyLimit: 10
+  });
+  assert.equal(planned.dispatch.length, 1);
 });

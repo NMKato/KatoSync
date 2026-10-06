@@ -12,6 +12,8 @@ export interface AutoQRefreshInput {
   syncing: boolean;
   writerActive: boolean;
   laneCount: number;
+  // Die bereits geladene kanonische Project Registry enthaelt neuere READY-Wahrheit als der letzte Sync.
+  projectTruthChanged?: boolean;
   lastRefreshAt: number;
   now: number;
   emptyRefreshMs?: number;
@@ -24,6 +26,7 @@ export function autoQRefreshReason(input: AutoQRefreshInput): AutoQRefreshReason
   const elapsed = input.lastRefreshAt > 0 ? Math.max(0, input.now - input.lastRefreshAt) : Number.POSITIVE_INFINITY;
   const emptyRefreshMs = Math.max(0, input.emptyRefreshMs ?? AUTO_Q_EMPTY_REFRESH_MS);
   const periodicRefreshMs = Math.max(emptyRefreshMs, input.periodicRefreshMs ?? AUTO_Q_PERIODIC_REFRESH_MS);
+  if (input.laneCount === 0 && input.projectTruthChanged) return "queue_empty";
   if (input.laneCount === 0 && elapsed >= emptyRefreshMs) return "queue_empty";
   if (elapsed >= periodicRefreshMs) return "periodic";
   return null;

@@ -40,6 +40,39 @@ export interface ProjectWorkSyncReport {
   projects: ProjectWorkProjectResult[];
 }
 
+/**
+ * Stabiler Fingerabdruck der fuer AutoQ relevanten kanonischen Projektwahrheit. Pfade verlassen den
+ * Prozess nicht; der Wert dient nur dazu, neue READY-Arbeit trotz Refresh-Cooldown sofort zu erkennen.
+ */
+export function projectWorkTruthSignature(
+  registry: ProjectRegistry,
+  projectRepos: Record<string, string> | undefined
+): string {
+  return JSON.stringify(
+    registry.projects
+      .filter((project) => project.focus.status === "active")
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((project) => {
+        const mappedPath = projectRepos?.[project.id] ?? null;
+        const worktree = mappedPath
+          ? project.scan?.worktrees.find((entry) => entry.path === mappedPath) ?? null
+          : null;
+        return {
+          id: project.id,
+          focus: project.focus,
+          mappedPath,
+          headSha: worktree?.headSha ?? project.scan?.headSha ?? null,
+          dirtyCount: worktree?.dirtyCount ?? (mappedPath === project.rootPath ? project.scan?.dirtyCount ?? null : null),
+          // Nur inhaltliche Wahrheit; reine Zeitstempel eines unveraenderten Re-Scans loesen keinen Refresh aus.
+          verification: project.verification
+            ? { state: project.verification.state, findings: project.verification.findings, headSha: project.verification.headSha }
+            : null,
+          nextSafeWork: project.capsule?.nextSafeWork ?? []
+        };
+      })
+  );
+}
+
 function hashText(value: string): string {
   let hash = 2166136261;
   for (let i = 0; i < value.length; i += 1) {

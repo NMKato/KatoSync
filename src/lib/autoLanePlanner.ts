@@ -26,10 +26,11 @@ import { evaluateFocus } from "./projectFocus.ts";
 export const AUTO_LANE_TICK_MS = 15_000;
 // Action-Plans (neue Freigaben/Merges) werden im Auto-Modus hoechstens so oft neu geladen.
 export const AUTO_LANE_PLAN_REFRESH_MS = 5 * 60 * 1000;
-// Der Runner-Zustand (codexRun, Live-Feed) ist heute ein Singleton und startSafety meldet bei jedem
-// laufenden Runner `runner_busy`. Der Planer kann mehrere Slots (ein Writer pro Repo) – freigeschaltet
-// wird das erst, wenn der Runner mehrere Laeufe getrennt fuehren kann.
-export const AUTO_LANE_MAX_CONCURRENT = 1;
+// Je ein unabhaengiger Subscription-CLI-Runner kann einen eigenen Worktree bedienen: Codex und Claude
+// laufen parallel, jeder Provider per Default aber hoechstens mit einem Job (AUTO_LANE_PER_RUNNER). Ist
+// nur ein Provider gesund, bleibt es beim seriellen Ein-Slot-Verhalten.
+export const AUTO_LANE_MAX_CONCURRENT = 2;
+export const AUTO_LANE_PER_RUNNER = 1;
 
 export interface AutoLanePlannerInput {
   enabled: boolean;
@@ -51,6 +52,9 @@ export interface AutoLanePlannerInput {
   dailyCount: number;
   dailyLimit: number;
   maxConcurrent?: number;
+  // Gleichzeitige Auto-Jobs je Subscription-Provider. Undefined = nur maxConcurrent begrenzt; die
+  // kanonische Agent-Sync-Planung setzt AUTO_LANE_PER_RUNNER.
+  perRunnerLimit?: number;
   // Fairness: zuletzt gestartete Projekte kommen spaeter wieder dran (Round-Robin).
   lastDispatchAt?: Record<string, string>;
   // Fokus-Portfolio der Project Registry. Gesetzt = HARTE Grenze VOR Kandidaten-Gruppierung und Ranking:
@@ -112,14 +116,22 @@ export function pickAutoLaneRunner(
   preferred: AutoLaneRunner | string | null | undefined,
   priority: ProviderId[] = []
 ): AutoLaneRunner | null {
+  return eligibleAutoLaneRunners(lanes, preferred, priority)[0] ?? null;
+}
+
+/** Alle aktuell ausfuehrbaren Subscription-Runner in Nutzerreihenfolge (gleicher Vertrag wie oben). */
+function eligibleAutoLaneRunners(
+  lanes: AgentLane[],
+  preferred: AutoLaneRunner | string | null | undefined,
+  priority: ProviderId[] = []
+): AutoLaneRunner[] {
   const first: AutoLaneRunner = preferred === "claude_cli" ? "claude_cli" : "codex_cli";
   const second: AutoLaneRunner = first === "codex_cli" ? "claude_cli" : "codex_cli";
   const lane = (runner: AutoLaneRunner) => (runner === "codex_cli" ? "codex" : "claude");
   const secondAllowed = priority.length === 0 || priority.includes(lane(second));
-  for (const runner of secondAllowed ? [first, second] : [first]) {
-    if (lanes.find((entry) => entry.id === lane(runner))?.eligible) return runner;
-  }
-  return null;
+  return (secondAllowed ? [first, second] : [first]).filter((runner) =>
+    lanes.some((entry) => entry.id === lane(runner) && entry.eligible)
+  );
 }
 
 function earliestRetry(lanes: AgentLane[]): string | null {
@@ -233,24 +245,43 @@ export function planAutoLanes(input: AutoLanePlannerInput): AutoLanePlan {
       const at = (projectId: string) => Date.parse(input.lastDispatchAt?.[projectId] ?? "") || 0;
       return at(a.projectId) - at(b.projectId) || a.projectId.localeCompare(b.projectId);
     });
-  const runner = pickAutoLaneRunner(input.lanes, input.preferredRunner, input.providerPriority);
-  const dailyExhausted = input.dailyCount >= input.dailyLimit;
+  const perRunnerLimit = input.perRunnerLimit === undefined
+    ? Number.POSITIVE_INFINITY
+    : Math.max(1, Math.floor(input.perRunnerLimit));
+  const runners = eligibleAutoLaneRunners(input.lanes, input.preferredRunner, input.providerPriority);
+  const runnerLoad = new Map<AutoLaneRunner, number>(runners.map((runner) => [runner, 0]));
+  const inFlight = new Set(input.inFlightTaskIds);
+  for (const claim of input.claims) {
+    if (inFlight.has(claim.taskId) && runnerLoad.has(claim.runner)) {
+      runnerLoad.set(claim.runner, (runnerLoad.get(claim.runner) ?? 0) + 1);
+    }
+  }
+  // Am wenigsten belegter Runner mit freier Kapazitaet, bei Gleichstand in Nutzerreihenfolge.
+  const nextRunner = (): AutoLaneRunner | null =>
+    runners
+      .filter((runner) => (runnerLoad.get(runner) ?? 0) < perRunnerLimit)
+      .reduce<AutoLaneRunner | null>(
+        (best, runner) => (!best || (runnerLoad.get(runner) ?? 0) < (runnerLoad.get(best) ?? 0) ? runner : best),
+        null
+      );
+  const primaryRunner = runners[0] ?? null;
   for (const draft of ready) {
     if (!input.enabled) {
       lanes.set(draft.projectId, make(draft, "planned", "auto_off"));
       continue;
     }
-    if (!runner) {
+    if (!primaryRunner) {
       lanes.set(draft.projectId, make(draft, "waiting", "no_runner_lane", { retryAt: earliestRetry(input.lanes) }));
       continue;
     }
-    if (dailyExhausted) {
-      lanes.set(draft.projectId, make(draft, "waiting", "daily_limit", { runner }));
+    // Jeder Batch-Dispatch zaehlt gegen das Tageslimit, damit zwei Provider es nicht gemeinsam ueberschreiten.
+    if (input.dailyCount + plan.dispatch.length >= input.dailyLimit) {
+      lanes.set(draft.projectId, make(draft, "waiting", "daily_limit", { runner: primaryRunner }));
       continue;
     }
     const repo = input.repos[draft.projectId];
     if (busyRepos.has(repo)) {
-      lanes.set(draft.projectId, make(draft, "queued", "repo_busy", { runner }));
+      lanes.set(draft.projectId, make(draft, "queued", "repo_busy", { runner: primaryRunner }));
       continue;
     }
     if (!input.startSafety.safe) {
@@ -259,17 +290,24 @@ export function planAutoLanes(input: AutoLanePlannerInput): AutoLanePlan {
       lanes.set(
         draft.projectId,
         input.startSafety.reason === "runner_busy"
-          ? make(draft, "queued", "runner_slot", { runner })
-          : make(draft, "waiting", "start_unsafe", { runner, detail: input.startSafety.reason })
+          ? make(draft, "queued", "runner_slot", { runner: primaryRunner })
+          : make(draft, "waiting", "start_unsafe", { runner: primaryRunner, detail: input.startSafety.reason })
       );
       continue;
     }
     if (slots <= 0) {
-      lanes.set(draft.projectId, make(draft, "queued", "runner_slot", { runner }));
+      lanes.set(draft.projectId, make(draft, "queued", "runner_slot", { runner: primaryRunner }));
+      continue;
+    }
+    const runner = nextRunner();
+    if (!runner) {
+      // Alle gesunden Provider sind belegt: sichtbar eingereiht, nicht als Provider-Ausfall gemeldet.
+      lanes.set(draft.projectId, make(draft, "queued", "runner_slot", { runner: primaryRunner }));
       continue;
     }
     slots -= 1;
     busyRepos.add(repo);
+    runnerLoad.set(runner, (runnerLoad.get(runner) ?? 0) + 1);
     const lane = make(draft, "queued", "ready", { runner });
     lanes.set(draft.projectId, lane);
     plan.dispatch.push({ laneId: lane.id, projectId: draft.projectId, taskId: draft.head.taskId, planId: draft.planId, runner });
