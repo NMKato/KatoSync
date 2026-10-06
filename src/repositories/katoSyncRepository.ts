@@ -27,11 +27,14 @@ import type {
   ProviderLoginUrlEvent,
   ProviderSettings,
   ProviderStatus,
+  ProviderWarmupState,
+  WarmupReport,
   ScanSummary,
   SupabaseSessionStatus,
   SyncReport
 } from "../types";
 import { normalizeProviderPriority, toProviderSettings } from "../lib/providerPolicy";
+import { emptyWarmupState } from "../lib/providerWarmupPolicy";
 import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 
 const mockConfigKey = "katosync.config";
@@ -354,6 +357,18 @@ export async function getProviderStatuses(config: AppConfig, runSmoke = false): 
     });
   }
   return demoProviderStatuses(config);
+}
+
+// Persistierte Warm-up-Zeitstempel. Browser-Demo: leer (es wird dort nie aufgewaermt).
+export async function getProviderWarmupState(): Promise<ProviderWarmupState> {
+  if (isTauri()) return invoke<ProviderWarmupState>("provider_warmup_state");
+  return emptyWarmupState();
+}
+
+// Ein begrenzter Warm-up; Rust prueft Config, Runner, Cooldown und Abo-Login erneut.
+export async function warmUpProvider(provider: ProviderId): Promise<WarmupReport | null> {
+  if (!isTauri()) return null;
+  return invoke<WarmupReport>("warm_up_provider", { provider });
 }
 
 export async function connectProvider(provider: ProviderId, forceLogin = false): Promise<ProviderStatus> {
@@ -1528,7 +1543,9 @@ function normalizeConfig(config: AppConfig): AppConfig {
           : "ollama",
       baseUrl: config.localProvider?.baseUrl ?? "",
       model: config.localProvider?.model ?? ""
-    }
+    },
+    // Alt-Configs ohne Feld: Warm-up an (Rust-Default identisch).
+    providerWarmupEnabled: config.providerWarmupEnabled ?? defaultConfig.providerWarmupEnabled
   };
 }
 

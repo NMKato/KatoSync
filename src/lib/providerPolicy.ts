@@ -248,6 +248,7 @@ export function mergeCheapProviderHealth(current: ProviderStatus, probe: Provide
     ...current,
     installed: probe.installed,
     authenticated: probe.authenticated,
+    authKind: probe.authKind ?? current.authKind,
     version: probe.version ?? current.version,
     healthCheckedAt: probe.checkedAt
   };

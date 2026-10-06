@@ -63,6 +63,8 @@ import {
   testConnection,
   testLibrary,
   testProvider,
+  getProviderWarmupState,
+  warmUpProvider,
   updateActionPlanStatus,
   updateActionTaskStatus,
   updateBriefingStatus,
@@ -79,6 +81,7 @@ import {
   validateLocalEndpointInput
 } from "../lib/providerPolicy";
 import { agentWorkWaiting, normalizeAgentSyncState } from "../lib/agentJobModel";
+import { providerWarmupPlan, warmupSuppressedByWork } from "../lib/providerWarmupPolicy";
 import {
   AUTO_LANE_PLAN_REFRESH_MS,
   AUTO_LANE_TICK_MS,
@@ -132,6 +135,7 @@ import type {
   ProviderAction,
   ProviderId,
   ProviderStatus,
+  ProviderWarmupState,
   ProviderTransition,
   ScanSummary,
   SupabaseSessionStatus,
@@ -971,6 +975,52 @@ export function useKatoSyncViewModel() {
     }, 60_000);
     return () => window.clearInterval(timer);
   }, [applyProviderSnapshot, testProviderSilently]);
+
+  // Begrenzter Abo-Provider-Warm-up (providerWarmupPolicy): hoechstens ein winziger READY-Prompt je
+  // Provider und ~5-h-Fenster, nur ohne laufende/wartende Arbeit. Das Ergebnis aendert weder
+  // Provider-Karten noch Routing – ein Fehlschlag ist folgenlos und loest nie Failover aus.
+  const warmupStateRef = useRef<ProviderWarmupState | null>(null);
+  const warmupInFlightRef = useRef(false);
+  const tryProviderWarmup = useCallback(async () => {
+    const source = configRef.current;
+    if (!source || warmupInFlightRef.current) return;
+    if (!warmupStateRef.current) {
+      try {
+        warmupStateRef.current = await getProviderWarmupState();
+      } catch {
+        return;
+      }
+    }
+    const plan = providerWarmupPlan(providerStatusesRef.current, {
+      enabled: source.providerWarmupEnabled,
+      workBusy: warmupSuppressedByWork(
+        agentSyncRef.current,
+        autoDispatchingRef.current || queueStartingRef.current || manualRunRef.current > 0
+      ),
+      inFlight: warmupInFlightRef.current,
+      state: warmupStateRef.current,
+      providerBusy: providerBusyRef.current
+    });
+    if (!plan.provider) return;
+    warmupInFlightRef.current = true;
+    try {
+      const report = await warmUpProvider(plan.provider);
+      if (report) warmupStateRef.current = report.state;
+    } catch {
+      // Warm-up ist best effort; der naechste Takt liest den persistierten Zustand neu.
+      warmupStateRef.current = null;
+    } finally {
+      warmupInFlightRef.current = false;
+    }
+  }, []);
+  useEffect(() => {
+    const timer = window.setInterval(() => void tryProviderWarmup(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [tryProviderWarmup]);
+  // Sobald ein Abo-Provider angemeldet/verfuegbar wird, nicht erst auf den naechsten Takt warten.
+  useEffect(() => {
+    void tryProviderWarmup();
+  }, [providerStatuses, tryProviderWarmup]);
 
   const saveDraftKeyIfNeeded = useCallback(async () => {
     const draft = keyInput.trim();

@@ -46,6 +46,9 @@ const LOCAL_CONTROL_HEARTBEAT_MAX_AGE_SECS: i64 = 90;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const LOCAL_KEY_ACCOUNT: &str = "local-provider-api-key";
 const SMOKE_PROMPT: &str = "Reply with exactly READY and no other text.";
+/// Warm-up: dieselbe READY-Pruefung, aber ausdruecklich ohne Tools/Dateien/Repo-Zugriff, damit ein
+/// Abo-Provider sein rollierendes Nutzungsfenster startet, bevor echte Arbeit ansteht.
+pub(crate) const WARMUP_PROMPT: &str = "KatoSync provider warm-up health check. Do not use any tools. Do not read, list, create or modify any files and do not run any commands. Reply with exactly READY and no other text.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -79,6 +82,16 @@ pub enum ProviderState {
     CapacityUnavailable,
     JobFailed,
     Offline,
+    Unknown,
+}
+
+/// Anmeldeart der Provider-CLI. Nur `Subscription` (ChatGPT-Login bzw. claude.ai-Abo) kommt fuer
+/// einen Warm-up in Frage; API-Key-Anmeldungen verursachen echte Kosten und bleiben ausgenommen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderAuthKind {
+    Subscription,
+    ApiKey,
     Unknown,
 }
 
@@ -160,6 +173,8 @@ pub struct ProviderStatus {
     pub reason: ProviderReason,
     pub installed: bool,
     pub authenticated: bool,
+    /// Nur Codex/Claude: Abo-Login oder API-Key (nie der Key selbst).
+    pub auth_kind: Option<ProviderAuthKind>,
     pub available: bool,
     pub enabled: bool,
     pub failover_allowed: bool,
@@ -186,6 +201,7 @@ impl ProviderStatus {
             reason: ProviderReason::NotChecked,
             installed: false,
             authenticated: false,
+            auth_kind: None,
             available: false,
             enabled,
             failover_allowed: true,
@@ -245,6 +261,7 @@ enum CommandPurpose {
     AuthStatus,
     Login,
     Smoke,
+    WarmUp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,6 +298,21 @@ fn command_spec(provider: ProviderId, purpose: CommandPurpose) -> Option<Command
                 SMOKE_TIMEOUT,
                 true,
             ),
+            (ProviderId::Codex, CommandPurpose::WarmUp) => (
+                &[
+                    "exec",
+                    "--ephemeral",
+                    "--skip-git-repo-check",
+                    "--sandbox",
+                    "read-only",
+                    "--color",
+                    "never",
+                    "--json",
+                    WARMUP_PROMPT,
+                ],
+                SMOKE_TIMEOUT,
+                true,
+            ),
             (ProviderId::Claude, CommandPurpose::AuthStatus) => {
                 (&["auth", "status", "--json"], AUTH_TIMEOUT, false)
             }
@@ -299,6 +331,22 @@ fn command_spec(provider: ProviderId, purpose: CommandPurpose) -> Option<Command
                     "--strict-mcp-config",
                     "--no-session-persistence",
                     SMOKE_PROMPT,
+                ],
+                SMOKE_TIMEOUT,
+                true,
+            ),
+            (ProviderId::Claude, CommandPurpose::WarmUp) => (
+                &[
+                    "-p",
+                    "--output-format",
+                    "json",
+                    "--permission-mode",
+                    "plan",
+                    "--tools",
+                    "",
+                    "--strict-mcp-config",
+                    "--no-session-persistence",
+                    WARMUP_PROMPT,
                 ],
                 SMOKE_TIMEOUT,
                 true,
@@ -517,6 +565,44 @@ fn parse_auth_status(provider: ProviderId, outcome: &CommandOutcome) -> bool {
             Err(_) => false,
         },
         _ => false,
+    }
+}
+
+/// Leitet die Anmeldeart aus denselben Status-Ausgaben ab, ohne Account-Daten zu uebernehmen.
+/// Im Zweifel `Unknown` – nur ein eindeutiger Abo-Login gilt als warm-up-faehig.
+fn parse_auth_kind(provider: ProviderId, outcome: &CommandOutcome) -> ProviderAuthKind {
+    match provider {
+        ProviderId::Codex => {
+            let text = outcome.combined().to_ascii_lowercase();
+            if text.contains("api key") || text.contains("api-key") {
+                ProviderAuthKind::ApiKey
+            } else if text.contains("using chatgpt") {
+                ProviderAuthKind::Subscription
+            } else {
+                ProviderAuthKind::Unknown
+            }
+        }
+        ProviderId::Claude => {
+            let Ok(value) = serde_json::from_str::<Value>(outcome.stdout.trim()) else {
+                return ProviderAuthKind::Unknown;
+            };
+            let method = value
+                .get("authMethod")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let api_provider = value
+                .get("apiProvider")
+                .and_then(Value::as_str)
+                .unwrap_or("firstParty");
+            if method.contains("api_key") || method.contains("apiKey") {
+                ProviderAuthKind::ApiKey
+            } else if method == "claude.ai" && api_provider == "firstParty" {
+                ProviderAuthKind::Subscription
+            } else {
+                ProviderAuthKind::Unknown
+            }
+        }
+        _ => ProviderAuthKind::Unknown,
     }
 }
 
@@ -825,6 +911,7 @@ async fn cloud_probe(provider: ProviderId, enabled: bool) -> CloudProbe {
     match run_captured(&executable, &spec).await {
         Ok(outcome) if parse_auth_status(provider, &outcome) => {
             status.authenticated = true;
+            status.auth_kind = Some(parse_auth_kind(provider, &outcome));
             status.state = ProviderState::Authenticated;
             status.reason = if enabled {
                 ProviderReason::ReadyTestPending
@@ -1656,6 +1743,55 @@ pub async fn test_provider(provider: ProviderId, settings: &ProviderSettings) ->
     }
 }
 
+/// Ergebnis eines einzelnen Warm-up-Versuchs. Bewusst ohne Provider-Antwort oder Diagnose-Text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WarmUpResult {
+    Warmed,
+    NotInstalled,
+    NotAuthenticated,
+    NotSubscription,
+    Failed,
+}
+
+/// Billige Vorpruefung (ohne Inferenz): nur Codex/Claude, installiert, angemeldet und eindeutig
+/// per Abo. Liefert das validierte Executable fuer den anschliessenden Warm-up.
+pub async fn warm_up_eligibility(provider: ProviderId) -> Result<PathBuf, WarmUpResult> {
+    if !matches!(provider, ProviderId::Codex | ProviderId::Claude) {
+        return Err(WarmUpResult::NotSubscription);
+    }
+    let CloudProbe { status, executable } = cloud_probe(provider, true).await;
+    let Some(executable) = executable else {
+        return Err(WarmUpResult::NotInstalled);
+    };
+    if !status.authenticated {
+        return Err(WarmUpResult::NotAuthenticated);
+    }
+    if status.auth_kind != Some(ProviderAuthKind::Subscription) {
+        return Err(WarmUpResult::NotSubscription);
+    }
+    Ok(executable)
+}
+
+/// Fuehrt genau einen Warm-up-Prompt aus – im neutralen Temp-Verzeichnis, ohne Tools. Der Ausgang
+/// aendert keine Provider-Karte und loest nie Failover aus; die Antwort wird nicht weitergegeben.
+pub async fn run_warm_up(provider: ProviderId, executable: &Path) -> WarmUpResult {
+    let Some(spec) = command_spec(provider, CommandPurpose::WarmUp) else {
+        return WarmUpResult::NotSubscription;
+    };
+    let Ok(outcome) = run_captured(executable, &spec).await else {
+        return WarmUpResult::Failed;
+    };
+    let parsed = match provider {
+        ProviderId::Codex => parse_codex_smoke(&outcome),
+        _ => parse_claude_smoke(&outcome),
+    };
+    match parsed {
+        SmokeOutcome::Ready { .. } => WarmUpResult::Warmed,
+        SmokeOutcome::Failed { .. } => WarmUpResult::Failed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1771,6 +1907,7 @@ mod tests {
                 CommandPurpose::AuthStatus,
                 CommandPurpose::Login,
                 CommandPurpose::Smoke,
+                CommandPurpose::WarmUp,
             ] {
                 let spec = command_spec(provider, purpose).unwrap();
                 assert!(spec.timeout <= LOGIN_TIMEOUT);
@@ -1791,7 +1928,25 @@ mod tests {
                     .unwrap()
                     .neutral_cwd
             );
+            let warm = command_spec(provider, CommandPurpose::WarmUp).unwrap();
+            assert!(warm.neutral_cwd);
+            assert!(warm.timeout <= SMOKE_TIMEOUT);
+            assert_eq!(warm.args.last(), Some(&WARMUP_PROMPT));
         }
+        // Claude-Warm-up laeuft ohne Tools, im Plan-Modus und ohne MCP; Codex nur read-only.
+        let claude = command_spec(ProviderId::Claude, CommandPurpose::WarmUp).unwrap();
+        assert!(claude.args.windows(2).any(|pair| pair == ["--tools", ""]));
+        assert!(claude.args.contains(&"--strict-mcp-config"));
+        assert!(claude.args.contains(&"--no-session-persistence"));
+        let codex = command_spec(ProviderId::Codex, CommandPurpose::WarmUp).unwrap();
+        assert!(codex
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--sandbox", "read-only"]));
+        assert!(codex.args.contains(&"--ephemeral"));
+        assert!(WARMUP_PROMPT.contains("Do not use any tools"));
+        assert!(WARMUP_PROMPT.contains("exactly READY"));
+        assert!(command_spec(ProviderId::Local, CommandPurpose::WarmUp).is_none());
         assert!(command_spec(ProviderId::Local, CommandPurpose::Login).is_none());
         assert!(command_spec(ProviderId::LocalControl, CommandPurpose::Smoke).is_none());
     }
@@ -1853,6 +2008,63 @@ mod tests {
             ProviderId::Claude,
             &outcome(true, "garbage", "")
         ));
+    }
+
+    #[test]
+    fn auth_kind_only_marks_unambiguous_subscription_logins() {
+        let kind = |provider, stdout| parse_auth_kind(provider, &outcome(true, stdout, ""));
+        assert_eq!(
+            kind(ProviderId::Codex, "Logged in using ChatGPT"),
+            ProviderAuthKind::Subscription
+        );
+        assert_eq!(
+            kind(ProviderId::Codex, "Logged in using an API key - sk-***"),
+            ProviderAuthKind::ApiKey
+        );
+        assert_eq!(
+            kind(ProviderId::Codex, "Logged in"),
+            ProviderAuthKind::Unknown
+        );
+        assert_eq!(
+            kind(
+                ProviderId::Claude,
+                r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"pro"}"#
+            ),
+            ProviderAuthKind::Subscription
+        );
+        assert_eq!(
+            kind(
+                ProviderId::Claude,
+                r#"{"loggedIn":true,"authMethod":"api_key"}"#
+            ),
+            ProviderAuthKind::ApiKey
+        );
+        assert_eq!(
+            kind(
+                ProviderId::Claude,
+                r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"bedrock"}"#
+            ),
+            ProviderAuthKind::Unknown
+        );
+        assert_eq!(
+            kind(ProviderId::Claude, "garbage"),
+            ProviderAuthKind::Unknown
+        );
+        assert_eq!(kind(ProviderId::Local, "{}"), ProviderAuthKind::Unknown);
+    }
+
+    #[tokio::test]
+    async fn warm_up_never_runs_for_local_or_local_control() {
+        for provider in [ProviderId::Local, ProviderId::LocalControl] {
+            assert_eq!(
+                warm_up_eligibility(provider).await.err(),
+                Some(WarmUpResult::NotSubscription)
+            );
+            assert_eq!(
+                run_warm_up(provider, Path::new("/nonexistent")).await,
+                WarmUpResult::NotSubscription
+            );
+        }
     }
 
     #[test]
