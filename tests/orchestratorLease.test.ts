@@ -40,6 +40,10 @@ test("orchestrator heartbeat writes a bounded 0600 lease that reports attached",
     assert.equal(statSync(file).mode & 0o777, 0o600);
     assert.equal(lease(root, "status").stdout.trim(), "attached");
     assert.equal(lease(root, "detach", "--session", "rdc-1").status, 0);
+    const detached = JSON.parse(readFileSync(file, "utf8"));
+    assert.equal(detached.state, "detached");
+    assert.equal(detached.jobId, undefined);
+    assert.equal(detached.transport, undefined, "detaching must clear RDC liveness");
     assert.equal(lease(root, "status").stdout.trim(), "detached");
     assert.notEqual(lease(root, "heartbeat", "--session", "../escape").status, 0);
   } finally {
@@ -75,6 +79,38 @@ test("claim refuses while the provider health scheduler is resuming the same job
     assert.equal(item(root).status, "waiting");
     writeFileSync(join(root, "provider-health.log"), "2026-10-04T12:00:00+02:00 RESUME name=job branch=feat/x\n2026-10-04T12:30:00+02:00 RESUME_DONE name=job exit=75\n");
     assert.equal(lease(root, "claim", "--session", "rdc-1", "--item", "1-job").status, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("expired claim is reclaimed to waiting and fences the stale remote state", { skip }, () => {
+  const root = setup();
+  try {
+    assert.equal(lease(root, "claim", "--session", "rdc-old", "--item", "1-job").status, 0);
+    const claimed = item(root);
+    claimed.leaseExpiresAt = "2000-01-01T00:00:00+00:00";
+    writeFileSync(join(root, "rdc-fallback", "1-job.json"), JSON.stringify(claimed));
+
+    const reclaimed = lease(
+      root,
+      "release",
+      "--session",
+      "supervisor-new",
+      "--item",
+      "1-job",
+      "--status",
+      "waiting",
+      "--if-expired"
+    );
+    assert.equal(reclaimed.status, 0, reclaimed.stderr);
+    assert.equal(item(root).status, "waiting");
+    assert.equal(item(root).leaseOwner, undefined);
+    assert.equal(item(root).leaseExpiresAt, undefined);
+    const remote = JSON.parse(readFileSync(join(root, "remote-orchestrator.json"), "utf8"));
+    assert.equal(remote.state, "detached");
+    assert.equal(remote.jobId, undefined);
+    assert.equal(remote.transport, undefined);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

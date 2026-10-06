@@ -137,6 +137,12 @@ Home-Pfade und liefert vom Worktree nur den Basename plus zwei Nachweise: `branc
 (aktueller Branch = erwarteter Branch) und `worktreeBusy` (aktiver Local-Control-Writer im selben
 Worktree).
 
+Der Continuation-Zustand trennt zwei Wahrheiten: `workerState` kommt unter macOS aus dem
+kanonischen LaunchAgent `com.nmkato.katosync.continuation-watchdog`; `status`, Cursor und Ergebnis
+kommen aus dem aktuellen/letzten Plan. Ein fehlgeschlagener Plan bedeutet deshalb nicht, dass der
+Worker gestoppt ist. Agent Sync zeigt außerdem einen frischen `attached`-Heartbeat ohne Job als
+externen Projekt-Supervisor/Standby, nicht als arbeitende KatoSync-Lane.
+
 **Wiederaufnahme nur mit Nachweis:** Ein wartender Router-Job ist erst „sicher fortsetzbar“, wenn
 der Branch nachgewiesen ist, kein anderer Writer läuft, der Worktree frei ist, keine
 Orchestrator-Lease ihn hält und eine intelligente Lane übernehmen kann. Kein automatischer Merge.
@@ -164,10 +170,20 @@ Orchestrator-Lease ihn hält und eine intelligente Lane übernehmen kann. Kein a
 - UI: *angebunden/arbeitet* (Heartbeat ≤ 5 min, Lease gültig), *veraltet* (Lease gültig, Heartbeat
   alt – blockiert weiterhin andere Writer), *abgemeldet*, *nicht verfügbar*. RDC-Transport wird
   separat als online/veraltet/unbekannt geführt.
+- Ein `working`-Heartbeat allein begründet keinen KatoSync-Jobbesitz. Erst wenn `jobId`,
+  `sessionId`, Queue-Status `orchestrator_active`, `leaseOwner` sowie Remote- und Job-Lease
+  gleichzeitig übereinstimmen und gültig sind, gilt die Remote-Lane als Besitzer. Unbestätigte
+  Claims blockieren fail-closed, erfinden aber keinen laufenden Job.
+  Für die Warm-up-Sperre (`work_active`) zählt ein reiner `attached`-Heartbeat ohne Job nicht als
+  Arbeit; jeder Claim unter gültiger Lease und jedes noch nicht freigegebene `orchestrator_active`
+  bleiben blockierend.
 - `claim --item <id>` setzt einen wartenden Router-Job auf `orchestrator_active`; der
   Provider-Health-Scheduler nimmt nur `waiting`/`provider_ready` auf → genau ein Writer nach der
   Übergabe. `claim` verweigert, solange der Scheduler denselben Job bereits wieder aufnimmt.
-  `release --status waiting|completed|failed` (bzw. `--if-expired` für abgelaufene Leases) gibt ihn frei.
+  `release --status waiting|completed|failed` (bzw. `--if-expired` für abgelaufene Leases) gibt ihn
+  frei. Bei fremder Rückforderung einer abgelaufenen Lease wird der alte Remote-Owner auf
+  `detached` eingehegt und dessen RDC-Liveness entfernt; es wird kein neuer Heartbeat und keine neue
+  Arbeit erfunden. Auch ein explizites `detach` entfernt die RDC-Liveness.
 
 ### Provider-Re-Check
 

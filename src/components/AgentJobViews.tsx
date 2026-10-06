@@ -294,8 +294,14 @@ export function ControlTower({ state }: { state: AgentSyncState }) {
             <span className={`runtime-pill ${state.scheduler.providerHealth.state}`}>
               {t("agent.substrate.health")}: <strong>{t(`agent.sched.${state.scheduler.providerHealth.state}` as TKey)}</strong>
             </span>
+            <span className={`runtime-pill ${state.scheduler.supervisor.state}`}>
+              {t("agent.substrate.supervisor")}: <strong>{t(`agent.supervisor.${state.scheduler.supervisor.state}` as TKey)}</strong>
+            </span>
+            <span className={`runtime-pill ${state.scheduler.continuation.workerState}`}>
+              {t("agent.substrate.continuationWorker")}: <strong>{t(`agent.worker.${state.scheduler.continuation.workerState}` as TKey)}</strong>
+            </span>
             <span className={`runtime-pill ${state.scheduler.continuation.state}`}>
-              {t("agent.substrate.continuation")}: <strong>{t(`agent.cont.${state.scheduler.continuation.state}` as TKey)}</strong>
+              {t("agent.substrate.continuationPlan")}: <strong>{t(`agent.cont.${state.scheduler.continuation.state}` as TKey)}</strong>
             </span>
           </div>
         </div>
@@ -547,6 +553,7 @@ export function SubstratePanel({ state }: { state: AgentSyncState }) {
   const { t } = useT();
   const { remote, scheduler } = state;
   const health = scheduler.providerHealth;
+  const supervisor = scheduler.supervisor;
   const continuation = scheduler.continuation;
   const rows: Array<{ id: string; title: string; value: string; detail: string; tone: RowState }> = [
     {
@@ -562,6 +569,15 @@ export function SubstratePanel({ state }: { state: AgentSyncState }) {
       value: t(`agent.rdc.${remote.transport}` as TKey),
       detail: remote.transportAt ? t("agent.substrate.seen", { time: clock(remote.transportAt, true) }) : t("agent.substrate.noEvidence"),
       tone: remote.transport === "online" ? "idle" : remote.transport === "stale" ? "offline" : "unknown"
+    },
+    {
+      id: "supervisor",
+      title: t("agent.substrate.supervisor"),
+      value: t(`agent.supervisor.${supervisor.state}` as TKey),
+      detail: supervisor.heartbeatAt
+        ? [supervisor.activity, t("agent.substrate.seen", { time: clock(supervisor.heartbeatAt, true) })].filter(Boolean).join(" · ")
+        : t("agent.substrate.noEvidence"),
+      tone: supervisor.state === "active" ? "active" : supervisor.state === "inactive" ? "idle" : supervisor.state === "stale" ? "offline" : "unknown"
     },
     {
       id: "orchestrator",
@@ -588,8 +604,15 @@ export function SubstratePanel({ state }: { state: AgentSyncState }) {
       tone: health.state === "resuming" ? "active" : health.state === "armed" ? "idle" : health.state === "stale" ? "offline" : "unknown"
     },
     {
-      id: "continuation",
-      title: t("agent.substrate.continuation"),
+      id: "continuationWorker",
+      title: t("agent.substrate.continuationWorker"),
+      value: t(`agent.worker.${continuation.workerState}` as TKey),
+      detail: t("agent.substrate.launchAgent"),
+      tone: continuation.workerState === "running" ? "active" : continuation.workerState === "loaded" ? "idle" : continuation.workerState === "stopped" ? "offline" : "unknown"
+    },
+    {
+      id: "continuationPlan",
+      title: t("agent.substrate.continuationPlan"),
       value: t(`agent.cont.${continuation.state}` as TKey),
       detail: continuation.planId
         ? [
@@ -598,7 +621,7 @@ export function SubstratePanel({ state }: { state: AgentSyncState }) {
             continuation.updatedAt ? clock(continuation.updatedAt) : null
           ].filter(Boolean).join(" · ")
         : t("agent.substrate.noEvidence"),
-      tone: continuation.state === "armed" ? "active" : continuation.state === "stopped" ? "failed" : continuation.state === "waiting_daemon" ? "offline" : continuation.state === "idle" ? "idle" : "unknown"
+      tone: continuation.state === "armed" ? "active" : continuation.state === "failed" ? "failed" : continuation.state === "waiting_daemon" ? "offline" : continuation.state === "idle" ? "idle" : "unknown"
     }
   ];
   return (

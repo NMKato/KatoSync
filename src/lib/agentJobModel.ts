@@ -126,29 +126,59 @@ function laneModel(input: AgentJobModelInput, lane: AgentLaneId | null, remote: 
 export function remoteOrchestratorRuntime(snapshot: LocalControlMonitorSnapshot | null, nowMs: number): RemoteOrchestratorRuntime {
   const lease = snapshot?.orchestration?.remoteOrchestrator;
   if (!lease) {
-    return { transport: "unknown", orchestrator: "unavailable", leaseActive: false, eligible: false };
+    return { transport: "unknown", orchestrator: "unavailable", ownership: "none", leaseActive: false, eligible: false };
   }
   const heartbeat = ms(lease.heartbeatAt);
   const expires = ms(lease.leaseExpiresAt);
   const leaseActive = lease.state !== "detached" && !Number.isNaN(expires) && nowMs < expires;
-  const fresh = leaseActive && nowMs - heartbeat <= REMOTE_HEARTBEAT_FRESH_MS;
+  const heartbeatAge = nowMs - heartbeat;
+  const fresh = leaseActive && heartbeatAge >= -120_000 && heartbeatAge <= REMOTE_HEARTBEAT_FRESH_MS;
+  const claimedItem = lease.jobId
+    ? snapshot?.orchestration?.fallbackJobs.find((item) => item.id === lease.jobId || item.name === lease.jobId)
+    : null;
+  const itemExpires = ms(claimedItem?.leaseExpiresAt);
+  const verifiedClaim = Boolean(
+    lease.state === "working" &&
+    lease.jobId &&
+    claimedItem?.status === "orchestrator_active" &&
+    claimedItem.leaseOwner === lease.sessionId &&
+    !Number.isNaN(itemExpires) &&
+    nowMs < itemExpires &&
+    leaseActive
+  );
   const orchestrator: RemoteOrchestratorRuntime["orchestrator"] =
-    lease.state === "detached" ? "detached" : fresh ? (lease.state === "working" ? "working" : "attached") : "stale";
+    lease.state === "detached"
+      ? "detached"
+      : lease.state === "working"
+        ? verifiedClaim && fresh ? "working" : "stale"
+        : fresh ? "attached" : "stale";
+  const ownership: RemoteOrchestratorRuntime["ownership"] = lease.state === "detached"
+    ? "none"
+    : verifiedClaim && fresh
+      ? "katosync_lane"
+      : verifiedClaim || !leaseActive
+        ? "stale"
+        : lease.jobId || lease.state === "working"
+          ? "unverified"
+          : "external_supervisor";
   const transportAt = lease.transportHeartbeatAt ?? (lease.transport === "rdc" ? lease.heartbeatAt : null);
-  const transport: RemoteOrchestratorRuntime["transport"] = !transportAt
+  const transportAge = nowMs - ms(transportAt);
+  const transport: RemoteOrchestratorRuntime["transport"] = lease.state === "detached" || !transportAt
     ? "unknown"
-    : nowMs - ms(transportAt) <= lease.leaseSeconds * 1000
+    : transportAge >= -120_000 && transportAge <= lease.leaseSeconds * 1000
       ? "online"
       : "stale";
   return {
     transport,
     transportAt,
     orchestrator,
+    ownership,
     attachedAt: lease.attachedAt ?? null,
     heartbeatAt: lease.heartbeatAt,
     leaseExpiresAt: lease.leaseExpiresAt,
     leaseActive,
-    jobId: lease.jobId ?? null,
+    // Nur ein durch Queue-Owner und beide Leases bestaetigter Claim besitzt KatoSync-Arbeit.
+    jobId: verifiedClaim ? lease.jobId ?? null : null,
     device: lease.device ?? null,
     model: lease.model ?? null,
     activity: lease.activity ?? null,
@@ -175,12 +205,23 @@ export function schedulerRuntime(snapshot: LocalControlMonitorSnapshot | null, n
   const continuationState: AgentSchedulerRuntime["continuation"]["state"] = !continuation
     ? "unknown"
     : continuation.status === "failed"
-      ? "stopped"
+      ? "failed"
       : continuation.status === "daemon_unavailable"
         ? "waiting_daemon"
         : continuation.enabled && continuation.status === "running" && continuation.cursor < continuation.waveCount
           ? "armed"
           : "idle";
+  const remote = remoteOrchestratorRuntime(snapshot, nowMs);
+  const rawRemote = snapshot?.orchestration?.remoteOrchestrator;
+  const supervisorState: AgentSchedulerRuntime["supervisor"]["state"] = !rawRemote
+    ? "unknown"
+    : rawRemote.state === "detached"
+      ? "inactive"
+      : rawRemote.jobId || rawRemote.state === "working"
+        ? "inactive"
+        : remote.ownership === "external_supervisor" && remote.orchestrator === "attached"
+          ? "active"
+          : "stale";
   return {
     providerHealth: {
       state: !health
@@ -195,8 +236,14 @@ export function schedulerRuntime(snapshot: LocalControlMonitorSnapshot | null, n
       resumeJob: resume?.name ?? null,
       waitingJobs: health?.waitingFallbackJobs ?? 0
     },
+    supervisor: {
+      state: supervisorState,
+      heartbeatAt: rawRemote?.heartbeatAt ?? null,
+      activity: rawRemote?.activity ?? null
+    },
     continuation: {
       state: continuationState,
+      workerState: continuation?.workerState ?? "unknown",
       planId: continuation?.planId ?? null,
       activeWave: continuation?.activeWaveName ?? null,
       cursor: continuation?.cursor ?? null,
@@ -754,7 +801,9 @@ function startSafety(input: AgentJobModelInput, jobs: AgentJob[], lanes: AgentLa
   if (input.codexRun.status === "running" || input.queueRunning || input.autoLane?.inFlightTaskIds.length) {
     return { safe: false, reason: "runner_busy" };
   }
-  if (remote.leaseActive && remote.jobId) return { safe: false, reason: "orchestrator_lease" };
+  if (remote.leaseActive && (remote.jobId || remote.ownership === "unverified")) {
+    return { safe: false, reason: "orchestrator_lease" };
+  }
   if (jobs.some((job) => job.source === "provider_router" && job.status === "running")) {
     return { safe: false, reason: "handoff_in_flight" };
   }
