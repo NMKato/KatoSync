@@ -25,6 +25,7 @@ import {
   parseRegistry,
   projectDisplayName,
   reconcileLegacy,
+  registryErrorMessage,
   removeProject,
   repoPathFor,
   resolveFinding,
@@ -656,4 +657,19 @@ test("agent job model: out-of-focus plans stay visible but are never the recomme
   assert.equal(focused.jobs.find((job) => job.id === "live-1")?.focus, undefined);
   // Leere Registry: Empfehlungen bleiben wie bisher sichtbar (Dispatch ist trotzdem gesperrt).
   assert.equal(normalizeAgentSyncState({ ...base, focus: buildFocusPolicy(emptyRegistry(NOW)) }).nextJob?.id, "twilio-1");
+});
+
+test("registry save errors keep the real Tauri reason instead of 'Unbekannter Fehler'", () => {
+  // Tauri-Commands mit Result<_, String> lehnen mit einem nackten String ab.
+  assert.equal(
+    registryErrorMessage("Registry enthält ein Secret-Muster und wurde nicht gespeichert."),
+    "Registry enthält ein Secret-Muster und wurde nicht gespeichert."
+  );
+  assert.equal(registryErrorMessage(new Error("Ungültige Registry-Struktur.")), "Ungültige Registry-Struktur.");
+  assert.equal(registryErrorMessage({ message: "Command project_registry_save not found" }), "Command project_registry_save not found");
+  assert.equal(registryErrorMessage("   "), "Unbekannter Fehler.");
+  assert.equal(registryErrorMessage(undefined), "Unbekannter Fehler.");
+  assert.equal(registryErrorMessage({ code: 1 }), "Unbekannter Fehler.");
+  // Defense in Depth: ein Fehlertext darf nie ein Secret-Muster ins Banner tragen.
+  assert.equal(registryErrorMessage("boom DATABASE_URL=x").includes("DATABASE_URL"), false);
 });

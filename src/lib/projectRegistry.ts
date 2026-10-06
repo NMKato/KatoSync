@@ -28,6 +28,24 @@ import {
 import { applyResolution, headlineState, verifyProject } from "./projectVerification.ts";
 
 const NO_PROJECT = "__no_project__";
+const UNKNOWN_ERROR = "Unbekannter Fehler.";
+
+/**
+ * Lesbarer Grund aus einem abgelehnten Registry-Aufruf. Tauri-Commands mit `Result<_, String>` lehnen mit
+ * einem nackten String ab (kein `Error`) – der echte Grund darf im Banner nicht als „Unbekannt“ verschwinden.
+ */
+export function registryErrorMessage(error: unknown): string {
+  const raw =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : error && typeof error === "object" && typeof (error as { message?: unknown }).message === "string"
+          ? (error as { message: string }).message
+          : "";
+  const text = raw.trim();
+  return text ? redactSecrets(text) : UNKNOWN_ERROR;
+}
 
 export function emptyRegistry(now: string): ProjectRegistry {
   return {

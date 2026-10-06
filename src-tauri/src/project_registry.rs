@@ -884,13 +884,18 @@ pub(crate) fn save_registry_to(path: &Path, registry: &serde_json::Value) -> Res
         return Err("Registry enthält ein Secret-Muster und wurde nicht gespeichert.".to_string());
     }
     let temp = path.with_extension("json.tmp");
-    fs::write(&temp, text).map_err(|_| "Registry konnte nicht geschrieben werden.".to_string())?;
+    // Grund ohne Pfad melden (io::Error-Display enthaelt keinen Pfad), damit das Banner diagnostizierbar bleibt.
+    fs::write(&temp, text)
+        .map_err(|error| format!("Registry konnte nicht geschrieben werden ({error})."))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&temp, fs::Permissions::from_mode(0o600));
     }
-    fs::rename(&temp, path).map_err(|_| "Registry konnte nicht gespeichert werden.".to_string())
+    fs::rename(&temp, path).map_err(|error| {
+        let _ = fs::remove_file(&temp);
+        format!("Registry konnte nicht gespeichert werden ({error}).")
+    })
 }
 
 /// Liefert wenige typische lokale Workspace-Wurzeln fuer eine explizit gestartete Auto-Suche.
@@ -1263,6 +1268,27 @@ mod tests {
             .filter(|entry| entry.file_name().to_string_lossy().contains("corrupt"))
             .count();
         assert_eq!(backups, 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn registry_save_failure_reports_reason_without_path_and_cleans_temp() {
+        let dir = temp_dir("registry-fail");
+        // Zielpfad ist ein Ordner: das atomare Umbenennen muss scheitern.
+        let path = dir.join("project-registry.json");
+        fs::create_dir_all(path.join("blocker")).unwrap();
+        let good = serde_json::json!({ "schemaVersion": 1, "projects": [] });
+        let error = save_registry_to(&path, &good).unwrap_err();
+        assert!(
+            error.starts_with("Registry konnte nicht gespeichert werden ("),
+            "{error}"
+        );
+        assert!(error.contains("os error"), "{error}");
+        assert!(
+            !error.contains(&dir.to_string_lossy().into_owned()),
+            "{error}"
+        );
+        assert!(!path.with_extension("json.tmp").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }
