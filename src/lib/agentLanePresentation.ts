@@ -30,6 +30,8 @@ export function agentLaneBrand(lane: AgentLane): AgentLaneBrand {
   if (lane.id === "claude") return "claude";
   if (lane.id === "local") return "kai";
   if (lane.id === "local_control") return "katosync";
+  // Paid API lanes stay visually distinct from the Codex/Claude subscription lanes, whatever model they run.
+  if (lane.id === "api") return "remote";
 
   const model = normalized(lane.model);
   if (/(claude|anthropic)/.test(model)) return "claude";

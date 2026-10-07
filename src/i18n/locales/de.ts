@@ -985,6 +985,7 @@ const de = {
   "agent.status.failed": "Fehlgeschlagen",
   "agent.lane.codex": "Codex",
   "agent.lane.claude": "Claude Code",
+  "agent.lane.api": "API-Lane",
   "agent.lane.local": "Local Brain",
   "agent.lane.remote_orchestrator": "Remote Orchestrator + RDC",
   "agent.lane.local_control": "Local Control",

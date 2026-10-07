@@ -964,6 +964,7 @@ const ru: Record<TKey, string> = {
   "agent.status.failed": "Ошибка",
   "agent.lane.codex": "Codex",
   "agent.lane.claude": "Claude Code",
+  "agent.lane.api": "API-линия",
   "agent.lane.local": "Local Brain",
   "agent.lane.remote_orchestrator": "Remote Orchestrator + RDC",
   "agent.lane.local_control": "Local Control",

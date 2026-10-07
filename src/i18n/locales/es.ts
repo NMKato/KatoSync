@@ -964,6 +964,7 @@ const es: Record<TKey, string> = {
   "agent.status.failed": "Fallido",
   "agent.lane.codex": "Codex",
   "agent.lane.claude": "Claude Code",
+  "agent.lane.api": "Carril API",
   "agent.lane.local": "Local Brain",
   "agent.lane.remote_orchestrator": "Remote Orchestrator + RDC",
   "agent.lane.local_control": "Local Control",
