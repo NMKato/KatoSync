@@ -101,7 +101,7 @@ const knownReasons = new Set<string>([
   "offline", "timed_out", "ready_test_failed", "login_started", "login_in_progress",
   "login_cancelled", "login_timed_out", "login_failed", "no_models", "model_missing",
   "endpoint_auth_required", "endpoint_error", "endpoint_invalid_response", "capability_failed",
-  "insecure_remote_key", "secret_store_unavailable", "local_control_running", "local_control_queue_only",
+  "insecure_remote_key", "endpoint_blocked", "secret_store_unavailable", "local_control_running", "local_control_queue_only",
   "api_key_provider_mismatch"
 ]);
 
@@ -671,7 +671,9 @@ function ApiKeySetup({ vm, onCancel }: { vm: ViewModel; onCancel?: () => void })
             value={vm.apiSetupBaseUrl}
           />
           {vm.apiSetupBaseUrl && endpointError ? (
-            <span className="provider-field-error">{t("providers.api.setup.endpointHttps")}</span>
+            <span className="provider-field-error">
+              {t(endpointError === "https_required" ? "providers.api.setup.endpointHttps" : (`providers.local.error.${endpointError}` as TKey))}
+            </span>
           ) : null}
         </label>
       ) : null}

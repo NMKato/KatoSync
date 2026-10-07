@@ -531,9 +531,11 @@ pub(crate) async fn grounded_chat(context: &str, question: &str) -> Result<Strin
         return Err(anyhow!("Local-Brain-Frage darf nicht leer sein"));
     }
 
+    // Lokal-only: Loopback direkt, nie ueber einen System-Proxy (RAG-Kontext bleibt auf dem Rechner).
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
         .build()?;
     let response = client
         .post(format!("{ENDPOINT}/chat/completions"))
@@ -850,6 +852,8 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
         .build()?;
     for _ in 0..45 {
         if let Ok(response) = client.get(HEALTH_URL).send().await {

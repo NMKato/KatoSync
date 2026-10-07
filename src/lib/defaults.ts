@@ -36,7 +36,8 @@ export const defaultConfig: AppConfig = {
   safety: {
     dryRunDefault: true,
     cleanupEnabled: false,
-    secretScanEnabled: true
+    secretScanEnabled: true,
+    allowUnscannedBinaryUploads: false
   },
   codexAutoPush: true,
   codexCreatePr: true,

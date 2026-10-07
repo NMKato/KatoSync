@@ -416,32 +416,149 @@ export function nextLaneAfterFailure(
   return "local_control";
 }
 
-export type LocalEndpointError = "missing" | "invalid" | "scheme" | "host" | "credentials" | "query";
+export type LocalEndpointError =
+  | "missing"
+  | "invalid"
+  | "scheme"
+  | "host"
+  | "credentials"
+  | "query"
+  | "blocked_network"
+  | "https_required";
 
-export function validateLocalEndpointInput(value: string): LocalEndpointError | null {
+/**
+ * Netzklasse eines Endpoint-Hosts. Spiegelt `endpoint_guard.rs` fuer sofortiges UI-Feedback;
+ * verbindlich bleibt Rust (dort zusaetzlich mit Pruefung jeder DNS-Aufloesung).
+ * - loopback: exakt `localhost`, 127.0.0.0/8, ::1 (HTTP erlaubt, nur Local-Lane)
+ * - private: RFC1918, CGNAT, ULA, LAN-Namen (.local, .lan, .internal, einzelne Labels ...)
+ * - blocked: Link-Local, Cloud-Metadaten, Multicast, Broadcast, unspezifiziert, reserviert
+ * LAN-Endpunkte sind im Release ohne Freischaltmoeglichkeit gesperrt.
+ */
+export type EndpointHostClass = "loopback" | "private" | "blocked" | "public";
+
+const LAN_SUFFIXES = [".local", ".lan", ".home", ".home.arpa", ".internal", ".intranet", ".corp", ".localdomain", ".localhost"];
+
+function classifyIPv4(octets: number[]): EndpointHostClass {
+  const [a, b, c] = octets;
+  const ip = octets.join(".");
+  if (a === 127) return "loopback";
+  if (
+    ip === "168.63.129.16" ||
+    ip === "100.100.100.200" ||
+    a === 0 ||
+    (a === 169 && b === 254) ||
+    a >= 224 ||
+    (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+    (a === 198 && b === 51 && c === 100) ||
+    (a === 203 && b === 0 && c === 113) ||
+    (a === 192 && b === 88 && c === 99) ||
+    (a === 198 && (b & 0xfe) === 18)
+  ) {
+    return "blocked";
+  }
+  if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && (b & 0xc0) === 64)) {
+    return "private";
+  }
+  return "public";
+}
+
+function parseIPv4(host: string): number[] | null {
+  const parts = host.split(".");
+  if (parts.length !== 4 || !parts.every((part) => /^\d{1,3}$/.test(part))) return null;
+  const octets = parts.map(Number);
+  return octets.every((value) => value <= 255) ? octets : null;
+}
+
+function parseIPv6(host: string): number[] | null {
+  if (!host.startsWith("[") || !host.endsWith("]")) return null;
+  const body = host.slice(1, -1).toLowerCase();
+  const halves = body.split("::");
+  if (halves.length > 2) return null;
+  const groups = (value: string) => (value ? value.split(":") : []);
+  const head = groups(halves[0]);
+  const tail = halves.length === 2 ? groups(halves[1]) : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0 || (halves.length === 1 && head.length !== 8)) return null;
+  const all = [...head, ...Array(fill).fill("0"), ...tail];
+  if (all.length !== 8 || !all.every((group) => /^[0-9a-f]{1,4}$/.test(group))) return null;
+  return all.map((group) => parseInt(group, 16));
+}
+
+function embeddedV4(high: number, low: number): number[] {
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff];
+}
+
+function classifyIPv6(seg: number[]): EndpointHostClass {
+  const zeroPrefix = seg.slice(0, 5).every((value) => value === 0);
+  if (zeroPrefix && seg[5] === 0 && seg[6] === 0 && seg[7] === 1) return "loopback";
+  // AWS IMDS IPv6 fd00:ec2::254
+  if (seg[0] === 0xfd00 && seg[1] === 0x0ec2 && seg.slice(2, 7).every((value) => value === 0) && seg[7] === 0x254) {
+    return "blocked";
+  }
+  if (zeroPrefix && seg[5] === 0xffff) return classifyIPv4(embeddedV4(seg[6], seg[7]));
+  if (zeroPrefix && seg[5] === 0) return "blocked";
+  if (seg[0] === 0x64 && seg[1] === 0xff9b && seg.slice(2, 6).every((value) => value === 0)) {
+    return classifyIPv4(embeddedV4(seg[6], seg[7]));
+  }
+  if (seg[0] === 0x2002) return classifyIPv4(embeddedV4(seg[1], seg[2])) === "public" ? "public" : "blocked";
+  if ((seg[0] & 0xfe00) === 0xfc00) return "private";
+  const globalUnicast = (seg[0] & 0xe000) === 0x2000;
+  const special =
+    (seg[0] === 0x2001 && seg[1] < 0x0200) || (seg[0] === 0x2001 && seg[1] === 0x0db8) || (seg[0] & 0xfff0) === 0x3ff0;
+  return globalUnicast && !special ? "public" : "blocked";
+}
+
+/** Klassifiziert den bereits per WHATWG-URL kanonisierten Hostnamen. */
+export function classifyEndpointHost(hostname: string): EndpointHostClass {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  const v4 = parseIPv4(host);
+  if (v4) return classifyIPv4(v4);
+  if (host.startsWith("[")) {
+    const v6 = parseIPv6(host);
+    return v6 ? classifyIPv6(v6) : "blocked";
+  }
+  if (host === "localhost") return "loopback";
+  if (!host.includes(".") || LAN_SUFFIXES.some((suffix) => host.endsWith(suffix))) return "private";
+  return "public";
+}
+
+function endpointSyntaxError(value: string): { error: LocalEndpointError } | { url: URL } {
   const trimmed = value.trim();
-  if (!trimmed) return "missing";
-  if (trimmed.length > 2048 || /[\s\u0000-\u001f\u007f]/.test(trimmed)) return "invalid";
+  if (!trimmed) return { error: "missing" };
+  if (trimmed.length > 2048 || /[\s\u0000-\u001f\u007f]/.test(trimmed)) return { error: "invalid" };
   let url: URL;
   try {
     url = new URL(trimmed);
   } catch {
-    return "invalid";
+    return { error: "invalid" };
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return "scheme";
-  if (!url.hostname) return "host";
-  if (url.username || url.password) return "credentials";
-  if (url.search || url.hash || trimmed.includes("?") || trimmed.includes("#")) return "query";
-  return null;
+  if (url.protocol !== "http:" && url.protocol !== "https:") return { error: "scheme" };
+  if (!url.hostname) return { error: "host" };
+  // Auch ein leeres `user@` ist ein Credential-Versuch.
+  const authority = trimmed.split("://")[1]?.split(/[/?#]/)[0] ?? "";
+  if (url.username || url.password || authority.includes("@")) return { error: "credentials" };
+  if (url.search || url.hash || trimmed.includes("?") || trimmed.includes("#")) return { error: "query" };
+  return { url };
 }
 
-export type ApiEndpointError = LocalEndpointError | "https_required";
+/** Local-Lane: exaktes Loopback (HTTP/HTTPS) oder oeffentliches HTTPS. LAN/privat ist gesperrt. */
+export function validateLocalEndpointInput(value: string): LocalEndpointError | null {
+  const parsed = endpointSyntaxError(value);
+  if ("error" in parsed) return parsed.error;
+  const hostClass = classifyEndpointHost(parsed.url.hostname);
+  if (hostClass === "loopback") return null;
+  if (hostClass !== "public") return "blocked_network";
+  return parsed.url.protocol === "https:" ? null : "https_required";
+}
 
-/** Custom OpenAI-compatible Endpunkte: Keys gehen nur per HTTPS raus (Rust prueft zusaetzlich den Scope). */
+export type ApiEndpointError = LocalEndpointError;
+
+/** Custom OpenAI-compatible API-Endpunkte: ausschliesslich oeffentliches HTTPS, nie Loopback/LAN. */
 export function validateCustomApiEndpointInput(value: string): ApiEndpointError | null {
-  const base = validateLocalEndpointInput(value);
-  if (base) return base;
-  return new URL(value.trim()).protocol === "https:" ? null : "https_required";
+  const parsed = endpointSyntaxError(value);
+  if ("error" in parsed) return parsed.error;
+  if (classifyEndpointHost(parsed.url.hostname) !== "public") return "blocked_network";
+  return parsed.url.protocol === "https:" ? null : "https_required";
 }
 
 // Fehlercodes, die die API-Setup-UI uebersetzt. Alles andere wird generisch, nie roh angezeigt.
@@ -455,6 +572,7 @@ const API_ERROR_CODES = new Set<string>([
   "endpoint_invalid_response",
   "capability_failed",
   "insecure_remote_key",
+  "endpoint_blocked",
   "secret_store_unavailable",
   "quota_limited",
   "capacity_limited",

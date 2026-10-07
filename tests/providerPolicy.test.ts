@@ -28,7 +28,8 @@ import {
   providerTransitions,
   redactDiagnostic,
   toProviderSettings,
-  validateLocalEndpointInput
+  validateLocalEndpointInput,
+  classifyEndpointHost
 } from "../src/lib/providerPolicy.ts";
 import type { ApiProviderConfig, ProviderId, ProviderStatus } from "../src/types.ts";
 
@@ -169,6 +170,71 @@ test("local endpoint validation rejects credentials and injection-shaped URLs", 
   assert.equal(validateLocalEndpointInput("http://localhost:1234/#x"), "query");
   assert.equal(validateLocalEndpointInput("http://localhost:1234/\nHost: evil"), "invalid");
   assert.equal(validateLocalEndpointInput("http://localhost:1234 ; rm -rf /"), "invalid");
+  assert.equal(validateLocalEndpointInput("http://@localhost:1234"), "credentials");
+});
+
+test("local endpoints allow plain HTTP only for exact loopback and block LAN/metadata by default", () => {
+  for (const ok of [
+    "http://127.0.0.1:11434",
+    "http://127.8.9.10:1234",
+    "http://localhost:1234/v1",
+    "http://LOCALHOST.:1234",
+    "http://[::1]:1234/v1",
+    "http://2130706433:11434",
+    "https://models.example.test/v1",
+    "https://172.40.0.5:8000"
+  ]) {
+    assert.equal(validateLocalEndpointInput(ok), null, ok);
+  }
+  for (const blocked of [
+    "http://169.254.169.254/latest/meta-data",
+    "https://169.254.169.254/v1",
+    "https://[fd00:ec2::254]/v1",
+    "https://[::ffff:169.254.169.254]/v1",
+    "https://[64:ff9b::a9fe:a9fe]/v1",
+    "https://[2002:a9fe:a9fe::1]/v1",
+    "https://[fe80::1]/v1",
+    "http://10.0.0.5:8000",
+    "https://172.16.0.1",
+    "https://192.168.1.20:11434",
+    "https://100.64.1.1",
+    "https://[fd12:3456::1]:1234",
+    "https://0.0.0.0:11434",
+    "https://224.0.0.1",
+    "https://255.255.255.255",
+    "https://[::]/v1",
+    "https://[ff02::1]/v1",
+    "http://studio.local:1234",
+    "https://metadata.google.internal/computeMetadata/v1",
+    "https://router.home.arpa",
+    "https://ollama:11434",
+    "https://foo.localhost",
+    "https://0xa9fea9fe/",
+    "https://2852039166/",
+    "https://168.63.129.16/",
+    "https://100.100.100.200/"
+  ]) {
+    assert.equal(validateLocalEndpointInput(blocked), "blocked_network", blocked);
+  }
+  assert.equal(validateLocalEndpointInput("http://models.example.test/v1"), "https_required");
+  assert.equal(validateLocalEndpointInput("http://172.40.0.5:8000"), "https_required");
+});
+
+test("endpoint host classification mirrors the Rust guard", () => {
+  assert.equal(classifyEndpointHost("127.0.0.1"), "loopback");
+  assert.equal(classifyEndpointHost("[::1]"), "loopback");
+  assert.equal(classifyEndpointHost("[::ffff:7f00:1]"), "loopback");
+  assert.equal(classifyEndpointHost("localhost"), "loopback");
+  assert.equal(classifyEndpointHost("169.254.169.254"), "blocked");
+  assert.equal(classifyEndpointHost("[fd00:ec2::254]"), "blocked");
+  assert.equal(classifyEndpointHost("[2001:db8::1]"), "blocked");
+  assert.equal(classifyEndpointHost("[2002:c0a8:101::1]"), "blocked");
+  assert.equal(classifyEndpointHost("10.1.2.3"), "private");
+  assert.equal(classifyEndpointHost("[::ffff:a00:1]"), "private");
+  assert.equal(classifyEndpointHost("1.1.1.1"), "public");
+  assert.equal(classifyEndpointHost("[2606:4700::1111]"), "public");
+  assert.equal(classifyEndpointHost("[64:ff9b::101:101]"), "public");
+  assert.equal(classifyEndpointHost("gateway.example.com"), "public");
 });
 
 test("API provider presets are remote HTTPS endpoints and keep EU routing explicit", () => {
@@ -408,12 +474,26 @@ test("custom OpenAI-compatible endpoints must be https without credentials or qu
   assert.equal(validateCustomApiEndpointInput("https://user:pw@gateway.example.com/v1"), "credentials");
   assert.equal(validateCustomApiEndpointInput("https://gateway.example.com/v1?key=x"), "query");
   assert.equal(validateCustomApiEndpointInput(""), "missing");
+  // API-Lane: nie Loopback, LAN oder Metadaten – auch nicht per HTTPS.
+  for (const blocked of [
+    "https://127.0.0.1:8443/v1",
+    "https://localhost/v1",
+    "http://localhost:1234/v1",
+    "https://169.254.169.254/latest",
+    "https://[fd00:ec2::254]/v1",
+    "https://10.1.2.3/v1",
+    "https://[fe80::1]/v1",
+    "https://metadata.google.internal/v1"
+  ]) {
+    assert.equal(validateCustomApiEndpointInput(blocked), "blocked_network", blocked);
+  }
 });
 
 test("API error codes are allow-listed and never echo raw messages or secrets", () => {
   const secret = "sk-ant-api03-EXAMPLEONLYSECRET0000";
   assert.equal(apiErrorCode("endpoint_auth_required"), "endpoint_auth_required");
   assert.equal(apiErrorCode("api_key_provider_mismatch"), "api_key_provider_mismatch");
+  assert.equal(apiErrorCode("endpoint_blocked"), "endpoint_blocked");
   assert.equal(apiErrorCode(new Error("api_budget_exceeded")), "api_budget_exceeded");
   for (const raw of [new Error(`401 invalid key ${secret}`), `bad ${secret}`, { key: secret }, null]) {
     const code = apiErrorCode(raw);

@@ -25,7 +25,9 @@ use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
+mod cloud_boundary;
 mod context_pack;
+mod endpoint_guard;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
@@ -173,6 +175,10 @@ pub struct SafetyConfig {
     dry_run_default: bool,
     cleanup_enabled: bool,
     secret_scan_enabled: bool,
+    // Ausdrueckliche Freigabe fuer PDF/Bild-Uploads, die lokal nicht auf Secrets pruefbar sind.
+    // Default AUS: ohne Freigabe werden Binaerdokumente nie hochgeladen (siehe cloud_boundary).
+    #[serde(default)]
+    allow_unscanned_binary_uploads: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,6 +200,12 @@ pub struct ScanSummary {
     relevant_files: usize,
     skipped_files: usize,
     secret_warnings: usize,
+    // PDF/Bilder, die mangels Freigabe nicht hochgeladen werden.
+    #[serde(default)]
+    binary_consent_required: usize,
+    // PDF/Bilder, die mit Freigabe OHNE Inhalts-Secret-Scan hochgeladen wuerden.
+    #[serde(default)]
+    unscanned_binary_uploads: usize,
     findings: Vec<FileFinding>,
 }
 
@@ -3635,7 +3647,15 @@ async fn sync_once(
                         }
                     }
                 }
-                match upload_with_backoff(&key, &config.library_id, &file_path, app).await {
+                match upload_with_backoff(
+                    &key,
+                    &config.library_id,
+                    &file_path,
+                    config.safety.allow_unscanned_binary_uploads,
+                    app,
+                )
+                .await
+                {
                     Ok(result) => uploaded.push(result),
                     Err(error) => {
                         let message = format!(
@@ -3707,6 +3727,8 @@ fn scan_roots(config: &AppConfig) -> Result<ScanSummary> {
     let mut relevant_files = 0usize;
     let mut skipped_files = 0usize;
     let mut secret_warnings = 0usize;
+    let mut binary_consent_required = 0usize;
+    let mut unscanned_binary_uploads = 0usize;
 
     for root in config
         .source_roots
@@ -3774,6 +3796,22 @@ fn scan_roots(config: &AppConfig) -> Result<ScanSummary> {
             } else if metadata.len() > config.scan_rules.max_file_size_mb * 1024 * 1024 {
                 skipped = true;
                 reason = Some("Datei größer als Maximalgröße".to_string());
+            } else if category == "document" && cloud_boundary::is_unscannable_binary(&path) {
+                // Vorschau = dieselbe Entscheidung wie beim Upload (fail-closed, kein Secret-Scan).
+                match cloud_boundary::check_upload(
+                    &path,
+                    metadata.len(),
+                    config.safety.allow_unscanned_binary_uploads,
+                ) {
+                    Ok(_) => unscanned_binary_uploads += 1,
+                    Err(block) => {
+                        if block == cloud_boundary::UploadBlock::ConsentRequired {
+                            binary_consent_required += 1;
+                        }
+                        skipped = true;
+                        reason = Some(block.message().to_string());
+                    }
+                }
             }
 
             if skipped {
@@ -3799,6 +3837,8 @@ fn scan_roots(config: &AppConfig) -> Result<ScanSummary> {
         relevant_files,
         skipped_files,
         secret_warnings,
+        binary_consent_required,
+        unscanned_binary_uploads,
         findings,
     })
 }
@@ -4124,7 +4164,10 @@ fn render_briefing(
     text.push_str("\n## Hinweise\n\n");
     text.push_str("- CURRENT-Dateien sind der aktuelle Stand.\n");
     text.push_str("- Datierte Snapshot-Ordner dienen nur als lokales Archiv.\n");
-    text.push_str("- Dateien mit Secret-Mustern werden nicht hochgeladen.\n");
+    text.push_str("- Textdateien mit Secret-Mustern werden nicht hochgeladen.\n");
+    text.push_str(
+        "- PDF/Bilder sind lokal nicht auf Secrets pruefbar und gehen nur nach ausdruecklicher Freigabe raus.\n",
+    );
     Ok(text)
 }
 
@@ -4312,6 +4355,7 @@ async fn upload_with_backoff(
     api_key: &str,
     library_id: &str,
     file_path: &Path,
+    allow_unscanned_binary: bool,
     app: Option<&AppHandle>,
 ) -> Result<UploadResult> {
     // Kuerzerer, interaktiv-tauglicher Backoff (statt 30/60/120 = bis 3,5 Min stumm): 10/30/60s,
@@ -4319,7 +4363,7 @@ async fn upload_with_backoff(
     let waits = [10_u64, 30, 60];
     let file_name = file_path.file_name().and_then(OsStr::to_str).unwrap_or("");
     for attempt in 0..=waits.len() {
-        match upload_document(api_key, library_id, file_path).await {
+        match upload_document(api_key, library_id, file_path, allow_unscanned_binary).await {
             Ok(result) => return Ok(result),
             // Monats-Token-Budget ODER Tages-Dokumentlimit erschoepft: Backoff/Retry hilft heute NICHT
             // -> sofort scheitern (statt 4x sinnlos zu grinden + das Minuten-Limit hochzutreiben).
@@ -4373,67 +4417,57 @@ async fn upload_document(
     api_key: &str,
     library_id: &str,
     file_path: &Path,
+    allow_unscanned_binary: bool,
 ) -> Result<UploadResult> {
     let file_name = file_path
         .file_name()
         .and_then(OsStr::to_str)
         .ok_or_else(|| anyhow!("Ungültiger Dateiname"))?
         .to_string();
+    let blocked = |reason: &str| UploadResult {
+        file_name: file_name.clone(),
+        document_id: None,
+        processing_status: None,
+        rate_limits: Vec::new(),
+        success: false,
+        error: Some(reason.to_string()),
+    };
     // Secrets nie hochladen: Dateiname-Marker greift fuer Text UND Binaer (.env/.key/.pem/...).
     if file_name_has_secret_marker(file_path) {
-        return Ok(UploadResult {
-            file_name,
-            document_id: None,
-            processing_status: None,
-            rate_limits: Vec::new(),
-            success: false,
-            error: Some("Secret-Datei vom Upload ausgeschlossen.".to_string()),
-        });
+        return Ok(blocked("Secret-Datei vom Upload ausgeschlossen."));
     }
+    // Typ-/Groessen-Allowlist + Binaer-Freigabe VOR dem Lesen des Inhalts (fail-closed).
+    let size = fs::metadata(file_path)
+        .with_context(|| format!("Datei kann nicht gelesen werden: {}", file_path.display()))?
+        .len();
+    let kind = match cloud_boundary::check_upload(file_path, size, allow_unscanned_binary) {
+        Ok(kind) => kind,
+        Err(block) => return Ok(blocked(block.message())),
+    };
+    let mime = kind.mime;
 
-    let lower = file_name.to_lowercase();
-    let is_binary = lower.ends_with(".pdf")
-        || lower.ends_with(".png")
-        || lower.ends_with(".jpg")
-        || lower.ends_with(".jpeg");
-
-    let (bytes, mime): (Vec<u8>, &str) = if is_binary {
-        // Binaer (PDF/Bild): direkt als Bytes hochladen. Inhalts-Secret-Scan ist auf
-        // Binaerdaten nicht moeglich -> Schutz ueber Dateiname + Ordner-Ausschluss (Scan).
+    let bytes: Vec<u8> = if kind.check == cloud_boundary::ContentCheck::Unscannable {
+        // Binaer (PDF/Bild): ausdruecklich freigegeben und Signatur geprueft. Ein Inhalts-
+        // Secret-Scan ist hier NICHT moeglich und wird auch nicht behauptet.
         let data = fs::read(file_path)
             .with_context(|| format!("Datei kann nicht gelesen werden: {}", file_path.display()))?;
-        let mime = if lower.ends_with(".pdf") {
-            "application/pdf"
-        } else if lower.ends_with(".png") {
-            "image/png"
-        } else {
-            "image/jpeg"
-        };
-        (data, mime)
+        if !cloud_boundary::signature_matches(mime, &data) {
+            return Ok(blocked(
+                cloud_boundary::UploadBlock::SignatureMismatch.message(),
+            ));
+        }
+        data
     } else {
         let content = fs::read_to_string(file_path)
             .with_context(|| format!("Datei kann nicht gelesen werden: {}", file_path.display()))?;
         if secret_regex().is_match(&content) {
-            return Ok(UploadResult {
-                file_name,
-                document_id: None,
-                processing_status: None,
-                rate_limits: Vec::new(),
-                success: false,
-                error: Some("Secret-Muster im Upload-Inhalt erkannt.".to_string()),
-            });
+            return Ok(blocked("Secret-Muster im Upload-Inhalt erkannt."));
         }
-        let mime = if lower.ends_with(".txt") {
-            "text/plain"
-        } else if lower.ends_with(".json") {
-            "application/json"
-        } else if lower.ends_with(".csv") {
-            "text/csv"
-        } else {
-            "text/markdown"
-        };
-        (content.into_bytes(), mime)
+        content.into_bytes()
     };
+    if bytes.len() as u64 > cloud_boundary::MAX_CLOUD_UPLOAD_BYTES {
+        return Ok(blocked(cloud_boundary::UploadBlock::TooLarge.message()));
+    }
 
     let url = format!("https://api.mistral.ai/v1/libraries/{library_id}/documents");
     let part = Part::bytes(bytes)
@@ -4915,6 +4949,7 @@ fn default_config() -> Result<AppConfig> {
             dry_run_default: false,
             cleanup_enabled: false,
             secret_scan_enabled: true,
+            allow_unscanned_binary_uploads: false,
         },
         codex_auto_push: true,
         codex_create_pr: true,
@@ -5529,6 +5564,8 @@ mod context_pack_pipeline_tests {
             relevant_files: 1,
             skipped_files: 0,
             secret_warnings: 0,
+            binary_consent_required: 0,
+            unscanned_binary_uploads: 0,
             findings: vec![FileFinding {
                 path: source_path.to_string_lossy().to_string(),
                 relative_path: "PROJECT_STATUS.md".to_string(),
@@ -5672,6 +5709,104 @@ mod context_pack_pipeline_tests {
             .iter()
             .all(|warning| !warning.contains(secret_value)));
 
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod cloud_upload_gate_tests {
+    use super::*;
+
+    fn document_root() -> (PathBuf, AppConfig) {
+        let temp_dir =
+            std::env::temp_dir().join(format!("katosync-upload-gate-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        fs::write(temp_dir.join("offer.pdf"), b"%PDF-1.7\nbinary").unwrap();
+        fs::write(
+            temp_dir.join("disguised.pdf"),
+            b"plain text pretending to be a pdf",
+        )
+        .unwrap();
+        fs::write(temp_dir.join("notes.md"), "# Notes\n- harmless\n").unwrap();
+        fs::write(temp_dir.join("archive.zip"), b"PK\x03\x04").unwrap();
+        let mut config = default_config().unwrap();
+        config.scan_rules.include_documents = true;
+        config.source_roots = vec![temp_dir.to_string_lossy().to_string()];
+        config.output_dir = temp_dir.join("out").to_string_lossy().to_string();
+        (temp_dir, config)
+    }
+
+    fn finding<'a>(scan: &'a ScanSummary, name: &str) -> &'a FileFinding {
+        scan.findings
+            .iter()
+            .find(|finding| finding.relative_path == name)
+            .unwrap()
+    }
+
+    #[test]
+    fn scan_preview_gates_unscannable_binaries_without_consent() {
+        let (temp_dir, config) = document_root();
+        assert!(!config.safety.allow_unscanned_binary_uploads);
+        let scan = scan_roots(&config).unwrap();
+        let pdf = finding(&scan, "offer.pdf");
+        assert!(pdf.skipped);
+        assert!(pdf.reason.as_deref().unwrap().contains("Freigabe"));
+        assert_eq!(scan.binary_consent_required, 2);
+        assert_eq!(scan.unscanned_binary_uploads, 0);
+        assert!(!finding(&scan, "notes.md").skipped);
+        assert!(finding(&scan, "archive.zip").skipped);
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn scan_preview_counts_consented_binaries_and_rejects_disguised_text() {
+        let (temp_dir, mut config) = document_root();
+        config.safety.allow_unscanned_binary_uploads = true;
+        let scan = scan_roots(&config).unwrap();
+        assert!(!finding(&scan, "offer.pdf").skipped);
+        let disguised = finding(&scan, "disguised.pdf");
+        assert!(disguised.skipped);
+        assert_eq!(
+            disguised.reason.as_deref(),
+            Some(cloud_boundary::UploadBlock::SignatureMismatch.message())
+        );
+        assert_eq!(scan.binary_consent_required, 0);
+        assert_eq!(scan.unscanned_binary_uploads, 1);
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn upload_path_fails_closed_before_any_network_call() {
+        let (temp_dir, _) = document_root();
+        let key = "sk-test-upload-gate-0000000000";
+        // Ohne Freigabe: Binaerdatei wird nie gelesen oder gesendet.
+        let pdf = upload_document(key, "lib", &temp_dir.join("offer.pdf"), false)
+            .await
+            .unwrap();
+        assert!(!pdf.success);
+        assert_eq!(
+            pdf.error.as_deref(),
+            Some(cloud_boundary::UploadBlock::ConsentRequired.message())
+        );
+        // Mit Freigabe: umbenannte Textdatei bleibt blockiert.
+        let disguised = upload_document(key, "lib", &temp_dir.join("disguised.pdf"), true)
+            .await
+            .unwrap();
+        assert_eq!(
+            disguised.error.as_deref(),
+            Some(cloud_boundary::UploadBlock::SignatureMismatch.message())
+        );
+        // Nicht gelistete Typen gehen nie raus.
+        let zip = upload_document(key, "lib", &temp_dir.join("archive.zip"), true)
+            .await
+            .unwrap();
+        assert_eq!(
+            zip.error.as_deref(),
+            Some(cloud_boundary::UploadBlock::UnsupportedType.message())
+        );
+        for result in [&pdf, &disguised, &zip] {
+            assert!(!format!("{result:?}").contains(key));
+        }
         fs::remove_dir_all(&temp_dir).unwrap();
     }
 }

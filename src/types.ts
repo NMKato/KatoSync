@@ -23,6 +23,8 @@ export interface SafetyConfig {
   dryRunDefault: boolean;
   cleanupEnabled: boolean;
   secretScanEnabled: boolean;
+  // Ausdrueckliche Freigabe fuer PDF/Bild-Uploads ohne lokalen Secret-Scan. Default aus.
+  allowUnscannedBinaryUploads?: boolean;
 }
 
 export interface AppConfig {
@@ -232,6 +234,7 @@ export type ProviderReason =
   | "endpoint_invalid_response"
   | "capability_failed"
   | "insecure_remote_key"
+  | "endpoint_blocked"
   | "secret_store_unavailable"
   | "local_control_running"
   | "local_control_queue_only"
@@ -388,6 +391,10 @@ export interface ScanSummary {
   relevantFiles: number;
   skippedFiles: number;
   secretWarnings: number;
+  // PDF/Bilder, die mangels Freigabe nicht hochgeladen werden (lokal nicht pruefbar).
+  binaryConsentRequired?: number;
+  // PDF/Bilder, die mit Freigabe OHNE Inhalts-Secret-Scan hochgeladen wuerden.
+  unscannedBinaryUploads?: number;
   findings: FileFinding[];
 }
 

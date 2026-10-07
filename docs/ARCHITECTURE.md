@@ -91,7 +91,29 @@ Service einen `reason`-Code, den das Frontend übersetzt (Rust liefert keine UI-
 - READY-Tests laufen im System-Temp-Verzeichnis, damit keine Projektdateien oder Projekt-Instruktionen geladen werden.
 - Login-Prozesse bekommen ein offenes, nie beschriebenes stdin; KatoSync liest nur stdout/stderr, um eine offizielle HTTPS-Login-URL (Host-Allowlist) als Fallback-Link zu melden. Diese URL wird nie geloggt.
 - KatoSync besitzt die CLI-Credentials nicht und ruft beim Trennen keinen CLI-Logout auf.
-- KatoSync-eigene Secrets liegen ausschließlich im OS-Schlüsselbund (`com.nmkato.katosync`; macOS Keychain, Windows Credential Manager, Linux Keyutils): der optionale lokale Endpoint-Key (`local-provider-api-key`) und je API-Slot ein Key (`api-provider-api-key:<slot-id>`). Jeder Key ist an den Endpoint-Origin gebunden, wird nur an genau diesen Origin gesendet (entfernt nur über HTTPS) und beim Trennen gelöscht. Config, REX, Ledger, Logs und Commits enthalten nie Rohkeys.
+- KatoSync-eigene Secrets liegen ausschließlich im OS-Schlüsselbund (`com.nmkato.katosync`; macOS Keychain, Windows Credential Manager, Linux Keyutils): der optionale lokale Endpoint-Key (`local-provider-api-key`) und je API-Slot ein Key (`api-provider-api-key:<slot-id>`). Jeder Key ist an den Endpoint-Origin gebunden, wird nur an genau diesen Origin gesendet (Klartext-HTTP nur an exaktes Loopback, sonst HTTPS) und beim Trennen gelöscht. Config, REX, Ledger, Logs und Commits enthalten nie Rohkeys.
+
+### Netzwerk- und Cloud-Grenze
+
+- **Custom Endpoints** (`endpoint_guard.rs`, gespiegelt in `providerPolicy.ts`): Local Lane erlaubt
+  exaktes Loopback (`localhost`, 127.0.0.0/8, `::1`; HTTP oder HTTPS) oder öffentliches HTTPS. Die
+  API Lane erlaubt ausschließlich öffentliches HTTPS. Private/RFC1918/CGNAT/ULA, Link-Local,
+  Cloud-Metadaten (u. a. 169.254.169.254, `fd00:ec2::254`, IPv4-mapped/NAT64/6to4-Formen),
+  Multicast, Broadcast, unspezifizierte und reservierte Bereiche sowie LAN-Namen (`.local`,
+  `.internal`, einzelne Labels …) werden mit `endpoint_blocked` abgelehnt. Eine LAN-Freischaltung
+  gibt es im Release nicht; käme sie später, dann nur als getrennte, ausdrückliche Expert-Option.
+- **DNS/Rebinding:** Jeder Endpoint-Client nutzt einen eigenen Resolver, der jede Auflösung beim
+  Verbindungsaufbau gegen die Zielklasse prüft (gemischte Antworten → komplett gesperrt). Kein
+  Proxy (würde die Prüfung umgehen), keine Redirects → Credentials verlassen nie den validierten Origin.
+- **URL-Credentials** (`user@`, `user:pw@`), Query und Fragment sind verboten.
+- **Lokal-only vs. Upload** (`cloud_boundary.rs`): Scan/Vorschau, Dry-Run, CURRENT-/Snapshot-Dateien,
+  Context Pack, Local Brain und Provider-Erkennung bleiben auf dem Rechner. Inhalte verlassen ihn nur
+  über den Mistral-Library-Sync, den API-Lane-Worker und die KatoSync-Web-API.
+- **Datei-Uploads:** feste Typ-Allowlist (md/markdown/txt/json/csv, pdf/png/jpg/jpeg) und harte
+  50-MiB-Grenze. Text wird vor dem Upload vollständig lokal auf Secret-Muster geprüft. PDF/Bilder
+  sind nicht prüfbar und gehen nur mit `safety.allowUnscannedBinaryUploads` (Default aus) und
+  passender Datei-Signatur raus; die Scan-Vorschau zeigt zurückgehaltene und ungeprüfte Dateien an.
+  Es gibt keinen Cloud-DLP-Dienst.
 
 ### Routingvertrag
 
