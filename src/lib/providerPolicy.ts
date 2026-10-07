@@ -3,6 +3,8 @@
 // Endpoint-Validierung und redigierte Diagnosen. Keine Seiteneffekte, keine Secrets.
 import type {
   AgentLaneId,
+  ApiProviderConfig,
+  ApiProviderPreset,
   LocalProviderConfig,
   LocalProviderKind,
   ProviderDisplayState,
@@ -13,7 +15,18 @@ import type {
   ProviderTransition
 } from "../types";
 
-export const DEFAULT_PROVIDER_PRIORITY: ProviderId[] = ["codex", "claude", "local", "local_control"];
+export const DEFAULT_PROVIDER_PRIORITY: ProviderId[] = ["codex", "claude", "api", "local", "local_control"];
+
+export const API_PROVIDER_PRESETS: Record<Exclude<ApiProviderPreset, "custom_openai">, { label: string; baseUrl: string }> = {
+  openai: { label: "OpenAI API", baseUrl: "https://api.openai.com/v1" },
+  anthropic: { label: "Anthropic API", baseUrl: "https://api.anthropic.com/v1" },
+  openrouter_global: { label: "OpenRouter Global", baseUrl: "https://openrouter.ai/api/v1" },
+  openrouter_eu: { label: "OpenRouter EU", baseUrl: "https://eu.openrouter.ai/api/v1" },
+  deepseek: { label: "DeepSeek API", baseUrl: "https://api.deepseek.com/v1" },
+  mistral: { label: "Mistral API", baseUrl: "https://api.mistral.ai/v1" },
+  xai: { label: "xAI API", baseUrl: "https://api.x.ai/v1" },
+  zai: { label: "Z.AI / GLM API", baseUrl: "https://api.z.ai/api/paas/v4" }
+};
 
 // Provider melden Kontingent-/Kapazitaetsgrenzen selten mit Reset-Zeit. Spaetestens nach zehn
 // Minuten wird der billige Auth-/Netzstatus erneuert; READY-Probes bleiben bedarfsgebunden.
@@ -62,9 +75,63 @@ export function moveProvider(priority: ProviderId[], provider: ProviderId, direc
   return next;
 }
 
+// Obergrenze schuetzt vor Tippfehlern (z. B. 100000 statt 100). Ungueltig = kein Budget.
+export const MAX_API_MONTHLY_BUDGET_USD = 50_000;
+
+export function normalizeApiBudget(value: unknown): number | null {
+  const amount = typeof value === "string" ? Number(value.replace(",", ".")) : value;
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return null;
+  return Math.round(Math.min(amount, MAX_API_MONTHLY_BUDGET_USD) * 100) / 100;
+}
+
+export type ApiRouteBlock = "api_not_configured" | "api_connection_unavailable" | "api_budget_exceeded";
+
+export interface ApiRouteDecision {
+  connection: ApiProviderConfig | null;
+  source: "explicit" | "project" | "auto" | null;
+  block: ApiRouteBlock | null;
+}
+
+function routable(connection: ApiProviderConfig): boolean {
+  return connection.enabled && connection.model.trim().length > 0;
+}
+
+/**
+ * Waehlt genau einen API-Slot fuer einen Lauf. Fail-closed: Eine explizite oder projektbezogene
+ * Wahl wird nie still auf einen anderen bezahlten Provider umgeleitet. Auto-Routing nimmt nur
+ * Slots im Budget; "fallback"-Slots kommen erst, wenn kein regulaerer Slot verfuegbar ist.
+ */
+export function resolveApiConnection(
+  connections: ApiProviderConfig[],
+  options: { connectionId?: string | null; projectId?: string | null; projectPreferences?: Record<string, string> },
+  monthSpendUsd: Record<string, number> = {}
+): ApiRouteDecision {
+  const overBudget = (connection: ApiProviderConfig) => {
+    const budget = normalizeApiBudget(connection.monthlyBudgetUsd);
+    return budget !== null && (monthSpendUsd[connection.id] ?? 0) >= budget;
+  };
+  const pinnedId = options.connectionId?.trim() || null;
+  const projectId = options.projectId?.trim() || null;
+  const preferredId = pinnedId ?? (projectId ? options.projectPreferences?.[projectId] ?? null : null);
+  if (preferredId) {
+    const source = pinnedId ? "explicit" : "project";
+    const connection = connections.find((item) => item.id === preferredId) ?? null;
+    if (!connection || !routable(connection)) return { connection: null, source, block: "api_connection_unavailable" };
+    if (overBudget(connection)) return { connection: null, source, block: "api_budget_exceeded" };
+    return { connection, source, block: null };
+  }
+  const candidates = connections.filter(routable);
+  if (!candidates.length) return { connection: null, source: null, block: "api_not_configured" };
+  const inBudget = candidates.filter((connection) => !overBudget(connection));
+  if (!inBudget.length) return { connection: null, source: "auto", block: "api_budget_exceeded" };
+  const connection = inBudget.find((item) => item.mode !== "fallback") ?? inBudget[0];
+  return { connection, source: "auto", block: null };
+}
+
 export function toProviderSettings(
   disabledProviders: ProviderId[],
-  localProvider: LocalProviderConfig
+  localProvider: LocalProviderConfig,
+  apiProviders: ApiProviderConfig[]
 ): ProviderSettings {
   return {
     disabledProviders: disabledProviders.filter((provider) => provider !== "local_control"),
@@ -72,7 +139,19 @@ export function toProviderSettings(
       kind: localProvider.kind,
       baseUrl: localProvider.baseUrl.trim(),
       model: localProvider.model.trim()
-    }
+    },
+    apiProviders: apiProviders.map((connection) => ({
+      id: connection.id,
+      label: connection.label.trim(),
+      preset: connection.preset,
+      baseUrl: connection.baseUrl.trim(),
+      model: connection.model.trim(),
+      effort: connection.effort,
+      mode: connection.mode,
+      capabilities: [...connection.capabilities],
+      enabled: connection.enabled,
+      monthlyBudgetUsd: normalizeApiBudget(connection.monthlyBudgetUsd)
+    }))
   };
 }
 
@@ -108,8 +187,8 @@ export function providerDisplayState(
   connecting = false
 ): ProviderDisplayState {
   if (connecting) return "connecting";
-  if (!status) return provider === "local" ? "notConfigured" : "connect";
-  if (!status.installed) return provider === "local" ? "notConfigured" : "notInstalled";
+  if (!status) return provider === "local" || provider === "api" ? "notConfigured" : "connect";
+  if (!status.installed) return provider === "local" || provider === "api" ? "notConfigured" : "notInstalled";
   if (!status.enabled) return "disabled";
   switch (status.state) {
     case "available":
@@ -301,7 +380,7 @@ export function providerRecheckPlan(
 }
 
 // ===== Agent-Lanes: intelligente Failover-Kette + deterministisches Substrat =====
-export const AGENT_LANE_ORDER: AgentLaneId[] = ["codex", "claude", "local", "remote_orchestrator", "local_control"];
+export const AGENT_LANE_ORDER: AgentLaneId[] = ["codex", "claude", "api", "local", "remote_orchestrator", "local_control"];
 
 export function isIntelligentLane(lane: AgentLaneId): boolean {
   return lane !== "local_control";
@@ -356,11 +435,56 @@ export function validateLocalEndpointInput(value: string): LocalEndpointError | 
   return null;
 }
 
+export type ApiEndpointError = LocalEndpointError | "https_required";
+
+/** Custom OpenAI-compatible Endpunkte: Keys gehen nur per HTTPS raus (Rust prueft zusaetzlich den Scope). */
+export function validateCustomApiEndpointInput(value: string): ApiEndpointError | null {
+  const base = validateLocalEndpointInput(value);
+  if (base) return base;
+  return new URL(value.trim()).protocol === "https:" ? null : "https_required";
+}
+
+// Fehlercodes, die die API-Setup-UI uebersetzt. Alles andere wird generisch, nie roh angezeigt.
+const API_ERROR_CODES = new Set<string>([
+  "not_configured",
+  "invalid_endpoint",
+  "no_models",
+  "model_missing",
+  "endpoint_auth_required",
+  "endpoint_error",
+  "endpoint_invalid_response",
+  "capability_failed",
+  "insecure_remote_key",
+  "secret_store_unavailable",
+  "quota_limited",
+  "capacity_limited",
+  "offline",
+  "timed_out",
+  "api_key_provider_mismatch",
+  "api_provider_choice_required",
+  "api_key_invalid",
+  "api_not_configured",
+  "api_connection_unavailable",
+  "api_budget_exceeded",
+  "api_worker_unavailable"
+]);
+
+/**
+ * Bildet beliebige Fehler (Tauri-Reason-Strings, Errors, Fremdtexte) auf einen bekannten Code ab.
+ * Rohtexte werden nie durchgereicht, damit kein Key-Fragment in UI, Logs oder Toasts landet.
+ */
+export function apiErrorCode(error: unknown): string {
+  const raw = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+  const code = raw.trim();
+  return API_ERROR_CODES.has(code) ? code : "api_request_failed";
+}
+
 // Spiegelt die Rust-Redaction (provider_manager::redact) fuer alles, was in die Zwischenablage geht.
 export function redactDiagnostic(value: string): string {
   return value
     .replace(/[\r\n\t]+/g, " ")
-    .replace(/\b(?:sk|sess|oauth|token|rk|pk|ghp|gho|xox[a-z])[-_][A-Za-z0-9._-]{8,}/gi, "<redacted>")
+    .replace(/\b(?:sk|sess|oauth|token|rk|pk|ghp|gho|xai|xox[a-z])[-_][A-Za-z0-9._-]{8,}/gi, "<redacted>")
+    .replace(/\b[0-9a-f]{32}\.[A-Za-z0-9]{16}\b/g, "<redacted>")
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer <redacted>")
     .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+/g, "<redacted-jwt>")
     .replace(

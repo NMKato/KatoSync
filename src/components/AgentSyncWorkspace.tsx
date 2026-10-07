@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import {
   Activity,
   AlertTriangle,
+  Calculator,
   ArrowRight,
   CheckCircle2,
   Clock3,
@@ -26,6 +27,8 @@ import {
 import { useT, type TFunc, type TKey } from "../i18n";
 import { providerDisplayState } from "../lib/providerPolicy";
 import { isInActiveFocus } from "../lib/projectFocus";
+import { balancedOption, bestFitOption, cheapestKnownOption, estimateProject, fastestOption } from "../lib/apiCostPlanner";
+import { apiMonthSpendByConnection } from "../lib/apiUsageLedger";
 import {
   agentReadiness,
   jobStage,
@@ -48,13 +51,13 @@ import {
   duration,
   laneLabel
 } from "./AgentJobViews";
-import type { ProviderId } from "../types";
+import type { ActionTask, ProviderId } from "../types";
 import type { StepId, useKatoSyncViewModel } from "../viewmodels/useKatoSyncViewModel";
 
 type ViewModel = ReturnType<typeof useKatoSyncViewModel>;
 type Navigate = (step: StepId) => void;
 
-const modelProviders: ProviderId[] = ["codex", "claude", "local"];
+const modelProviders: ProviderId[] = ["codex", "claude", "api", "local"];
 
 function providerLabel(vm: ViewModel, provider: ProviderId): string {
   return vm.providerStatuses.find((entry) => entry.provider === provider)?.label ?? fallbackLabels[provider];
@@ -489,6 +492,175 @@ function LastRunnerResult({ vm }: { vm: ViewModel }) {
   );
 }
 
+function formatEstimateUsd(value: number | null): string {
+  if (value == null) return "—";
+  if (value > 0 && value < 0.001) return "< $0.001";
+  return `$${value.toFixed(value < 0.1 ? 3 : 2)}`;
+}
+
+function ProjectCostPlanner({ vm }: { vm: ViewModel }) {
+  const { t } = useT();
+  const configuredApis = vm.apiProviders.filter((connection) => connection.enabled && connection.model.trim());
+  const monthSpend = apiMonthSpendByConnection();
+  const taskGroups = new Map<string, ActionTask[]>();
+
+  vm.actionPlans
+    .flatMap((plan) => plan.tasks)
+    .filter((task) => !["completed", "rejected", "failed", "deferred"].includes(task.status))
+    .forEach((task) => {
+      const current = taskGroups.get(task.projectId) ?? [];
+      current.push(task);
+      taskGroups.set(task.projectId, current);
+    });
+
+  if (!taskGroups.size) return null;
+
+  return (
+    <div className="glass agent-card api-cost-planner">
+      <CardTitle icon={<Calculator size={17} />} title={t("agent.cost.title")} />
+      <p className="agent-route-note">{t("agent.cost.note")}</p>
+      {!configuredApis.length ? (
+        <div className="api-cost-empty">
+          <strong>{t("agent.cost.noApis")}</strong>
+          <span>{t("agent.cost.noApisHint")}</span>
+        </div>
+      ) : (
+        <div className="api-cost-projects">
+          {[...taskGroups.entries()].map(([projectId, tasks]) => {
+            const estimate = estimateProject(projectId, tasks, configuredApis, monthSpend);
+            const best = bestFitOption(estimate);
+            const cheapest = cheapestKnownOption(estimate);
+            const fastest = fastestOption(estimate);
+            const balanced = balancedOption(estimate);
+            const preferredId = vm.apiProjectPreferences[projectId] ?? "";
+            return (
+              <section className="api-cost-project" key={projectId}>
+                <header>
+                  <div>
+                    <span>{projectId === NO_PROJECT_ID ? t("agent.jobs.noProject") : projectId}</span>
+                    <strong>{t("agent.cost.tasks", { count: tasks.length })}</strong>
+                  </div>
+                  <label>
+                    {t("agent.cost.projectChoice")}
+                    <select
+                      onChange={(event) =>
+                        void vm.handleSetProjectApiPreference(projectId, event.target.value || null)
+                      }
+                      value={preferredId}
+                    >
+                      <option value="">{t("agent.cost.auto")}</option>
+                      {configuredApis.map((connection) => (
+                        <option key={connection.id} value={connection.id}>
+                          {connection.label || connection.model} · {connection.model}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </header>
+
+                <div className="api-cost-summary">
+                  <span>
+                    <small>{t("agent.cost.balanced")}</small>
+                    <strong>{balanced ? `${balanced.model} · ${formatEstimateUsd(balanced.estimatedCostUsd)}` : "—"}</strong>
+                  </span>
+                  <span>
+                    <small>{t("agent.cost.bestFit")}</small>
+                    <strong>{best ? `${best.model} · ${best.fit}%` : "—"}</strong>
+                  </span>
+                  <span>
+                    <small>{t("agent.cost.fastest")}</small>
+                    <strong>{fastest ? fastest.model : "—"}</strong>
+                  </span>
+                  <span>
+                    <small>{t("agent.cost.lowest")}</small>
+                    <strong>{cheapest ? formatEstimateUsd(cheapest.estimatedCostUsd) : "—"}</strong>
+                  </span>
+                  <span>
+                    <small>{t("agent.cost.variableOnly")}</small>
+                    <strong>{t("agent.cost.subscriptionsSeparate")}</strong>
+                  </span>
+                </div>
+
+                <div className="api-cost-options" role="table" aria-label={t("agent.cost.compare")}>
+                  {estimate.options.map((option) => (
+                    <div
+                      className={`api-cost-option${preferredId === option.connectionId ? " selected" : ""}${option.supported && !option.blocked ? "" : " weak"}`}
+                      key={option.connectionId}
+                      role="row"
+                    >
+                      <div>
+                        <strong>{option.model}</strong>
+                        <small>{option.providerLabel}</small>
+                      </div>
+                      <span>
+                        <small>{t("agent.cost.fit")}</small>
+                        <strong>{option.fit}%</strong>
+                      </span>
+                      <span>
+                        <small>{t("agent.cost.effort")}</small>
+                        <strong>{t(`providers.api.effort.${option.effort}` as TKey)}</strong>
+                      </span>
+                      <span>
+                        <small>{t("agent.cost.speed")}</small>
+                        <strong>{t(`providers.api.speed.${option.speed}` as TKey)}</strong>
+                      </span>
+                      <span>
+                        <small>{t("agent.cost.estimate")} · {t("agent.cost.estimateBadge")}</small>
+                        <strong>≈ {formatEstimateUsd(option.estimatedCostUsd)}</strong>
+                      </span>
+                      {option.blocked === "over_budget" ? (
+                        <span className="api-cost-blocked">{t("agent.cost.overBudget")}</span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+
+                <details className="api-task-costs">
+                  <summary>{t("agent.cost.taskBreakdown")}</summary>
+                  <div className="api-task-cost-list">
+                    {estimate.taskPlans.map((taskPlan) => (
+                      <article className="api-task-cost" key={taskPlan.task.taskId}>
+                        <div>
+                          <strong>{taskPlan.task.title}</strong>
+                          <small>
+                            {taskPlan.task.required.join(" · ")} · ~{Math.round((taskPlan.task.inputTokens + taskPlan.task.outputTokens) / 1000)}k tokens
+                          </small>
+                        </div>
+                        <span>
+                          <small>{t("agent.cost.balanced")}</small>
+                          <strong>
+                            {taskPlan.balanced
+                              ? `${taskPlan.balanced.model} · ${formatEstimateUsd(taskPlan.balanced.estimatedCostUsd)}`
+                              : "—"}
+                          </strong>
+                        </span>
+                        <span>
+                          <small>{t("agent.cost.lowest")}</small>
+                          <strong>
+                            {taskPlan.cheapest
+                              ? `${taskPlan.cheapest.model} · ${formatEstimateUsd(taskPlan.cheapest.estimatedCostUsd)}`
+                              : "—"}
+                          </strong>
+                        </span>
+                        <span>
+                          <small>{t("agent.cost.bestFit")}</small>
+                          <strong>{taskPlan.bestFit ? `${taskPlan.bestFit.model} · ${taskPlan.bestFit.fit}%` : "—"}</strong>
+                        </span>
+                      </article>
+                    ))}
+                  </div>
+                </details>
+
+                <p className="api-cost-disclaimer">{t("agent.cost.planOnly")} {t("agent.cost.disclaimer")}</p>
+              </section>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ===== Jobs & Queue =====
 export function AgentSyncJobs({ vm, onOpenMistralTasks }: { vm: ViewModel; onOpenMistralTasks: () => void }) {
   const { t } = useT();
@@ -528,6 +700,8 @@ export function AgentSyncJobs({ vm, onOpenMistralTasks }: { vm: ViewModel; onOpe
         onToggle={vm.handleSetAutoMode}
         plan={state.autoLanes}
       />
+
+      <ProjectCostPlanner vm={vm} />
 
       <div className="glass agent-card">
         <CardTitle icon={<ListChecks size={17} />} title={t("agent.queue.title")} />
