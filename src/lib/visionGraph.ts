@@ -20,6 +20,7 @@ import type {
   RegistryProject,
   VerificationState
 } from "../types.ts";
+import { agentBrandAsset, agentLaneBrand, agentLaneDisplayModel, type AgentBrandAsset } from "./agentLanePresentation.ts";
 import type { LocalBrainStatus } from "./localBrainCatalog.ts";
 
 export const VISION_GRAPH_SCHEMA = "katosync.vision-graph/v1";
@@ -54,8 +55,11 @@ export type VisionSource =
   | "local_control"
   | "remote_orchestrator"
   | "mistral_library";
-/** Freigegebene lokale Marken-Assets (public/). Alles andere zeigt Initialen. */
-export type VisionAsset = "katosync" | "kai";
+/**
+ * Freigegebene lokale Marken-Assets (public/). Dieselbe Markenwahrheit wie Live Control
+ * (agentLanePresentation); unbekannte Identitaet zeigt Initialen.
+ */
+export type VisionAsset = AgentBrandAsset;
 /** Quellen, die in dieser Projektion fehlen (ehrlich ausgewiesen statt erfunden). */
 export type VisionOmission = "device_identity" | "project_registry" | "memory_fabric" | "agent_lanes" | "local_brain";
 
@@ -605,8 +609,9 @@ export function buildVisionGraph(input: VisionGraphInput): VisionGraph {
     g.node({
       id: LOCAL_BRAIN_NODE_ID,
       kind: "local_brain",
-      label: rexBoundHere ? "REX" : "Local Brain",
-      short: rexBoundHere ? "REX" : "LB",
+      // Sichtbare Identitaet des Local Brain ist Kai (wie Live Control); REX bleibt als Identitaets-Fakt.
+      label: "Kai",
+      short: "KAI",
       subtitle: brain.modelName || null,
       asset: "kai",
       scope: "local",
@@ -615,6 +620,7 @@ export function buildVisionGraph(input: VisionGraphInput): VisionGraph {
       activity: brain.running ? "ready" : "offline",
       source: "local_brain",
       facts: [
+        ...(rexBoundHere ? fact("identity", "rex_main", "code") : []),
         ...fact("model", brain.modelName),
         ...fact("runtime", brain.running ? "running" : brain.runtimeInstalled ? "installed" : "not_installed", "code"),
         ...fact(
@@ -683,7 +689,9 @@ export function buildVisionGraph(input: VisionGraphInput): VisionGraph {
       kind,
       label: LANE_LABEL[lane.id],
       short: lane.id === "local_control" ? "LC" : lane.id === "remote_orchestrator" ? "RO" : initials(LANE_LABEL[lane.id]),
-      subtitle: lane.model ?? null,
+      subtitle: agentLaneDisplayModel(lane),
+      // Remote Orchestrator: Marke nur aus veroeffentlichtem Modell, sonst neutral (Initialen).
+      asset: agentBrandAsset(agentLaneBrand(lane)),
       scope,
       truth,
       freshness,
