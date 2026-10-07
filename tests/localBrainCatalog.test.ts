@@ -48,6 +48,7 @@ test("model package metadata is versioned, separate from the runtime and layout-
 
 test("embedded manifest carries no credentials, signed URLs or own-channel base yet", () => {
   assert.equal(manifest.distribution.baseUrl, null);
+  assert.deepEqual(manifest.distribution.redirectHosts, ["release-assets.githubusercontent.com", "*.hf.co"]);
   const urls = [...manifest.models.map((entry) => entry.url), ...Object.values(manifest.runtime.targets).map((t) => t.url)];
   for (const raw of urls) {
     const url = new URL(raw);
@@ -55,6 +56,14 @@ test("embedded manifest carries no credentials, signed URLs or own-channel base 
     assert.equal(url.search, "");
     assert.equal(url.username + url.password, "");
     assert.ok(manifest.distribution.allowedHosts.includes(url.hostname), url.hostname);
+  }
+  for (const target of Object.values(manifest.runtime.targets)) {
+    assert.ok(Number.isSafeInteger(target.sizeBytes) && target.sizeBytes > 0);
+    assert.match(target.sha256, /^[0-9a-f]{64}$/);
+  }
+  for (const entry of manifest.models) {
+    assert.equal(entry.package.objectKey.includes("/latest/"), false);
+    assert.ok(entry.package.objectKey.includes(`/${entry.package.version}/`));
   }
   assert.doesNotMatch(JSON.stringify(manifest), /secret|signature|password|bearer|api.?key|account.?id|access.?key|x-amz-|[?&]token=/i);
 });

@@ -25,15 +25,22 @@ use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
+mod agent_boundary;
+mod cloud_boundary;
 mod context_pack;
+mod endpoint_guard;
 mod local_brain;
+mod local_brain_runtime;
 mod local_control;
 mod memory_fabric;
 mod model_distribution;
+mod model_trust;
 mod orchestration;
 mod project_registry;
 mod provider_manager;
 mod provider_warmup;
+mod runner_guard;
+mod safe_archive;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -93,6 +100,11 @@ pub struct AppConfig {
     // Standard AUS (offline/sandboxed, Schutz vor Exfiltration).
     #[serde(default)]
     runner_connector_mode: bool,
+    // Trusted-local Developer-Policy (Standard AUS, auch in Release): erlaubt freie Code-Ausfuehrung
+    // (Local Control: npm/cargo/python3/... mit beliebigen Argumenten; Claude-Runner:
+    // --dangerously-skip-permissions im Connector-Modus). Nie aus Task-/Repo-/RAG-Text ableitbar.
+    #[serde(default)]
+    local_control_developer_mode: bool,
     // KatoContext: lokaler Referenzordner (Lebenslauf/Zeugnisse/Kontext). Wird im Datei-Modus vor
     // dem Lauf nach <repo>/KatoContext/ materialisiert; bleibt lokal (nie in Mistral-Library).
     #[serde(default)]
@@ -125,6 +137,27 @@ pub struct AppConfig {
 
 fn default_true() -> bool {
     true
+}
+
+impl AppConfig {
+    /// Explizite, vom Nutzer gewaehlte Runner-Ordner (projectExternalId -> Pfad).
+    pub(crate) fn project_repos(&self) -> &std::collections::HashMap<String, String> {
+        &self.project_repos
+    }
+
+    pub(crate) fn local_control_developer_mode(&self) -> bool {
+        self.local_control_developer_mode
+    }
+}
+
+/// Liest config.json ohne Seiteneffekte (kein Default-Anlegen, kein Zurueckschreiben). Fuer
+/// Policy-Entscheidungen in Daemon/Runner: fehlt oder ist die Datei kaputt -> None (fail-closed).
+pub(crate) fn read_config_snapshot() -> Option<AppConfig> {
+    let path = config_path().ok()?;
+    let content = fs::read_to_string(path).ok()?;
+    let mut config: AppConfig = serde_json::from_str(&content).ok()?;
+    normalize_config(&mut config);
+    Some(config)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +206,10 @@ pub struct SafetyConfig {
     dry_run_default: bool,
     cleanup_enabled: bool,
     secret_scan_enabled: bool,
+    // Ausdrueckliche Freigabe fuer PDF/Bild-Uploads, die lokal nicht auf Secrets pruefbar sind.
+    // Default AUS: ohne Freigabe werden Binaerdokumente nie hochgeladen (siehe cloud_boundary).
+    #[serde(default)]
+    allow_unscanned_binary_uploads: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,6 +231,12 @@ pub struct ScanSummary {
     relevant_files: usize,
     skipped_files: usize,
     secret_warnings: usize,
+    // PDF/Bilder, die mangels Freigabe nicht hochgeladen werden.
+    #[serde(default)]
+    binary_consent_required: usize,
+    // PDF/Bilder, die mit Freigabe OHNE Inhalts-Secret-Scan hochgeladen wuerden.
+    #[serde(default)]
+    unscanned_binary_uploads: usize,
     findings: Vec<FileFinding>,
 }
 
@@ -381,6 +424,7 @@ pub fn run() {
         ])
         .setup(|app| {
             let _ = app.path().app_data_dir().map(fs::create_dir_all);
+            local_brain::register_app(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -1882,12 +1926,19 @@ fn ensure_git_excludes(repo_path: &str) {
 }
 
 async fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usize {
-    let dst = format!("{repo_path}/KatoContext");
-    let _ = fs::remove_dir_all(&dst); // frisch: Referenzordner koennte sich geaendert haben
-    if fs::create_dir_all(&dst).is_err() {
-        let _ = write_log("codex", "KatoContext konnte nicht angelegt werden.");
+    // Frisch materialisieren (Referenzordner koennte sich geaendert haben) – aber nur einen eigenen,
+    // von KatoSync markierten Ordner ersetzen; fremde KatoContext-Ordner bleiben unangetastet.
+    if let Err(error) = runner_guard::clear_owned_kato_context(Path::new(repo_path)) {
+        let _ = write_log("codex", &format!("KatoContext uebersprungen: {error}"));
         return 0;
     }
+    let dst = match runner_guard::create_owned_kato_context(Path::new(repo_path)) {
+        Ok(dir) => dir.to_string_lossy().to_string(),
+        Err(error) => {
+            let _ = write_log("codex", &format!("KatoContext: {error}"));
+            return 0;
+        }
+    };
     let pdftotext = pdftotext_bin();
     let mut count = 0usize;
     let Ok(entries) = fs::read_dir(reference_root) else {
@@ -2232,10 +2283,27 @@ fn extract_session_id(events: &str) -> Option<String> {
     None
 }
 
-fn git_capture(repo: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+/// git fuer KatoSyncs EIGENE Runner-Schritte (add/commit/checkout/merge/push). Repo-lokale Hooks und
+/// fsmonitor sind abgeschaltet: ein schreibender Agent koennte sonst `.git/hooks/*` bzw. `core.fsmonitor`
+/// anlegen und KatoSync (ausserhalb jeder Sandbox) zur Ausfuehrung bringen. Keine Terminal-Prompts.
+fn runner_git(repo: &str) -> Command {
+    let mut command = Command::new("git");
+    command
+        .args([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+        ])
         .arg("-C")
         .arg(repo)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null());
+    command
+}
+
+fn git_capture(repo: &str, args: &[&str]) -> Result<String, String> {
+    let output = runner_git(repo)
         .args(args)
         .output()
         .map_err(error_to_string)?;
@@ -2252,9 +2320,7 @@ fn git_capture(repo: &str, args: &[&str]) -> Result<String, String> {
 // Wie git_capture, aber liefert rohes stdout ohne Trim — fuer NUL-getrennte (-z) Ausgaben,
 // bei denen git Pfade unescaped laesst (sonst quotet git Nicht-ASCII/Umlaute mit fuehrendem '"').
 fn git_capture_raw(repo: &str, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
+    let output = runner_git(repo)
         .args(args)
         .output()
         .map_err(error_to_string)?;
@@ -2397,10 +2463,15 @@ async fn check_codex_task(
         }
     }
 
-    // Lokaler Merge-Check (z.B. manuell gemerged ohne PR).
+    // Lokaler Merge-Check (z.B. manuell gemerged ohne PR) – nur in registrierten Projektordnern,
+    // weil er `git fetch` (Netz + Ref-Schreiben) ausfuehrt.
     let repo = repo_path.trim();
     let br = branch.trim();
-    if !repo.is_empty() && Path::new(repo).is_dir() && !br.is_empty() {
+    let registered = !repo.is_empty()
+        && agent_boundary::WriteScope::load()
+            .resolve(Path::new(repo), None)
+            .is_ok();
+    if registered && !br.is_empty() {
         let default_branch = detect_default_branch(repo);
         let _ = git_capture(repo, &["fetch", "origin", &default_branch]); // best effort
         for base in [format!("origin/{default_branch}"), default_branch.clone()] {
@@ -2440,15 +2511,37 @@ async fn run_codex_task(
     if !repo.is_dir() {
         return Err(format!("Projektordner nicht gefunden: {repo_path}"));
     }
+    // Schreib-Scope: nur registrierte kanonische Projektwurzeln (Project Registry bzw. explizite
+    // Runner-Zuordnung) oder deren verknuepfte Worktrees. Alles andere fail-closed.
+    let scoped = agent_boundary::WriteScope::load()
+        .resolve(repo, None)
+        .map_err(|e| format!("Runner-Lauf abgelehnt: {e}"))?;
+    let repo_path = scoped.path.to_string_lossy().to_string();
+    // Writer-Ownership (prozessuebergreifend mit Local Control und Provider-Router).
+    let control_root = app_support_dir().map_err(error_to_string)?.join("control");
+    let _writer = agent_boundary::acquire_writer(
+        &control_root,
+        &scoped.writer_key_path(),
+        &format!(
+            "runner:{}",
+            slugify(&req.title).chars().take(40).collect::<String>()
+        ),
+    )
+    .map_err(|e| format!("Runner-Lauf abgelehnt: {e}"))?;
     let config = load_config_inner().map_err(error_to_string)?;
     // Coding-Modus an = GitHub (Branch/Push/PR), aus = Datei-Modus (lokal). Datei-Modus ist Standard.
     let file_mode = !config.codex_coding_mode;
     // Multi-Runner: Codex (Default) oder Claude Code CLI.
     let is_claude = req.runner.as_deref() == Some("claude_cli");
     let runner_label = if is_claude { "Claude" } else { "Codex" };
-    // Keine sourceRoots-Allowlist mehr: der Nutzer waehlt den Ordner bewusst im
-    // Datei-Dialog (= explizite Freigabe). Schutz kommt aus Git-Repo-Pflicht,
-    // sauberem Arbeitsbaum, eigenem Branch, Sandbox und critical-Abbruch.
+    // Der Ordner muss registriert sein (oben). Zusaetzlicher Schutz: Git-Repo-Pflicht, sauberer
+    // Arbeitsbaum (Coding-Modus), eigener Branch, Sandbox, Writer-Lease und critical-Abbruch.
+    // Faehigkeiten (Schreiben/Netz/freie Kommandos) kommen nur aus lokaler Config, nie aus dem Prompt.
+    let policy = runner_guard::runner_policy(
+        req.dry_run,
+        config.runner_connector_mode,
+        config.local_control_developer_mode,
+    );
     if is_claude {
         // Claude Code CLI: nur Binary/PATH pruefen (claude --version). Die Auth (Claude-Abo-Login,
         // keine API-Kosten) wird NICHT vorab geprueft -> fehlende Auth/Limit zeigt sich als Lauf-Fehler.
@@ -2495,7 +2588,12 @@ async fn run_codex_task(
     ensure_git_excludes(&repo_path);
     // Stale KatoContext eines frueheren Laufs IMMER entfernen (auch wenn jetzt kein/ein anderer
     // Referenzordner gesetzt ist oder im Coding-Modus) -> private Daten ueberleben ihre Quelle nicht.
-    let _ = fs::remove_dir_all(format!("{repo_path}/KatoContext"));
+    if let Err(error) = runner_guard::clear_owned_kato_context(Path::new(&repo_path)) {
+        let _ = write_log(
+            "codex",
+            &format!("KatoContext bleibt unveraendert: {error}"),
+        );
+    }
     if file_mode && !is_git {
         // NUR ein frisch angelegtes Repo: aktuellen Inhalt als Ausgangszustand committen, damit
         // ein HEAD existiert und der spaetere Diff nur Codex' neue Dateien zeigt. Lokal, ohne Push.
@@ -2627,6 +2725,11 @@ async fn run_codex_task(
     } else {
         "\n\n## Faktenbasis (verbindlich)\nNutze ausschliesslich Angaben, die woertlich in der Aufgabe oben stehen. ERFINDE NICHTS hinzu (keine Adressen, Ansprechpartner, Namen, Daten, Zahlen). Fehlt eine Angabe, LASS SIE WEG (kein Platzhalter, kein [bitte ergaenzen])."
     };
+    // Eigene Ergebnis-Artefakte: Zustand des Ergebnisordners VOR dem Lauf merken, damit ein
+    // Fehlschlag nur die von diesem Lauf neu angelegten Eintraege entfernt.
+    let result_dir_abs = Path::new(&repo_path).join(&result_rel);
+    let result_dir_existed = result_dir_abs.is_dir();
+    let result_before = runner_guard::snapshot_tree(&result_dir_abs);
     let effective_prompt = if file_mode {
         let result_dir = format!("{repo_path}/{result_rel}");
         fs::create_dir_all(&result_dir).map_err(error_to_string)?;
@@ -2639,6 +2742,10 @@ async fn run_codex_task(
         // geprueft (Wahrheit); keine Datei-Modus-Schreibbeschraenkung.
         format!("{}{context_block}", req.prompt)
     };
+    let effective_prompt = format!(
+        "{effective_prompt}{}",
+        runner_guard::boundary_notice(policy)
+    );
 
     // Immer von main/Default abzweigen (nicht vom aktuellen HEAD -> kein Codex-auf-Codex-Stapeln).
     let _ = git_capture(&repo_path, &["fetch", "origin", &default_branch]); // best effort
@@ -2653,35 +2760,20 @@ async fn run_codex_task(
             sanitize_log(&req.title)
         ),
     );
-    // Datei-Modus erlaubt einen unsauberen Baum -> pre-existierende fremde Aenderungen merken,
-    // damit der spaetere "ausserhalb geschrieben"-Check sie NICHT als Codex-Verstoss wertet.
-    let pre_dirty: std::collections::HashSet<String> = if file_mode {
-        git_capture_raw(
-            &repo_path,
-            &[
-                "-c",
-                "core.quotepath=false",
-                "status",
-                "--porcelain",
-                "-z",
-                "--",
-                ":!.katosync",
-                ":!KatoContext",
-            ],
+    // Datei-Modus erlaubt einen unsauberen Baum -> Fingerprint aller uncommitteten/ungetrackten
+    // Eintraege merken. Danach zaehlen nur ECHTE Aenderungen ausserhalb des Ergebnisordners als
+    // Verstoss; fremde Vorarbeit wird weder mitcommittet noch zurueckgesetzt.
+    let pre_fingerprint = if file_mode {
+        Some(
+            runner_guard::worktree_fingerprint(Path::new(&repo_path)).ok_or_else(|| {
+                "Arbeitsbaum-Zustand nicht lesbar; Lauf aus Sicherheitsgruenden abgebrochen."
+                    .to_string()
+            })?,
         )
-        .unwrap_or_default()
-        .split(|b| *b == 0)
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-            String::from_utf8_lossy(s)
-                .chars()
-                .skip(3)
-                .collect::<String>()
-        })
-        .collect()
     } else {
-        std::collections::HashSet::new()
+        None
     };
+    let base_head = git_capture(&repo_path, &["rev-parse", "HEAD"]).ok();
 
     if let Some(plan_id) = &req.action_plan_id {
         if let Err(e) = patch_action_plan_status_inner(&req.base_url, plan_id, "running").await {
@@ -2703,12 +2795,7 @@ async fn run_codex_task(
     }
 
     // ---- codex exec (Sandbox + Timeout) ----
-    let sandbox = if req.dry_run {
-        "read-only"
-    } else {
-        "workspace-write"
-    };
-    let timeout_secs = req.timeout_secs.unwrap_or(900);
+    let timeout_secs = runner_guard::clamp_timeout(req.timeout_secs);
     let output_path = format!("{run_dir}/output.txt");
     let events_path = format!("{run_dir}/execution_log.jsonl");
     let stderr_path = format!("{run_dir}/codex_stderr.log");
@@ -2719,66 +2806,44 @@ async fn run_codex_task(
     let mut codex_error: Option<String> = None;
     let mut exit_code: Option<i32> = None;
     // Nur der exec-Aufruf ist runner-spezifisch; spawn/Reader/Timeout teilen sich beide.
-    let mut command = if is_claude {
-        // Claude Code CLI: headless, ordnergebunden, schreibend, stream-json Live-Feed.
-        // permission-mode plan = read-only (Dry-Run), acceptEdits = Datei-Edits/Writes im Ordner.
-        // Hinweis: acceptEdits genehmigt NUR Datei-Edits (ideal fuer Datei-Modus/Dokumente);
-        // Bash/Shell wird headless nicht auto-genehmigt -> Code-Aufgaben mit Build/Test sind
-        // mit dem Claude-Runner derzeit eingeschraenkt. Hat kein -o: finaler Ergebnis-Text
-        // wird unten aus dem result-Event gezogen.
-        let mut c = TokioCommand::new(claude_bin());
-        c.arg("-p")
-            .arg(&effective_prompt)
-            .arg("--output-format")
-            .arg("stream-json")
-            .arg("--verbose");
-        if req.dry_run {
-            c.arg("--permission-mode").arg("plan");
-        } else if config.runner_connector_mode {
-            // Connector-Modus (opt-in): alle Tools/Connectoren ohne Nachfrage nutzen.
-            c.arg("--dangerously-skip-permissions");
+    // argv kommt ausschliesslich aus runner_guard (Policy aus lokaler Config); der Prompt ist genau
+    // ein Argument. Claude: plan = read-only (Dry-Run), acceptEdits = Datei-Edits im Ordner;
+    // --dangerously-skip-permissions nur mit Connector-Modus UND lokaler Developer-Policy.
+    // Codex: Sandbox read-only/workspace-write, Netz explizit an/aus.
+    let launch = runner_guard::RunnerLaunch {
+        is_claude,
+        policy,
+        prompt: &effective_prompt,
+        repo: &repo_path,
+        output_path: &output_path,
+        model: if is_claude {
+            &config.claude_model
         } else {
-            c.arg("--permission-mode").arg("acceptEdits");
-        }
-        c.arg("--add-dir").arg(&repo_path);
-        if !config.claude_model.trim().is_empty() {
-            c.arg("--model").arg(config.claude_model.trim());
-        }
-        if !config.claude_effort.trim().is_empty() {
-            c.arg("--effort").arg(config.claude_effort.trim());
-        }
-        c.current_dir(&repo_path);
-        c
-    } else {
-        let mut c = TokioCommand::new(codex_bin());
-        c.arg("exec")
-            .arg(&effective_prompt)
-            .arg("--cd")
-            .arg(&repo_path)
-            .arg("--sandbox")
-            .arg(sandbox)
-            .arg("--json")
-            .arg("-o")
-            .arg(&output_path)
-            .arg("--color")
-            .arg("never")
-            .arg("-c")
-            .arg("approval_policy=\"never\"");
-        if !config.codex_model.trim().is_empty() {
-            c.arg("-m").arg(config.codex_model.trim());
-        }
-        if config.runner_connector_mode {
-            // Connector-Modus (opt-in): Netzzugriff im Sandbox erlauben -> Connectoren erreichbar.
-            c.arg("-c")
-                .arg("sandbox_workspace_write.network_access=true");
-        }
-        c
+            &config.codex_model
+        },
+        effort: if is_claude { &config.claude_effort } else { "" },
     };
+    if config.runner_connector_mode && is_claude && !policy.skip_permissions && !req.dry_run {
+        let _ = write_log(
+            "codex",
+            "Connector-Modus ohne Developer-Policy: Claude laeuft mit acceptEdits (keine freien Kommandos).",
+        );
+    }
+    let mut command = TokioCommand::new(if is_claude { claude_bin() } else { codex_bin() });
+    command.args(runner_guard::runner_args(&launch));
+    if is_claude {
+        command.current_dir(&repo_path);
+    }
+    // Eigene Prozessgruppe + kill_on_drop: Timeout, Abbruch oder App-Ende beenden auch Unterprozesse.
+    #[cfg(unix)]
+    command.process_group(0);
+    command.kill_on_drop(true);
     command
         .stdout(Stdio::piped())
         .stderr(Stdio::from(stderr_file));
     match command.spawn() {
         Ok(mut child) => {
+            let mut group = agent_boundary::ProcessGroupGuard::new(child.id());
             // Live-Feed: codex-stdout (JSONL) zeilenweise -> in execution_log.jsonl schreiben
             // UND als Tauri-Event "codex-event" ans Frontend streamen.
             let reader_handle = child.stdout.take().map(|stdout| {
@@ -2825,10 +2890,28 @@ async fn run_codex_task(
                 }
                 Ok(Err(e)) => codex_error = Some(error_to_string(e)),
                 Err(_) => {
+                    // SIGTERM an die ganze eigene Gruppe, kurze Frist fuer geordnetes Ende; der Leiter
+                    // wird von tokio eingesammelt (nie per roher PID), danach SIGKILL an den Rest.
+                    group.interrupt();
+                    let _ = timeout(Duration::from_secs(3), child.wait()).await;
                     let _ = child.kill().await;
-                    codex_error = Some(format!("{runner_label}-Timeout nach {timeout_secs}s"));
+                    let cleared = tokio::task::spawn_blocking(move || {
+                        group.terminate(Duration::from_secs(1), || {})
+                    })
+                    .await
+                    .unwrap_or(false);
+                    codex_error = Some(if cleared {
+                        format!(
+                            "{runner_label}-Timeout nach {timeout_secs}s; Prozessgruppe beendet"
+                        )
+                    } else {
+                        format!("{runner_label}-Timeout nach {timeout_secs}s; Prozessgruppe nicht vollstaendig beendbar")
+                    });
+                    group = agent_boundary::ProcessGroupGuard::new(None);
                 }
             }
+            // Verwaiste Unterprozesse dieses Laufs beenden (owned Prozessgruppe).
+            drop(group);
             // Restliche Zeilen flushen lassen — aber nie unbegrenzt warten: falls ein
             // Codex-Subprozess das stdout-Pipe offen haelt (kein EOF nach kill), den Reader abbrechen,
             // sonst wuerde der Timeout ausgehebelt und der Command haengen.
@@ -2898,6 +2981,43 @@ async fn run_codex_task(
                 }
                 break;
             }
+        }
+    }
+
+    // ---- Scope-Pruefung (Datei-Modus) ----
+    // Vor Kompilieren/Staging: nur ECHTE Aenderungen dieses Laufs ausserhalb des Ergebnisordners
+    // zaehlen (Fingerprint vorher/nachher). Bei Verstoss wird verworfen, aber NICHTS zurueckgesetzt
+    // (kein reset --hard / clean -fd): fremde Vorarbeit und die Verstoesse bleiben zur Pruefung stehen.
+    // Mit abschliessendem '/' vergleichen, sonst wuerde ein Geschwister-Ordner wie
+    // "KatoResults/<Titel> 2/" den starts_with-Check faelschlich bestehen.
+    let scope_prefix = format!("{result_rel}/");
+    let head_now = git_capture(&repo_path, &["rev-parse", "HEAD"]).ok();
+    // HEAD nicht lesbar oder bewegt = der Runner hat selbst committet/umgeschaltet (oder Zustand
+    // mehrdeutig) -> der Branch wird dann nie automatisch geloescht.
+    let head_moved = head_now.is_none() || head_now != base_head;
+    if file_mode && codex_error.is_none() {
+        let after = runner_guard::worktree_fingerprint(Path::new(&repo_path));
+        match pre_fingerprint.as_ref().zip(after.as_ref()) {
+            None => {
+                codex_error = Some(
+                    "Datei-Modus: Arbeitsbaum-Zustand nach dem Lauf nicht lesbar; Lauf verworfen."
+                        .to_string(),
+                )
+            }
+            Some((before, after)) => {
+                let outside = runner_guard::changes_outside(before, after, &scope_prefix);
+                if !outside.is_empty() {
+                    codex_error = Some(format!(
+                        "Datei-Modus: {runner_label} hat ausserhalb von {result_rel}/ geschrieben ({}). Lauf verworfen; die Aenderungen bleiben zur Pruefung im Arbeitsbaum (kein automatisches Zuruecksetzen).",
+                        outside.join(", ")
+                    ));
+                }
+            }
+        }
+        if codex_error.is_none() && head_moved {
+            codex_error = Some(format!(
+                "Datei-Modus: {runner_label} hat selbst Commits erzeugt oder den Branch gewechselt. Lauf verworfen; Branch {branch} bleibt zur Pruefung erhalten."
+            ));
         }
     }
 
@@ -2972,58 +3092,38 @@ async fn run_codex_task(
     // Datei-Modus: den Ergebnis-Ordner FORCE-adden, falls ihn eine .gitignore/exclude-Regel
     // ignorieren wuerde -> sonst waere der Diff leer und der Lauf gaelte faelschlich als
     // "Codex hat keine Ergebnisdatei erzeugt", obwohl die Dateien geschrieben wurden.
+    // Datei-Modus: NUR den eigenen Ergebnisordner stagen und committen (pathspec-gebunden) ->
+    // fremde, schon vorher vorhandene oder vom Nutzer gestagte Aenderungen werden nie mitcommittet.
+    // Run-Ordner (.katosync) bewusst NICHT mitcommitten -> bleibt lokaler Audit-Trail.
     if file_mode {
-        let _ = git_capture(&repo_path, &["add", "-f", "--", &result_rel]);
-    }
-    // Run-Ordner (.katosync) bewusst NICHT mitcommitten -> bleibt lokaler Audit-Trail,
-    // die "geaenderte Dateien"-Liste zeigt nur die echten Aenderungen.
-    let _ = git_capture(
-        &repo_path,
-        &["add", "-A", "--", ":!.katosync", ":!KatoContext"],
-    );
-    // -z + core.quotepath=false: NUL-getrennte, UNescapte UTF-8-Pfade. Ohne das quotet git
-    // Umlaut-Namen (z.B. "Lebenslauf_Mueller.md" mit Ue) mit fuehrendem '"' -> der starts_with-
-    // Scope-Check unten wuerde sie faelschlich als "ausserhalb" werten und den Lauf verwerfen.
-    let changed_files: Vec<String> = git_capture_raw(
-        &repo_path,
-        &[
-            "-c",
-            "core.quotepath=false",
-            "diff",
-            "--cached",
-            "-z",
-            "--name-only",
-        ],
-    )
-    .unwrap_or_default()
-    .split(|b| *b == 0)
-    .filter(|s| !s.is_empty())
-    .map(|s| String::from_utf8_lossy(s).to_string())
-    .collect();
-
-    // Datei-Modus: Codex darf nur in den Ergebnis-Ordner geschrieben haben. Aenderungen
-    // ausserhalb -> Lauf verwerfen (kein blindes Mergen ins Projekt).
-    if file_mode && codex_error.is_none() {
-        // Mit abschliessendem '/' vergleichen, sonst wuerde ein Geschwister-Ordner wie
-        // "KatoResults/task-<slug>-x/" den starts_with-Check faelschlich bestehen.
-        let scope_prefix = format!("{result_rel}/");
-        let out_of_scope: Vec<&str> = changed_files
-            .iter()
-            .filter(|f| !f.starts_with(&scope_prefix) && !pre_dirty.contains(f.as_str()))
-            .map(|f| f.as_str())
-            .collect();
-        if !out_of_scope.is_empty() {
-            codex_error = Some(format!(
-                "Datei-Modus: {runner_label} hat ausserhalb von {result_rel}/ geschrieben ({}). Lauf verworfen.",
-                out_of_scope.join(", ")
-            ));
-            let _ = git_capture(&repo_path, &["reset", "--hard"]);
-            let _ = git_capture(
-                &repo_path,
-                &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"],
-            );
+        if codex_error.is_none() {
+            let _ = git_capture(&repo_path, &["add", "-f", "--", &result_rel]);
         }
+    } else {
+        let _ = git_capture(
+            &repo_path,
+            &["add", "-A", "--", ":!.katosync", ":!KatoContext"],
+        );
     }
+    // -z + core.quotepath=false: NUL-getrennte, UNescapte UTF-8-Pfade. Ohne das quotet git
+    // Umlaut-Namen (z.B. "Lebenslauf_Mueller.md" mit Ue) mit fuehrendem '"'.
+    let mut diff_args = vec![
+        "-c",
+        "core.quotepath=false",
+        "diff",
+        "--cached",
+        "-z",
+        "--name-only",
+    ];
+    if file_mode {
+        diff_args.extend(["--", result_rel.as_str()]);
+    }
+    let changed_files: Vec<String> = git_capture_raw(&repo_path, &diff_args)
+        .unwrap_or_default()
+        .split(|b| *b == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| String::from_utf8_lossy(s).to_string())
+        .collect();
 
     let result_summary = fs::read_to_string(&output_path)
         .unwrap_or_default()
@@ -3044,7 +3144,12 @@ async fn run_codex_task(
             req.title.replace('\n', " "),
             task_id
         );
-        match git_capture(&repo_path, &["commit", "-m", &msg]) {
+        // Datei-Modus: Commit strikt auf den Ergebnisordner begrenzt (andere Index-Eintraege bleiben).
+        let mut commit_args = vec!["commit", "-m", msg.as_str()];
+        if file_mode {
+            commit_args.extend(["--", result_rel.as_str()]);
+        }
+        match git_capture(&repo_path, &commit_args) {
             Ok(_) => commit = git_capture(&repo_path, &["rev-parse", "HEAD"]).ok(),
             Err(e) => codex_error = Some(format!("Commit fehlgeschlagen: {e}")),
         }
@@ -3212,15 +3317,23 @@ async fn run_codex_task(
         }
     }
 
-    // Datei-Modus + Fehlschlag (kein Commit): evtl. von Codex geschriebene Teil-Dateien NICHT
-    // mit auf den Default-Branch nehmen. Sonst bliebe der Arbeitsbaum dauerhaft schmutzig und
-    // jeder weitere Lauf scheiterte am sauberer-Baum-Check. Auf den Ausgangszustand zuruecksetzen.
+    // Datei-Modus + Fehlschlag (kein Commit): nur die von DIESEM Lauf neu angelegten Eintraege im
+    // eigenen Ergebnisordner entfernen (Snapshot vor dem Lauf). Kein reset --hard / clean -fd gegen den
+    // Arbeitsbaum: fremde Vorarbeit und Verstoesse ausserhalb bleiben unangetastet zur Pruefung stehen.
     if file_mode && commit.is_none() {
-        let _ = git_capture(&repo_path, &["reset", "--hard"]);
-        let _ = git_capture(
-            &repo_path,
-            &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"],
-        );
+        // Nur Index (eigene Staging-Eintraege des Ergebnisordners), nie Arbeitsbaum-Inhalte.
+        let _ = git_capture(&repo_path, &["reset", "-q", "--", &result_rel]);
+        let removed =
+            runner_guard::remove_new_entries(&result_dir_abs, &result_before, result_dir_existed);
+        if !removed.is_empty() {
+            let _ = write_log(
+                "codex",
+                &format!(
+                    "Datei-Modus: {} eigene Teil-Datei(en) aus {result_rel}/ entfernt.",
+                    removed.len()
+                ),
+            );
+        }
     }
     // Zurueck auf den Default-Branch -> Arbeitskopie bleibt sauber; Codex-Aenderungen leben auf dem Branch.
     let _ = git_capture(&repo_path, &["checkout", &default_branch]);
@@ -3230,7 +3343,8 @@ async fn run_codex_task(
         // der Ergebnis-Commit durch das force-Delete (-D) verloren.
         match git_capture(&repo_path, &["merge", "--ff-only", &branch]) {
             Ok(_) => {
-                let _ = git_capture(&repo_path, &["branch", "-D", &branch]);
+                // -d (nicht -D): git loescht nur, wenn der Branch nachweislich gemergt ist.
+                let _ = git_capture(&repo_path, &["branch", "-d", &branch]);
             }
             Err(e) => {
                 let _ = write_log(
@@ -3239,9 +3353,15 @@ async fn run_codex_task(
                 );
             }
         }
+    } else if commit.is_none() && !head_moved {
+        // Fehlgeschlagener Lauf ohne Commit -> leeren Codex-Branch wieder entfernen. Nur wenn HEAD
+        // nachweislich unveraendert ist und nur sicher (-d): eigene Runner-Commits gehen nie verloren.
+        let _ = git_capture(&repo_path, &["branch", "-d", &branch]);
     } else if commit.is_none() {
-        // Fehlgeschlagener Lauf ohne Commit -> leeren Codex-Branch wieder entfernen.
-        let _ = git_capture(&repo_path, &["branch", "-D", &branch]);
+        let _ = write_log(
+            "codex",
+            &format!("Branch {branch} bleibt erhalten (Runner-Commits ohne KatoSync-Commit)."),
+        );
     }
 
     let _ = write_log(
@@ -3549,7 +3669,7 @@ fn open_output_dir() -> Result<String, String> {
 fn quit_app(app: tauri::AppHandle) {
     // Fenster-Schließen lässt KatoSync absichtlich weiterlaufen. Nur der explizite
     // "Programm beenden"-Pfad beendet auch die von KatoSync verwaltete Local-Brain-Runtime.
-    let _ = local_brain::stop_owned();
+    let _ = local_brain::stop_owned(&app);
     app.exit(0);
 }
 
@@ -3635,7 +3755,15 @@ async fn sync_once(
                         }
                     }
                 }
-                match upload_with_backoff(&key, &config.library_id, &file_path, app).await {
+                match upload_with_backoff(
+                    &key,
+                    &config.library_id,
+                    &file_path,
+                    config.safety.allow_unscanned_binary_uploads,
+                    app,
+                )
+                .await
+                {
                     Ok(result) => uploaded.push(result),
                     Err(error) => {
                         let message = format!(
@@ -3707,6 +3835,8 @@ fn scan_roots(config: &AppConfig) -> Result<ScanSummary> {
     let mut relevant_files = 0usize;
     let mut skipped_files = 0usize;
     let mut secret_warnings = 0usize;
+    let mut binary_consent_required = 0usize;
+    let mut unscanned_binary_uploads = 0usize;
 
     for root in config
         .source_roots
@@ -3774,6 +3904,22 @@ fn scan_roots(config: &AppConfig) -> Result<ScanSummary> {
             } else if metadata.len() > config.scan_rules.max_file_size_mb * 1024 * 1024 {
                 skipped = true;
                 reason = Some("Datei größer als Maximalgröße".to_string());
+            } else if category == "document" && cloud_boundary::is_unscannable_binary(&path) {
+                // Vorschau = dieselbe Entscheidung wie beim Upload (fail-closed, kein Secret-Scan).
+                match cloud_boundary::check_upload(
+                    &path,
+                    metadata.len(),
+                    config.safety.allow_unscanned_binary_uploads,
+                ) {
+                    Ok(_) => unscanned_binary_uploads += 1,
+                    Err(block) => {
+                        if block == cloud_boundary::UploadBlock::ConsentRequired {
+                            binary_consent_required += 1;
+                        }
+                        skipped = true;
+                        reason = Some(block.message().to_string());
+                    }
+                }
             }
 
             if skipped {
@@ -3799,6 +3945,8 @@ fn scan_roots(config: &AppConfig) -> Result<ScanSummary> {
         relevant_files,
         skipped_files,
         secret_warnings,
+        binary_consent_required,
+        unscanned_binary_uploads,
         findings,
     })
 }
@@ -4124,7 +4272,10 @@ fn render_briefing(
     text.push_str("\n## Hinweise\n\n");
     text.push_str("- CURRENT-Dateien sind der aktuelle Stand.\n");
     text.push_str("- Datierte Snapshot-Ordner dienen nur als lokales Archiv.\n");
-    text.push_str("- Dateien mit Secret-Mustern werden nicht hochgeladen.\n");
+    text.push_str("- Textdateien mit Secret-Mustern werden nicht hochgeladen.\n");
+    text.push_str(
+        "- PDF/Bilder sind lokal nicht auf Secrets pruefbar und gehen nur nach ausdruecklicher Freigabe raus.\n",
+    );
     Ok(text)
 }
 
@@ -4312,6 +4463,7 @@ async fn upload_with_backoff(
     api_key: &str,
     library_id: &str,
     file_path: &Path,
+    allow_unscanned_binary: bool,
     app: Option<&AppHandle>,
 ) -> Result<UploadResult> {
     // Kuerzerer, interaktiv-tauglicher Backoff (statt 30/60/120 = bis 3,5 Min stumm): 10/30/60s,
@@ -4319,7 +4471,7 @@ async fn upload_with_backoff(
     let waits = [10_u64, 30, 60];
     let file_name = file_path.file_name().and_then(OsStr::to_str).unwrap_or("");
     for attempt in 0..=waits.len() {
-        match upload_document(api_key, library_id, file_path).await {
+        match upload_document(api_key, library_id, file_path, allow_unscanned_binary).await {
             Ok(result) => return Ok(result),
             // Monats-Token-Budget ODER Tages-Dokumentlimit erschoepft: Backoff/Retry hilft heute NICHT
             // -> sofort scheitern (statt 4x sinnlos zu grinden + das Minuten-Limit hochzutreiben).
@@ -4373,67 +4525,57 @@ async fn upload_document(
     api_key: &str,
     library_id: &str,
     file_path: &Path,
+    allow_unscanned_binary: bool,
 ) -> Result<UploadResult> {
     let file_name = file_path
         .file_name()
         .and_then(OsStr::to_str)
         .ok_or_else(|| anyhow!("Ungültiger Dateiname"))?
         .to_string();
+    let blocked = |reason: &str| UploadResult {
+        file_name: file_name.clone(),
+        document_id: None,
+        processing_status: None,
+        rate_limits: Vec::new(),
+        success: false,
+        error: Some(reason.to_string()),
+    };
     // Secrets nie hochladen: Dateiname-Marker greift fuer Text UND Binaer (.env/.key/.pem/...).
     if file_name_has_secret_marker(file_path) {
-        return Ok(UploadResult {
-            file_name,
-            document_id: None,
-            processing_status: None,
-            rate_limits: Vec::new(),
-            success: false,
-            error: Some("Secret-Datei vom Upload ausgeschlossen.".to_string()),
-        });
+        return Ok(blocked("Secret-Datei vom Upload ausgeschlossen."));
     }
+    // Typ-/Groessen-Allowlist + Binaer-Freigabe VOR dem Lesen des Inhalts (fail-closed).
+    let size = fs::metadata(file_path)
+        .with_context(|| format!("Datei kann nicht gelesen werden: {}", file_path.display()))?
+        .len();
+    let kind = match cloud_boundary::check_upload(file_path, size, allow_unscanned_binary) {
+        Ok(kind) => kind,
+        Err(block) => return Ok(blocked(block.message())),
+    };
+    let mime = kind.mime;
 
-    let lower = file_name.to_lowercase();
-    let is_binary = lower.ends_with(".pdf")
-        || lower.ends_with(".png")
-        || lower.ends_with(".jpg")
-        || lower.ends_with(".jpeg");
-
-    let (bytes, mime): (Vec<u8>, &str) = if is_binary {
-        // Binaer (PDF/Bild): direkt als Bytes hochladen. Inhalts-Secret-Scan ist auf
-        // Binaerdaten nicht moeglich -> Schutz ueber Dateiname + Ordner-Ausschluss (Scan).
+    let bytes: Vec<u8> = if kind.check == cloud_boundary::ContentCheck::Unscannable {
+        // Binaer (PDF/Bild): ausdruecklich freigegeben und Signatur geprueft. Ein Inhalts-
+        // Secret-Scan ist hier NICHT moeglich und wird auch nicht behauptet.
         let data = fs::read(file_path)
             .with_context(|| format!("Datei kann nicht gelesen werden: {}", file_path.display()))?;
-        let mime = if lower.ends_with(".pdf") {
-            "application/pdf"
-        } else if lower.ends_with(".png") {
-            "image/png"
-        } else {
-            "image/jpeg"
-        };
-        (data, mime)
+        if !cloud_boundary::signature_matches(mime, &data) {
+            return Ok(blocked(
+                cloud_boundary::UploadBlock::SignatureMismatch.message(),
+            ));
+        }
+        data
     } else {
         let content = fs::read_to_string(file_path)
             .with_context(|| format!("Datei kann nicht gelesen werden: {}", file_path.display()))?;
         if secret_regex().is_match(&content) {
-            return Ok(UploadResult {
-                file_name,
-                document_id: None,
-                processing_status: None,
-                rate_limits: Vec::new(),
-                success: false,
-                error: Some("Secret-Muster im Upload-Inhalt erkannt.".to_string()),
-            });
+            return Ok(blocked("Secret-Muster im Upload-Inhalt erkannt."));
         }
-        let mime = if lower.ends_with(".txt") {
-            "text/plain"
-        } else if lower.ends_with(".json") {
-            "application/json"
-        } else if lower.ends_with(".csv") {
-            "text/csv"
-        } else {
-            "text/markdown"
-        };
-        (content.into_bytes(), mime)
+        content.into_bytes()
     };
+    if bytes.len() as u64 > cloud_boundary::MAX_CLOUD_UPLOAD_BYTES {
+        return Ok(blocked(cloud_boundary::UploadBlock::TooLarge.message()));
+    }
 
     let url = format!("https://api.mistral.ai/v1/libraries/{library_id}/documents");
     let part = Part::bytes(bytes)
@@ -4915,6 +5057,7 @@ fn default_config() -> Result<AppConfig> {
             dry_run_default: false,
             cleanup_enabled: false,
             secret_scan_enabled: true,
+            allow_unscanned_binary_uploads: false,
         },
         codex_auto_push: true,
         codex_create_pr: true,
@@ -4924,6 +5067,7 @@ fn default_config() -> Result<AppConfig> {
         claude_model: String::new(),
         claude_effort: String::new(),
         runner_connector_mode: false,
+        local_control_developer_mode: false,
         reference_root: String::new(),
         project_repos: std::collections::HashMap::new(),
         provider_priority: default_provider_priority(),
@@ -5529,6 +5673,8 @@ mod context_pack_pipeline_tests {
             relevant_files: 1,
             skipped_files: 0,
             secret_warnings: 0,
+            binary_consent_required: 0,
+            unscanned_binary_uploads: 0,
             findings: vec![FileFinding {
                 path: source_path.to_string_lossy().to_string(),
                 relative_path: "PROJECT_STATUS.md".to_string(),
@@ -5672,6 +5818,104 @@ mod context_pack_pipeline_tests {
             .iter()
             .all(|warning| !warning.contains(secret_value)));
 
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod cloud_upload_gate_tests {
+    use super::*;
+
+    fn document_root() -> (PathBuf, AppConfig) {
+        let temp_dir =
+            std::env::temp_dir().join(format!("katosync-upload-gate-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        fs::write(temp_dir.join("offer.pdf"), b"%PDF-1.7\nbinary").unwrap();
+        fs::write(
+            temp_dir.join("disguised.pdf"),
+            b"plain text pretending to be a pdf",
+        )
+        .unwrap();
+        fs::write(temp_dir.join("notes.md"), "# Notes\n- harmless\n").unwrap();
+        fs::write(temp_dir.join("archive.zip"), b"PK\x03\x04").unwrap();
+        let mut config = default_config().unwrap();
+        config.scan_rules.include_documents = true;
+        config.source_roots = vec![temp_dir.to_string_lossy().to_string()];
+        config.output_dir = temp_dir.join("out").to_string_lossy().to_string();
+        (temp_dir, config)
+    }
+
+    fn finding<'a>(scan: &'a ScanSummary, name: &str) -> &'a FileFinding {
+        scan.findings
+            .iter()
+            .find(|finding| finding.relative_path == name)
+            .unwrap()
+    }
+
+    #[test]
+    fn scan_preview_gates_unscannable_binaries_without_consent() {
+        let (temp_dir, config) = document_root();
+        assert!(!config.safety.allow_unscanned_binary_uploads);
+        let scan = scan_roots(&config).unwrap();
+        let pdf = finding(&scan, "offer.pdf");
+        assert!(pdf.skipped);
+        assert!(pdf.reason.as_deref().unwrap().contains("Freigabe"));
+        assert_eq!(scan.binary_consent_required, 2);
+        assert_eq!(scan.unscanned_binary_uploads, 0);
+        assert!(!finding(&scan, "notes.md").skipped);
+        assert!(finding(&scan, "archive.zip").skipped);
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn scan_preview_counts_consented_binaries_and_rejects_disguised_text() {
+        let (temp_dir, mut config) = document_root();
+        config.safety.allow_unscanned_binary_uploads = true;
+        let scan = scan_roots(&config).unwrap();
+        assert!(!finding(&scan, "offer.pdf").skipped);
+        let disguised = finding(&scan, "disguised.pdf");
+        assert!(disguised.skipped);
+        assert_eq!(
+            disguised.reason.as_deref(),
+            Some(cloud_boundary::UploadBlock::SignatureMismatch.message())
+        );
+        assert_eq!(scan.binary_consent_required, 0);
+        assert_eq!(scan.unscanned_binary_uploads, 1);
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn upload_path_fails_closed_before_any_network_call() {
+        let (temp_dir, _) = document_root();
+        let key = "sk-test-upload-gate-0000000000";
+        // Ohne Freigabe: Binaerdatei wird nie gelesen oder gesendet.
+        let pdf = upload_document(key, "lib", &temp_dir.join("offer.pdf"), false)
+            .await
+            .unwrap();
+        assert!(!pdf.success);
+        assert_eq!(
+            pdf.error.as_deref(),
+            Some(cloud_boundary::UploadBlock::ConsentRequired.message())
+        );
+        // Mit Freigabe: umbenannte Textdatei bleibt blockiert.
+        let disguised = upload_document(key, "lib", &temp_dir.join("disguised.pdf"), true)
+            .await
+            .unwrap();
+        assert_eq!(
+            disguised.error.as_deref(),
+            Some(cloud_boundary::UploadBlock::SignatureMismatch.message())
+        );
+        // Nicht gelistete Typen gehen nie raus.
+        let zip = upload_document(key, "lib", &temp_dir.join("archive.zip"), true)
+            .await
+            .unwrap();
+        assert_eq!(
+            zip.error.as_deref(),
+            Some(cloud_boundary::UploadBlock::UnsupportedType.message())
+        );
+        for result in [&pdf, &disguised, &zip] {
+            assert!(!format!("{result:?}").contains(key));
+        }
         fs::remove_dir_all(&temp_dir).unwrap();
     }
 }

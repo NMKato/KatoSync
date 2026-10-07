@@ -11,14 +11,18 @@ def main():
     parser.add_argument("--project")
     parser.add_argument("--resource-lock", action="append", default=[])
     parser.add_argument("--dedupe-key")
+    parser.add_argument("--capability", help="structured capability, e.g. npm.test or git.status (no command/args)")
+    parser.add_argument("--network", action="store_true", help="explicitly request network access for this job")
     parser.add_argument("--wait", action="store_true")
     parser.add_argument("--wait-timeout", type=int, default=960)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.command and args.command[0] == "--":
         args.command = args.command[1:]
-    if not args.command:
-        parser.error("command required after options")
+    if args.capability and args.command:
+        parser.error("--capability jobs take no command/args")
+    if not args.capability and not args.command:
+        parser.error("command or --capability required")
 
     root = pathlib.Path.home() / "Library" / "Application Support" / "KatoSync" / "control"
     inbox = root / "inbox"
@@ -29,8 +33,10 @@ def main():
     job = {
         "id": job_id,
         "cwd": str(pathlib.Path(args.cwd).expanduser().resolve()),
-        "command": args.command[0],
+        "command": args.command[0] if args.command else "",
         "args": args.command[1:],
+        "capability": args.capability,
+        "network": args.network,
         "mode": args.mode,
         "timeoutSeconds": args.timeout,
         "requireCleanGit": args.require_clean_git,

@@ -9,16 +9,16 @@
 //!
 //! (Created by NMKato Solutions)
 
+use crate::endpoint_guard::{self, EndpointRejection, TargetKind, ValidatedEndpoint};
 use chrono::{DateTime, Utc};
 use regex::Regex;
-use reqwest::{redirect::Policy, Url};
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
     env,
     ffi::OsString,
-    net::IpAddr,
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
@@ -39,6 +39,9 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(60);
 const LOCAL_TIMEOUT: Duration = Duration::from_secs(8);
+const RESERVED_LOCAL_BRAIN_DETAIL: &str =
+    "Port 17842 ist fuer die KatoSync-verwaltete Local-Brain-Runtime reserviert; \
+     ohne Besitznachweis wird dieser Endpunkt nicht angesprochen";
 const LOCAL_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(60);
 const API_TIMEOUT: Duration = Duration::from_secs(20);
 const API_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(90);
@@ -146,6 +149,8 @@ pub enum ProviderReason {
     LocalControlRunning,
     LocalControlQueueOnly,
     ApiKeyProviderMismatch,
+    /// Ziel liegt in einem gesperrten Netzbereich (privat, Link-Local, Metadaten, Multicast ...).
+    EndpointBlocked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1380,65 +1385,26 @@ where
 // Lokale Modelle (Ollama, LM Studio, OpenAI-kompatibel).
 // ---------------------------------------------------------------------------------------------
 
-/// Validiert und normalisiert eine lokale/entfernte OpenAI-kompatible Basis-URL.
-pub fn validate_local_endpoint(value: &str) -> Result<Url, ProviderReason> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(ProviderReason::NotConfigured);
-    }
-    if trimmed.len() > 2048 || trimmed.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return Err(ProviderReason::InvalidEndpoint);
-    }
-    let url = Url::parse(trimmed).map_err(|_| ProviderReason::InvalidEndpoint)?;
-    let valid = matches!(url.scheme(), "http" | "https")
-        && url.host_str().is_some_and(|host| !host.is_empty())
-        && url.username().is_empty()
-        && url.password().is_none()
-        && url.query().is_none()
-        && url.fragment().is_none();
-    if valid {
-        Ok(url)
-    } else {
-        Err(ProviderReason::InvalidEndpoint)
+fn endpoint_reason(rejection: EndpointRejection) -> ProviderReason {
+    match rejection {
+        EndpointRejection::Missing => ProviderReason::NotConfigured,
+        EndpointRejection::Invalid => ProviderReason::InvalidEndpoint,
+        EndpointRejection::HttpsRequired => ProviderReason::InsecureRemoteKey,
+        EndpointRejection::BlockedNetwork => ProviderReason::EndpointBlocked,
     }
 }
 
-/// local = dieser Rechner, lan = privates Netz, remote = alles andere.
-pub fn endpoint_scope(url: &Url) -> &'static str {
-    let Some(host) = url.host_str() else {
-        return "remote";
-    };
-    let host = host
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .to_ascii_lowercase();
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return ip_scope(ip);
-    }
-    if host == "localhost" || host.ends_with(".localhost") {
-        "local"
-    } else if host.ends_with(".local") || host.ends_with(".lan") || host.ends_with(".home.arpa") {
-        "lan"
-    } else {
-        "remote"
-    }
+/// Validiert eine Local-Lane-Basis-URL: exaktes Loopback (HTTP/HTTPS) oder oeffentliches HTTPS.
+/// LAN-/private Ziele sind in diesem Release gesperrt (siehe `endpoint_guard`).
+pub fn validate_local_endpoint(value: &str) -> Result<ValidatedEndpoint, ProviderReason> {
+    endpoint_guard::validate_endpoint(value, true).map_err(endpoint_reason)
 }
 
-fn ip_scope(ip: IpAddr) -> &'static str {
-    if ip.is_loopback() {
-        return "local";
-    }
-    let private = match ip {
-        IpAddr::V4(v4) => v4.is_private() || v4.is_link_local(),
-        IpAddr::V6(v6) => {
-            let first = v6.segments()[0];
-            (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
-        }
-    };
-    if private {
-        "lan"
-    } else {
-        "remote"
+/// local = dieser Rechner (exaktes Loopback), remote = oeffentliches HTTPS-Ziel.
+pub fn endpoint_scope(endpoint: &ValidatedEndpoint) -> &'static str {
+    match endpoint.target {
+        TargetKind::Loopback => "local",
+        TargetKind::Public => "remote",
     }
 }
 
@@ -1530,22 +1496,18 @@ fn extract_api_model_ids(value: &Value) -> Vec<String> {
     models
 }
 
-fn http_client(limit: Duration) -> Option<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(limit)
-        .redirect(Policy::none())
-        .build()
-        .ok()
+/// Jeder Endpoint-Request laeuft ueber einen Client mit gepruefter DNS-Aufloesung, ohne Redirects
+/// und ohne Proxy (siehe `endpoint_guard::guarded_client`).
+fn http_client(endpoint: &ValidatedEndpoint, limit: Duration) -> Option<reqwest::Client> {
+    endpoint_guard::guarded_client(endpoint, limit)
 }
 
+/// Loopback-Ziele werden nie ueber einen Env-/System-Proxy geleitet: Prompts und Keys fuer
+/// lokale Modelle verlassen den Rechner nicht.
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredOriginKey {
     origin: String,
     key: String,
-}
-
-fn origin_of(url: &Url) -> String {
-    url.origin().ascii_serialization()
 }
 
 /// Erlaubt nur druckbare ASCII-Keys ohne Whitespace; verhindert Header-Injection.
@@ -1554,9 +1516,9 @@ pub fn validate_api_key(value: &str) -> bool {
     !key.is_empty() && key.len() <= 512 && key.chars().all(|c| c.is_ascii_graphic())
 }
 
-/// API-Keys nie im Klartext ueber unverschluesseltes HTTP ins Internet senden.
-fn key_transport_allowed(url: &Url) -> bool {
-    url.scheme() == "https" || endpoint_scope(url) != "remote"
+/// API-Keys nie im Klartext senden – einzige Ausnahme sind exakte Loopback-Ziele.
+fn key_transport_allowed(endpoint: &ValidatedEndpoint) -> bool {
+    endpoint.key_transport_allowed()
 }
 
 fn key_entry(account: &str) -> Result<keyring::Entry, ProviderReason> {
@@ -1603,7 +1565,7 @@ pub fn save_local_key(base_url: &str, api_key: &str) -> Result<(), ProviderReaso
     store_origin_key(
         LOCAL_KEY_ACCOUNT,
         &StoredOriginKey {
-            origin: origin_of(&url),
+            origin: url.origin(),
             key: api_key.trim().to_string(),
         },
     )
@@ -1618,7 +1580,7 @@ pub fn disconnect(provider: ProviderId) -> Result<(), ProviderReason> {
     }
 }
 
-fn api_base_url(config: &ApiProviderConfig) -> Result<Url, ProviderReason> {
+fn api_base_url(config: &ApiProviderConfig) -> Result<ValidatedEndpoint, ProviderReason> {
     let raw = match config.preset {
         ApiProviderPreset::Openai => "https://api.openai.com/v1",
         ApiProviderPreset::Anthropic => "https://api.anthropic.com/v1",
@@ -1630,11 +1592,8 @@ fn api_base_url(config: &ApiProviderConfig) -> Result<Url, ProviderReason> {
         ApiProviderPreset::Zai => "https://api.z.ai/api/paas/v4",
         ApiProviderPreset::CustomOpenai => config.base_url.trim(),
     };
-    let url = validate_local_endpoint(raw)?;
-    if url.scheme() != "https" || endpoint_scope(&url) != "remote" {
-        return Err(ProviderReason::InsecureRemoteKey);
-    }
-    Ok(url)
+    // API-Lane: ausschliesslich oeffentliche HTTPS-Ziele, nie Loopback oder LAN.
+    endpoint_guard::validate_endpoint(raw, false).map_err(endpoint_reason)
 }
 
 fn api_key_account(connection_id: &str) -> Result<String, ProviderReason> {
@@ -1655,12 +1614,12 @@ fn load_api_key_for(config: &ApiProviderConfig) -> Result<Option<String>, Provid
     let account = api_key_account(&config.id)?;
     let stored = load_origin_key(&account)?;
     if let Some(value) = stored {
-        return Ok((value.origin == origin_of(&base)).then_some(value.key));
+        return Ok((value.origin == base.origin()).then_some(value.key));
     }
     // Einmalige, sichere Kompatibilitaet fuer den ersten migrierten Preview-Slot.
     if config.id == "api-1" {
         return Ok(load_origin_key(API_KEY_ACCOUNT)?
-            .filter(|value| value.origin == origin_of(&base))
+            .filter(|value| value.origin == base.origin())
             .map(|value| value.key));
     }
     Ok(None)
@@ -1713,7 +1672,7 @@ pub fn save_api_provider_key(
     store_origin_key(
         &account,
         &StoredOriginKey {
-            origin: origin_of(&base),
+            origin: base.origin(),
             key: api_key.trim().to_string(),
         },
     )
@@ -1813,12 +1772,13 @@ pub async fn api_provider_models(
     .await
     .map_err(|_| ProviderReason::SecretStoreUnavailable)??;
     let key = key.ok_or(ProviderReason::EndpointAuthRequired)?;
-    let endpoint = api_models_url(&base).ok_or(ProviderReason::InvalidEndpoint)?;
-    let client = http_client(API_TIMEOUT).ok_or(ProviderReason::Offline)?;
+    let endpoint = api_models_url(&base.url).ok_or(ProviderReason::InvalidEndpoint)?;
+    let client = http_client(&base, API_TIMEOUT).ok_or(ProviderReason::Offline)?;
     let request = api_auth_request(client.get(endpoint), config.preset, &key);
     let body = fetch_json_limited(request, MAX_API_CATALOG_BYTES)
         .await
         .map_err(|failure| match failure {
+            HttpFailure::Blocked => ProviderReason::EndpointBlocked,
             HttpFailure::Status(401 | 403) => ProviderReason::EndpointAuthRequired,
             HttpFailure::Status(429) => ProviderReason::QuotaLimited,
             HttpFailure::Timeout => ProviderReason::TimedOut,
@@ -1834,7 +1794,7 @@ pub async fn api_provider_models(
     Ok(ApiProviderCatalog {
         connection_id: config.id.clone(),
         provider_label: config.preset.label().to_string(),
-        base_url: base.to_string(),
+        base_url: base.url.to_string(),
         models,
     })
 }
@@ -1962,11 +1922,11 @@ pub async fn run_api_worker(
     .map_err(|_| ProviderReason::SecretStoreUnavailable)??
     .ok_or(ProviderReason::EndpointAuthRequired)?;
 
-    let Some(endpoint) = api_generation_url(&base, config.preset) else {
+    let Some(endpoint) = api_generation_url(&base.url, config.preset) else {
         api_key.zeroize();
         return Err(ProviderReason::InvalidEndpoint);
     };
-    let Some(client) = http_client(API_WORKER_TIMEOUT) else {
+    let Some(client) = http_client(&base, API_WORKER_TIMEOUT) else {
         api_key.zeroize();
         return Err(ProviderReason::Offline);
     };
@@ -1983,6 +1943,7 @@ Produce a concise implementation-ready result that can be handed to another lane
     let result = fetch_json(request).await;
     api_key.zeroize();
     let response = result.map_err(|failure| match failure {
+        HttpFailure::Blocked => ProviderReason::EndpointBlocked,
         HttpFailure::Status(401 | 403) => ProviderReason::EndpointAuthRequired,
         HttpFailure::Status(429) => ProviderReason::QuotaLimited,
         HttpFailure::Timeout => ProviderReason::TimedOut,
@@ -2062,7 +2023,7 @@ async fn api_status(
         return status;
     }
 
-    let endpoint = match api_models_url(&base) {
+    let endpoint = match api_models_url(&base.url) {
         Some(value) => value,
         None => {
             status.fail(
@@ -2073,7 +2034,7 @@ async fn api_status(
             return status;
         }
     };
-    let Some(client) = http_client(API_TIMEOUT) else {
+    let Some(client) = http_client(&base, API_TIMEOUT) else {
         status.fail(ProviderState::Offline, ProviderReason::Offline, None);
         return status;
     };
@@ -2105,7 +2066,7 @@ async fn api_status(
         return status;
     }
 
-    let Some(endpoint) = api_generation_url(&base, config.preset) else {
+    let Some(endpoint) = api_generation_url(&base.url, config.preset) else {
         status.fail(
             ProviderState::Unknown,
             ProviderReason::InvalidEndpoint,
@@ -2113,7 +2074,7 @@ async fn api_status(
         );
         return status;
     };
-    let Some(client) = http_client(API_CAPABILITY_TIMEOUT) else {
+    let Some(client) = http_client(&base, API_CAPABILITY_TIMEOUT) else {
         status.fail(ProviderState::Offline, ProviderReason::Offline, None);
         return status;
     };
@@ -2269,12 +2230,25 @@ async fn local_status(
     status.installed = true;
     status.state = ProviderState::Installed;
     status.endpoint_scope = Some(endpoint_scope(&base).to_string());
+    // Der Local-Brain-Port gehoert der KatoSync-verwalteten Runtime. Ohne Besitznachweis
+    // bekommt ein dort lauschender Prozess weder Prompts noch den gespeicherten Key. Auch
+    // mit Nachweis bleibt dies die externe Local-Lane und gilt nicht als verwaltete Runtime.
+    if crate::local_brain::is_reserved_endpoint(&base.url)
+        && !crate::local_brain::managed_endpoint_verified(&base.url)
+    {
+        status.fail(
+            ProviderState::Unknown,
+            ProviderReason::InvalidEndpoint,
+            Some(RESERVED_LOCAL_BRAIN_DETAIL),
+        );
+        return status;
+    }
 
     let stored_key = tokio::task::spawn_blocking(load_local_key)
         .await
         .unwrap_or(Err(ProviderReason::SecretStoreUnavailable));
     let api_key = match stored_key {
-        Ok(Some(stored)) if stored.origin == origin_of(&base) => {
+        Ok(Some(stored)) if stored.origin == base.origin() => {
             status.secret_stored = true;
             Some(stored.key)
         }
@@ -2294,9 +2268,10 @@ async fn local_status(
         return status;
     }
 
-    let (Some(endpoint), Some(client)) =
-        (models_url(&base, config.kind), http_client(LOCAL_TIMEOUT))
-    else {
+    let (Some(endpoint), Some(client)) = (
+        models_url(&base.url, config.kind),
+        http_client(&base, LOCAL_TIMEOUT),
+    ) else {
         status.fail(
             ProviderState::Unknown,
             ProviderReason::InvalidEndpoint,
@@ -2336,8 +2311,10 @@ async fn local_status(
     }
 
     // Faehigkeitstest: ein begrenzter Chat-Aufruf; jede generierte Antwort belegt Faehigkeit.
-    let (Some(chat), Some(client)) = (chat_url(&base), http_client(LOCAL_CAPABILITY_TIMEOUT))
-    else {
+    let (Some(chat), Some(client)) = (
+        chat_url(&base.url),
+        http_client(&base, LOCAL_CAPABILITY_TIMEOUT),
+    ) else {
         status.fail(
             ProviderState::Unknown,
             ProviderReason::InvalidEndpoint,
@@ -2387,6 +2364,8 @@ async fn local_status(
 }
 
 enum HttpFailure {
+    /// Resolver hat das Ziel gesperrt (privat, Metadaten, Rebinding ...).
+    Blocked,
     Timeout,
     Unreachable,
     Status(u16),
@@ -2403,7 +2382,9 @@ async fn fetch_json_limited(
     max_bytes: usize,
 ) -> Result<Value, HttpFailure> {
     let response = request.send().await.map_err(|error| {
-        if error.is_timeout() {
+        if endpoint_guard::is_blocked_target(&error) {
+            HttpFailure::Blocked
+        } else if error.is_timeout() {
             HttpFailure::Timeout
         } else {
             HttpFailure::Unreachable
@@ -2427,6 +2408,7 @@ async fn fetch_json_limited(
 
 fn apply_http_failure(status: &mut ProviderStatus, failure: HttpFailure) {
     let (state, reason) = match failure {
+        HttpFailure::Blocked => (ProviderState::Unknown, ProviderReason::EndpointBlocked),
         HttpFailure::Timeout => (ProviderState::Offline, ProviderReason::TimedOut),
         HttpFailure::Unreachable => (ProviderState::Offline, ProviderReason::Offline),
         HttpFailure::Status(401 | 403) => (
@@ -2448,28 +2430,24 @@ fn apply_http_failure(status: &mut ProviderStatus, failure: HttpFailure) {
 }
 
 /// Sucht nur auf diesem Rechner (Loopback) nach Ollama und LM Studio auf Standardports.
+/// Ohne Key und ohne Netzwerk-Fan-out: es werden nie Secrets mitgesendet.
 pub async fn discover_local() -> Vec<DiscoveredLocalProvider> {
-    let Some(client) = http_client(DISCOVERY_TIMEOUT) else {
-        return Vec::new();
-    };
     let (ollama, lm_studio) = tokio::join!(
-        probe_local(&client, LocalProviderKind::Ollama, "http://127.0.0.1:11434"),
-        probe_local(
-            &client,
-            LocalProviderKind::LmStudio,
-            "http://127.0.0.1:1234"
-        )
+        probe_local(LocalProviderKind::Ollama, "http://127.0.0.1:11434"),
+        probe_local(LocalProviderKind::LmStudio, "http://127.0.0.1:1234")
     );
     [ollama, lm_studio].into_iter().flatten().collect()
 }
 
-async fn probe_local(
-    client: &reqwest::Client,
-    kind: LocalProviderKind,
-    base: &str,
-) -> Option<DiscoveredLocalProvider> {
-    let url = validate_local_endpoint(base).ok()?;
-    let body = fetch_json(client.get(models_url(&url, kind)?)).await.ok()?;
+async fn probe_local(kind: LocalProviderKind, base: &str) -> Option<DiscoveredLocalProvider> {
+    let endpoint = validate_local_endpoint(base).ok()?;
+    if endpoint.target != TargetKind::Loopback {
+        return None;
+    }
+    let client = http_client(&endpoint, DISCOVERY_TIMEOUT)?;
+    let body = fetch_json(client.get(models_url(&endpoint.url, kind)?))
+        .await
+        .ok()?;
     Some(DiscoveredLocalProvider {
         kind,
         base_url: base.to_string(),
@@ -2977,50 +2955,125 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_scope_distinguishes_local_lan_and_remote() {
+    fn reserved_local_brain_port_is_never_treated_as_managed_without_proof() {
+        let url = |value: &str| {
+            validate_local_endpoint(value).unwrap_or_else(|reason| panic!("{value}: {reason:?}"))
+        };
+        for reserved in [
+            "http://127.0.0.1:17842",
+            "http://127.0.0.1:17842/v1",
+            "http://localhost:17842/v1",
+            "http://[::1]:17842",
+            "https://127.0.0.1:17842",
+        ] {
+            assert!(
+                crate::local_brain::is_reserved_endpoint(&url(reserved).url),
+                "{reserved}"
+            );
+            // Ohne registrierte, nachgewiesene Runtime nie als verwaltet akzeptiert.
+            assert!(!crate::local_brain::managed_endpoint_verified(
+                &url(reserved).url
+            ));
+        }
+
+        // Die unspezifizierte Bind-Adresse bleibt semantisch fuer den Local-Brain-Port
+        // reserviert, wird vom neuen Endpoint-Guard aber bereits vor Provider-Nutzung
+        // fail-closed blockiert.
+        let unspecified = reqwest::Url::parse("http://0.0.0.0:17842").unwrap();
+        assert!(crate::local_brain::is_reserved_endpoint(&unspecified));
+        assert!(!crate::local_brain::managed_endpoint_verified(&unspecified));
+        assert!(matches!(
+            validate_local_endpoint("http://0.0.0.0:17842"),
+            Err(ProviderReason::EndpointBlocked)
+        ));
+        for external in [
+            "http://127.0.0.1:11434",
+            "http://localhost:1234/v1",
+            "http://192.168.1.20:17842",
+            "https://models.example.test:17842/v1",
+        ] {
+            let external_url = reqwest::Url::parse(external).unwrap();
+            assert!(
+                !crate::local_brain::is_reserved_endpoint(&external_url),
+                "{external}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unverified_listener_on_reserved_port_gets_no_requests() {
+        let config = LocalProviderConfig {
+            kind: LocalProviderKind::OpenAiCompatible,
+            base_url: "http://127.0.0.1:17842/v1".to_string(),
+            model: String::new(),
+        };
+        let status = local_status(&config, true, true).await;
+        assert_eq!(status.reason, ProviderReason::InvalidEndpoint);
+        assert!(!status.available);
+        assert!(!status.authenticated);
+        assert!(!status.secret_stored, "Key wurde nicht einmal geladen");
+    }
+
+    #[test]
+    fn endpoint_scope_is_exact_loopback_or_public_https_and_lan_is_blocked() {
         let scope = |value: &str| endpoint_scope(&validate_local_endpoint(value).unwrap());
         assert_eq!(scope("http://127.0.0.1:11434"), "local");
         assert_eq!(scope("http://localhost:1234"), "local");
         assert_eq!(scope("http://[::1]:1234"), "local");
-        assert_eq!(scope("http://192.168.1.20:11434"), "lan");
-        assert_eq!(scope("http://10.0.0.5:8000"), "lan");
-        assert_eq!(scope("http://172.20.0.5:8000"), "lan");
-        assert_eq!(scope("http://172.40.0.5:8000"), "remote");
-        assert_eq!(scope("http://studio.local:1234"), "lan");
-        assert_eq!(scope("http://[fd00::1]:1234"), "lan");
+        assert_eq!(scope("https://172.40.0.5:8000"), "remote");
         assert_eq!(scope("https://models.example.test/v1"), "remote");
+        // LAN ist im Release nie konfigurierbar, weder per HTTP noch per HTTPS.
+        for blocked in [
+            "http://192.168.1.20:11434",
+            "http://10.0.0.5:8000",
+            "https://172.20.0.5:8000",
+            "http://studio.local:1234",
+            "https://[fd00::1]:1234",
+            "http://169.254.169.254/latest/meta-data",
+            "https://[fd00:ec2::254]/v1",
+        ] {
+            assert_eq!(
+                validate_local_endpoint(blocked),
+                Err(ProviderReason::EndpointBlocked),
+                "{blocked}"
+            );
+        }
+        assert_eq!(
+            validate_local_endpoint("http://172.40.0.5:8000"),
+            Err(ProviderReason::InsecureRemoteKey)
+        );
     }
 
     #[test]
     fn local_urls_preserve_v1_without_duplication() {
         let lm = validate_local_endpoint("http://127.0.0.1:1234/v1").unwrap();
         assert_eq!(
-            models_url(&lm, LocalProviderKind::LmStudio)
+            models_url(&lm.url, LocalProviderKind::LmStudio)
                 .unwrap()
                 .as_str(),
             "http://127.0.0.1:1234/v1/models"
         );
         assert_eq!(
-            chat_url(&lm).unwrap().as_str(),
+            chat_url(&lm.url).unwrap().as_str(),
             "http://127.0.0.1:1234/v1/chat/completions"
         );
         let ollama = validate_local_endpoint("http://127.0.0.1:11434").unwrap();
         assert_eq!(
-            models_url(&ollama, LocalProviderKind::Ollama)
+            models_url(&ollama.url, LocalProviderKind::Ollama)
                 .unwrap()
                 .as_str(),
             "http://127.0.0.1:11434/api/tags"
         );
         assert_eq!(
-            chat_url(&ollama).unwrap().as_str(),
+            chat_url(&ollama.url).unwrap().as_str(),
             "http://127.0.0.1:11434/v1/chat/completions"
         );
-        let generic = validate_local_endpoint("http://10.0.0.5:8000").unwrap();
+        let generic = validate_local_endpoint("https://models.example.test").unwrap();
         assert_eq!(
-            models_url(&generic, LocalProviderKind::OpenAiCompatible)
+            models_url(&generic.url, LocalProviderKind::OpenAiCompatible)
                 .unwrap()
                 .as_str(),
-            "http://10.0.0.5:8000/v1/models"
+            "https://models.example.test/v1/models"
         );
     }
 
@@ -3044,18 +3097,23 @@ mod tests {
         assert!(!validate_api_key("abc\r\nX-Injected: 1"));
         assert!(!validate_api_key("with space"));
         assert!(!validate_api_key(&"a".repeat(513)));
-        let remote_http = validate_local_endpoint("http://models.example.test").unwrap();
         let remote_https = validate_local_endpoint("https://models.example.test").unwrap();
-        let lan_http = validate_local_endpoint("http://192.168.1.5:8000").unwrap();
-        assert!(!key_transport_allowed(&remote_http));
+        let loopback_http = validate_local_endpoint("http://127.0.0.1:1234").unwrap();
         assert!(key_transport_allowed(&remote_https));
-        assert!(key_transport_allowed(&lan_http));
+        assert!(key_transport_allowed(&loopback_http));
+        // Klartext-HTTP ausserhalb von exaktem Loopback wird gar nicht erst validiert.
         assert_eq!(
             save_local_key("http://models.example.test", "sk-abcdef"),
             Err(ProviderReason::InsecureRemoteKey)
         );
         assert_eq!(
-            origin_of(&validate_local_endpoint("http://127.0.0.1:1234/v1").unwrap()),
+            save_local_key("http://192.168.1.5:8000", "sk-abcdef"),
+            Err(ProviderReason::EndpointBlocked)
+        );
+        assert_eq!(
+            validate_local_endpoint("http://127.0.0.1:1234/v1")
+                .unwrap()
+                .origin(),
             "http://127.0.0.1:1234"
         );
     }
@@ -3198,16 +3256,30 @@ mod tests {
             api_base_url(&custom).err(),
             Some(ProviderReason::InsecureRemoteKey)
         );
-        custom.base_url = "https://127.0.0.1:8443/v1".to_string();
-        assert_eq!(
-            api_base_url(&custom).err(),
-            Some(ProviderReason::InsecureRemoteKey)
-        );
+        for blocked in [
+            "https://127.0.0.1:8443/v1",
+            "https://localhost/v1",
+            "https://169.254.169.254/latest",
+            "https://[fd00:ec2::254]/v1",
+            "https://[::ffff:a9fe:a9fe]/v1",
+            "https://10.1.2.3/v1",
+            "https://192.168.0.10/v1",
+            "https://[fe80::1]/v1",
+            "https://metadata.google.internal/v1",
+        ] {
+            custom.base_url = blocked.to_string();
+            assert_eq!(
+                api_base_url(&custom).err(),
+                Some(ProviderReason::EndpointBlocked),
+                "{blocked}"
+            );
+        }
         custom.base_url = "https://gateway.example.com/v1".to_string();
-        assert!(api_base_url(&custom).is_ok());
+        let base = api_base_url(&custom).unwrap();
+        assert_eq!(base.origin(), "https://gateway.example.com");
         let zai = api_slot("api-2", ApiProviderPreset::Zai, "glm");
         assert_eq!(
-            api_generation_url(&api_base_url(&zai).unwrap(), zai.preset)
+            api_generation_url(&api_base_url(&zai).unwrap().url, zai.preset)
                 .unwrap()
                 .as_str(),
             "https://api.z.ai/api/paas/v4/chat/completions"
@@ -3292,5 +3364,80 @@ mod tests {
         let models = extract_api_model_ids(&serde_json::json!({ "data": entries }));
         assert_eq!(models.len(), MAX_API_CATALOG_MODELS);
         assert!(models.iter().all(|model| is_safe_model_name(model)));
+    }
+
+    async fn one_shot_server(response: String) -> (u16, tokio::task::JoinHandle<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let read = socket.read(&mut buf).await.unwrap_or(0);
+            let _ = socket.write_all(response.as_bytes()).await;
+            String::from_utf8_lossy(&buf[..read]).to_string()
+        });
+        (port, handle)
+    }
+
+    #[tokio::test]
+    async fn api_key_never_appears_in_status_errors_or_logs() {
+        let key = "sk-fixture-never-leak-0123456789";
+        let body = format!("{{\"error\":\"invalid key {key}\"}}");
+        let (port, server) = one_shot_server(format!(
+            "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ))
+        .await;
+        let base = validate_local_endpoint(&format!("http://127.0.0.1:{port}/v1")).unwrap();
+        let client = http_client(&base, Duration::from_secs(2)).unwrap();
+        let request = client.get(chat_url(&base.url).unwrap()).bearer_auth(key);
+        let failure = fetch_json(request).await.expect_err("401 must fail");
+        let mut status = ProviderStatus::base(ProviderId::Local, true);
+        apply_http_failure(&mut status, failure);
+        assert_eq!(status.reason, ProviderReason::EndpointAuthRequired);
+        let serialized = serde_json::to_string(&status).unwrap();
+        assert!(!serialized.contains(key), "{serialized}");
+        // Der Key ging nur an den exakt validierten Loopback-Origin.
+        assert!(server.await.unwrap().contains(key));
+        // Diagnose-/Log-Pfade redigieren Key-Formen und Bearer-Header.
+        let log_line = redact(&format!("Authorization: Bearer {key} body={body}"));
+        assert!(!log_line.contains(key), "{log_line}");
+    }
+
+    #[tokio::test]
+    async fn blocked_or_redirected_requests_surface_reason_codes_without_key() {
+        let key = "sk-fixture-redirect-0123456789";
+        let (port, server) = one_shot_server(
+            "HTTP/1.1 302 Found\r\nLocation: http://169.254.169.254/latest/meta-data\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_string(),
+        )
+        .await;
+        let base = validate_local_endpoint(&format!("http://127.0.0.1:{port}")).unwrap();
+        let client = http_client(&base, Duration::from_secs(2)).unwrap();
+        let failure = fetch_json(client.get(chat_url(&base.url).unwrap()).bearer_auth(key))
+            .await
+            .expect_err("redirect is never followed");
+        assert!(matches!(failure, HttpFailure::Status(302)));
+        server.await.unwrap();
+
+        // Ein als oeffentlich validiertes Ziel, das auf Loopback aufloest (Rebinding), wird
+        // vor dem Verbindungsaufbau als EndpointBlocked gemeldet.
+        let public = ValidatedEndpoint {
+            url: Url::parse("https://public.example.test").unwrap(),
+            target: TargetKind::Public,
+        };
+        let client = http_client(&public, Duration::from_secs(2)).unwrap();
+        let failure = fetch_json(client.get("http://localhost:9/v1/models").bearer_auth(key))
+            .await
+            .expect_err("blocked resolution");
+        let mut status = ProviderStatus::base(ProviderId::Local, true);
+        apply_http_failure(&mut status, failure);
+        assert_eq!(status.reason, ProviderReason::EndpointBlocked);
+        assert!(!serde_json::to_string(&status).unwrap().contains(key));
+        assert_eq!(
+            serde_json::to_value(ProviderReason::EndpointBlocked).unwrap(),
+            "endpoint_blocked"
+        );
     }
 }

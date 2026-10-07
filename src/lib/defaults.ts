@@ -36,7 +36,8 @@ export const defaultConfig: AppConfig = {
   safety: {
     dryRunDefault: true,
     cleanupEnabled: false,
-    secretScanEnabled: true
+    secretScanEnabled: true,
+    allowUnscannedBinaryUploads: false
   },
   codexAutoPush: true,
   codexCreatePr: true,
@@ -46,6 +47,7 @@ export const defaultConfig: AppConfig = {
   claudeModel: "",
   claudeEffort: "",
   runnerConnectorMode: false,
+  localControlDeveloperMode: false,
   referenceRoot: "",
   projectRepos: {},
   providerPriority: ["codex", "claude", "api", "local", "local_control"],

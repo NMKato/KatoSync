@@ -23,6 +23,8 @@ export interface SafetyConfig {
   dryRunDefault: boolean;
   cleanupEnabled: boolean;
   secretScanEnabled: boolean;
+  // Ausdrueckliche Freigabe fuer PDF/Bild-Uploads ohne lokalen Secret-Scan. Default aus.
+  allowUnscannedBinaryUploads?: boolean;
 }
 
 export interface AppConfig {
@@ -47,6 +49,9 @@ export interface AppConfig {
   claudeEffort: string;
   // Opt-in: autonomer Connector-Lauf (Netz + Runner-Connectoren). Standard aus.
   runnerConnectorMode: boolean;
+  // Trusted-local Developer-Policy: freie Kommandos (Local Control) + Claude ohne Rueckfragen im
+  // Connector-Modus. Standard aus, auch im Release; nie aus Task-/Repo-/RAG-Text ableitbar.
+  localControlDeveloperMode: boolean;
   // KatoContext: lokaler Referenzordner (Lebenslauf/Zeugnisse/Kontext) fuer den Datei-Modus.
   referenceRoot: string;
   // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectId -> Pfad).
@@ -232,6 +237,7 @@ export type ProviderReason =
   | "endpoint_invalid_response"
   | "capability_failed"
   | "insecure_remote_key"
+  | "endpoint_blocked"
   | "secret_store_unavailable"
   | "local_control_running"
   | "local_control_queue_only"
@@ -388,6 +394,10 @@ export interface ScanSummary {
   relevantFiles: number;
   skippedFiles: number;
   secretWarnings: number;
+  // PDF/Bilder, die mangels Freigabe nicht hochgeladen werden (lokal nicht pruefbar).
+  binaryConsentRequired?: number;
+  // PDF/Bilder, die mit Freigabe OHNE Inhalts-Secret-Scan hochgeladen wuerden.
+  unscannedBinaryUploads?: number;
   findings: FileFinding[];
 }
 

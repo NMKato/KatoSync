@@ -369,7 +369,13 @@ pub(crate) struct GroundedMemoryAnswer {
     pub answer: String,
     pub citations: Vec<RagCitation>,
     pub local_brain_used: bool,
+    /// Immer "none": eine Local-Brain-Antwort ist Information, nie Freigabe fuer Tools/Aktionen,
+    /// Schreibzugriff, Netz oder canonical-Promotion. Policy wird ausserhalb des Modells entschieden.
+    pub action_authority: &'static str,
 }
+
+/// Feste Autoritaetsstufe jeder Memory-Antwort (siehe `GroundedMemoryAnswer::action_authority`).
+pub(crate) const ANSWER_ACTION_AUTHORITY: &str = "none";
 
 #[tauri::command]
 pub(crate) async fn memory_fabric_answer(
@@ -405,6 +411,7 @@ pub(crate) async fn memory_fabric_answer(
             answer: "NOT_IN_MEMORY".to_string(),
             citations: Vec::new(),
             local_brain_used: false,
+            action_authority: ANSWER_ACTION_AUTHORITY,
         });
     }
 
@@ -417,6 +424,7 @@ pub(crate) async fn memory_fabric_answer(
         answer,
         citations: rag.citations,
         local_brain_used: true,
+        action_authority: ANSWER_ACTION_AUTHORITY,
     })
 }
 

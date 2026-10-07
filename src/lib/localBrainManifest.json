@@ -5,6 +5,10 @@
     "allowedHosts": [
       "github.com",
       "huggingface.co"
+    ],
+    "redirectHosts": [
+      "release-assets.githubusercontent.com",
+      "*.hf.co"
     ]
   },
   "runtime": {
@@ -14,24 +18,28 @@
       "macos-aarch64": {
         "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11272/llama-b11272-bin-macos-arm64.tar.gz",
         "sha256": "1ef6db9f1913725a9a7522f1719e987c88329f266e906270436b23d662985a20",
+        "sizeBytes": 11767510,
         "archive": "tar.gz",
         "executable": "llama-server"
       },
       "macos-x86_64": {
         "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11272/llama-b11272-bin-macos-x64.tar.gz",
         "sha256": "118d82d0e88877449786480ebf58da40d24fe170f3f625a3631b07414a0bedde",
+        "sizeBytes": 11320078,
         "archive": "tar.gz",
         "executable": "llama-server"
       },
       "windows-x86_64": {
         "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11272/llama-b11272-bin-win-cpu-x64.zip",
         "sha256": "f6d6c2d547b8f87ac1cecf1614207ee300aae1e0cf9b1966bd01129ef58855f7",
+        "sizeBytes": 19164875,
         "archive": "zip",
         "executable": "llama-server.exe"
       },
       "linux-x86_64": {
         "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11272/llama-b11272-bin-ubuntu-x64.tar.gz",
         "sha256": "ce70ee200f17071609b316398a4a765530a539803cfe5976de8c738a3a61a037",
+        "sizeBytes": 17408959,
         "archive": "tar.gz",
         "executable": "llama-server"
       }

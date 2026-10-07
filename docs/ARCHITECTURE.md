@@ -91,7 +91,29 @@ Service einen `reason`-Code, den das Frontend übersetzt (Rust liefert keine UI-
 - READY-Tests laufen im System-Temp-Verzeichnis, damit keine Projektdateien oder Projekt-Instruktionen geladen werden.
 - Login-Prozesse bekommen ein offenes, nie beschriebenes stdin; KatoSync liest nur stdout/stderr, um eine offizielle HTTPS-Login-URL (Host-Allowlist) als Fallback-Link zu melden. Diese URL wird nie geloggt.
 - KatoSync besitzt die CLI-Credentials nicht und ruft beim Trennen keinen CLI-Logout auf.
-- KatoSync-eigene Secrets liegen ausschließlich im OS-Schlüsselbund (`com.nmkato.katosync`; macOS Keychain, Windows Credential Manager, Linux Keyutils): der optionale lokale Endpoint-Key (`local-provider-api-key`) und je API-Slot ein Key (`api-provider-api-key:<slot-id>`). Jeder Key ist an den Endpoint-Origin gebunden, wird nur an genau diesen Origin gesendet (entfernt nur über HTTPS) und beim Trennen gelöscht. Config, REX, Ledger, Logs und Commits enthalten nie Rohkeys.
+- KatoSync-eigene Secrets liegen ausschließlich im OS-Schlüsselbund (`com.nmkato.katosync`; macOS Keychain, Windows Credential Manager, Linux Keyutils): der optionale lokale Endpoint-Key (`local-provider-api-key`) und je API-Slot ein Key (`api-provider-api-key:<slot-id>`). Jeder Key ist an den Endpoint-Origin gebunden, wird nur an genau diesen Origin gesendet (Klartext-HTTP nur an exaktes Loopback, sonst HTTPS) und beim Trennen gelöscht. Config, REX, Ledger, Logs und Commits enthalten nie Rohkeys.
+
+### Netzwerk- und Cloud-Grenze
+
+- **Custom Endpoints** (`endpoint_guard.rs`, gespiegelt in `providerPolicy.ts`): Local Lane erlaubt
+  exaktes Loopback (`localhost`, 127.0.0.0/8, `::1`; HTTP oder HTTPS) oder öffentliches HTTPS. Die
+  API Lane erlaubt ausschließlich öffentliches HTTPS. Private/RFC1918/CGNAT/ULA, Link-Local,
+  Cloud-Metadaten (u. a. 169.254.169.254, `fd00:ec2::254`, IPv4-mapped/NAT64/6to4-Formen),
+  Multicast, Broadcast, unspezifizierte und reservierte Bereiche sowie LAN-Namen (`.local`,
+  `.internal`, einzelne Labels …) werden mit `endpoint_blocked` abgelehnt. Eine LAN-Freischaltung
+  gibt es im Release nicht; käme sie später, dann nur als getrennte, ausdrückliche Expert-Option.
+- **DNS/Rebinding:** Jeder Endpoint-Client nutzt einen eigenen Resolver, der jede Auflösung beim
+  Verbindungsaufbau gegen die Zielklasse prüft (gemischte Antworten → komplett gesperrt). Kein
+  Proxy (würde die Prüfung umgehen), keine Redirects → Credentials verlassen nie den validierten Origin.
+- **URL-Credentials** (`user@`, `user:pw@`), Query und Fragment sind verboten.
+- **Lokal-only vs. Upload** (`cloud_boundary.rs`): Scan/Vorschau, Dry-Run, CURRENT-/Snapshot-Dateien,
+  Context Pack, Local Brain und Provider-Erkennung bleiben auf dem Rechner. Inhalte verlassen ihn nur
+  über den Mistral-Library-Sync, den API-Lane-Worker und die KatoSync-Web-API.
+- **Datei-Uploads:** feste Typ-Allowlist (md/markdown/txt/json/csv, pdf/png/jpg/jpeg) und harte
+  50-MiB-Grenze. Text wird vor dem Upload vollständig lokal auf Secret-Muster geprüft. PDF/Bilder
+  sind nicht prüfbar und gehen nur mit `safety.allowUnscannedBinaryUploads` (Default aus) und
+  passender Datei-Signatur raus; die Scan-Vorschau zeigt zurückgehaltene und ungeprüfte Dateien an.
+  Es gibt keinen Cloud-DLP-Dienst.
 
 ### Routingvertrag
 
@@ -254,7 +276,62 @@ startet ausschließlich dessen `dispatch` über den bestehenden Runner (`runCode
 
 Runtime und Modellgewichte sind getrennt: KatoSync verwaltet die gepinnte llama.cpp-Runtime, die
 Gewichte kommen als versioniertes Paket (`kato-model-package/1`) aus einem R2-faehigen
-Verteilkanal oder dem gepinnten Upstream. Gewichte werden erst nach exakter Groessen- und
-SHA-256-Pruefung atomar installiert; Update, Pin, Rollback und Entfernen laufen ueber ein Ledger
-ohne URLs oder Tokens. Ein Lizenz-/Redistribution-Gate verhindert, dass ein Paket ohne Freigabe
-oeffentlich wird. Vertrag, R2-Layout und Release-Checkliste: [`MODEL_DISTRIBUTION.md`](MODEL_DISTRIBUTION.md)
+Verteilkanal oder dem gepinnten Upstream. Der eigene Kanal verwendet einen offline gepinnten
+Ed25519-Root, signierte und ablaufende Kanalmetadaten sowie einen persistenten Rollback-Floor.
+Artefakte werden erst nach exakter Groessen-/SHA-256-Pruefung und Runtime-Archive nur unter harten
+Extraktionsgrenzen atomar installiert. Update, Pin, Rollback und Entfernen der Modelle laufen ueber
+ein Ledger ohne URLs oder Tokens; Modell und kompletter Runtime-Baum werden vor der Nutzung erneut
+gegen ihre jeweiligen, zweckgebundenen Integritaetsnachweise geprueft. Ein
+Lizenz-/Redistribution-Gate verhindert, dass ein Paket ohne Freigabe oeffentlich wird. Vertrag,
+Trust Chain, R2-Layout und Release-Checkliste:
+[`MODEL_DISTRIBUTION.md`](MODEL_DISTRIBUTION.md)
+
+## Local-Brain-Runtime: Vertrauensgrenze
+
+llama-server kann seinen HTTP-Endpunkt gegenueber KatoSync nicht authentisieren (`--api-key`
+schuetzt nur den Server vor fremden Clients). KatoSync vertraut deshalb keinem Prozess, nur weil er
+auf `127.0.0.1:17842` antwortet, sondern verlangt einen Besitznachweis (`local_brain_runtime.rs`):
+
+- **Runtime-Integritaet:** Beim Installieren wird aus dem SHA-256-verifizierten Archiv ein
+  Hash-Ledger aller Runtime-Dateien (inkl. dylibs und Symlink-Ziele) erzeugt und privat (0600,
+  ausserhalb des Runtime-Baums) gespeichert, gebunden an Runtime-ID, Version, Ziel und Archiv-Hash
+  des gepinnten Manifests. Vor **jedem** Start wird der komplette Baum erneut gehasht; fremde,
+  fehlende oder veraenderte Dateien, Symlinks nach aussen, ein symlinktes Executable bzw.
+  Versionsverzeichnis, fremder Besitzer oder Gruppen-/Welt-Schreibrechte blockieren den Start.
+  Das Executable muss kanonisch im versionierten Runtime-Verzeichnis liegen; Runtime-Baum 0700.
+- **Start:** strukturiertes `Command` + argv (keine Shell), nur `--host 127.0.0.1`, leere
+  Basisumgebung plus Allowlist (`HOME`, `TMPDIR`, festes `PATH`); `DYLD_*`, `LD_*`, Proxy-,
+  Shell-Startup-, `LLAMA_*`/`GGML_*`-Variablen erreichen den Prozess nie. Eigene Prozessgruppe.
+- **Besitznachweis:** Direkt nach `spawn` werden PID, Prozess-Startidentitaet (macOS
+  `pbi_start_tvsec/usec`, Linux Boot-ID + Startticks), UID, kanonischer Executable-Pfad,
+  Executable-Hash, Version, Port und Alias privat gespeichert. „Verwalteter Local Brain laeuft“
+  gilt nur, wenn dieser Datensatz zur installierten Runtime passt **und** der Live-Prozess mit
+  identischer Startidentitaet den TCP-LISTEN-Socket `127.0.0.1:17842` selbst haelt (Kernel-
+  Abfrage). PID-Wiederverwendung, fremde Executables, fremde Benutzer und veraltete Datensaetze
+  scheitern fail closed. Ein unbekannter, bereits lauschender Prozess wird nie uebernommen; der
+  Start bricht dann mit einem Hinweis ab.
+- **Requests:** Health-, Modell- und RAG-Anfragen nur an Loopback, ohne Proxy (`no_proxy`) und
+  ohne Redirects, und nur nach bestandenem Besitznachweis.
+- **Beenden:** SIGTERM an die gesamte Prozessgruppe, nach Wartefrist SIGKILL. Prozesse frueherer
+  Sitzungen werden nur bei positivem Nachweis (Startidentitaet + eigene Prozessgruppe + Executable
+  im Runtime-Root) signalisiert.
+- **Externe lokale Endpunkte** (Ollama, LM Studio, OpenAI-kompatibel) bleiben die externe
+  Local-Lane und werden nie als verwaltete Runtime dargestellt. Der reservierte Port 17842 wird
+  dort nur angesprochen, wenn der Besitznachweis der verwalteten Runtime gilt; Loopback-Anfragen
+  der Local-Lane und die Discovery laufen ohne Proxy.
+
+**Restrisiken:**
+
+- *Verify→Exec (TOCTOU):* Rust/macOS bieten keinen portablen Start aus einem geoeffneten Handle
+  (`fexecve`). Das Fenster wird minimiert: Vollpruefung des Baums, dann unmittelbar vor `spawn`
+  Abgleich von dev/ino/Groesse/mtime und erneuter SHA-256 des Executables; dylibs werden in der
+  Vollpruefung Sekunden vorher gehasht. Der Runtime-Baum ist 0700 und gehoert dem Benutzer — ein
+  Angreifer mit Schreibrechten als derselbe Benutzer bleibt ausserhalb dieser Grenze.
+- *Check→Request:* Zwischen Besitznachweis und HTTP-Request liegt ein Fenster im
+  Millisekundenbereich, in dem der verifizierte Prozess sterben und ein Fremdprozess den Port
+  binden koennte.
+- *Plattformen:* Kernel-Nachweis nur auf macOS und Linux. Anderswo zaehlt ausschliesslich der
+  eigene Child-Handle der laufenden Sitzung; Runtimes frueherer Sitzungen werden nicht uebernommen.
+- *Migration:* Runtimes ohne Ledger (Installation vor dieser Haertung) gelten als nicht
+  installiert und werden aus dem gepinnten Archiv neu installiert. Ein noch laufender llama-server
+  einer alten Version hat keinen Besitznachweis und blockiert den Start, bis er beendet ist.

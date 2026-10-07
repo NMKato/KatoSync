@@ -5,8 +5,11 @@
 //! Distribution-Base (Cloudflare R2 / Custom Domain) oder den gepinnten Upstream, landen
 //! zuerst als inhaltsadressierte `.part`-Datei im Staging und werden erst nach exakter
 //! Groessen- und SHA-256-Pruefung atomar in den installierten Paketbaum uebernommen.
-//! Persistiert werden nur Version, Hash und Groesse – nie URLs, Tokens oder Signaturen.
+//! Paketmetadaten sind nur als `TrustedPackage` installierbar (eingebettetes Manifest oder
+//! signierter Kanalindex, siehe `model_trust`). Persistiert werden nur Version, Hash, Groesse
+//! und Metadaten-Herkunft – nie URLs, Tokens oder Signaturen.
 
+use crate::model_trust::{PackageProvenance, TrustedPackage};
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::{
     header::{CONTENT_RANGE, RANGE},
@@ -16,19 +19,19 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     cmp::Ordering,
+    collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
     time::{Duration, UNIX_EPOCH},
 };
 
 pub const PACKAGE_SCHEMA: &str = "kato-model-package/1";
-// Kanalindex-Vertrag: wird clientseitig ausgewertet, sobald `distribution.baseUrl` gesetzt ist.
-#[cfg_attr(not(test), allow(dead_code))]
-pub const INDEX_SCHEMA: &str = "kato-model-index/1";
 const LEDGER_SCHEMA_VERSION: u32 = 1;
-const MAX_PACKAGE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+pub const MAX_PACKAGE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 const MAX_OBJECT_KEY_LEN: usize = 512;
+const MAX_REDIRECTS: usize = 5;
 
 // ---------------------------------------------------------------------------------------
 // Vertrag
@@ -39,6 +42,15 @@ const MAX_OBJECT_KEY_LEN: usize = 512;
 pub enum Channel {
     Stable,
     Beta,
+}
+
+impl Channel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Beta => "beta",
+        }
+    }
 }
 
 /// Veroeffentlichungsstufe. `Public` ist nur mit bestandenem Lizenz-/Redistribution-Gate gueltig.
@@ -120,16 +132,6 @@ pub struct ModelPackage {
     pub license: PackageLicense,
     pub object_key: String,
     pub upstream_url: Option<String>,
-}
-
-/// Kanalindex – `channels/<channel>/index.json` im Bucket.
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChannelIndex {
-    pub schema: String,
-    pub channel: Channel,
-    pub packages: Vec<ModelPackage>,
 }
 
 fn is_simple_token(value: &str, max: usize) -> bool {
@@ -308,24 +310,22 @@ impl ModelPackage {
     }
 }
 
-/// Waehlt aus einem Kanalindex die installierbare Version: nur gueltige, oeffentliche,
-/// plattform-/runtime-kompatible Eintraege; ein Pin gewinnt gegen "neueste".
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn select_release<'a>(
-    index: &'a ChannelIndex,
+/// Waehlt aus den Eintraegen eines (bereits signaturgeprueften) Kanalindex die installierbare
+/// Version: nur gueltige, oeffentliche, plattform-/runtime-kompatible Eintraege; ein Pin
+/// gewinnt gegen "neueste". Unsignierte Indizes erreichen diese Funktion nie.
+pub(crate) fn select_candidate<'a>(
+    channel: Channel,
+    packages: &'a [ModelPackage],
     package_id: &str,
     pinned: Option<&str>,
     platform: &str,
     runtime_version: &str,
     policy: &OriginPolicy,
 ) -> Result<Option<&'a ModelPackage>> {
-    if index.schema != INDEX_SCHEMA {
-        bail!("Nicht unterstuetztes Indexschema: {}", index.schema);
-    }
     let mut best: Option<(&ModelPackage, SemVer)> = None;
-    for candidate in &index.packages {
+    for candidate in packages {
         if candidate.package_id != package_id
-            || candidate.channel != index.channel
+            || candidate.channel != channel
             || candidate.release_state != ReleaseState::Public
             || candidate.validate(policy).is_err()
             || !candidate.supports(platform, runtime_version)
@@ -347,13 +347,13 @@ pub fn select_release<'a>(
 // Semantische Versionen (SemVer 2.0 Praezedenz, Build-Metadaten werden ignoriert)
 // ---------------------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum PreId {
     Numeric(u64),
     Alpha(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SemVer {
     major: u64,
     minor: u64,
@@ -451,39 +451,91 @@ impl PartialOrd for SemVer {
 // Herkunfts-/HTTPS-Policy und Distribution-Base
 // ---------------------------------------------------------------------------------------
 
-/// Erlaubte Download-Herkuenfte. Produktion: nur HTTPS auf explizit gelisteten Hosts,
-/// ohne Userinfo, Query oder Fragment (damit nie signierte URLs/Tokens im Manifest landen).
+fn validate_host_name(host: &str) -> Result<String> {
+    let host = host.trim().to_ascii_lowercase();
+    if host.is_empty()
+        || host.parse::<std::net::IpAddr>().is_ok()
+        || host.starts_with('.')
+        || host.ends_with('.')
+        || host.contains("..")
+        || !host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+    {
+        bail!("Ungueltiger erlaubter Host: {host:?}");
+    }
+    Ok(host)
+}
+
+/// Ziel einer Weiterleitung: exakter Host oder `*.<domain>` (mind. zwei Labels, z. B. `*.hf.co`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RedirectHost {
+    Exact(String),
+    Subdomain(String),
+}
+
+impl RedirectHost {
+    fn parse(raw: &str) -> Result<Self> {
+        match raw.trim().strip_prefix("*.") {
+            Some(domain) => {
+                let domain = validate_host_name(domain)?;
+                if !domain.contains('.') {
+                    bail!("Wildcard-Weiterleitung {raw:?} ist zu breit");
+                }
+                Ok(Self::Subdomain(domain))
+            }
+            None => Ok(Self::Exact(validate_host_name(raw)?)),
+        }
+    }
+
+    fn matches(&self, host: &str) -> bool {
+        match self {
+            Self::Exact(exact) => host == exact,
+            Self::Subdomain(domain) => host
+                .strip_suffix(domain.as_str())
+                .is_some_and(|label| label.len() > 1 && label.ends_with('.')),
+        }
+    }
+}
+
+/// Erlaubte Download-Herkuenfte. Produktion: nur HTTPS auf Port 443 und explizit gelisteten
+/// Hosts, ohne Userinfo, Query oder Fragment (damit nie signierte URLs/Tokens im Manifest
+/// landen). Jede Weiterleitung wird erneut gegen diese Policy (plus CDN-Allowlist) geprueft.
 #[derive(Debug, Clone)]
 pub struct OriginPolicy {
     allowed_hosts: Vec<String>,
+    redirect_hosts: Vec<RedirectHost>,
     allow_loopback_http: bool,
 }
 
 impl OriginPolicy {
     pub fn new(allowed_hosts: &[String]) -> Result<Self> {
-        let mut hosts = Vec::with_capacity(allowed_hosts.len());
-        for host in allowed_hosts {
-            let host = host.trim().to_ascii_lowercase();
-            if host.is_empty()
-                || host.parse::<std::net::IpAddr>().is_ok()
-                || !host
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
-            {
-                bail!("Ungueltiger erlaubter Host: {host:?}");
-            }
-            hosts.push(host);
-        }
+        let hosts = allowed_hosts
+            .iter()
+            .map(|host| validate_host_name(host))
+            .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             allowed_hosts: hosts,
+            redirect_hosts: Vec::new(),
             allow_loopback_http: false,
         })
+    }
+
+    /// CDN-Hosts, auf die eine erlaubte Herkunft weiterleiten darf (z. B. GitHub Release
+    /// Assets, Hugging Face Xet/CDN). Sie sind nie direkte Download-Quelle.
+    pub fn with_redirect_hosts(mut self, redirect_hosts: &[String]) -> Result<Self> {
+        self.redirect_hosts = redirect_hosts
+            .iter()
+            .map(|raw| RedirectHost::parse(raw))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(self)
     }
 
     #[cfg(test)]
     pub fn loopback_for_tests() -> Self {
         Self {
             allowed_hosts: Vec::new(),
+            redirect_hosts: Vec::new(),
             allow_loopback_http: true,
         }
     }
@@ -495,40 +547,70 @@ impl OriginPolicy {
     }
 
     fn check_url(&self, url: &Url) -> Result<()> {
-        if !url.username().is_empty() || url.password().is_some() {
-            bail!("Download-URL darf keine Zugangsdaten enthalten");
-        }
         if url.query().is_some() || url.fragment().is_some() {
             bail!("Download-URL darf keine Query/Signatur enthalten");
         }
+        let host = self.check_transport(url)?;
+        if url.scheme() == "https" && !self.allowed_hosts.contains(&host) {
+            bail!("Host {host} ist keine erlaubte Modell-Herkunft");
+        }
+        Ok(())
+    }
+
+    /// Gemeinsame Pruefung fuer Quelle und jede Weiterleitung: HTTPS (Port 443), keine
+    /// Zugangsdaten in der URL. Liefert den normalisierten Host.
+    fn check_transport(&self, url: &Url) -> Result<String> {
+        if !url.username().is_empty() || url.password().is_some() {
+            bail!("Download-URL darf keine Zugangsdaten enthalten");
+        }
         let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
         match url.scheme() {
-            "https" if self.allowed_hosts.contains(&host) => Ok(()),
-            "http" if self.allow_loopback_http && host == "127.0.0.1" => Ok(()),
-            "https" => bail!("Host {host} ist keine erlaubte Modell-Herkunft"),
+            "https" if url.port().is_none() => Ok(host),
+            "https" => bail!("Download-URL darf keinen abweichenden Port nutzen"),
+            "http" if self.allow_loopback_http && host == "127.0.0.1" => Ok(host),
             other => bail!("Nur HTTPS ist fuer Modell-Downloads erlaubt (nicht {other})"),
         }
     }
 
-    /// Client mit Redirect-Policy: Weiterleitungen nur auf HTTPS (CDN-Hosts der Herkunft).
+    /// Weiterleitungsziel: HTTPS, keine Userinfo, kein Fragment, Host in `allowedHosts` oder
+    /// der CDN-Allowlist. Eine Query ist nur hier erlaubt (zeitlich begrenzte CDN-URL des
+    /// Servers); KatoSync sendet selbst nie Zugangsdaten und persistiert keine dieser URLs.
+    fn check_redirect(&self, url: &Url) -> Result<()> {
+        if url.fragment().is_some() {
+            bail!("Weiterleitung mit Fragment verweigert");
+        }
+        let host = self.check_transport(url)?;
+        let allowed = url.scheme() == "http"
+            || self.allowed_hosts.contains(&host)
+            || self
+                .redirect_hosts
+                .iter()
+                .any(|pattern| pattern.matches(&host));
+        if !allowed {
+            bail!("Weiterleitung auf {host} ist keine erlaubte Modell-Herkunft");
+        }
+        Ok(())
+    }
+
+    /// Client mit Redirect-Policy: jede Weiterleitung wird gegen die Herkunfts-Policy
+    /// revalidiert; kein Cookie-Speicher, kein Referer, in Produktion nur HTTPS.
     pub fn http_client(&self) -> Result<reqwest::Client> {
-        let allow_loopback = self.allow_loopback_http;
+        let policy = self.clone();
         let redirect = reqwest::redirect::Policy::custom(move |attempt| {
-            let url = attempt.url();
-            let secure =
-                url.scheme() == "https" || (allow_loopback && url.host_str() == Some("127.0.0.1"));
-            if attempt.previous().len() >= 10 {
-                attempt.error("zu viele Weiterleitungen")
-            } else if !secure || !url.username().is_empty() || url.password().is_some() {
-                attempt.error("unsichere Weiterleitung")
-            } else {
-                attempt.follow()
+            if attempt.previous().len() >= MAX_REDIRECTS {
+                return attempt.error("zu viele Weiterleitungen");
+            }
+            match policy.check_redirect(attempt.url()) {
+                Ok(()) => attempt.follow(),
+                Err(err) => attempt.error(err.to_string()),
             }
         });
         Ok(reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(20))
             .timeout(Duration::from_secs(60 * 60 * 6))
             .redirect(redirect)
+            .referer(false)
+            .https_only(!self.allow_loopback_http)
             .build()?)
     }
 }
@@ -561,11 +643,14 @@ impl DistributionBase {
 
 /// Download-Reihenfolge: oeffentlich freigegebene Pakete zuerst ueber die Distribution-Base,
 /// danach der gepinnte Upstream. Nicht freigegebene Pakete nie ueber den eigenen Kanal.
+/// Nur vertrauenswuerdige Metadaten (`TrustedPackage`) bestimmen den exakten,
+/// versionierten Objekt-Schluessel – nie ein veraenderliches "latest".
 pub fn download_sources(
-    package: &ModelPackage,
+    trusted: &TrustedPackage,
     base: Option<&DistributionBase>,
     policy: &OriginPolicy,
 ) -> Result<Vec<Url>> {
+    let package = trusted.package();
     let mut sources = Vec::new();
     if let Some(base) = base {
         if package.release_state == ReleaseState::Public {
@@ -589,11 +674,22 @@ pub fn download_sources(
 // Verifizierter, fortsetzbarer Download
 // ---------------------------------------------------------------------------------------
 
+/// Erwartete Artefaktidentitaet. Die Groesse ist Pflicht und zugleich harte Download-Obergrenze:
+/// kein Artefakt (Modell oder Runtime-Archiv) darf mehr Bytes liefern als signiert/gepinnt.
 #[derive(Debug, Clone, Copy)]
 pub struct ExpectedArtifact<'a> {
     pub sha256: &'a str,
-    /// Pflicht fuer Modellgewichte; nur Runtime-Archive ohne Groessenangabe duerfen `None` nutzen.
-    pub size_bytes: Option<u64>,
+    pub size_bytes: u64,
+}
+
+impl ExpectedArtifact<'_> {
+    fn validate(&self) -> Result<()> {
+        validate_sha256(self.sha256)?;
+        if self.size_bytes == 0 || self.size_bytes > MAX_PACKAGE_BYTES {
+            bail!("Unplausible Artefaktgroesse {}", self.size_bytes);
+        }
+        Ok(())
+    }
 }
 
 enum FetchError {
@@ -605,6 +701,43 @@ enum FetchError {
 
 pub fn staging_part_path(staging: &Path, sha256: &str) -> PathBuf {
     staging.join(format!("{sha256}.part"))
+}
+
+/// Legt ein KatoSync-eigenes Arbeitsverzeichnis mit restriktiven Rechten an (Unix: 0700).
+/// Symlinks oder Nicht-Verzeichnisse an dieser Stelle werden verweigert.
+pub fn ensure_private_dir(dir: &Path) -> Result<()> {
+    match fs::symlink_metadata(dir) {
+        Ok(meta) if meta.file_type().is_dir() => {}
+        Ok(_) => bail!(
+            "Staging-Pfad {} ist kein reguläres Verzeichnis",
+            dir.display()
+        ),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = dir.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut builder = fs::DirBuilder::new();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            match builder.create(dir) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return ensure_private_dir(dir)
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Err(err) => return Err(err.into()),
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
 }
 
 fn existing_part_len(part: &Path) -> Result<u64> {
@@ -620,7 +753,7 @@ fn existing_part_len(part: &Path) -> Result<u64> {
 }
 
 /// `Content-Range: bytes <start>-<end>/<total>` – Start muss exakt am Teil-Download anschliessen.
-fn content_range_matches(value: Option<&str>, start: u64, expected_total: Option<u64>) -> bool {
+fn content_range_matches(value: Option<&str>, start: u64, expected_total: u64) -> bool {
     let Some(range) = value.and_then(|v| v.strip_prefix("bytes ")) else {
         return false;
     };
@@ -630,12 +763,23 @@ fn content_range_matches(value: Option<&str>, start: u64, expected_total: Option
     let Some((first, _)) = span.split_once('-') else {
         return false;
     };
-    let start_ok = first.parse::<u64>().ok() == Some(start);
-    let total_ok = match expected_total {
-        Some(expected) => total == "*" || total.parse::<u64>().ok() == Some(expected),
-        None => true,
-    };
-    start_ok && total_ok
+    first.parse::<u64>().ok() == Some(start)
+        && (total == "*" || total.parse::<u64>().ok() == Some(expected_total))
+}
+
+fn open_part(part: &Path, append: bool) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options
+        .create(true)
+        .write(true)
+        .append(append)
+        .truncate(!append);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(part)
 }
 
 async fn fetch_into_part(
@@ -646,15 +790,15 @@ async fn fetch_into_part(
     progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
 ) -> std::result::Result<(), FetchError> {
     let transport = |err: anyhow::Error| FetchError::Transport(err);
+    let size = expected.size_bytes;
     let mut existing = existing_part_len(part).map_err(transport)?;
-    if let Some(size) = expected.size_bytes {
-        if existing > size {
-            fs::remove_file(part).ok();
-            existing = 0;
-        }
-        if existing == size {
-            return Ok(());
-        }
+    if existing > size {
+        fs::remove_file(part).ok();
+        existing = 0;
+    }
+    // Vollstaendige Teil-Datei: keine Netzwerkanfrage; die SHA-Pruefung entscheidet danach.
+    if existing == size {
+        return Ok(());
     }
 
     let mut request = client.get(url.clone());
@@ -671,7 +815,7 @@ async fn fetch_into_part(
                 .headers()
                 .get(CONTENT_RANGE)
                 .and_then(|v| v.to_str().ok());
-            if !content_range_matches(range, existing, expected.size_bytes) {
+            if !content_range_matches(range, existing, size) {
                 fs::remove_file(part).ok();
                 return Err(transport(anyhow!(
                     "Server lieferte einen unpassenden Teilbereich; Download startet neu"
@@ -680,9 +824,6 @@ async fn fetch_into_part(
             existing
         }
         StatusCode::OK => 0,
-        // Ohne Groessenangabe kann der Teil-Download bereits vollstaendig sein; die
-        // anschliessende SHA-Pruefung entscheidet (und verwirft ihn bei Abweichung).
-        StatusCode::RANGE_NOT_SATISFIABLE if expected.size_bytes.is_none() => return Ok(()),
         StatusCode::RANGE_NOT_SATISFIABLE => {
             fs::remove_file(part).ok();
             return Err(transport(anyhow!(
@@ -695,26 +836,20 @@ async fn fetch_into_part(
             )))
         }
     };
-    if let (Some(size), Some(length)) = (expected.size_bytes, response.content_length()) {
-        if offset + length != size {
+    if let Some(length) = response.content_length() {
+        if offset.saturating_add(length) != size {
             if offset == 0 {
                 fs::remove_file(part).ok();
             }
             return Err(FetchError::Integrity(anyhow!(
                 "Groesse der Quelle ({}) passt nicht zum Manifest ({size})",
-                offset + length
+                offset.saturating_add(length)
             )));
         }
     }
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(offset > 0)
-        .truncate(offset == 0)
-        .open(part)
-        .map_err(|err| transport(err.into()))?;
-    progress(offset, expected.size_bytes);
+    let mut file = open_part(part, offset > 0).map_err(|err| transport(err.into()))?;
+    progress(offset, Some(size));
     loop {
         let chunk = match response.chunk().await {
             Ok(Some(chunk)) => chunk,
@@ -725,7 +860,8 @@ async fn fetch_into_part(
             }
         };
         offset += chunk.len() as u64;
-        if expected.size_bytes.is_some_and(|size| offset > size) {
+        // Harte Obergrenze unabhaengig von Content-Length (z. B. chunked Transfer).
+        if offset > size {
             drop(file);
             fs::remove_file(part).ok();
             return Err(FetchError::Integrity(anyhow!(
@@ -734,10 +870,10 @@ async fn fetch_into_part(
         }
         file.write_all(&chunk)
             .map_err(|err| transport(err.into()))?;
-        progress(offset, expected.size_bytes);
+        progress(offset, Some(size));
     }
     file.sync_all().map_err(|err| transport(err.into()))?;
-    if expected.size_bytes.is_some_and(|size| offset < size) {
+    if offset < size {
         return Err(transport(anyhow!(
             "Download nach {offset} Bytes beendet; Fortsetzung beim naechsten Versuch"
         )));
@@ -761,7 +897,7 @@ pub fn sha256_file(path: &Path) -> Result<String> {
 }
 
 /// Nachweis einer bestandenen Groessen- + SHA-256-Pruefung. Nur `verify_or_discard` erzeugt
-/// ihn; `PackageStore::promote` akzeptiert nichts anderes.
+/// ihn; `PackageStore::promote` akzeptiert nichts anderes. Ein `.part` ist nie promotbar.
 #[derive(Debug)]
 pub struct VerifiedFile {
     path: PathBuf,
@@ -775,14 +911,21 @@ impl VerifiedFile {
     }
 }
 
-/// Exakte Groesse + SHA-256. Bei Abweichung wird die Datei verworfen (fail closed).
+/// Exakte Groesse + SHA-256 einer regulaeren Datei. Bei Abweichung wird sie verworfen.
 pub fn verify_or_discard(path: &Path, expected: ExpectedArtifact<'_>) -> Result<VerifiedFile> {
-    let size = fs::metadata(path)?.len();
-    if let Some(expected_size) = expected.size_bytes {
-        if size != expected_size {
-            fs::remove_file(path).ok();
-            bail!("Groessen-Mismatch: erwartet {expected_size} Bytes, erhalten {size}");
-        }
+    expected.validate()?;
+    let meta = fs::symlink_metadata(path)?;
+    if !meta.file_type().is_file() {
+        fs::remove_file(path).ok();
+        bail!("Staging-Artefakt ist keine regulaere Datei");
+    }
+    let size = meta.len();
+    if size != expected.size_bytes {
+        fs::remove_file(path).ok();
+        bail!(
+            "Groessen-Mismatch: erwartet {} Bytes, erhalten {size}",
+            expected.size_bytes
+        );
     }
     let actual = sha256_file(path)?;
     if !actual.eq_ignore_ascii_case(expected.sha256) {
@@ -800,7 +943,8 @@ pub fn verify_or_discard(path: &Path, expected: ExpectedArtifact<'_>) -> Result<
 }
 
 /// Laedt ein Artefakt inhaltsadressiert nach `<staging>/<sha256>.part` und gibt den Pfad erst
-/// nach bestandener Verifikation zurueck. Unterbrochene Downloads werden per Range fortgesetzt.
+/// nach bestandener Verifikation zurueck. Unterbrochene Downloads werden per Range fortgesetzt;
+/// auch ein fortgesetzter oder vorab abgelegter Teil muss Groesse + SHA-256 bestehen.
 pub async fn fetch_verified(
     client: &reqwest::Client,
     sources: &[Url],
@@ -808,11 +952,11 @@ pub async fn fetch_verified(
     expected: ExpectedArtifact<'_>,
     progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
 ) -> Result<VerifiedFile> {
-    validate_sha256(expected.sha256)?;
+    expected.validate()?;
     if sources.is_empty() {
         bail!("Keine Download-Quelle angegeben");
     }
-    fs::create_dir_all(staging)?;
+    ensure_private_dir(staging)?;
     let part = staging_part_path(staging, expected.sha256);
     let mut last_error = None;
     for url in sources {
@@ -862,8 +1006,12 @@ pub struct InstalledVersion {
     pub sha256: String,
     pub size_bytes: u64,
     pub verified_at: String,
-    /// mtime beim Promote; Abweichung erzwingt vor Nutzung eine erneute Hash-Pruefung.
+    /// mtime beim Promote (Diagnose); die Start-Pruefung haengt nicht davon ab.
     pub modified_unix_secs: u64,
+    /// Herkunft der akzeptierten Metadaten (eingebettetes Manifest oder signierter Index mit
+    /// Version + Payload-Hash). Fehlt nur bei Eintraegen aus Ledgern vor dieser Version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<PackageProvenance>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -901,16 +1049,39 @@ impl PackageLedger {
         if self.schema_version != LEDGER_SCHEMA_VERSION || self.package_id != package_id {
             bail!("Paket-Ledger passt nicht zu {package_id}");
         }
+        let mut versions = HashSet::new();
         for entry in &self.installed {
             SemVer::parse(&entry.version)?;
+            if !versions.insert(entry.version.as_str()) {
+                bail!("Paket-Ledger enthaelt Version {} doppelt", entry.version);
+            }
             validate_file_name(&entry.file_name)?;
             validate_sha256(&entry.sha256)?;
+            if entry.size_bytes == 0 || entry.size_bytes > MAX_PACKAGE_BYTES {
+                bail!("Paket-Ledger enthaelt eine unplausible Artefaktgroesse");
+            }
+            if let Some(PackageProvenance::SignedIndex {
+                metadata_version,
+                metadata_sha256,
+            }) = &entry.provenance
+            {
+                if *metadata_version == 0 {
+                    bail!("Paket-Ledger enthaelt eine ungueltige Metadatenversion");
+                }
+                validate_sha256(metadata_sha256)?;
+            }
         }
         for version in [&self.active, &self.previous, &self.pinned]
             .into_iter()
             .flatten()
         {
             SemVer::parse(version)?;
+            if self.entry(version).is_none() {
+                bail!("Paket-Ledger verweist auf nicht installierte Version {version}");
+            }
+        }
+        if self.active.is_some() && self.active == self.previous {
+            bail!("Aktive und vorherige Paketversion duerfen nicht identisch sein");
         }
         Ok(())
     }
@@ -969,7 +1140,7 @@ fn modified_secs(path: &Path) -> Result<u64> {
         .unwrap_or(0))
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4().simple()));
     {
         let mut file = File::create(&tmp)?;
@@ -980,6 +1151,58 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         fs::remove_file(&tmp).ok();
     })?;
     Ok(())
+}
+
+/// Identitaet einer bereits gehashten Datei innerhalb dieses Prozesses. Jede Aenderung an
+/// Inhalt oder Metadaten (Unix: ctime/Inode, nicht vom Nutzer setzbar) erzwingt einen Re-Hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    ctime: (i64, i64),
+    #[cfg(unix)]
+    inode: (u64, u64),
+    sha256: String,
+}
+
+impl FileStamp {
+    fn of(meta: &fs::Metadata, sha256: &str) -> Self {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            #[cfg(unix)]
+            ctime: (meta.ctime(), meta.ctime_nsec()),
+            #[cfg(unix)]
+            inode: (meta.dev(), meta.ino()),
+            sha256: sha256.to_ascii_lowercase(),
+        }
+    }
+}
+
+fn launch_stamps() -> &'static Mutex<HashMap<PathBuf, FileStamp>> {
+    static STAMPS: OnceLock<Mutex<HashMap<PathBuf, FileStamp>>> = OnceLock::new();
+    STAMPS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn launch_stamp_matches(path: &Path, stamp: &FileStamp) -> bool {
+    launch_stamps()
+        .lock()
+        .is_ok_and(|stamps| stamps.get(path) == Some(stamp))
+}
+
+fn remember_launch_stamp(path: &Path, stamp: FileStamp) {
+    if let Ok(mut stamps) = launch_stamps().lock() {
+        stamps.insert(path.to_path_buf(), stamp);
+    }
+}
+
+fn forget_launch_stamp(path: &Path) {
+    if let Ok(mut stamps) = launch_stamps().lock() {
+        stamps.remove(path);
+    }
 }
 
 /// Paketbaum unterhalb von `<root>`:
@@ -1059,8 +1282,9 @@ impl PackageStore {
         Ok(ok.then_some(path))
     }
 
-    /// Strenge Pruefung vor dem Start: Groesse + mtime; bei veraenderter mtime erneuter
-    /// SHA-256-Abgleich. Unverifizierte Gewichte werden nie zurueckgegeben.
+    /// Strenge Pruefung vor dem Start: regulaere Datei, exakte Groesse und – beim ersten Start
+    /// je Prozess oder nach jeder Dateiaenderung (Groesse/mtime/ctime/Inode) – voller
+    /// SHA-256-Abgleich gegen das Ledger. Unverifizierte Gewichte werden nie zurueckgegeben.
     pub fn resolve_for_launch(&self, package_id: &str) -> Result<PathBuf> {
         let mut ledger = self
             .load_ledger(package_id)?
@@ -1070,25 +1294,8 @@ impl PackageStore {
             .cloned()
             .ok_or_else(|| anyhow!("Modellpaket {package_id} hat keine aktive Version"))?;
         let path = self.artifact_path(package_id, &entry)?;
-        let meta = fs::symlink_metadata(&path)
-            .with_context(|| format!("Modelldatei fuer {} fehlt", entry.version))?;
-        if !meta.file_type().is_file() || meta.len() != entry.size_bytes {
-            bail!(
-                "Modelldatei {}@{} ist unvollstaendig oder ersetzt",
-                package_id,
-                entry.version
-            );
-        }
-        let modified = modified_secs(&path)?;
+        let modified = self.verify_installed(package_id, &entry, &path)?;
         if modified != entry.modified_unix_secs {
-            let actual = sha256_file(&path)?;
-            if !actual.eq_ignore_ascii_case(&entry.sha256) {
-                bail!(
-                    "Modelldatei {}@{} wurde veraendert (SHA256-Mismatch)",
-                    package_id,
-                    entry.version
-                );
-            }
             if let Some(stored) = ledger
                 .installed
                 .iter_mut()
@@ -1101,9 +1308,49 @@ impl PackageStore {
         Ok(path)
     }
 
+    /// Prueft eine installierte Version gegen ihren Ledger-Eintrag; liefert die aktuelle mtime.
+    fn verify_installed(
+        &self,
+        package_id: &str,
+        entry: &InstalledVersion,
+        path: &Path,
+    ) -> Result<u64> {
+        let meta = fs::symlink_metadata(path)
+            .with_context(|| format!("Modelldatei fuer {} fehlt", entry.version))?;
+        if !meta.file_type().is_file() || meta.len() != entry.size_bytes {
+            forget_launch_stamp(path);
+            bail!(
+                "Modelldatei {}@{} ist unvollstaendig oder ersetzt",
+                package_id,
+                entry.version
+            );
+        }
+        let stamp = FileStamp::of(&meta, &entry.sha256);
+        if !launch_stamp_matches(path, &stamp) {
+            let actual = sha256_file(path)?;
+            if !actual.eq_ignore_ascii_case(&entry.sha256) {
+                forget_launch_stamp(path);
+                bail!(
+                    "Modelldatei {}@{} wurde veraendert (SHA256-Mismatch)",
+                    package_id,
+                    entry.version
+                );
+            }
+            remember_launch_stamp(path, stamp);
+        }
+        modified_secs(path)
+    }
+
     /// Uebernimmt eine bereits verifizierte Datei atomar als neue aktive Version.
     /// Die bisher aktive Version wird Rollback-Ziel; aeltere Versionen werden entfernt.
-    pub fn promote(&self, package: &ModelPackage, verified: VerifiedFile) -> Result<PackageLedger> {
+    /// Verweigert: Downgrades per Download (nur `rollback` auf lokal verifizierte Versionen)
+    /// und eine bereits installierte Version mit anderem Inhalt (Versionen sind unveraenderlich).
+    pub fn promote(
+        &self,
+        trusted: &TrustedPackage,
+        verified: VerifiedFile,
+    ) -> Result<PackageLedger> {
+        let package = trusted.package();
         validate_package_id(&package.package_id)?;
         validate_file_name(&package.file_name)?;
         if !verified.sha256.eq_ignore_ascii_case(&package.sha256)
@@ -1115,6 +1362,38 @@ impl PackageStore {
                 package.version
             );
         }
+        let existing = self.load_ledger(&package.package_id)?;
+        if let Some(ledger) = &existing {
+            let requested = SemVer::parse(&package.version)?;
+            if let Some(highest) = ledger
+                .installed
+                .iter()
+                .map(|entry| SemVer::parse(&entry.version).map(|version| (entry, version)))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .max_by(|(_, left), (_, right)| left.cmp(right))
+                .filter(|(_, highest)| requested < *highest)
+                .map(|(entry, _)| entry)
+            {
+                bail!(
+                    "Downgrade von {} auf {} per Download verweigert; nur Rollback auf eine lokal verifizierte Version ist erlaubt",
+                    highest.version,
+                    package.version
+                );
+            }
+            if let Some(same) = ledger.entry(&package.version) {
+                if !same.sha256.eq_ignore_ascii_case(&package.sha256)
+                    || same.size_bytes != package.size_bytes
+                    || same.file_name != package.file_name
+                {
+                    bail!(
+                        "{}@{} ist bereits mit anderem Inhalt installiert; veroeffentlichte Versionen sind unveraenderlich",
+                        package.package_id,
+                        package.version
+                    );
+                }
+            }
+        }
         let package_dir = self.package_dir(&package.package_id)?;
         let final_dir = self.version_dir(&package.package_id, &package.version)?;
         fs::create_dir_all(&package_dir)?;
@@ -1125,6 +1404,12 @@ impl PackageStore {
         if let Err(err) = fs::rename(&verified.path, &incoming_file) {
             fs::remove_dir_all(&incoming).ok();
             return Err(err).context("Verifizierte Datei konnte nicht uebernommen werden");
+        }
+        // Installierte Gewichte sind schreibgeschuetzt; Aenderungen erzwingen ohnehin Re-Hash.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&incoming_file, fs::Permissions::from_mode(0o444))?;
         }
         let modified = modified_secs(&incoming_file)?;
 
@@ -1144,12 +1429,9 @@ impl PackageStore {
         if let Some(trash) = displaced {
             fs::remove_dir_all(trash).ok();
         }
+        forget_launch_stamp(&final_dir.join(&package.file_name));
 
-        let mut ledger = self
-            .load_ledger(&package.package_id)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| PackageLedger::new(&package.package_id));
+        let mut ledger = existing.unwrap_or_else(|| PackageLedger::new(&package.package_id));
         ledger
             .installed
             .retain(|entry| entry.version != package.version);
@@ -1161,6 +1443,7 @@ impl PackageStore {
             size_bytes: package.size_bytes,
             verified_at: now_rfc3339(),
             modified_unix_secs: modified,
+            provenance: Some(trusted.provenance().clone()),
         });
         if ledger.active.as_deref() != Some(package.version.as_str()) {
             ledger.previous = ledger.active.take();
@@ -1199,6 +1482,8 @@ impl PackageStore {
     }
 
     /// Wechselt auf die vorherige Version und pinnt sie, damit kein Update sie sofort ersetzt.
+    /// Ziel ist ausschliesslich eine frueher lokal verifizierte, noch installierte Version; sie
+    /// wird vor der Aktivierung erneut voll gehasht. Aeltere Remote-Metadaten spielen keine Rolle.
     pub fn rollback(&self, package_id: &str) -> Result<PackageLedger> {
         let mut ledger = self
             .load_ledger(package_id)?
@@ -1208,6 +1493,14 @@ impl PackageStore {
             .clone()
             .filter(|v| ledger.entry(v).is_some())
             .ok_or_else(|| anyhow!("Keine Rollback-Version fuer {package_id} vorhanden"))?;
+        let entry = ledger
+            .entry(&target)
+            .cloned()
+            .ok_or_else(|| anyhow!("Rollback-Version {target} fehlt im Ledger"))?;
+        let path = self.artifact_path(package_id, &entry)?;
+        forget_launch_stamp(&path);
+        self.verify_installed(package_id, &entry, &path)
+            .context("Rollback-Ziel ist nicht mehr intakt; Rollback verweigert")?;
         ledger.previous = ledger.active.replace(target.clone());
         ledger.pinned = Some(target);
         self.save_ledger(&ledger)?;
@@ -1220,6 +1513,9 @@ impl PackageStore {
             .ok_or_else(|| anyhow!("Modellpaket {package_id} ist nicht installiert"))?;
         if let Some(version) = version {
             SemVer::parse(version)?;
+            if ledger.entry(version).is_none() {
+                bail!("Version {version} von {package_id} ist nicht installiert");
+            }
         }
         ledger.pinned = version.map(str::to_string);
         self.save_ledger(&ledger)?;
@@ -1261,10 +1557,26 @@ impl PackageStore {
         if is_active && active_in_use {
             bail!("Aktive Version {version} wird gerade genutzt; zuerst stoppen");
         }
+        let replacement = if is_active {
+            ledger
+                .previous
+                .as_deref()
+                .and_then(|candidate| ledger.entry(candidate))
+                .cloned()
+        } else {
+            None
+        };
+        if let Some(replacement) = &replacement {
+            let path = self.artifact_path(package_id, replacement)?;
+            forget_launch_stamp(&path);
+            self.verify_installed(package_id, replacement, &path)
+                .context("Ersatz fuer die aktive Version ist nicht mehr intakt")?;
+        }
         self.remove_version_dir(package_id, version)?;
         ledger.installed.retain(|entry| entry.version != version);
         if is_active {
-            ledger.active = ledger.previous.take();
+            ledger.active = replacement.map(|entry| entry.version);
+            ledger.previous = None;
         }
         if ledger.previous.as_deref() == Some(version) {
             ledger.previous = None;
@@ -1284,19 +1596,14 @@ impl PackageStore {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_fixtures {
     use super::*;
-    use std::{
-        io::{BufRead, BufReader},
-        net::TcpListener,
-        sync::{Arc, Mutex},
-    };
 
-    fn sha_hex(bytes: &[u8]) -> String {
+    pub fn sha_hex(bytes: &[u8]) -> String {
         format!("{:x}", Sha256::digest(bytes))
     }
 
-    fn approved_license() -> PackageLicense {
+    pub fn approved_license() -> PackageLicense {
         PackageLicense {
             spdx: "Apache-2.0".into(),
             notice_refs: vec!["packages/example/1.0.0/NOTICE".into()],
@@ -1311,7 +1618,7 @@ mod tests {
         }
     }
 
-    fn package(version: &str, bytes: &[u8]) -> ModelPackage {
+    pub fn package(version: &str, bytes: &[u8]) -> ModelPackage {
         ModelPackage {
             schema: PACKAGE_SCHEMA.into(),
             package_id: "kato-test-brain".into(),
@@ -1340,11 +1647,11 @@ mod tests {
         }
     }
 
-    fn prod_policy() -> OriginPolicy {
+    pub fn prod_policy() -> OriginPolicy {
         OriginPolicy::new(&["models.example.org".into(), "huggingface.co".into()]).unwrap()
     }
 
-    fn tempdir(tag: &str) -> PathBuf {
+    pub fn tempdir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "katosync-model-dist-{tag}-{}",
             uuid::Uuid::new_v4().simple()
@@ -1352,6 +1659,18 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         dir
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_fixtures::*;
+    use super::*;
+    use crate::model_trust::{PackageProvenance, TrustedPackage};
+    use std::{
+        io::{BufRead, BufReader},
+        net::TcpListener,
+        sync::{Arc, Mutex},
+    };
 
     // ----- Vertrag ------------------------------------------------------------------------
 
@@ -1509,20 +1828,17 @@ mod tests {
         foreign_platform.platforms = vec!["windows-x86_64".into()];
         let mut internal = package("1.3.0", b"w");
         internal.release_state = ReleaseState::Internal;
-        let index = ChannelIndex {
-            schema: INDEX_SCHEMA.into(),
-            channel: Channel::Stable,
-            packages: vec![
-                package("1.0.0", b"w"),
-                package("1.2.0", b"w"),
-                gated,
-                foreign_platform,
-                internal,
-            ],
-        };
+        let packages = vec![
+            package("1.0.0", b"w"),
+            package("1.2.0", b"w"),
+            gated,
+            foreign_platform,
+            internal,
+        ];
         let pick = |pin| {
-            select_release(
-                &index,
+            select_candidate(
+                Channel::Stable,
+                &packages,
                 "kato-test-brain",
                 pin,
                 "macos-aarch64",
@@ -1535,8 +1851,9 @@ mod tests {
         assert_eq!(pick(None).as_deref(), Some("1.2.0"));
         assert_eq!(pick(Some("1.0.0")).as_deref(), Some("1.0.0"));
         assert_eq!(pick(Some("1.5.0")), None);
-        assert!(select_release(
-            &index,
+        assert!(select_candidate(
+            Channel::Stable,
+            &packages,
             "kato-test-brain",
             None,
             "macos-aarch64",
@@ -1591,6 +1908,7 @@ mod tests {
             "https://models.example.org/m.gguf#frag",
             "file:///etc/passwd",
             "http://127.0.0.1:9/m.gguf",
+            "https://models.example.org:8443/m.gguf",
         ] {
             assert!(policy.check(bad).is_err(), "{bad}");
         }
@@ -1619,27 +1937,36 @@ mod tests {
         let base = DistributionBase::parse("https://models.example.org/", &policy).unwrap();
         let mut pkg = package("1.0.0", b"w");
         pkg.upstream_url = Some("https://huggingface.co/org/repo/resolve/rev/model.gguf".into());
-        let public = download_sources(&pkg, Some(&base), &policy).unwrap();
+        let trusted = |pkg: &ModelPackage| TrustedPackage::embedded(pkg.clone(), &policy).unwrap();
+        let public = download_sources(&trusted(&pkg), Some(&base), &policy).unwrap();
         assert_eq!(public.len(), 2);
         assert_eq!(public[0].host_str(), Some("models.example.org"));
+        assert_eq!(
+            public[0].path(),
+            "/packages/kato-test-brain/1.0.0/model.gguf",
+            "exakter, versionierter Schluessel"
+        );
 
         pkg.release_state = ReleaseState::Internal;
-        let internal = download_sources(&pkg, Some(&base), &policy).unwrap();
+        let internal = download_sources(&trusted(&pkg), Some(&base), &policy).unwrap();
         assert_eq!(internal.len(), 1);
         assert_eq!(internal[0].host_str(), Some("huggingface.co"));
 
         pkg.upstream_url = None;
-        assert!(download_sources(&pkg, Some(&base), &policy).is_err());
+        assert!(download_sources(&trusted(&pkg), Some(&base), &policy).is_err());
     }
 
     // ----- Download -----------------------------------------------------------------------
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone)]
     enum Serve {
         Full,
         CutAfter(usize),
         IgnoreRange,
         Status(u16),
+        Redirect(String),
+        /// Antwortet ohne Content-Length und liefert mehr Bytes als erwartet.
+        Unbounded(usize),
     }
 
     /// Loopback-Server mit Range-Unterstuetzung; je Verbindung ein Verhalten aus `plan`.
@@ -1668,10 +1995,19 @@ mod tests {
                         .unwrap_or_default(),
                 );
                 let total = payload.len();
-                let (head, body): (String, &[u8]) = match (serve, range_start) {
+                let padding = match &serve {
+                    Serve::Unbounded(extra) => vec![b'x'; total + extra],
+                    _ => Vec::new(),
+                };
+                let (head, body): (String, &[u8]) = match (&serve, range_start) {
                     (Serve::Status(code), _) => {
                         (format!("HTTP/1.1 {code} X\r\nContent-Length: 0\r\n"), &[])
                     }
+                    (Serve::Redirect(location), _) => (
+                        format!("HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\n"),
+                        &[],
+                    ),
+                    (Serve::Unbounded(_), _) => ("HTTP/1.1 200 OK\r\n".to_string(), &padding),
                     (Serve::IgnoreRange, _) | (_, None) => (
                         format!("HTTP/1.1 200 OK\r\nContent-Length: {total}\r\n"),
                         &payload,
@@ -1685,8 +2021,8 @@ mod tests {
                         &payload[start..],
                     ),
                 };
-                let body = match serve {
-                    Serve::CutAfter(n) => &body[..n.min(body.len())],
+                let body = match &serve {
+                    Serve::CutAfter(n) => &body[..(*n).min(body.len())],
                     _ => body,
                 };
                 let _ = write!(stream, "{head}Connection: close\r\n\r\n");
@@ -1711,7 +2047,7 @@ mod tests {
             staging,
             ExpectedArtifact {
                 sha256: sha,
-                size_bytes: Some(size),
+                size_bytes: size,
             },
             &mut progress,
         )
@@ -1778,44 +2114,144 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sizeless_complete_part_is_verified_not_trusted_on_416() {
+    async fn planted_or_resumed_partials_cannot_bypass_size_and_hash_gates() {
         let data = payload();
         let sha = sha_hex(&data);
-        let policy = OriginPolicy::loopback_for_tests();
-        let client = policy.http_client().unwrap();
-        let mut progress = |_: u64, _: Option<u64>| {};
-        let expected = ExpectedArtifact {
-            sha256: &sha,
-            size_bytes: None,
-        };
+        let size = data.len() as u64;
 
-        let staging = tempdir("sizeless-ok");
-        fs::write(staging_part_path(&staging, &sha), &data).unwrap();
-        let (url, _) = mock_origin(data.clone(), vec![Serve::Status(416)]);
-        let done = fetch_verified(
-            &client,
-            &[policy.check(&url).unwrap()],
-            &staging,
-            expected,
-            &mut progress,
+        // Vorab abgelegte, vollstaendig grosse Faelschung: kein Request, aber SHA scheitert.
+        let staging = tempdir("planted");
+        let forged = vec![0u8; data.len()];
+        fs::write(staging_part_path(&staging, &sha), &forged).unwrap();
+        let (url, ranges) = mock_origin(data.clone(), vec![Serve::Full]);
+        let err = fetch(&url, &staging, &sha, size).await.unwrap_err();
+        assert!(err.to_string().contains("SHA256-Mismatch"), "{err:#}");
+        assert!(!staging_part_path(&staging, &sha).exists());
+        assert!(
+            ranges.lock().unwrap().is_empty(),
+            "kein Netzwerkzugriff noetig"
+        );
+
+        // Gefaelschter Praefix + korrekt fortgesetzter Rest: Hash ueber die Gesamtdatei scheitert.
+        let staging = tempdir("poisoned-prefix");
+        fs::write(staging_part_path(&staging, &sha), vec![0xAA; 4096]).unwrap();
+        let (url, ranges) = mock_origin(data.clone(), vec![Serve::Full]);
+        assert!(fetch(&url, &staging, &sha, size).await.is_err());
+        assert_eq!(ranges.lock().unwrap().as_slice(), ["bytes=4096-"]);
+        assert!(!staging_part_path(&staging, &sha).exists());
+
+        // Teil-Datei, die groesser als erlaubt ist, wird verworfen und neu geladen.
+        let staging = tempdir("oversized-part");
+        fs::write(
+            staging_part_path(&staging, &sha),
+            vec![1u8; data.len() + 10],
         )
-        .await
         .unwrap();
+        let (url, _) = mock_origin(data.clone(), vec![Serve::Full]);
+        let done = fetch(&url, &staging, &sha, size).await.unwrap();
         assert_eq!(fs::read(done.path()).unwrap(), data);
 
-        let staging = tempdir("sizeless-bad");
-        fs::write(staging_part_path(&staging, &sha), b"stale").unwrap();
-        let (url, _) = mock_origin(data.clone(), vec![Serve::Status(416)]);
-        assert!(fetch_verified(
-            &client,
-            &[policy.check(&url).unwrap()],
-            &staging,
-            expected,
-            &mut progress
-        )
-        .await
-        .is_err());
+        // Symlink an Stelle der Teil-Datei wird nie gelesen oder beschrieben.
+        #[cfg(unix)]
+        {
+            let staging = tempdir("symlink-part");
+            let outside = tempdir("symlink-target").join("victim");
+            fs::write(&outside, b"keep").unwrap();
+            std::os::unix::fs::symlink(&outside, staging_part_path(&staging, &sha)).unwrap();
+            let (url, _) = mock_origin(data.clone(), vec![Serve::Full]);
+            let done = fetch(&url, &staging, &sha, size).await.unwrap();
+            assert_eq!(fs::read(done.path()).unwrap(), data);
+            assert_eq!(fs::read(&outside).unwrap(), b"keep");
+        }
+    }
+
+    #[tokio::test]
+    async fn chunked_overlong_body_is_capped_and_discarded() {
+        let data = payload();
+        let sha = sha_hex(&data);
+        let (url, _) = mock_origin(data.clone(), vec![Serve::Unbounded(10_000)]);
+        let staging = tempdir("overlong");
+        let err = fetch(&url, &staging, &sha, data.len() as u64)
+            .await
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("mehr Bytes"), "{err:#}");
         assert!(!staging_part_path(&staging, &sha).exists());
+    }
+
+    #[tokio::test]
+    async fn redirect_to_disallowed_origin_or_with_credentials_is_rejected() {
+        let data = payload();
+        let sha = sha_hex(&data);
+        let size = data.len() as u64;
+        for location in [
+            "https://evil.example.com/model.gguf".to_string(),
+            "http://localhost:1/model.gguf".to_string(),
+            "ftp://127.0.0.1/model.gguf".to_string(),
+        ] {
+            let (url, _) = mock_origin(data.clone(), vec![Serve::Redirect(location.clone())]);
+            let staging = tempdir("redirect-bad");
+            assert!(
+                fetch(&url, &staging, &sha, size).await.is_err(),
+                "{location}"
+            );
+            assert!(!staging_part_path(&staging, &sha).exists(), "{location}");
+        }
+
+        // Zugangsdaten im Weiterleitungsziel – auch auf einen sonst erlaubten Host.
+        let (good, good_hits) = mock_origin(data.clone(), vec![Serve::Full]);
+        let with_creds = good.replace("http://", "http://user:secret@");
+        let (url, _) = mock_origin(data.clone(), vec![Serve::Redirect(with_creds)]);
+        let staging = tempdir("redirect-creds");
+        assert!(fetch(&url, &staging, &sha, size).await.is_err());
+        assert!(
+            good_hits.lock().unwrap().is_empty(),
+            "Ziel wurde nie kontaktiert"
+        );
+
+        // Erlaubtes Ziel (gleiche Loopback-Herkunft im Testmodus) funktioniert weiterhin.
+        let (target, _) = mock_origin(data.clone(), vec![Serve::Full]);
+        let (url, _) = mock_origin(data.clone(), vec![Serve::Redirect(target)]);
+        let staging = tempdir("redirect-ok");
+        let done = fetch(&url, &staging, &sha, size).await.unwrap();
+        assert_eq!(fs::read(done.path()).unwrap(), data);
+    }
+
+    #[test]
+    fn production_redirect_policy_revalidates_every_hop() {
+        let policy = prod_policy()
+            .with_redirect_hosts(&[
+                "*.hf.co".into(),
+                "release-assets.githubusercontent.com".into(),
+            ])
+            .unwrap();
+        let ok = |raw: &str| policy.check_redirect(&Url::parse(raw).unwrap()).is_ok();
+        assert!(ok(
+            "https://us.aws.cdn.hf.co/xet-bridge-us/abc?X-Amz-Signature=1"
+        ));
+        assert!(ok("https://release-assets.githubusercontent.com/a/b?sig=1"));
+        assert!(ok("https://huggingface.co/api/resolve-cache/x"));
+        for bad in [
+            "https://hf.co.evil.example.com/x",
+            "https://evilhf.co/x",
+            "https://objects.githubusercontent.com.evil.example/x",
+            "http://us.aws.cdn.hf.co/x",
+            "https://user:pw@us.aws.cdn.hf.co/x",
+            "https://us.aws.cdn.hf.co:8443/x",
+            "https://us.aws.cdn.hf.co/x#frag",
+            "https://raw.githubusercontent.com/x",
+        ] {
+            assert!(!ok(bad), "{bad}");
+        }
+        // Weiterleitungs-Hosts sind nie direkte Quelle.
+        assert!(policy.check("https://us.aws.cdn.hf.co/x").is_err());
+        for too_broad in ["*.co", "*.", "*..hf.co", "*.hf..co"] {
+            assert!(
+                prod_policy()
+                    .with_redirect_hosts(&[too_broad.into()])
+                    .is_err(),
+                "{too_broad}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1834,7 +2270,7 @@ mod tests {
             &staging,
             ExpectedArtifact {
                 sha256: &sha,
-                size_bytes: Some(data.len() as u64),
+                size_bytes: data.len() as u64,
             },
             &mut progress,
         )
@@ -1845,19 +2281,38 @@ mod tests {
 
     // ----- Installierter Baum -------------------------------------------------------------
 
-    fn install(store: &PackageStore, pkg: &ModelPackage, bytes: &[u8]) -> PackageLedger {
-        fs::create_dir_all(store.staging_dir()).unwrap();
+    fn try_install(
+        store: &PackageStore,
+        pkg: &ModelPackage,
+        bytes: &[u8],
+    ) -> Result<PackageLedger> {
+        ensure_private_dir(&store.staging_dir()).unwrap();
         let part = staging_part_path(&store.staging_dir(), &pkg.sha256);
         fs::write(&part, bytes).unwrap();
         let verified = verify_or_discard(
             &part,
             ExpectedArtifact {
                 sha256: &pkg.sha256,
-                size_bytes: Some(pkg.size_bytes),
+                size_bytes: pkg.size_bytes,
             },
+        )?;
+        store.promote(
+            &TrustedPackage::embedded(pkg.clone(), &prod_policy())?,
+            verified,
         )
-        .unwrap();
-        store.promote(pkg, verified).unwrap()
+    }
+
+    fn install(store: &PackageStore, pkg: &ModelPackage, bytes: &[u8]) -> PackageLedger {
+        try_install(store, pkg, bytes).unwrap()
+    }
+
+    /// Simuliert einen lokalen Angreifer: Schreibschutz aufheben und Inhalt ersetzen.
+    fn overwrite(path: &Path, bytes: &[u8]) {
+        let mut perms = fs::metadata(path).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        fs::set_permissions(path, perms).unwrap();
+        fs::write(path, bytes).unwrap();
     }
 
     #[test]
@@ -1903,16 +2358,139 @@ mod tests {
         install(&store, &pkg, b"genuine");
         let path = store.resolve_for_launch("kato-test-brain").unwrap();
 
-        fs::write(&path, b"short").unwrap();
+        let original_mtime = fs::metadata(&path).unwrap().modified().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o444
+            );
+        }
+
+        overwrite(&path, b"short");
         assert!(store.active_installed("kato-test-brain").unwrap().is_none());
         assert!(store.resolve_for_launch("kato-test-brain").is_err());
 
         // Gleiche Groesse, anderer Inhalt + andere mtime → Re-Hash scheitert.
-        fs::write(&path, b"forgery").unwrap();
+        overwrite(&path, b"forgery");
         let file = File::options().write(true).open(&path).unwrap();
         file.set_modified(UNIX_EPOCH + Duration::from_secs(1))
             .unwrap();
         assert!(store.resolve_for_launch("kato-test-brain").is_err());
+
+        // Gleiche Groesse UND wiederhergestellte mtime → trotzdem erkannt (TOCTOU-Haertung).
+        file.set_modified(original_mtime).unwrap();
+        drop(file);
+        assert!(store.resolve_for_launch("kato-test-brain").is_err());
+
+        // Erster Start im neuen Prozess (Cache leer) hasht immer voll.
+        overwrite(&path, b"genuine");
+        file_set_mtime(&path, original_mtime);
+        forget_launch_stamp(&path);
+        store.resolve_for_launch("kato-test-brain").unwrap();
+        overwrite(&path, b"forgery");
+        file_set_mtime(&path, original_mtime);
+        forget_launch_stamp(&path);
+        assert!(store.resolve_for_launch("kato-test-brain").is_err());
+    }
+
+    fn file_set_mtime(path: &Path, mtime: std::time::SystemTime) {
+        File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+    }
+
+    #[test]
+    fn rollback_only_to_previously_verified_local_package() {
+        let root = tempdir("rollback-verified");
+        let store = PackageStore::new(root.clone());
+        assert!(
+            store.rollback("kato-test-brain").is_err(),
+            "nichts installiert"
+        );
+        install(&store, &package("1.0.0", b"one"), b"one");
+        assert!(
+            store.rollback("kato-test-brain").is_err(),
+            "kein Vorgaenger"
+        );
+        install(&store, &package("1.1.0", b"two"), b"two");
+
+        // Vorgaenger auf der Platte manipuliert → Rollback verweigert, aktiv bleibt 1.1.0.
+        let previous = root.join("packages/kato-test-brain/1.0.0/model.gguf");
+        overwrite(&previous, b"ONE");
+        let err = store.rollback("kato-test-brain").unwrap_err();
+        assert!(format!("{err:#}").contains("nicht mehr intakt"), "{err:#}");
+        assert_eq!(
+            store
+                .load_ledger("kato-test-brain")
+                .unwrap()
+                .unwrap()
+                .active
+                .as_deref(),
+            Some("1.1.0")
+        );
+
+        // Intakter Vorgaenger → Rollback gelingt, ohne Remote-Metadaten.
+        overwrite(&previous, b"one");
+        let rolled = store.rollback("kato-test-brain").unwrap();
+        assert_eq!(rolled.active.as_deref(), Some("1.0.0"));
+    }
+
+    #[test]
+    fn downloads_cannot_downgrade_or_mutate_published_versions() {
+        let store = PackageStore::new(tempdir("downgrade"));
+        install(&store, &package("1.0.0", b"one"), b"one");
+        install(&store, &package("1.1.0", b"two"), b"two");
+        let err = try_install(&store, &package("0.9.0", b"old"), b"old").unwrap_err();
+        assert!(err.to_string().contains("Downgrade"), "{err:#}");
+
+        // Gleiche Version, anderer Inhalt (z. B. ueberschriebenes R2-Objekt).
+        let err = try_install(&store, &package("1.1.0", b"TWO"), b"TWO").unwrap_err();
+        assert!(err.to_string().contains("unveraenderlich"), "{err:#}");
+        // Identische Neuinstallation (Reparatur) bleibt erlaubt.
+        install(&store, &package("1.1.0", b"two"), b"two");
+        let ledger = store.load_ledger("kato-test-brain").unwrap().unwrap();
+        assert_eq!(ledger.active.as_deref(), Some("1.1.0"));
+        assert_eq!(
+            ledger.active_entry().unwrap().provenance,
+            Some(PackageProvenance::EmbeddedManifest)
+        );
+
+        // Nach einem lokalen Rollback bleibt die hoechste verifizierte Version die
+        // Download-Untergrenze; ein Remote-Zwischenstand darf sie nicht verdraengen.
+        store.rollback("kato-test-brain").unwrap();
+        store.set_pin("kato-test-brain", None).unwrap();
+        let err = try_install(&store, &package("1.0.5", b"middle"), b"middle").unwrap_err();
+        assert!(err.to_string().contains("Downgrade"), "{err:#}");
+        assert!(store.set_pin("kato-test-brain", Some("9.9.9")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staging_directory_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempdir("private");
+        let staging = root.join("staging");
+        ensure_private_dir(&staging).unwrap();
+        assert_eq!(
+            fs::metadata(&staging).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        fs::set_permissions(&staging, fs::Permissions::from_mode(0o777)).unwrap();
+        ensure_private_dir(&staging).unwrap();
+        assert_eq!(
+            fs::metadata(&staging).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+
+        let elsewhere = tempdir("elsewhere");
+        let link = root.join("linked");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        assert!(ensure_private_dir(&link).is_err());
     }
 
     #[test]

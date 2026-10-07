@@ -1213,7 +1213,18 @@ export default function App() {
               </HoverTip>
             </div>
             {config.scanRules.includeDocuments ? (
-              <p className="documents-warning">{t("settings.rules.documentsWarning")}</p>
+              <>
+                <p className="documents-warning">{t("settings.rules.documentsWarning")}</p>
+                <div className="switch-grid">
+                  <HoverTip title={t("settings.rules.allowUnscannedBinary")} description={t("settings.rules.allowUnscannedBinaryDesc")}>
+                    <Toggle
+                      checked={config.safety.allowUnscannedBinaryUploads ?? false}
+                      label={t("settings.rules.allowUnscannedBinary")}
+                      onChange={(checked) => vm.updateNested("safety", { allowUnscannedBinaryUploads: checked })}
+                    />
+                  </HoverTip>
+                </div>
+              </>
             ) : null}
             <div className="range-row">
               <label>
@@ -2622,10 +2633,18 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
             label={t("codex.connector.label")}
             onChange={(checked) => vm.updateConfig("runnerConnectorMode", checked)}
           />
+          <Toggle
+            checked={vm.config.localControlDeveloperMode ?? false}
+            label={t("codex.developer.label")}
+            onChange={(checked) => vm.updateConfig("localControlDeveloperMode", checked)}
+          />
         </div>
       ) : null}
       {vm.config && vm.config.runnerConnectorMode ? (
         <p className="field-hint" style={{ marginTop: 2, color: "#c47f00" }}>{t("codex.connector.warn")}</p>
+      ) : null}
+      {vm.config && vm.config.localControlDeveloperMode ? (
+        <p className="field-hint" style={{ marginTop: 2, color: "#c47f00" }}>{t("codex.developer.warn")}</p>
       ) : null}
       {vm.config && vm.config.codexCodingMode ? (
         <div className="switch-grid" style={{ marginBottom: 6 }}>
@@ -3512,6 +3531,22 @@ function buildHints(vm: ReturnType<typeof useKatoSyncViewModel>, t: TFunc) {
       kind: "warn",
       title: t("hintmsg.moreSecrets.title"),
       text: t("hintmsg.moreSecrets.text", { count: scan.secretWarnings - secretFiles.length })
+    });
+  }
+
+  // Cloud-Grenze sichtbar machen: PDF/Bilder sind lokal nicht auf Secrets pruefbar.
+  if (scan?.binaryConsentRequired) {
+    hints.push({
+      kind: "info",
+      title: t("hintmsg.binaryConsent.title"),
+      text: t("hintmsg.binaryConsent.text", { count: scan.binaryConsentRequired })
+    });
+  }
+  if (scan?.unscannedBinaryUploads) {
+    hints.push({
+      kind: "warn",
+      title: t("hintmsg.unscannedBinary.title"),
+      text: t("hintmsg.unscannedBinary.text", { count: scan.unscannedBinaryUploads })
     });
   }
 
