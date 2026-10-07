@@ -134,8 +134,8 @@ function plan(tasks: ActionPlan["tasks"], status: ActionPlan["status"] = "approv
 test("truthful idle: no running source means no current job, but lanes stay separate", () => {
   const state = normalizeAgentSyncState(input());
   assert.equal(state.currentJob, null);
-  assert.deepEqual(state.lanes.map((lane) => lane.id), ["codex", "claude", "local", "remote_orchestrator", "local_control"]);
-  assert.deepEqual(state.lanes.map((lane) => lane.intelligent), [true, true, true, true, false]);
+  assert.deepEqual(state.lanes.map((lane) => lane.id), ["codex", "claude", "api", "local", "remote_orchestrator", "local_control"]);
+  assert.deepEqual(state.lanes.map((lane) => lane.intelligent), [true, true, true, true, true, false]);
   const codex = state.lanes.find((lane) => lane.id === "codex");
   // Verbunden/limitiert ist Konnektivitaet, kein Job-Besitz.
   assert.equal(codex?.connectivity, "limited");

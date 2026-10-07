@@ -60,9 +60,15 @@ export interface AppConfig {
   // Begrenzter Warm-up fuer Abo-CLIs (Codex/ChatGPT, Claude/claude.ai). Standard an; API-Key-Logins,
   // Local Brain und Local Control werden nie aufgewaermt.
   providerWarmupEnabled: boolean;
+  // Remote API Lane: mehrere nicht-geheime Connection-Slots. Secrets bleiben pro Slot im OS-Schluesselbund.
+  apiProviders: ApiProviderConfig[];
+  // Projektbezogene Routing-Vorwahl: projectId -> API connectionId. Fehlender Eintrag = Auto-Routing.
+  apiProjectPreferences: Record<string, string>;
+  // Legacy-Feld wird nur noch beim Einlesen alter Configs akzeptiert und beim Normalisieren migriert.
+  apiProvider?: ApiProviderConfig;
 }
 
-export type ProviderId = "codex" | "claude" | "local" | "local_control";
+export type ProviderId = "codex" | "claude" | "api" | "local" | "local_control";
 
 export type ProviderState =
   | "installed"
@@ -76,6 +82,27 @@ export type ProviderState =
   | "unknown";
 
 export type LocalProviderKind = "ollama" | "lm_studio" | "open_ai_compatible";
+export type ApiProviderPreset =
+  | "openai"
+  | "anthropic"
+  | "openrouter_global"
+  | "openrouter_eu"
+  | "deepseek"
+  | "mistral"
+  | "xai"
+  | "zai"
+  | "custom_openai";
+export type ApiEffort = "auto" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ApiConnectionMode = "auto" | "specialist" | "fallback";
+export type ApiCapability =
+  | "coding"
+  | "reasoning"
+  | "security"
+  | "vision"
+  | "image"
+  | "video"
+  | "long_context"
+  | "tools";
 
 export interface LocalProviderConfig {
   kind: LocalProviderKind;
@@ -83,9 +110,100 @@ export interface LocalProviderConfig {
   model: string;
 }
 
+export interface ApiProviderConfig {
+  // Stabile, nicht geheime Slot-ID. Sie bindet den Key im OS-Schluesselbund und darf nach dem Anlegen nicht wechseln.
+  id: string;
+  label: string;
+  preset: ApiProviderPreset;
+  baseUrl: string;
+  model: string;
+  effort: ApiEffort;
+  mode: ApiConnectionMode;
+  capabilities: ApiCapability[];
+  enabled: boolean;
+  // Optionales Monatsbudget (USD) nur fuer diesen API-Slot. null = kein Budget gesetzt.
+  // Wird gegen das lokale Usage-Ledger geprueft (Provider-Rechnung bleibt massgeblich).
+  monthlyBudgetUsd: number | null;
+}
+
+export interface ApiProviderCatalog {
+  connectionId: string;
+  providerLabel: string;
+  baseUrl: string;
+  models: string[];
+}
+
+export interface ApiModelPricing {
+  currency: "USD";
+  inputPerMillion: number | null;
+  cachedInputPerMillion: number | null;
+  outputPerMillion: number | null;
+  source: "provider" | "verified_catalog";
+  effectiveAt: string;
+  note?: string | null;
+}
+
+export interface ApiModelProfile {
+  id: string;
+  displayName: string;
+  capabilities: ApiCapability[];
+  supportedEfforts: ApiEffort[];
+  contextWindow: number | null;
+  pricing: ApiModelPricing | null;
+  speed: "fast" | "balanced" | "deep" | "unknown";
+}
+
+export interface ApiUsageRecord {
+  id: string;
+  connectionId: string;
+  projectId: string | null;
+  provider: ApiProviderPreset;
+  model: string;
+  effort: ApiEffort;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reportedCostUsd: number | null;
+  estimatedCostUsd: number | null;
+  pricingEffectiveAt: string | null;
+  createdAt: string;
+}
+
+export interface ApiUsageSummary {
+  connectionId: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  requests: number;
+  actualCostUsd: number | null;
+  estimatedCostUsd: number;
+  todayCostUsd: number;
+  monthCostUsd: number;
+  monthReportedCostUsd: number;
+  monthEstimatedCostUsd: number;
+  // Requests ohne gemeldete Kosten und ohne Katalogpreis: Kosten unbekannt.
+  monthUnpricedRequests: number;
+  todayCostIsEstimate: boolean;
+  monthCostIsEstimate: boolean;
+  updatedAt: string | null;
+}
+
+export interface ApiWorkerResult {
+  connectionId: string;
+  providerLabel: string;
+  model: string;
+  effort: ApiEffort;
+  content: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  reportedCostUsd: number | null;
+  completedAt: string;
+}
+
 export interface ProviderSettings {
   disabledProviders: ProviderId[];
   localProvider: LocalProviderConfig;
+  apiProviders: ApiProviderConfig[];
 }
 
 export type ProviderReason =
@@ -116,7 +234,8 @@ export type ProviderReason =
   | "insecure_remote_key"
   | "secret_store_unavailable"
   | "local_control_running"
-  | "local_control_queue_only";
+  | "local_control_queue_only"
+  | "api_key_provider_mismatch";
 
 // Normalisierter, redigierter Provider-Status aus dem Rust-Adapter. Enthaelt nie Tokens/E-Mails.
 export interface ProviderStatus {
@@ -198,7 +317,7 @@ export type ProviderDisplayState =
   | "offline"
   | "disabled";
 
-export type ProviderAction = "connect" | "test" | "disconnect" | "key";
+export type ProviderAction = "connect" | "test" | "disconnect" | "key" | "catalog";
 
 export interface DiscoveredLocalProvider {
   kind: LocalProviderKind;
@@ -619,7 +738,7 @@ export interface OrchestrationSnapshot {
 // die Views uebersetzen; Rohtexte gibt es nur fuer echte Feed-/Evidence-Zeilen.
 
 // Fuenf kanonische Lanes: vier intelligente Besitzer + das deterministische Substrat.
-export type AgentLaneId = "codex" | "claude" | "local" | "remote_orchestrator" | "local_control";
+export type AgentLaneId = "codex" | "claude" | "api" | "local" | "remote_orchestrator" | "local_control";
 export type AgentJobStatus =
   | "queued"
   | "running"

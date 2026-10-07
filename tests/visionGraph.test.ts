@@ -234,10 +234,12 @@ test("projection reflects the canonical sources and nothing else", () => {
   }
   // Local lane IS the managed Local Brain -> one node, not two.
   assert.ok(!nodeIds.includes("lane:local"));
-  // The REX identity is bound to this device's node ID.
+  // Local Brain is visibly Kai; the REX binding to this device's node ID stays an identity fact.
   const rex = graph.nodes.find((node) => node.id === LOCAL_BRAIN_NODE_ID)!;
-  assert.equal(rex.label, "REX");
+  assert.equal(rex.label, "Kai");
   assert.equal(rex.asset, "kai");
+  assert.ok(rex.facts.some((entry) => entry.key === "identity" && entry.value === "rex_main"));
+  assert.ok(!JSON.stringify([rex.label, rex.short, rex.subtitle]).includes("kato-local-brain"));
   assert.equal(graph.nodes.find((node) => node.id === HUB_NODE_ID)!.asset, "katosync");
   // Job on an alias resolves to the canonical project; unknown projects never become nodes.
   assert.ok(edge(graph, "works_on:lane:codex->project:beta"));
@@ -400,4 +402,40 @@ test("initials and short node ids", () => {
   assert.equal(initials("REX"), "REX");
   assert.equal(initials(""), "?");
   assert.equal(shortNodeId(DEVICE_ID), "ks-11111111…");
+});
+
+test("provider nodes reuse the Live Control brand truth with a neutral fallback", () => {
+  const graph = buildVisionGraph(fullInput());
+  const node = (id: string) => graph.nodes.find((entry) => entry.id === id)!;
+  assert.equal(node("lane:codex").asset, "openai");
+  assert.equal(node("lane:claude").asset, "claude");
+  assert.equal(node(LOCAL_BRAIN_NODE_ID).asset, "kai");
+  assert.equal(node("service:local_control").asset, "katosync");
+  assert.equal(node(HUB_NODE_ID).asset, "katosync");
+});
+
+test("remote orchestrator brand follows the published model family", () => {
+  const remoteWith = (model: string | null) => {
+    const base = fullInput();
+    const lanes = base.agentSync!.lanes.map((entry) =>
+      entry.id === "remote_orchestrator" ? { ...entry, connectivity: "connected" as const, activity: "idle" as const, model } : entry
+    );
+    const remote = { ...base.agentSync!.remote, orchestrator: "attached" as const };
+    const graph = buildVisionGraph({ ...base, agentSync: { ...base.agentSync!, lanes, remote } });
+    return graph.nodes.find((entry) => entry.id === "service:remote_orchestrator")!;
+  };
+  assert.equal(remoteWith("gpt-5.6-sol").asset, "openai");
+  assert.equal(remoteWith("claude-opus-4").asset, "claude");
+  // Without a published model: neutral initials, no invented brand.
+  assert.equal(remoteWith(null).asset, null);
+  assert.equal(remoteWith(null).short, "RO");
+  assert.equal(remoteWith("mystery-model").asset, null);
+  assert.equal(remoteWith("mystery-model").subtitle, "mystery-model");
+});
+
+test("an unmanaged local lane never shows the technical Local Brain alias", () => {
+  const graph = buildVisionGraph(fullInput({ localBrain: null }));
+  const local = graph.nodes.find((entry) => entry.id === "lane:local")!;
+  assert.equal(local.subtitle, "Kai");
+  assert.equal(local.asset, "kai");
 });
