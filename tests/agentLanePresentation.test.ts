@@ -68,6 +68,14 @@ test("remote brand follows the active model family", () => {
   assert.equal(agentLaneBrand(lane({ model: null })), "remote");
 });
 
+test("API lane never borrows the Codex/Claude subscription brand", () => {
+  const api = (model: string | null) => lane({ id: "api", kind: "model_provider", rank: 2, model });
+  assert.equal(agentLaneBrand(api("gpt-5.6-sol")), "remote");
+  assert.equal(agentLaneBrand(api("claude-opus-4")), "remote");
+  assert.equal(agentLaneBrand(api(null)), "remote");
+  assert.equal(agentLaneDisplayStatus(lane({ id: "api", kind: "model_provider", connectivity: "not_configured", activity: "offline" })), "not_configured");
+});
+
 test("long lane titles split instead of widening or ellipsizing cards", () => {
   assert.deepEqual(splitAgentLaneTitle("Remote Orchestrator + RDC"), {
     primary: "Remote",
