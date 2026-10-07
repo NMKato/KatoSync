@@ -46,6 +46,7 @@ export const defaultConfig: AppConfig = {
   claudeModel: "",
   claudeEffort: "",
   runnerConnectorMode: false,
+  localControlDeveloperMode: false,
   referenceRoot: "",
   projectRepos: {},
   providerPriority: ["codex", "claude", "api", "local", "local_control"],

@@ -286,9 +286,24 @@ python3 scripts/katosync-control-submit.py \
   -- git status --short
 ```
 
-Jobs sind strukturiert (`command` + `args`), nicht freie Shell-Skripte. Der Daemon blockiert
-privilegierte/destruktive Shell-Einstiege und unterscheidet `read_only` von explizitem
-`workspace_write`. `requireCleanGit` kann für schreibende Repo-Jobs fail-closed aktiviert werden.
+Jobs sind strukturiert (`command` + `args` oder eine feste `capability` wie `npm.test`,
+`cargo.test_lib`, `git.status`), nie freie Shell-Skripte. Die Policy wird außerhalb jedes Modells
+erzwungen; Repository-, Task- oder RAG-Text kann keine Fähigkeit freischalten:
+
+- `cwd` muss in einer registrierten Projektwurzel (Project Registry / gemerkter Projektordner) oder
+  einem ihrer Git-Worktrees liegen; alles andere wird vor dem Dispatch abgelehnt (fail-closed).
+- `read_only` vs. explizites `workspace_write`; Schreibziele und Pfadargumente müssen im Projekt-Scope
+  liegen (Symlinks werden aufgelöst). Destruktive Git-Aktionen (`reset --hard`, `clean`, Force-Push,
+  Push auf `main`/`master`, `worktree prune` …) werden nie dispatcht.
+- Netz nur mit `"network": true` (`--network`); ohne läuft der Job unter macOS in einer Sandbox ohne
+  ausgehenden IP-Verkehr.
+- Freie Entwickler-Kommandos (`npm`/`cargo`/`python3` … mit beliebigen Argumenten) nur mit der lokalen
+  Developer-Policy (`localControlDeveloperMode`, Standard **aus**).
+- Ein Writer pro Worktree: Kernel-Lock unter `control/writers/`, geteilt mit Agent Runner und
+  Provider-Router; eine (wiederverwendbare) PID beweist nie Besitz. Abbruch (`control/cancel/<job-id>`)
+  und Timeout beenden die gesamte Prozessgruppe des Jobs.
+
+`requireCleanGit` kann für schreibende Repo-Jobs fail-closed aktiviert werden.
 
 Der Local-Control-Pfad ist unabhängig vom bestehenden Mistral-/Briefing-Workflow; beide Modi
 können parallel installiert bleiben.

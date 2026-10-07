@@ -605,6 +605,8 @@ const ru: Record<TKey, string> = {
   "codex.model.default": "По умолчанию",
   "codex.connector.label": "Автономный запуск с коннекторами (сеть + коннекторы)",
   "codex.connector.warn": "⚠️ Runner может использовать сеть и коннекторы БЕЗ запроса. Включайте, только если доверяете runner и подключённым сервисам. Для human-in-the-loop лучше используйте возобновляемую сессию.",
+  "codex.developer.label": "Доверенная локальная политика разработчика (свободные команды)",
+  "codex.developer.warn": "⚠️ Разрешает свободное выполнение кода: Local Control может запускать npm/cargo/python3/node … с любыми аргументами, а Claude runner в режиме коннекторов не запрашивает подтверждения. Включайте только на своём доверенном компьютере. По умолчанию: выкл.",
   "codex.effort.default": "Effort: по умолчанию",
   "codex.effort.low": "быстро",
   "codex.effort.medium": "средне",

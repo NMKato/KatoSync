@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import argparse, json, os, pathlib, re, signal, subprocess, time
-from datetime import datetime
+import argparse, fcntl, hashlib, json, os, pathlib, re, signal, subprocess, tempfile, time, uuid
+from datetime import datetime, timezone
 
 LIMIT_PATTERNS = [
     r"usage limit", r"rate limit", r"quota", r"limit reached",
@@ -33,6 +33,36 @@ def under(path, roots):
         return any(resolved.is_relative_to(root.resolve()) for root in roots)
     except Exception:
         return False
+
+def writer_lock_path(control,worktree):
+    # Gleiches Schema wie agent_boundary::writer_lock_path (Rust): sha256(kanonischer Pfad)[:32].
+    digest=hashlib.sha256(str(worktree).encode()).hexdigest()[:32]
+    return control/"writers"/f"{digest}.lock"
+
+def acquire_writer(control,worktree,owner):
+    """Exklusive Writer-Lease (Kernel-flock, geteilt mit Local Control + Agent Runner).
+    Nur der gehaltene Lock beweist Besitz; eine liegengebliebene Identitaet/PID nie.
+    Rueckgabe: offener fd (Lease lebt bis Prozessende) oder None, wenn ein anderer Writer aktiv ist."""
+    lock_dir=control/"writers"
+    lock_dir.mkdir(parents=True,exist_ok=True)
+    os.chmod(lock_dir,0o700)
+    fd=os.open(writer_lock_path(control,worktree),os.O_RDWR|os.O_CREAT,0o600)
+    try:
+        fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    identity={
+        "schemaVersion":1,"owner":re.sub(r"[^A-Za-z0-9._:-]","",owner)[:96],
+        "pid":os.getpid(),"nonce":str(uuid.uuid4()),
+        "acquiredAt":datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "worktree":pathlib.Path(worktree).name,
+    }
+    os.ftruncate(fd,0)
+    os.lseek(fd,0,os.SEEK_SET)
+    os.write(fd,json.dumps(identity,separators=(",",":")).encode())
+    os.fsync(fd)
+    return fd
 
 def git(repo,*args):
     return subprocess.run(["git",*args],cwd=repo,text=True,capture_output=True,check=False)
@@ -195,6 +225,19 @@ def self_test():
         actual=classify_provider_failure(value)
         assert actual==expected,(value,actual,expected)
     print("AGENT_ROUTER_CLASSIFIER_TEST=PASS")
+    with tempfile.TemporaryDirectory() as tmp:
+        control=pathlib.Path(tmp)/"control"
+        worktree=pathlib.Path(tmp).resolve()/"wt"
+        first=acquire_writer(control,worktree,"router:a")
+        assert first is not None
+        assert acquire_writer(control,worktree,"router:b") is None, "second writer must be refused"
+        os.close(first)
+        # Verwaiste Identitaet mit lebender PID, aber ohne Lock: beweist keinen Besitz.
+        writer_lock_path(control,worktree).write_text(json.dumps({"pid":os.getpid(),"owner":"stale"}))
+        again=acquire_writer(control,worktree,"router:c")
+        assert again is not None, "stale identity without kernel lock must not block"
+        os.close(again)
+    print("AGENT_ROUTER_WRITER_LEASE_TEST=PASS")
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--repo")
@@ -236,6 +279,12 @@ def main():
         fail("worktree is dirty before run")
     if dirty:
         print("KATOSYNC_RESUME_DIRTY_WORKTREE",args.name,flush=True)
+
+    toplevel=pathlib.Path(git(repo,"rev-parse","--show-toplevel").stdout.strip()).resolve()
+    # Genau ein Writer pro Worktree, prozessuebergreifend; vor jeder Queue-Aenderung (fail-closed).
+    writer_fd=acquire_writer(control,toplevel,f"router:{args.name}")
+    if writer_fd is None:
+        fail(f"worktree already has an active writer: {toplevel.name}",23)
 
     prompt=prompt_file.read_text()
     item,item_path=ensure_job_item(control,args,repo,branch,resume_item,resume_path)

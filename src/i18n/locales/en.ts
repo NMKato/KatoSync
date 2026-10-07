@@ -605,6 +605,8 @@ const en: Record<TKey, string> = {
   "codex.model.default": "Default",
   "codex.connector.label": "Autonomous connector run (network + connectors)",
   "codex.connector.warn": "⚠️ The runner may use the network + its connectors WITHOUT asking. Only enable if you trust the runner and its connected services. For human-in-the-loop, prefer the resumable session.",
+  "codex.developer.label": "Trusted-local developer policy (free-form commands)",
+  "codex.developer.warn": "⚠️ Allows free-form code execution: Local Control may start npm/cargo/python3/node … with arbitrary arguments, and the Claude runner skips permission prompts in connector mode. Only enable on your own trusted machine. Default: off.",
   "codex.effort.default": "Effort: default",
   "codex.effort.low": "fast",
   "codex.effort.medium": "medium",

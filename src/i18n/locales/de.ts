@@ -626,6 +626,8 @@ const de = {
   "codex.model.default": "Standard",
   "codex.connector.label": "Autonomer Connector-Lauf (Netz + Connectoren)",
   "codex.connector.warn": "⚠️ Der Runner darf Netz + seine Connectoren OHNE Nachfrage nutzen. Nur einschalten, wenn du dem Runner und seinen verbundenen Diensten vertraust. Für Human-in-the-Loop lieber die fortsetzbare Session nutzen.",
+  "codex.developer.label": "Trusted-local Developer-Policy (freie Kommandos)",
+  "codex.developer.warn": "⚠️ Erlaubt freie Code-Ausführung: Local Control darf npm/cargo/python3/node … mit beliebigen Argumenten starten, und der Claude-Runner läuft im Connector-Modus ohne Rückfragen. Nur auf deinem eigenen, vertrauten Rechner einschalten. Standard: aus.",
   "codex.effort.default": "Effort: Standard",
   "codex.effort.low": "schnell",
   "codex.effort.medium": "mittel",

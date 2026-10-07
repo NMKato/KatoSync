@@ -2622,10 +2622,18 @@ function CodexBridgePanel({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> 
             label={t("codex.connector.label")}
             onChange={(checked) => vm.updateConfig("runnerConnectorMode", checked)}
           />
+          <Toggle
+            checked={vm.config.localControlDeveloperMode ?? false}
+            label={t("codex.developer.label")}
+            onChange={(checked) => vm.updateConfig("localControlDeveloperMode", checked)}
+          />
         </div>
       ) : null}
       {vm.config && vm.config.runnerConnectorMode ? (
         <p className="field-hint" style={{ marginTop: 2, color: "#c47f00" }}>{t("codex.connector.warn")}</p>
+      ) : null}
+      {vm.config && vm.config.localControlDeveloperMode ? (
+        <p className="field-hint" style={{ marginTop: 2, color: "#c47f00" }}>{t("codex.developer.warn")}</p>
       ) : null}
       {vm.config && vm.config.codexCodingMode ? (
         <div className="switch-grid" style={{ marginBottom: 6 }}>

@@ -605,6 +605,8 @@ const es: Record<TKey, string> = {
   "codex.model.default": "Predeterminado",
   "codex.connector.label": "Ejecución autónoma con conectores (red + conectores)",
   "codex.connector.warn": "⚠️ El runner puede usar la red y sus conectores SIN preguntar. Actívalo solo si confías en el runner y sus servicios conectados. Para human-in-the-loop, usa mejor la sesión reanudable.",
+  "codex.developer.label": "Política de desarrollador local de confianza (comandos libres)",
+  "codex.developer.warn": "⚠️ Permite ejecutar código libremente: Local Control puede iniciar npm/cargo/python3/node … con argumentos arbitrarios y el runner de Claude omite las confirmaciones en modo conector. Actívalo solo en tu propio equipo de confianza. Por defecto: desactivado.",
   "codex.effort.default": "Effort: predeterminado",
   "codex.effort.low": "rápido",
   "codex.effort.medium": "medio",

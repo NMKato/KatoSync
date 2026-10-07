@@ -47,6 +47,9 @@ export interface AppConfig {
   claudeEffort: string;
   // Opt-in: autonomer Connector-Lauf (Netz + Runner-Connectoren). Standard aus.
   runnerConnectorMode: boolean;
+  // Trusted-local Developer-Policy: freie Kommandos (Local Control) + Claude ohne Rueckfragen im
+  // Connector-Modus. Standard aus, auch im Release; nie aus Task-/Repo-/RAG-Text ableitbar.
+  localControlDeveloperMode: boolean;
   // KatoContext: lokaler Referenzordner (Lebenslauf/Zeugnisse/Kontext) fuer den Datei-Modus.
   referenceRoot: string;
   // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectId -> Pfad).
