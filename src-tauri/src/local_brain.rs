@@ -1,9 +1,12 @@
 // Created by NMKato Solutions
+use crate::local_brain_runtime::{
+    self as guard, LaunchIdentity, OwnershipRecord, RuntimeBinding, RuntimeLedger, VerifiedRuntime,
+};
 use crate::model_distribution::{
     self as dist, release_gate_blockers, Channel, DistributionBase, ExpectedArtifact, ModelPackage,
     OriginPolicy, PackagePublication, PackageStore, UpdateState,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,17 +18,19 @@ use std::{
     time::Duration,
 };
 use tauri::{AppHandle, Emitter, Manager};
-use walkdir::WalkDir;
 
 const MANIFEST_JSON: &str = include_str!("../../src/lib/localBrainManifest.json");
 const ENDPOINT: &str = "http://127.0.0.1:17842/v1";
 const HEALTH_URL: &str = "http://127.0.0.1:17842/health";
 const MODELS_URL: &str = "http://127.0.0.1:17842/v1/models";
 const PROBE_BODY_LIMIT: usize = 64 * 1024;
-const PORT: &str = "17842";
+const PORT: u16 = 17842;
 const MANIFEST_SCHEMA_VERSION: u32 = 2;
+const STOP_GRACE: Duration = Duration::from_secs(3);
 static CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
+static APP_ROOT: OnceLock<PathBuf> = OnceLock::new();
 static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static START_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -239,8 +244,156 @@ fn root(app: &AppHandle) -> Result<PathBuf> {
     Ok(app.path().app_data_dir()?.join("local-brain"))
 }
 
+/// Merkt sich das Local-Brain-Verzeichnis fuer Pfade ohne AppHandle (Provider-Lane, RAG).
+pub fn register_app(app: &AppHandle) {
+    if let Ok(local_root) = root(app) {
+        let _ = APP_ROOT.set(local_root);
+    }
+}
+
+fn registered_root() -> Option<PathBuf> {
+    APP_ROOT.get().cloned()
+}
+
+fn runtime_root(local_root: &Path) -> PathBuf {
+    local_root.join("runtime")
+}
+
 fn runtime_dir(app: &AppHandle, manifest: &Manifest) -> Result<PathBuf> {
-    Ok(root(app)?.join("runtime").join(&manifest.runtime.version))
+    Ok(runtime_root(&root(app)?).join(&manifest.runtime.version))
+}
+
+fn runtime_binding<'a>(
+    manifest: &'a Manifest,
+    key: &'a str,
+    target: &'a RuntimeTarget,
+) -> RuntimeBinding<'a> {
+    RuntimeBinding {
+        runtime_id: &manifest.runtime.id,
+        version: &manifest.runtime.version,
+        target: key,
+        archive_sha256: &target.sha256,
+        executable_name: &target.executable,
+    }
+}
+
+/// Ledger der installierten Runtime; fehlt es oder passt es nicht zum gepinnten Manifest,
+/// gilt die Runtime als nicht installiert (fail closed, Neuinstallation aus dem Archiv).
+fn load_runtime_ledger(local_root: &Path, binding: &RuntimeBinding<'_>) -> Result<RuntimeLedger> {
+    let ledger: RuntimeLedger =
+        guard::load_private_json(&guard::ledger_path(local_root, binding.version)?)?
+            .ok_or_else(|| anyhow!("Runtime-Integritaetsnachweis fehlt"))?;
+    ledger.check_binding(binding)?;
+    Ok(ledger)
+}
+
+/// Vollpruefung (alle Runtime-Dateien gegen das Ledger) fuer Start und Installation.
+fn verify_installed_runtime(
+    local_root: &Path,
+    binding: &RuntimeBinding<'_>,
+) -> Result<VerifiedRuntime> {
+    let ledger = load_runtime_ledger(local_root, binding)?;
+    let runtime_root = runtime_root(local_root);
+    guard::verify_runtime_tree(&runtime_root, &runtime_root.join(binding.version), &ledger)
+}
+
+/// Erwartete Identitaet der verwalteten Runtime (ohne Hashing; fuer Statusabfragen).
+struct ManagedExpectation {
+    executable: PathBuf,
+    executable_sha256: String,
+    runtime_version: String,
+    model_alias: String,
+}
+
+impl ManagedExpectation {
+    fn launch(&self) -> LaunchIdentity<'_> {
+        LaunchIdentity {
+            executable: &self.executable,
+            executable_sha256: &self.executable_sha256,
+            runtime_version: &self.runtime_version,
+            port: PORT,
+            model_alias: &self.model_alias,
+        }
+    }
+}
+
+fn managed_expectation(local_root: &Path) -> Result<ManagedExpectation> {
+    let manifest = manifest()?;
+    let model = recommended_model(&manifest)?;
+    let key = target_key();
+    let target = manifest
+        .runtime
+        .targets
+        .get(&key)
+        .ok_or_else(|| anyhow!("Local Brain wird auf {key} noch nicht unterstuetzt"))?;
+    let binding = runtime_binding(&manifest, &key, target);
+    let ledger = load_runtime_ledger(local_root, &binding)?;
+    let runtime_root = runtime_root(local_root);
+    let executable = guard::managed_executable_path(
+        &runtime_root,
+        &runtime_root.join(&manifest.runtime.version),
+        &ledger,
+    )?;
+    Ok(ManagedExpectation {
+        executable,
+        executable_sha256: ledger
+            .executable_sha256()
+            .ok_or_else(|| anyhow!("Runtime-Ledger ohne Executable-Hash"))?
+            .to_string(),
+        runtime_version: manifest.runtime.version.clone(),
+        model_alias: model.alias.clone(),
+    })
+}
+
+fn load_owner_record(local_root: &Path) -> Option<OwnershipRecord> {
+    guard::load_private_json(&guard::owner_record_path(local_root))
+        .ok()
+        .flatten()
+}
+
+/// Einzige Quelle fuer "verwalteter Local Brain laeuft": der persistierte Besitznachweis passt
+/// zur installierten Runtime UND der Live-Prozess (PID + Startidentitaet + Executable) haelt
+/// 127.0.0.1:17842. Ein unbekannter, bereits laufender Listener wird nie uebernommen.
+fn managed_runtime_verified(local_root: &Path) -> bool {
+    if !guard::supports_ownership_proof() {
+        // Ohne Kernel-Nachweis zaehlt nur der eigene Child-Handle dieser Sitzung.
+        return owned_child_alive();
+    }
+    let Ok(expected) = managed_expectation(local_root) else {
+        return false;
+    };
+    load_owner_record(local_root)
+        .is_some_and(|record| guard::verify_ownership(&record, &expected.launch(), true).is_ok())
+}
+
+/// Der Local-Brain-Port ist fuer die verwaltete Runtime reserviert (jede Loopback-Schreibweise).
+pub(crate) fn is_reserved_endpoint(url: &reqwest::Url) -> bool {
+    if url.port_or_known_default() != Some(PORT) {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    host == "localhost"
+        || host.ends_with(".localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified())
+}
+
+/// Provider-Lane-Gate: der reservierte Endpunkt wird nur angesprochen, wenn er exakt
+/// `http://127.0.0.1:17842` ist und der Besitznachweis der verwalteten Runtime gilt.
+pub(crate) fn managed_endpoint_verified(url: &reqwest::Url) -> bool {
+    url.scheme() == "http"
+        && url.host_str() == Some(guard::LOOPBACK_HOST)
+        && url.port() == Some(PORT)
+        && url.username().is_empty()
+        && url.password().is_none()
+        && registered_root().is_some_and(|local_root| managed_runtime_verified(&local_root))
 }
 
 fn package_store(app: &AppHandle) -> Result<PackageStore> {
@@ -321,20 +474,6 @@ fn detect_ram_gb() -> Option<u64> {
     None
 }
 
-fn find_runtime_binary(dir: &Path, executable: &str) -> Option<PathBuf> {
-    if !dir.exists() {
-        return None;
-    }
-    WalkDir::new(dir)
-        .max_depth(4)
-        .into_iter()
-        .filter_map(Result::ok)
-        .find(|entry| {
-            entry.file_type().is_file() && entry.file_name().to_string_lossy() == executable
-        })
-        .map(|entry| entry.into_path())
-}
-
 fn owned_child_alive() -> bool {
     let Ok(mut guard) = child_slot().lock() else {
         return false;
@@ -361,14 +500,19 @@ fn snapshot(app: &AppHandle) -> Result<LocalBrainStatus> {
         .targets
         .get(&key)
         .filter(|_| package.supports(&key, &manifest.runtime.version));
-    let runtime_installed = target
-        .and_then(|target| {
-            runtime_dir(app, &manifest)
-                .ok()
-                .and_then(|dir| find_runtime_binary(&dir, &target.executable))
-        })
-        .is_some();
     let local_root = root(app)?;
+    // Installiert = gueltiges Ledger zum gepinnten Manifest + strukturell intaktes Executable.
+    // Die vollstaendige Hash-Pruefung laeuft vor jedem Start und bei der Installation.
+    let runtime_installed = target.is_some_and(|target| {
+        load_runtime_ledger(&local_root, &runtime_binding(&manifest, &key, target)).is_ok_and(
+            |ledger| {
+                runtime_dir(app, &manifest).is_ok_and(|dir| {
+                    guard::managed_executable_path(&runtime_root(&local_root), &dir, &ledger)
+                        .is_ok()
+                })
+            },
+        )
+    });
     let store = PackageStore::new(local_root.clone());
     // Beschaedigtes Ledger = nicht installiert (fail closed); Entfernen setzt es zurueck.
     let ledger = store.load_ledger(&package.package_id).ok().flatten();
@@ -461,12 +605,7 @@ async fn serves_alias(health_url: &str, models_url: &str, alias: &str) -> bool {
     if !is_loopback_probe_url(health_url) || !is_loopback_probe_url(models_url) {
         return false;
     }
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
-        .build()
-    else {
+    let Ok(client) = guard::loopback_client(Duration::from_secs(2)) else {
         return false;
     };
     let healthy = client
@@ -493,10 +632,6 @@ async fn serves_alias(health_url: &str, models_url: &str, alias: &str) -> bool {
         .is_ok_and(|body| models_include_alias(&body, alias))
 }
 
-/// Laufzeitwahrheit: eigener Prozess lebt, oder die installierte Runtime + Modell werden
-/// bereits von einem gesunden Loopback-Server mit dem gepinnten Alias ausgeliefert
-/// (z. B. aus einer frueheren Sitzung gestartet).
-
 #[derive(Debug, Deserialize)]
 struct GroundedChatResponse {
     choices: Vec<GroundedChatChoice>,
@@ -519,9 +654,10 @@ struct GroundedChatMessage {
 pub(crate) async fn grounded_chat(context: &str, question: &str) -> Result<String> {
     let manifest = manifest()?;
     let model = recommended_model(&manifest)?;
-    if !serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
+    let owned = registered_root().is_some_and(|local_root| managed_runtime_verified(&local_root));
+    if !owned || !serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
         return Err(anyhow!(
-            "Local Brain ist nicht bereit oder bedient nicht das erwartete Modell"
+            "Local Brain ist nicht als KatoSync-verwaltete Runtime belegt oder nicht bereit"
         ));
     }
 
@@ -531,10 +667,7 @@ pub(crate) async fn grounded_chat(context: &str, question: &str) -> Result<Strin
         return Err(anyhow!("Local-Brain-Frage darf nicht leer sein"));
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
+    let client = guard::loopback_client(Duration::from_secs(30))?;
     let response = client
         .post(format!("{ENDPOINT}/chat/completions"))
         .json(&serde_json::json!({
@@ -580,12 +713,13 @@ pub(crate) async fn grounded_chat(context: &str, question: &str) -> Result<Strin
     Ok(crate::context_pack::bounded_text(answer, 4_000))
 }
 
+/// Laufzeitwahrheit: nur ein nachweislich von KatoSync gestarteter Prozess zaehlt. Ein aus
+/// einer frueheren Sitzung uebernommener Prozess muss zusaetzlich das gepinnte Alias liefern.
 pub async fn status(app: &AppHandle) -> Result<LocalBrainStatus> {
     let mut status = snapshot(app)?;
-    status.running = owned_child_alive()
-        || (status.runtime_installed
-            && status.model_installed
-            && serves_alias(HEALTH_URL, MODELS_URL, &status.model_alias).await);
+    status.running = status.runtime_installed
+        && managed_runtime_verified(&root(app)?)
+        && (owned_child_alive() || serves_alias(HEALTH_URL, MODELS_URL, &status.model_alias).await);
     Ok(status)
 }
 
@@ -614,7 +748,14 @@ fn progress_reporter<'a>(
     move |downloaded, total| emit_progress(app, phase, label, downloaded, total)
 }
 
-fn extract_runtime(archive: &Path, target: &RuntimeTarget, destination: &Path) -> Result<()> {
+/// Entpackt das SHA-256-verifizierte Archiv, haertet die Rechte, erzeugt das Hash-Ledger
+/// aus dem frischen Staging-Baum und tauscht erst danach das Runtime-Verzeichnis aus.
+fn extract_runtime(
+    archive: &Path,
+    target: &RuntimeTarget,
+    binding: &RuntimeBinding<'_>,
+    destination: &Path,
+) -> Result<RuntimeLedger> {
     let staging = destination.with_extension("staging");
     if staging.exists() {
         fs::remove_dir_all(&staging)?;
@@ -651,22 +792,24 @@ fn extract_runtime(archive: &Path, target: &RuntimeTarget, destination: &Path) -
         other => return Err(anyhow!("Nicht unterstuetztes Runtime-Archiv: {other}")),
     }
 
-    let binary = find_runtime_binary(&staging, &target.executable)
-        .ok_or_else(|| anyhow!("Runtime enthaelt {} nicht", target.executable))?;
-
+    let ledger = guard::build_runtime_ledger(&staging, binding)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&binary)?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&binary, perms)?;
+        let binary = staging.join(ledger.executable_relative()?);
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))?;
     }
+    guard::harden_runtime_permissions(&staging)?;
 
-    if destination.exists() {
-        fs::remove_dir_all(destination)?;
+    if fs::symlink_metadata(destination).is_ok() {
+        if fs::symlink_metadata(destination)?.file_type().is_dir() {
+            fs::remove_dir_all(destination)?;
+        } else {
+            fs::remove_file(destination)?;
+        }
     }
     fs::rename(staging, destination)?;
-    Ok(())
+    Ok(ledger)
 }
 
 pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
@@ -701,7 +844,28 @@ pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
     let store = PackageStore::new(local_root.clone());
 
     let runtime_dir = runtime_dir(app, &manifest)?;
-    if find_runtime_binary(&runtime_dir, &target.executable).is_none() {
+    let binding = runtime_binding(&manifest, &key, target);
+    let runtime_verified = {
+        let local_root = local_root.clone();
+        let manifest = manifest.clone();
+        let key = key.clone();
+        let target = target.clone();
+        tokio::task::spawn_blocking(move || {
+            verify_installed_runtime(&local_root, &runtime_binding(&manifest, &key, &target))
+        })
+        .await
+        .map_err(|err| anyhow!("Runtime-Pruefung abgebrochen: {err}"))?
+        .is_ok()
+    };
+    if !runtime_verified {
+        // Fehlender/abweichender Integritaetsnachweis: nie reparieren, immer neu aus dem
+        // gepinnten Archiv. Eine eigene Runtime aus dem alten Baum wird vorher beendet.
+        stop_managed(&local_root)?;
+        let ledger_file = guard::ledger_path(&local_root, &manifest.runtime.version)?;
+        match fs::remove_file(&ledger_file) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err.into()),
+            _ => {}
+        }
         let label = "llama.cpp Runtime";
         emit_progress(app, "runtime", label, 0, None);
         let archive = dist::fetch_verified(
@@ -715,8 +879,13 @@ pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
             &mut progress_reporter(app, "runtime", label),
         )
         .await?;
-        extract_runtime(archive.path(), target, &runtime_dir)?;
+        fs::create_dir_all(runtime_root(&local_root))?;
+        let ledger = extract_runtime(archive.path(), target, &binding, &runtime_dir);
         fs::remove_file(archive.path()).ok();
+        guard::harden_runtime_permissions(&runtime_root(&local_root))?;
+        guard::save_private_json(&ledger_file, &ledger?)?;
+        verify_installed_runtime(&local_root, &binding)
+            .context("Frisch installierte Runtime besteht die Integritaetspruefung nicht")?;
     }
 
     let ledger = store.load_ledger(&package.package_id).context(
@@ -794,7 +963,35 @@ async fn verified_model_for_launch(app: &AppHandle, model: &ModelManifest) -> Re
     .context("Local-Brain-Modell ist nicht installiert oder nicht verifiziert")
 }
 
+/// Strukturierter Startbefehl (keine Shell): nur Loopback, gepinnter Kontext und Alias,
+/// minimale Allowlist-Umgebung und eigene Prozessgruppe.
+fn launch_command(
+    executable: &Path,
+    model_file: &Path,
+    context_tokens: u32,
+    alias: &str,
+    work_dir: &Path,
+) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .arg("-m")
+        .arg(model_file)
+        .args(["--host", guard::LOOPBACK_HOST, "--port"])
+        .arg(PORT.to_string())
+        .arg("--ctx-size")
+        .arg(context_tokens.to_string())
+        .args(["--alias", alias])
+        .current_dir(work_dir);
+    #[cfg(target_os = "macos")]
+    {
+        command.args(["-ngl", "99"]);
+    }
+    guard::harden_launch(&mut command);
+    command
+}
+
 pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
+    let _start = START_LOCK.lock().await;
     let manifest = manifest()?;
     let model = recommended_model(&manifest)?;
     let key = target_key();
@@ -803,84 +1000,129 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
         .targets
         .get(&key)
         .ok_or_else(|| anyhow!("Local Brain wird auf {key} noch nicht unterstuetzt"))?;
-    let runtime = runtime_dir(app, &manifest)?;
-    let binary = find_runtime_binary(&runtime, &target.executable)
-        .ok_or_else(|| anyhow!("llama.cpp Runtime ist nicht installiert"))?;
-    if owned_child_alive() || serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
+    let local_root = root(app)?;
+    if managed_runtime_verified(&local_root) || owned_child_alive() {
         return status(app).await;
+    }
+    // Fail closed: ein fremder Listener auf dem reservierten Port wird nie uebernommen.
+    if guard::loopback_port_in_use(PORT) {
+        bail!(
+            "Port {PORT} ist von einem nicht von KatoSync gestarteten Prozess belegt; \
+             Local Brain wird nicht uebernommen. Fremden Prozess beenden und erneut starten."
+        );
     }
 
     let model_file = verified_model_for_launch(app, model).await?;
-    let context_tokens = model.package.context_tokens.to_string();
-    let logs = root(app)?.join("logs");
+    let verified = {
+        let local_root = local_root.clone();
+        let manifest = manifest.clone();
+        let key = key.clone();
+        let target = target.clone();
+        tokio::task::spawn_blocking(move || {
+            verify_installed_runtime(&local_root, &runtime_binding(&manifest, &key, &target))
+        })
+        .await
+        .map_err(|err| anyhow!("Runtime-Pruefung abgebrochen: {err}"))?
+        .context("llama.cpp Runtime ist nicht installiert oder nicht verifiziert; Local Brain neu installieren")?
+    };
+
+    let logs = local_root.join("logs");
     fs::create_dir_all(&logs)?;
     let log = OpenOptions::new()
         .create(true)
         .append(true)
         .open(logs.join("llama-server.log"))?;
-
-    let mut command = Command::new(binary);
+    let mut command = launch_command(
+        &verified.executable,
+        &model_file,
+        model.package.context_tokens,
+        &model.alias,
+        &logs,
+    );
     command
-        .arg("-m")
-        .arg(&model_file)
-        .args([
-            "--host",
-            "127.0.0.1",
-            "--port",
-            PORT,
-            "--ctx-size",
-            &context_tokens,
-            "--alias",
-            &model.alias,
-        ])
         .stdout(Stdio::from(log.try_clone()?))
         .stderr(Stdio::from(log));
 
-    #[cfg(target_os = "macos")]
-    {
-        command.args(["-ngl", "99"]);
-    }
-
-    let child = command
+    // Verify -> Exec so eng wie moeglich: erneuter Executable-Hash direkt vor spawn.
+    guard::recheck_before_spawn(&verified)?;
+    let mut child = command
         .spawn()
         .context("llama-server konnte nicht gestartet werden")?;
+    let launch = LaunchIdentity {
+        executable: &verified.executable,
+        executable_sha256: &verified.executable_sha256,
+        runtime_version: &manifest.runtime.version,
+        port: PORT,
+        model_alias: &model.alias,
+    };
+    let record = if guard::supports_ownership_proof() {
+        let captured = OwnershipRecord::capture(child.id(), &launch).and_then(|record| {
+            guard::save_private_json(&guard::owner_record_path(&local_root), &record)?;
+            Ok(record)
+        });
+        match captured {
+            Ok(record) => Some(record),
+            Err(err) => {
+                guard::terminate_child(&mut child, STOP_GRACE);
+                return Err(err.context("Besitznachweis der gestarteten Runtime fehlgeschlagen"));
+            }
+        }
+    } else {
+        None
+    };
     *child_slot()
         .lock()
         .map_err(|_| anyhow!("Local-Brain-Prozesslock ist beschaedigt"))? = Some(child);
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()?;
+    let client = guard::loopback_client(Duration::from_secs(2))?;
     for _ in 0..45 {
-        if let Ok(response) = client.get(HEALTH_URL).send().await {
-            if response.status().is_success() {
-                return status(app).await;
+        if !owned_child_alive() {
+            let _ = stop_managed(&local_root);
+            bail!("llama-server wurde unerwartet beendet (Port belegt oder Startfehler; siehe llama-server.log)");
+        }
+        let owned = record
+            .as_ref()
+            .is_none_or(|record| guard::verify_ownership(record, &launch, true).is_ok());
+        if owned {
+            if let Ok(response) = client.get(HEALTH_URL).send().await {
+                if response.status().is_success() {
+                    return status(app).await;
+                }
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    let _ = stop_owned();
+    let _ = stop_managed(&local_root);
     Err(anyhow!(
         "Local Brain wurde gestartet, aber der Health-Check blieb 45 Sekunden lang rot"
     ))
 }
 
-/// Beendet ausschliesslich die von dieser KatoSync-Sitzung gestartete Runtime.
-pub fn stop_owned() -> Result<()> {
-    let mut guard = child_slot()
+/// Beendet die verwaltete Runtime samt Prozessgruppe: den eigenen Child dieser Sitzung oder
+/// einen per Besitznachweis positiv identifizierten Prozess einer frueheren Sitzung. Fremde
+/// oder nicht identifizierbare Prozesse werden nie signalisiert.
+fn stop_managed(local_root: &Path) -> Result<()> {
+    let mut slot = child_slot()
         .lock()
         .map_err(|_| anyhow!("Local-Brain-Prozesslock ist beschaedigt"))?;
-    if let Some(child) = guard.as_mut() {
-        let _ = child.kill();
-        let _ = child.wait();
+    if let Some(mut child) = slot.take() {
+        guard::terminate_child(&mut child, STOP_GRACE);
+    } else if let Some(record) = load_owner_record(local_root) {
+        guard::terminate_recorded(&record, &runtime_root(local_root), STOP_GRACE);
     }
-    *guard = None;
-    Ok(())
+    match fs::remove_file(guard::owner_record_path(local_root)) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err.into()),
+        _ => Ok(()),
+    }
+}
+
+pub fn stop_owned(app: &AppHandle) -> Result<()> {
+    stop_managed(&root(app)?)
 }
 
 pub async fn stop(app: &AppHandle) -> Result<LocalBrainStatus> {
-    stop_owned()?;
+    stop_owned(app)?;
     status(app).await
 }
 
@@ -894,7 +1136,7 @@ pub async fn rollback_model(app: &AppHandle) -> Result<LocalBrainStatus> {
     let _guard = INSTALL_LOCK
         .try_lock()
         .map_err(|_| anyhow!("Local-Brain-Installation laeuft gerade"))?;
-    stop_owned()?;
+    stop_owned(app)?;
     package_store(app)?.rollback(&active_package_id()?)?;
     status(app).await
 }
@@ -920,7 +1162,7 @@ pub async fn remove_model_version(app: &AppHandle, version: String) -> Result<Lo
 }
 
 pub async fn remove(app: &AppHandle) -> Result<LocalBrainStatus> {
-    let _ = stop_owned();
+    let _ = stop_owned(app);
     let local_root = root(app)?;
     if local_root.exists() {
         fs::remove_dir_all(&local_root)?;
@@ -1124,6 +1366,46 @@ mod tests {
             )
             .await
         );
+    }
+
+    /// Ein gesunder Listener mit dem gepinnten Alias ist kein Besitznachweis: ohne
+    /// verifiziertes Runtime-Ledger und passenden Live-Prozess gilt er nie als verwaltet.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test]
+    async fn healthy_impersonator_without_ownership_proof_is_not_managed() {
+        let base = mock_llama_server(200, KATO_MODELS);
+        assert!(
+            serves_alias(
+                &format!("{base}/health"),
+                &format!("{base}/v1/models"),
+                "kato-local-brain"
+            )
+            .await
+        );
+        let local_root = std::env::temp_dir().join(format!(
+            "katosync-impersonator-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        assert!(!managed_runtime_verified(&local_root));
+
+        // Selbst ein Besitznachweis fuer einen echten Live-Prozess hilft nicht, solange die
+        // installierte Runtime nicht ueber das gepinnte Ledger belegt ist.
+        let exe = fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+        let record = OwnershipRecord::capture(
+            std::process::id(),
+            &LaunchIdentity {
+                executable: &exe,
+                executable_sha256: &"0".repeat(64),
+                runtime_version: &manifest().unwrap().runtime.version,
+                port: PORT,
+                model_alias: "kato-local-brain",
+            },
+        )
+        .unwrap();
+        guard::save_private_json(&guard::owner_record_path(&local_root), &record).unwrap();
+        assert!(load_owner_record(&local_root).is_some());
+        assert!(!managed_runtime_verified(&local_root));
+        fs::remove_dir_all(&local_root).ok();
     }
 
     #[tokio::test]

@@ -258,3 +258,53 @@ Verteilkanal oder dem gepinnten Upstream. Gewichte werden erst nach exakter Groe
 SHA-256-Pruefung atomar installiert; Update, Pin, Rollback und Entfernen laufen ueber ein Ledger
 ohne URLs oder Tokens. Ein Lizenz-/Redistribution-Gate verhindert, dass ein Paket ohne Freigabe
 oeffentlich wird. Vertrag, R2-Layout und Release-Checkliste: [`MODEL_DISTRIBUTION.md`](MODEL_DISTRIBUTION.md)
+
+## Local-Brain-Runtime: Vertrauensgrenze
+
+llama-server kann seinen HTTP-Endpunkt gegenueber KatoSync nicht authentisieren (`--api-key`
+schuetzt nur den Server vor fremden Clients). KatoSync vertraut deshalb keinem Prozess, nur weil er
+auf `127.0.0.1:17842` antwortet, sondern verlangt einen Besitznachweis (`local_brain_runtime.rs`):
+
+- **Runtime-Integritaet:** Beim Installieren wird aus dem SHA-256-verifizierten Archiv ein
+  Hash-Ledger aller Runtime-Dateien (inkl. dylibs und Symlink-Ziele) erzeugt und privat (0600,
+  ausserhalb des Runtime-Baums) gespeichert, gebunden an Runtime-ID, Version, Ziel und Archiv-Hash
+  des gepinnten Manifests. Vor **jedem** Start wird der komplette Baum erneut gehasht; fremde,
+  fehlende oder veraenderte Dateien, Symlinks nach aussen, ein symlinktes Executable bzw.
+  Versionsverzeichnis, fremder Besitzer oder Gruppen-/Welt-Schreibrechte blockieren den Start.
+  Das Executable muss kanonisch im versionierten Runtime-Verzeichnis liegen; Runtime-Baum 0700.
+- **Start:** strukturiertes `Command` + argv (keine Shell), nur `--host 127.0.0.1`, leere
+  Basisumgebung plus Allowlist (`HOME`, `TMPDIR`, festes `PATH`); `DYLD_*`, `LD_*`, Proxy-,
+  Shell-Startup-, `LLAMA_*`/`GGML_*`-Variablen erreichen den Prozess nie. Eigene Prozessgruppe.
+- **Besitznachweis:** Direkt nach `spawn` werden PID, Prozess-Startidentitaet (macOS
+  `pbi_start_tvsec/usec`, Linux Boot-ID + Startticks), UID, kanonischer Executable-Pfad,
+  Executable-Hash, Version, Port und Alias privat gespeichert. „Verwalteter Local Brain laeuft“
+  gilt nur, wenn dieser Datensatz zur installierten Runtime passt **und** der Live-Prozess mit
+  identischer Startidentitaet den TCP-LISTEN-Socket `127.0.0.1:17842` selbst haelt (Kernel-
+  Abfrage). PID-Wiederverwendung, fremde Executables, fremde Benutzer und veraltete Datensaetze
+  scheitern fail closed. Ein unbekannter, bereits lauschender Prozess wird nie uebernommen; der
+  Start bricht dann mit einem Hinweis ab.
+- **Requests:** Health-, Modell- und RAG-Anfragen nur an Loopback, ohne Proxy (`no_proxy`) und
+  ohne Redirects, und nur nach bestandenem Besitznachweis.
+- **Beenden:** SIGTERM an die gesamte Prozessgruppe, nach Wartefrist SIGKILL. Prozesse frueherer
+  Sitzungen werden nur bei positivem Nachweis (Startidentitaet + eigene Prozessgruppe + Executable
+  im Runtime-Root) signalisiert.
+- **Externe lokale Endpunkte** (Ollama, LM Studio, OpenAI-kompatibel) bleiben die externe
+  Local-Lane und werden nie als verwaltete Runtime dargestellt. Der reservierte Port 17842 wird
+  dort nur angesprochen, wenn der Besitznachweis der verwalteten Runtime gilt; Loopback-Anfragen
+  der Local-Lane und die Discovery laufen ohne Proxy.
+
+**Restrisiken:**
+
+- *Verify→Exec (TOCTOU):* Rust/macOS bieten keinen portablen Start aus einem geoeffneten Handle
+  (`fexecve`). Das Fenster wird minimiert: Vollpruefung des Baums, dann unmittelbar vor `spawn`
+  Abgleich von dev/ino/Groesse/mtime und erneuter SHA-256 des Executables; dylibs werden in der
+  Vollpruefung Sekunden vorher gehasht. Der Runtime-Baum ist 0700 und gehoert dem Benutzer — ein
+  Angreifer mit Schreibrechten als derselbe Benutzer bleibt ausserhalb dieser Grenze.
+- *Check→Request:* Zwischen Besitznachweis und HTTP-Request liegt ein Fenster im
+  Millisekundenbereich, in dem der verifizierte Prozess sterben und ein Fremdprozess den Port
+  binden koennte.
+- *Plattformen:* Kernel-Nachweis nur auf macOS und Linux. Anderswo zaehlt ausschliesslich der
+  eigene Child-Handle der laufenden Sitzung; Runtimes frueherer Sitzungen werden nicht uebernommen.
+- *Migration:* Runtimes ohne Ledger (Installation vor dieser Haertung) gelten als nicht
+  installiert und werden aus dem gepinnten Archiv neu installiert. Ein noch laufender llama-server
+  einer alten Version hat keinen Besitznachweis und blockiert den Start, bis er beendet ist.

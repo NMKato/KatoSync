@@ -39,6 +39,9 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(60);
 const LOCAL_TIMEOUT: Duration = Duration::from_secs(8);
+const RESERVED_LOCAL_BRAIN_DETAIL: &str =
+    "Port 17842 ist fuer die KatoSync-verwaltete Local-Brain-Runtime reserviert; \
+     ohne Besitznachweis wird dieser Endpunkt nicht angesprochen";
 const LOCAL_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(60);
 const API_TIMEOUT: Duration = Duration::from_secs(20);
 const API_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(90);
@@ -1538,6 +1541,20 @@ fn http_client(limit: Duration) -> Option<reqwest::Client> {
         .ok()
 }
 
+/// Loopback-Ziele werden nie ueber einen Env-/System-Proxy geleitet: Prompts und Keys fuer
+/// lokale Modelle verlassen den Rechner nicht.
+fn endpoint_client(base: &Url, limit: Duration) -> Option<reqwest::Client> {
+    let builder = reqwest::Client::builder()
+        .timeout(limit)
+        .redirect(Policy::none());
+    let builder = if endpoint_scope(base) == "local" {
+        builder.no_proxy()
+    } else {
+        builder
+    };
+    builder.build().ok()
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredOriginKey {
     origin: String,
@@ -2269,6 +2286,19 @@ async fn local_status(
     status.installed = true;
     status.state = ProviderState::Installed;
     status.endpoint_scope = Some(endpoint_scope(&base).to_string());
+    // Der Local-Brain-Port gehoert der KatoSync-verwalteten Runtime. Ohne Besitznachweis
+    // bekommt ein dort lauschender Prozess weder Prompts noch den gespeicherten Key. Auch
+    // mit Nachweis bleibt dies die externe Local-Lane und gilt nicht als verwaltete Runtime.
+    if crate::local_brain::is_reserved_endpoint(&base)
+        && !crate::local_brain::managed_endpoint_verified(&base)
+    {
+        status.fail(
+            ProviderState::Unknown,
+            ProviderReason::InvalidEndpoint,
+            Some(RESERVED_LOCAL_BRAIN_DETAIL),
+        );
+        return status;
+    }
 
     let stored_key = tokio::task::spawn_blocking(load_local_key)
         .await
@@ -2294,9 +2324,10 @@ async fn local_status(
         return status;
     }
 
-    let (Some(endpoint), Some(client)) =
-        (models_url(&base, config.kind), http_client(LOCAL_TIMEOUT))
-    else {
+    let (Some(endpoint), Some(client)) = (
+        models_url(&base, config.kind),
+        endpoint_client(&base, LOCAL_TIMEOUT),
+    ) else {
         status.fail(
             ProviderState::Unknown,
             ProviderReason::InvalidEndpoint,
@@ -2336,8 +2367,10 @@ async fn local_status(
     }
 
     // Faehigkeitstest: ein begrenzter Chat-Aufruf; jede generierte Antwort belegt Faehigkeit.
-    let (Some(chat), Some(client)) = (chat_url(&base), http_client(LOCAL_CAPABILITY_TIMEOUT))
-    else {
+    let (Some(chat), Some(client)) = (
+        chat_url(&base),
+        endpoint_client(&base, LOCAL_CAPABILITY_TIMEOUT),
+    ) else {
         status.fail(
             ProviderState::Unknown,
             ProviderReason::InvalidEndpoint,
@@ -2449,7 +2482,13 @@ fn apply_http_failure(status: &mut ProviderStatus, failure: HttpFailure) {
 
 /// Sucht nur auf diesem Rechner (Loopback) nach Ollama und LM Studio auf Standardports.
 pub async fn discover_local() -> Vec<DiscoveredLocalProvider> {
-    let Some(client) = http_client(DISCOVERY_TIMEOUT) else {
+    let Some(client) = reqwest::Client::builder()
+        .timeout(DISCOVERY_TIMEOUT)
+        .redirect(Policy::none())
+        .no_proxy()
+        .build()
+        .ok()
+    else {
         return Vec::new();
     };
     let (ollama, lm_studio) = tokio::join!(
@@ -2974,6 +3013,53 @@ mod tests {
         ] {
             assert!(validate_local_endpoint(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn reserved_local_brain_port_is_never_treated_as_managed_without_proof() {
+        let url = |value: &str| validate_local_endpoint(value).unwrap();
+        for reserved in [
+            "http://127.0.0.1:17842",
+            "http://127.0.0.1:17842/v1",
+            "http://localhost:17842/v1",
+            "http://[::1]:17842",
+            "http://0.0.0.0:17842",
+            "https://127.0.0.1:17842",
+        ] {
+            assert!(
+                crate::local_brain::is_reserved_endpoint(&url(reserved)),
+                "{reserved}"
+            );
+            // Ohne registrierte, nachgewiesene Runtime nie als verwaltet akzeptiert.
+            assert!(!crate::local_brain::managed_endpoint_verified(&url(
+                reserved
+            )));
+        }
+        for external in [
+            "http://127.0.0.1:11434",
+            "http://localhost:1234/v1",
+            "http://192.168.1.20:17842",
+            "https://models.example.test:17842/v1",
+        ] {
+            assert!(
+                !crate::local_brain::is_reserved_endpoint(&url(external)),
+                "{external}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unverified_listener_on_reserved_port_gets_no_requests() {
+        let config = LocalProviderConfig {
+            kind: LocalProviderKind::OpenAiCompatible,
+            base_url: "http://127.0.0.1:17842/v1".to_string(),
+            model: String::new(),
+        };
+        let status = local_status(&config, true, true).await;
+        assert_eq!(status.reason, ProviderReason::InvalidEndpoint);
+        assert!(!status.available);
+        assert!(!status.authenticated);
+        assert!(!status.secret_stored, "Key wurde nicht einmal geladen");
     }
 
     #[test]

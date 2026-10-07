@@ -27,6 +27,7 @@ use walkdir::{DirEntry, WalkDir};
 
 mod context_pack;
 mod local_brain;
+mod local_brain_runtime;
 mod local_control;
 mod memory_fabric;
 mod model_distribution;
@@ -381,6 +382,7 @@ pub fn run() {
         ])
         .setup(|app| {
             let _ = app.path().app_data_dir().map(fs::create_dir_all);
+            local_brain::register_app(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -3549,7 +3551,7 @@ fn open_output_dir() -> Result<String, String> {
 fn quit_app(app: tauri::AppHandle) {
     // Fenster-Schließen lässt KatoSync absichtlich weiterlaufen. Nur der explizite
     // "Programm beenden"-Pfad beendet auch die von KatoSync verwaltete Local-Brain-Runtime.
-    let _ = local_brain::stop_owned();
+    let _ = local_brain::stop_owned(&app);
     app.exit(0);
 }
 

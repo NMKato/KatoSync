@@ -40,6 +40,9 @@ walkdir = "2.5"
 zeroize = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
