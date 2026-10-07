@@ -40,3 +40,17 @@ The result always carries truthLevel=observed, trust=untrusted_web_data and acti
 v1 intentionally separates search/discovery from safe fetch. A search provider may later be Brave Search API, a self-hosted SearXNG instance, or another approved provider. It may return candidate URLs, but every candidate must still pass the Research Broker before REX can read it.
 
 This keeps provider choice replaceable while the security and evidence contract remains stable.
+
+
+## Search discovery adapter
+
+Search discovery is separated from content fetching. SearXNG adapter v1 calls only a configured
+public HTTPS SearXNG endpoint and requests the search endpoint with format=json and safe-search
+enabled. It returns bounded candidate URLs in the KatoSync research-search/v1 format.
+
+Candidates remain observed, untrusted_search_candidate, actionAuthority=none.
+A candidate URL is never trusted merely because SearXNG returned it. REX must pass selected
+candidate URLs through the Safe Fetch broker before reading or citing their content.
+
+Provider configuration is intentionally replaceable. Future adapters (self-hosted SearXNG,
+Brave Search API, or another approved service) can feed the same candidate contract.

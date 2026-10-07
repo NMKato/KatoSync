@@ -40,6 +40,7 @@ mod project_registry;
 mod provider_manager;
 mod provider_warmup;
 mod research_lane;
+mod research_search;
 mod runner_guard;
 mod safe_archive;
 
@@ -361,6 +362,7 @@ pub fn run() {
             research_lane::research_decide,
             research_lane::research_prepare_plan,
             research_lane::research_fetch_observed,
+            research_search::research_search_searxng,
             load_config,
             save_config,
             save_api_key,
