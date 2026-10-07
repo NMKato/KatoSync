@@ -30,10 +30,12 @@ mod local_brain;
 mod local_control;
 mod memory_fabric;
 mod model_distribution;
+mod model_trust;
 mod orchestration;
 mod project_registry;
 mod provider_manager;
 mod provider_warmup;
+mod safe_archive;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

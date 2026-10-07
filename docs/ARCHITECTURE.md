@@ -254,7 +254,10 @@ startet ausschließlich dessen `dispatch` über den bestehenden Runner (`runCode
 
 Runtime und Modellgewichte sind getrennt: KatoSync verwaltet die gepinnte llama.cpp-Runtime, die
 Gewichte kommen als versioniertes Paket (`kato-model-package/1`) aus einem R2-faehigen
-Verteilkanal oder dem gepinnten Upstream. Gewichte werden erst nach exakter Groessen- und
-SHA-256-Pruefung atomar installiert; Update, Pin, Rollback und Entfernen laufen ueber ein Ledger
-ohne URLs oder Tokens. Ein Lizenz-/Redistribution-Gate verhindert, dass ein Paket ohne Freigabe
-oeffentlich wird. Vertrag, R2-Layout und Release-Checkliste: [`MODEL_DISTRIBUTION.md`](MODEL_DISTRIBUTION.md)
+Verteilkanal oder dem gepinnten Upstream. Der eigene Kanal verwendet einen offline gepinnten
+Ed25519-Root, signierte und ablaufende Kanalmetadaten sowie einen persistenten Rollback-Floor.
+Artefakte werden erst nach exakter Groessen-/SHA-256-Pruefung und Runtime-Archive nur unter harten
+Extraktionsgrenzen atomar installiert. Modell und kompletter Runtime-Baum werden vor der Nutzung
+erneut gegen ihre Ledger geprueft. Ein Lizenz-/Redistribution-Gate verhindert, dass ein Paket ohne
+Freigabe oeffentlich wird. Vertrag, Trust Chain, R2-Layout und Release-Checkliste:
+[`MODEL_DISTRIBUTION.md`](MODEL_DISTRIBUTION.md)

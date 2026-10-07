@@ -3,12 +3,13 @@ use crate::model_distribution::{
     self as dist, release_gate_blockers, Channel, DistributionBase, ExpectedArtifact, ModelPackage,
     OriginPolicy, PackagePublication, PackageStore, UpdateState,
 };
+use crate::model_trust::{self, ExpiryPolicy, TrustRoot, TrustStateStore, TrustedPackage};
+use crate::safe_archive::{self, ArchiveFormat, InstalledTree, LinkPolicy, RUNTIME_ARCHIVE_LIMITS};
 use anyhow::{anyhow, Context, Result};
-use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Mutex, OnceLock},
@@ -43,6 +44,7 @@ struct Manifest {
 struct DistributionConfig {
     base_url: Option<String>,
     allowed_hosts: Vec<String>,
+    redirect_hosts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -58,6 +60,7 @@ struct RuntimeManifest {
 struct RuntimeTarget {
     url: String,
     sha256: String,
+    size_bytes: u64,
     archive: String,
     executable: String,
 }
@@ -184,6 +187,10 @@ fn parse_manifest(json: &str) -> Result<Manifest> {
     for target in parsed.runtime.targets.values() {
         policy.check(&target.url)?;
         dist::validate_sha256(&target.sha256)?;
+        if target.size_bytes == 0 || target.size_bytes > dist::MAX_PACKAGE_BYTES {
+            return Err(anyhow!("Unplausible Runtime-Archivgroesse"));
+        }
+        ArchiveFormat::parse(&target.archive)?;
     }
     for model in &parsed.models {
         let package = model.to_package();
@@ -207,7 +214,8 @@ fn manifest() -> Result<Manifest> {
 }
 
 fn origin_policy(manifest: &Manifest) -> Result<OriginPolicy> {
-    OriginPolicy::new(&manifest.distribution.allowed_hosts)
+    OriginPolicy::new(&manifest.distribution.allowed_hosts)?
+        .with_redirect_hosts(&manifest.distribution.redirect_hosts)
 }
 
 fn distribution_base(
@@ -243,6 +251,20 @@ fn runtime_dir(app: &AppHandle, manifest: &Manifest) -> Result<PathBuf> {
     Ok(root(app)?.join("runtime").join(&manifest.runtime.version))
 }
 
+fn runtime_ledger_path(app: &AppHandle, manifest: &Manifest) -> Result<PathBuf> {
+    Ok(root(app)?
+        .join("runtime")
+        .join(format!("{}.tree.json", manifest.runtime.version)))
+}
+
+/// Die Rollback-Untergrenze liegt absichtlich ausserhalb von `local-brain`: Entfernen oder
+/// Neuinstallieren eines Modells darf bereits akzeptierte Remote-Metadaten nie zuruecksetzen.
+fn trust_state_store(app: &AppHandle) -> Result<TrustStateStore> {
+    Ok(TrustStateStore::new(
+        app.path().app_data_dir()?.join("model-metadata-trust"),
+    ))
+}
+
 fn package_store(app: &AppHandle) -> Result<PackageStore> {
     Ok(PackageStore::new(root(app)?))
 }
@@ -264,7 +286,7 @@ fn stage_legacy_model(root: &Path, model: &ModelManifest, staging: &Path) -> Res
     let legacy_part = PathBuf::from(format!("{}.part", legacy.display()));
     for candidate in [legacy, legacy_part] {
         if fs::symlink_metadata(&candidate).is_ok_and(|meta| meta.file_type().is_file()) {
-            fs::create_dir_all(staging)?;
+            dist::ensure_private_dir(staging)?;
             fs::rename(&candidate, &part)?;
             if let Some(dir) = candidate.parent() {
                 fs::remove_dir(dir).ok();
@@ -335,6 +357,82 @@ fn find_runtime_binary(dir: &Path, executable: &str) -> Option<PathBuf> {
         .map(|entry| entry.into_path())
 }
 
+fn checked_runtime_ledger(
+    app: &AppHandle,
+    manifest: &Manifest,
+    target: &RuntimeTarget,
+) -> Result<Option<InstalledTree>> {
+    let Some(ledger) = safe_archive::load_tree_ledger(&runtime_ledger_path(app, manifest)?)? else {
+        return Ok(None);
+    };
+    if ledger.component != manifest.runtime.id
+        || ledger.version != manifest.runtime.version
+        || ledger.archive_sha256 != target.sha256
+    {
+        return Err(anyhow!(
+            "Runtime-Ledger passt nicht zu {} {}",
+            manifest.runtime.id,
+            manifest.runtime.version
+        ));
+    }
+    Ok(Some(ledger))
+}
+
+fn runtime_present(app: &AppHandle, manifest: &Manifest, target: &RuntimeTarget) -> bool {
+    checked_runtime_ledger(app, manifest, target)
+        .ok()
+        .flatten()
+        .is_some_and(|ledger| {
+            runtime_dir(app, manifest).is_ok_and(|dir| safe_archive::tree_present(&dir, &ledger))
+        })
+}
+
+async fn trusted_model_for_install(
+    app: &AppHandle,
+    manifest: &Manifest,
+    embedded: ModelPackage,
+    store: &PackageStore,
+    policy: &OriginPolicy,
+    client: &reqwest::Client,
+    platform: &str,
+) -> Result<TrustedPackage> {
+    let Some(base) = distribution_base(manifest, policy)? else {
+        return TrustedPackage::embedded(embedded, policy);
+    };
+
+    // Sobald eine eigene Distribution aktiviert ist, gibt es keinen stillen Rueckfall auf
+    // eingebettete R2-Metadaten: Root, Signatur, Ablauf und Rollback-Floor sind Pflicht.
+    let root = TrustRoot::production()?;
+    let trust_store = trust_state_store(app)?;
+    let verified = model_trust::refresh_channel(
+        client,
+        &base,
+        &trust_store,
+        &root,
+        embedded.channel,
+        ExpiryPolicy::from_environment(),
+        policy,
+    )
+    .await?;
+    let pinned = store
+        .load_ledger(&embedded.package_id)?
+        .and_then(|ledger| ledger.pinned);
+    verified
+        .select(
+            &embedded.package_id,
+            pinned.as_deref(),
+            platform,
+            &manifest.runtime.version,
+            policy,
+        )?
+        .ok_or_else(|| {
+            anyhow!(
+                "Signierter Kanal enthaelt kein installierbares Paket fuer {}",
+                embedded.package_id
+            )
+        })
+}
+
 fn owned_child_alive() -> bool {
     let Ok(mut guard) = child_slot().lock() else {
         return false;
@@ -361,13 +459,7 @@ fn snapshot(app: &AppHandle) -> Result<LocalBrainStatus> {
         .targets
         .get(&key)
         .filter(|_| package.supports(&key, &manifest.runtime.version));
-    let runtime_installed = target
-        .and_then(|target| {
-            runtime_dir(app, &manifest)
-                .ok()
-                .and_then(|dir| find_runtime_binary(&dir, &target.executable))
-        })
-        .is_some();
+    let runtime_installed = target.is_some_and(|target| runtime_present(app, &manifest, target));
     let local_root = root(app)?;
     let store = PackageStore::new(local_root.clone());
     // Beschaedigtes Ledger = nicht installiert (fail closed); Entfernen setzt es zurueck.
@@ -614,59 +706,45 @@ fn progress_reporter<'a>(
     move |downloaded, total| emit_progress(app, phase, label, downloaded, total)
 }
 
-fn extract_runtime(archive: &Path, target: &RuntimeTarget, destination: &Path) -> Result<()> {
-    let staging = destination.with_extension("staging");
-    if staging.exists() {
-        fs::remove_dir_all(&staging)?;
+fn install_runtime_archive(
+    app: &AppHandle,
+    manifest: &Manifest,
+    target: &RuntimeTarget,
+    archive: &Path,
+) -> Result<()> {
+    let staging_root = root(app)?.join("staging");
+    dist::ensure_private_dir(&staging_root)?;
+    let extracted = staging_root.join(format!("runtime-{}", uuid::Uuid::new_v4().simple()));
+    let result = (|| {
+        safe_archive::extract_archive(
+            archive,
+            ArchiveFormat::parse(&target.archive)?,
+            &extracted,
+            RUNTIME_ARCHIVE_LIMITS,
+            // Offizielle llama.cpp-Archive enthalten soname-Aliase. Kein Link wird angelegt:
+            // ausschliesslich validierte Geschwister-Aliase werden als regulaere Kopien erzeugt.
+            LinkPolicy::CopySiblingAliases,
+        )?;
+        let binary = find_runtime_binary(&extracted, &target.executable)
+            .ok_or_else(|| anyhow!("Runtime enthaelt {} nicht", target.executable))?;
+        let ledger = InstalledTree::new(
+            &manifest.runtime.id,
+            &manifest.runtime.version,
+            &target.sha256,
+            &extracted,
+            &binary,
+        )?;
+        safe_archive::promote_tree(
+            &extracted,
+            &runtime_dir(app, manifest)?,
+            &runtime_ledger_path(app, manifest)?,
+            &ledger,
+        )
+    })();
+    if result.is_err() {
+        fs::remove_dir_all(&extracted).ok();
     }
-    fs::create_dir_all(&staging)?;
-
-    match target.archive.as_str() {
-        "tar.gz" => {
-            let file = File::open(archive)?;
-            let decoder = GzDecoder::new(file);
-            let mut tar = tar::Archive::new(decoder);
-            tar.unpack(&staging)?;
-        }
-        "zip" => {
-            let file = File::open(archive)?;
-            let mut archive = zip::ZipArchive::new(file)?;
-            for index in 0..archive.len() {
-                let mut entry = archive.by_index(index)?;
-                let Some(relative) = entry.enclosed_name() else {
-                    return Err(anyhow!("Unsicherer Pfad im Runtime-Archiv"));
-                };
-                let output = staging.join(relative);
-                if entry.is_dir() {
-                    fs::create_dir_all(&output)?;
-                    continue;
-                }
-                if let Some(parent) = output.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                let mut out = File::create(&output)?;
-                std::io::copy(&mut entry, &mut out)?;
-            }
-        }
-        other => return Err(anyhow!("Nicht unterstuetztes Runtime-Archiv: {other}")),
-    }
-
-    let binary = find_runtime_binary(&staging, &target.executable)
-        .ok_or_else(|| anyhow!("Runtime enthaelt {} nicht", target.executable))?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&binary)?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&binary, perms)?;
-    }
-
-    if destination.exists() {
-        fs::remove_dir_all(destination)?;
-    }
-    fs::rename(staging, destination)?;
-    Ok(())
+    result
 }
 
 pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
@@ -675,48 +753,65 @@ pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
         .map_err(|_| anyhow!("Local-Brain-Installation laeuft bereits"))?;
     let manifest = manifest()?;
     let model = recommended_model(&manifest)?;
-    let package = model.to_package();
+    let embedded_package = model.to_package();
     let key = target_key();
     let target = manifest
         .runtime
         .targets
         .get(&key)
-        .filter(|_| package.supports(&key, &manifest.runtime.version))
         .ok_or_else(|| anyhow!("Local Brain wird auf {key} noch nicht unterstuetzt"))?;
-
-    if let Some(ram) = detect_ram_gb() {
-        if ram < model.minimum_ram_gb {
-            return Err(anyhow!(
-                "{} braucht mindestens {} GB RAM; erkannt wurden {} GB",
-                model.display_name,
-                model.minimum_ram_gb,
-                ram
-            ));
-        }
-    }
 
     let policy = origin_policy(&manifest)?;
     let client = policy.http_client()?;
     let local_root = root(app)?;
     let store = PackageStore::new(local_root.clone());
+    let trusted = trusted_model_for_install(
+        app,
+        &manifest,
+        embedded_package,
+        &store,
+        &policy,
+        &client,
+        &key,
+    )
+    .await?;
+    let package = trusted.package();
+    if !package.supports(&key, &manifest.runtime.version) {
+        return Err(anyhow!(
+            "{}@{} unterstuetzt {key} mit Runtime {} nicht",
+            package.package_id,
+            package.version,
+            manifest.runtime.version
+        ));
+    }
+    if let Some(ram) = detect_ram_gb() {
+        if ram < package.minimum_ram_gb {
+            return Err(anyhow!(
+                "{} braucht mindestens {} GB RAM; erkannt wurden {} GB",
+                model.display_name,
+                package.minimum_ram_gb,
+                ram
+            ));
+        }
+    }
 
-    let runtime_dir = runtime_dir(app, &manifest)?;
-    if find_runtime_binary(&runtime_dir, &target.executable).is_none() {
+    if !runtime_present(app, &manifest, target) {
         let label = "llama.cpp Runtime";
-        emit_progress(app, "runtime", label, 0, None);
+        emit_progress(app, "runtime", label, 0, Some(target.size_bytes));
         let archive = dist::fetch_verified(
             &client,
             &[policy.check(&target.url)?],
             &store.staging_dir(),
             ExpectedArtifact {
                 sha256: &target.sha256,
-                size_bytes: None,
+                size_bytes: target.size_bytes,
             },
             &mut progress_reporter(app, "runtime", label),
         )
         .await?;
-        extract_runtime(archive.path(), target, &runtime_dir)?;
+        let installed = install_runtime_archive(app, &manifest, target, archive.path());
         fs::remove_file(archive.path()).ok();
+        installed?;
     }
 
     let ledger = store.load_ledger(&package.package_id).context(
@@ -736,33 +831,41 @@ pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
 
     if needs_download {
         let staging = store.staging_dir();
-        stage_legacy_model(&local_root, model, &staging)?;
+        if package.sha256 == model.sha256 && package.file_name == model.file_name {
+            stage_legacy_model(&local_root, model, &staging)?;
+        }
         let sources = dist::download_sources(
-            &package,
+            &trusted,
             distribution_base(&manifest, &policy)?.as_ref(),
             &policy,
         )?;
-        emit_progress(app, "model", &model.display_name, 0, Some(model.size_bytes));
+        emit_progress(
+            app,
+            "model",
+            &model.display_name,
+            0,
+            Some(package.size_bytes),
+        );
         let verified = dist::fetch_verified(
             &client,
             &sources,
             &staging,
             ExpectedArtifact {
                 sha256: &package.sha256,
-                size_bytes: Some(package.size_bytes),
+                size_bytes: package.size_bytes,
             },
             &mut progress_reporter(app, "model", &model.display_name),
         )
         .await?;
-        store.promote(&package, verified)?;
+        store.promote(&trusted, verified)?;
     }
 
     emit_progress(
         app,
         "verify",
         "Installation verifiziert",
-        model.size_bytes,
-        Some(model.size_bytes),
+        package.size_bytes,
+        Some(package.size_bytes),
     );
     status(app).await
 }
@@ -770,6 +873,7 @@ pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
 /// Liefert ausschliesslich verifizierte Gewichte; Altbestand wird vorher geprueft und uebernommen.
 async fn verified_model_for_launch(app: &AppHandle, model: &ModelManifest) -> Result<PathBuf> {
     let package = model.to_package();
+    let trusted = TrustedPackage::embedded(package.clone(), &origin_policy(&manifest()?)?)?;
     let local_root = root(app)?;
     let model = model.clone();
     tokio::task::spawn_blocking(move || -> Result<PathBuf> {
@@ -782,16 +886,40 @@ async fn verified_model_for_launch(app: &AppHandle, model: &ModelManifest) -> Re
                 &part,
                 ExpectedArtifact {
                     sha256: &package.sha256,
-                    size_bytes: Some(package.size_bytes),
+                    size_bytes: package.size_bytes,
                 },
             )?;
-            store.promote(&package, verified)?;
+            store.promote(&trusted, verified)?;
         }
         store.resolve_for_launch(&package.package_id)
     })
     .await
     .map_err(|err| anyhow!("Modellpruefung abgebrochen: {err}"))?
     .context("Local-Brain-Modell ist nicht installiert oder nicht verifiziert")
+}
+
+/// Hasht den vollstaendigen Runtime-Baum unmittelbar vor dem ersten Prozessstart. Dadurch
+/// werden auch ersetzte Bibliotheken oder zusaetzlich eingeschleuste Dateien fail-closed erkannt.
+async fn verified_runtime_for_launch(
+    app: &AppHandle,
+    manifest: &Manifest,
+    target: &RuntimeTarget,
+) -> Result<PathBuf> {
+    let ledger = checked_runtime_ledger(app, manifest, target)?
+        .ok_or_else(|| anyhow!("llama.cpp Runtime ist nicht verifiziert installiert"))?;
+    let runtime = runtime_dir(app, manifest)?;
+    let executable = target.executable.clone();
+    tokio::task::spawn_blocking(move || {
+        let binary = safe_archive::verify_tree(&runtime, &ledger)?;
+        if binary.file_name().and_then(|name| name.to_str()) != Some(executable.as_str()) {
+            return Err(anyhow!(
+                "Runtime-Ledger verweist auf ein unerwartetes Executable"
+            ));
+        }
+        Ok(binary)
+    })
+    .await
+    .map_err(|err| anyhow!("Runtime-Pruefung abgebrochen: {err}"))?
 }
 
 pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
@@ -803,13 +931,11 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
         .targets
         .get(&key)
         .ok_or_else(|| anyhow!("Local Brain wird auf {key} noch nicht unterstuetzt"))?;
-    let runtime = runtime_dir(app, &manifest)?;
-    let binary = find_runtime_binary(&runtime, &target.executable)
-        .ok_or_else(|| anyhow!("llama.cpp Runtime ist nicht installiert"))?;
     if owned_child_alive() || serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
         return status(app).await;
     }
 
+    let binary = verified_runtime_for_launch(app, &manifest, target).await?;
     let model_file = verified_model_for_launch(app, model).await?;
     let context_tokens = model.package.context_tokens.to_string();
     let logs = root(app)?.join("logs");
@@ -964,7 +1090,8 @@ mod tests {
         // Nicht oeffentlich → nie ueber den eigenen Kanal, nur gepinnter Upstream.
         let policy = origin_policy(&manifest).unwrap();
         let base = DistributionBase::parse("https://github.com/placeholder", &policy).unwrap();
-        let sources = dist::download_sources(&package, Some(&base), &policy).unwrap();
+        let trusted = TrustedPackage::embedded(package, &policy).unwrap();
+        let sources = dist::download_sources(&trusted, Some(&base), &policy).unwrap();
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].host_str(), Some("huggingface.co"));
     }
@@ -1035,6 +1162,18 @@ mod tests {
                     v["schemaVersion"] = 1.into();
                 }),
             ),
+            (
+                "Runtime ohne Groessenlimit",
+                Box::new(|v| {
+                    v["runtime"]["targets"]["macos-aarch64"]["sizeBytes"] = 0.into();
+                }),
+            ),
+            (
+                "zu breite Redirect-Allowlist",
+                Box::new(|v| {
+                    v["distribution"]["redirectHosts"] = serde_json::json!(["*.co"]);
+                }),
+            ),
         ];
         for (label, edit) in cases {
             assert!(mutated_manifest(edit).is_err(), "{label} muss scheitern");
@@ -1059,7 +1198,7 @@ mod tests {
             &part,
             ExpectedArtifact {
                 sha256: &model.sha256,
-                size_bytes: Some(model.size_bytes),
+                size_bytes: model.size_bytes,
             },
         );
         assert!(verdict.is_err());
@@ -1073,6 +1212,7 @@ mod tests {
         for (key, target) in &manifest.runtime.targets {
             assert!(!key.is_empty());
             assert_eq!(target.sha256.len(), 64);
+            assert!(target.size_bytes > 0);
             assert!(target
                 .url
                 .starts_with("https://github.com/ggml-org/llama.cpp/releases/download/"));
