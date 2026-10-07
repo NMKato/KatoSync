@@ -39,6 +39,7 @@ mod orchestration;
 mod project_registry;
 mod provider_manager;
 mod provider_warmup;
+mod research_lane;
 mod runner_guard;
 mod safe_archive;
 
@@ -356,6 +357,10 @@ pub fn run() {
             memory_fabric::memory_fabric_answer,
             memory_fabric::memory_fabric_promote,
             memory_fabric::memory_fabric_export,
+            research_lane::research_policy,
+            research_lane::research_decide,
+            research_lane::research_prepare_plan,
+            research_lane::research_fetch_observed,
             load_config,
             save_config,
             save_api_key,
