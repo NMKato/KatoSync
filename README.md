@@ -225,6 +225,10 @@ Custom-Skills bleiben natürlich möglich.
 
 ---
 
+## Continuation Recovery (Nachtläufe prüfen und reviewt fortsetzen)
+
+`python3 scripts/katosync-continuation-recovery.py status` meldet den Continuation-Zustand und liest dabei nur. Es zeigt fehlgeschlagene Pläne, verwaiste `running`-Records (`outcome_unknown`), hängende aktive Jobs und alte Daemon-Heartbeats an. Resume oder neuer Plan, Quarantäne und Plan-Swap mit Backup laufen nur als Dry-run oder hinter expliziten menschlichen Gates. Es gibt keinen Auto-Retry, keine übersprungenen Wellen und keine Löschung. Die Prozedur steht in [`docs/CONTINUATION_RECOVERY.md`](docs/CONTINUATION_RECOVERY.md).
+
 ## Local Control Bridge (kein LLM erforderlich)
 
 KatoSync kann zusätzlich als lokaler Ausführungs-Bus für einen externen Orchestrator laufen.
