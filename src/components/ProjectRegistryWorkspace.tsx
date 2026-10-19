@@ -18,6 +18,7 @@ import {
   Trash2
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
+import { SecureBetaIssueInbox } from "./SecureBetaIssueInbox";
 import { AUTO_MODES, FOCUS_PRIORITIES, FOCUS_STATUSES } from "../lib/projectFocus";
 import { normalizeRemote } from "../lib/projectExclusions";
 import {
@@ -192,6 +193,8 @@ export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
         {excludedTasks > 0 ? <p className="agent-empty">{t("projects.focus.excluded", { count: excludedTasks })}</p> : null}
         {projects.missingProfile.length && projects.registry.projects.length ? <MissingProfile vm={vm} /> : null}
       </section>
+
+      <SecureBetaIssueInbox projects={projects.registry.projects} />
 
       {!projects.registry.projects.length && !projects.discovery ? <p className="agent-empty projects-empty">{t("projects.empty")}</p> : null}
 

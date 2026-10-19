@@ -9581,3 +9581,19 @@ button.agent-tile:hover {
 .control-lane-node > em {
   min-height: 1.2em;
 }
+
+
+/* Secure Beta Check: read-only GitHub Issue Inbox */
+.sbc-project-choice { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:9px 11px; border-bottom:1px solid var(--border, rgba(150,150,150,.2)); cursor:pointer; }
+.sbc-project-choice strong { min-width:140px; }
+.sbc-project-choice small { display:inline-flex; align-items:center; gap:5px; overflow-wrap:anywhere; }
+.sbc-controls { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-top:16px; }
+.sbc-results { margin-top:18px; }
+.sbc-results-heading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+.sbc-issues { list-style:none; margin:10px 0 0; padding:0; display:grid; gap:9px; }
+.sbc-issues li { display:flex; align-items:flex-start; gap:12px; border:1px solid var(--border, rgba(150,150,150,.2)); border-radius:10px; padding:12px; }
+.sbc-issues li > div { flex:1; min-width:0; display:grid; gap:5px; }
+.sbc-issues li strong { overflow-wrap:anywhere; }
+.sbc-issues li small { opacity:.78; }
+.sbc-issues li button { flex-shrink:0; }
+@media (max-width: 680px) { .sbc-issues li { flex-wrap:wrap; } }

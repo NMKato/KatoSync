@@ -26,6 +26,7 @@ use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
 mod context_pack;
+mod github_issue_inbox;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
@@ -296,6 +297,7 @@ pub fn run() {
             project_registry::project_registry_load,
             project_registry::project_registry_save,
             project_registry::project_registry_open,
+            github_issue_inbox::github_issue_inbox_read,
             memory_fabric::memory_fabric_overview,
             memory_fabric::memory_fabric_identity_get,
             memory_fabric::memory_fabric_identity_set_rex,

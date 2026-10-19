@@ -44,6 +44,20 @@ const mockActionPlansKey = "katosync.actionPlans.v2";
 const mockBriefingsKey = "katosync.briefings";
 const mockMcpConnectorTokenKey = "katosync.mcpConnectorToken";
 // Projekt-Board: Tasks ohne project_external_id landen in einer neutralen "Ohne Projekt"-Gruppe.
+export interface GithubIssueFetchBatch {
+  remote: string;
+  issues: unknown[];
+  error: string | null;
+}
+
+/** Auth belongs to the user's installed GitHub CLI. No token stored in KatoSync. */
+export async function fetchRegisteredGithubIssues(projectIds: string[]): Promise<GithubIssueFetchBatch[]> {
+  if (!isTauri()) {
+    throw new Error("GitHub-Issue-Abruf ist nur in der KatoSync-Desktop-App verfuegbar.");
+  }
+  return invoke<GithubIssueFetchBatch[]>("github_issue_inbox_read", { projectIds });
+}
+
 export const NO_PROJECT_ID = "__no_project__";
 const isTauri = () => Boolean(window.__TAURI_INTERNALS__);
 
