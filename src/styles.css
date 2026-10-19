@@ -9581,3 +9581,11 @@ button.agent-tile:hover {
 .control-lane-node > em {
   min-height: 1.2em;
 }
+
+
+/* Project Work Hub v1 – safe, copyable project resume preview */
+.projects-resume { padding:14px; margin-top:12px; border:1px solid var(--border, rgba(150,150,150,.2)); border-radius:12px; }
+.projects-resume > strong { display:block; margin-bottom:7px; }
+.projects-resume-result { margin-top:12px; }
+.projects-resume-result textarea { display:block; box-sizing:border-box; width:100%; margin-top:9px; padding:11px; border:1px solid var(--border, rgba(150,150,150,.25)); border-radius:10px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; resize:vertical; }
+.projects-resume-result ul { padding-left:20px; }

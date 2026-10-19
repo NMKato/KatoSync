@@ -32,6 +32,7 @@ mod memory_fabric;
 mod model_distribution;
 mod orchestration;
 mod project_registry;
+mod project_work_resume;
 mod provider_manager;
 mod provider_warmup;
 
@@ -294,6 +295,7 @@ pub fn run() {
             project_registry::project_registry_smart_roots,
             project_registry::project_registry_scan,
             project_registry::project_registry_load,
+            project_work_resume::project_work_resume,
             project_registry::project_registry_save,
             project_registry::project_registry_open,
             memory_fabric::memory_fabric_overview,
