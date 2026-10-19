@@ -11,6 +11,8 @@ import {
   resolveAgentPolicy
 } from "../src/lib/agentStandards.ts";
 import { buildSkillPrompt } from "../src/lib/skillTemplate.ts";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 test("community default respects the existing project architecture, organization can choose MVVM+R", () => {
   const shared = resolveAgentPolicy();
@@ -139,4 +141,23 @@ test("existing Mistral skill generator includes canonical provider-neutral polic
   });
   assert.match(ios, /SwiftUI MVVM/);
   assert.match(ios, /Was-Wo-Warum|WAS \(what changed\)/);
+});
+
+
+test("all native policy profiles use the shared semantic rules and contain immutable gates", () => {
+  const variants = [
+    ["community", {}],
+    ["mvvm-r", { organization: MVVM_R_ENGINEERING_PROFILE }],
+    ["ios-swiftui", { organization: IOS_SWIFTUI_ENGINEERING_PROFILE }],
+    ["android-kotlin", { organization: { platform: "android_kotlin" } }],
+    ["web-typescript", { organization: { platform: "web_typescript" } }],
+    ["tauri-rust", { organization: { platform: "tauri_rust" } }]
+  ] as const;
+  for (const [id, input] of variants) {
+    const text = readFileSync(new URL("../src-tauri/policies/kuas-" + id + "-v1.txt", import.meta.url), "utf8");
+    const generated = renderUniversalAgentInstructions(resolveAgentPolicy(input)) + "\n";
+    assert.equal(text, generated, "policy drift for " + id);
+    assert.equal(createHash("sha256").update(text).digest("hex").length, 64);
+    for (const rule of IMMUTABLE_AGENT_RULES) assert.ok(text.includes("[" + rule.id + "]"));
+  }
 });

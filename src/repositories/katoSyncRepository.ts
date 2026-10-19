@@ -35,6 +35,7 @@ import type {
   SyncReport
 } from "../types";
 import { normalizeProviderPriority, toProviderSettings } from "../lib/providerPolicy";
+import { AGENT_STANDARDS_VERSION } from "../lib/agentStandards.ts";
 import { emptyWarmupState } from "../lib/providerWarmupPolicy";
 import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 
@@ -537,7 +538,13 @@ export async function chooseRepoFolder(defaultPath?: string): Promise<string | n
 
 export async function runCodexTask(req: CodexRunRequest): Promise<CodexRunResult> {
   if (isTauri()) {
-    return invoke<CodexRunResult>("run_codex_task", { req });
+    return invoke<CodexRunResult>("run_codex_task", {
+      req: {
+        ...req,
+        agentPolicyVersion: AGENT_STANDARDS_VERSION,
+        agentPolicyProfile: req.agentPolicyProfile ?? "community"
+      }
+    });
   }
   await delay(900);
   return {
