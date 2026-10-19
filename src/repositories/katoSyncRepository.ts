@@ -44,7 +44,8 @@ const mockActionPlansKey = "katosync.actionPlans.v2";
 const mockBriefingsKey = "katosync.briefings";
 const mockMcpConnectorTokenKey = "katosync.mcpConnectorToken";
 // Projekt-Board: Tasks ohne project_external_id landen in einer neutralen "Ohne Projekt"-Gruppe.
-export const NO_PROJECT_ID = "__no_project__";
+import { NO_PROJECT_ID } from "../lib/projectConstants";
+export { NO_PROJECT_ID } from "../lib/projectConstants";
 const isTauri = () => Boolean(window.__TAURI_INTERNALS__);
 
 export async function getLocalControlSnapshot(): Promise<LocalControlMonitorSnapshot> {

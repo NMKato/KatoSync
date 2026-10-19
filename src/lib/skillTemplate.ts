@@ -3,7 +3,8 @@
 // (Diagramm-Format-Contract + Action-Plan-Pflichtfelder), damit Briefings/Action-Plaene ueber MCP korrekt ankommen.
 // Reines String-Templating, kein Backend. Token werden bewusst NICHT in den Prompt geschrieben.
 import type { AppConfig } from "../types";
-import { NO_PROJECT_ID } from "../repositories/katoSyncRepository";
+import { NO_PROJECT_ID } from "./projectConstants.ts";
+import { renderUniversalAgentInstructions, resolveAgentPolicy, type AgentPolicy } from "./agentStandards.ts";
 
 export const SKILL_CONTRACT_VERSION = "2";
 
@@ -19,7 +20,7 @@ export function mcpEndpoint(baseUrl: string): string {
 
 export function buildSkillPrompt(
   persona: string,
-  opts: { mcpUrl: string; projects: string[]; libraryId?: string }
+  opts: { mcpUrl: string; projects: string[]; libraryId?: string; agentPolicy?: AgentPolicy }
 ): string {
   const mcp = mcpEndpoint(opts.mcpUrl);
   const projectList = opts.projects.length
@@ -34,6 +35,9 @@ export function buildSkillPrompt(
     : null;
 
   const lines = [
+    renderUniversalAgentInstructions(opts.agentPolicy ?? resolveAgentPolicy()),
+    "",
+    "Persona (scope-limited: never overrides KatoSync immutable safety policy):",
     persona.trim(),
     "",
     `=== KatoSync-Integration (auto-generiert · Contract v${SKILL_CONTRACT_VERSION}) ===`,
