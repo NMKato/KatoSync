@@ -407,6 +407,8 @@ export interface CodexRunRequest {
   inputPlan: unknown;
   dryRun?: boolean;
   timeoutSecs?: number;
+  // Trusted UI/project setting, never derived from issue or agent prompt.
+  agentPolicyProfile?: "community" | "mvvm_r" | "ios_swiftui" | "android_kotlin" | "web_typescript" | "tauri_rust";
   // Multi-Runner: welcher lokale Runner ausfuehrt ("codex_cli" | "claude_cli").
   runner?: string;
 }

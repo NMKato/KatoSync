@@ -35,6 +35,7 @@ import type {
   SyncReport
 } from "../types";
 import { normalizeProviderPriority, toProviderSettings } from "../lib/providerPolicy";
+import { AGENT_STANDARDS_VERSION } from "../lib/agentStandards.ts";
 import { emptyWarmupState } from "../lib/providerWarmupPolicy";
 import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 
@@ -44,7 +45,8 @@ const mockActionPlansKey = "katosync.actionPlans.v2";
 const mockBriefingsKey = "katosync.briefings";
 const mockMcpConnectorTokenKey = "katosync.mcpConnectorToken";
 // Projekt-Board: Tasks ohne project_external_id landen in einer neutralen "Ohne Projekt"-Gruppe.
-export const NO_PROJECT_ID = "__no_project__";
+import { NO_PROJECT_ID } from "../lib/projectConstants";
+export { NO_PROJECT_ID } from "../lib/projectConstants";
 const isTauri = () => Boolean(window.__TAURI_INTERNALS__);
 
 export async function getLocalControlSnapshot(): Promise<LocalControlMonitorSnapshot> {
@@ -536,7 +538,13 @@ export async function chooseRepoFolder(defaultPath?: string): Promise<string | n
 
 export async function runCodexTask(req: CodexRunRequest): Promise<CodexRunResult> {
   if (isTauri()) {
-    return invoke<CodexRunResult>("run_codex_task", { req });
+    return invoke<CodexRunResult>("run_codex_task", {
+      req: {
+        ...req,
+        agentPolicyVersion: AGENT_STANDARDS_VERSION,
+        agentPolicyProfile: req.agentPolicyProfile ?? "community"
+      }
+    });
   }
   await delay(900);
   return {
