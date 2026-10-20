@@ -4,6 +4,11 @@ import type { ProjectProbe, RegistryProject, VerificationState } from "../types.
 import { buildContextCapsule } from "./projectCapsule.ts";
 import { verifyProject } from "./projectVerification.ts";
 import { isExcludedRelativePath, normalizeRemote, redactSecrets } from "./projectExclusions.ts";
+import {
+  AGENT_STANDARDS_VERSION,
+  resolveAgentPolicy,
+  renderUniversalAgentInstructions
+} from "./agentStandards.ts";
 
 export const PROJECT_WORK_RESUME_SCHEMA = "katosync.project-work-resume/v1" as const;
 export type ResumeAssessment = "needs_review" | "verified_source_state" | "blocked";
@@ -32,6 +37,13 @@ export interface ProjectWorkResumePacket {
     nextActionClaims: string[];
     docReferences: Array<{ path: string; category: string; modifiedAt: string | null }>;
     frameworkHints: string[];
+  };
+  policy: {
+    version: typeof AGENT_STANDARDS_VERSION;
+    profile: "community";
+    provenance: "bundled_unpersonalized_defaults";
+    instructions: string;
+    ownerApproved: false;
   };
   verification: {
     state: VerificationState;
@@ -119,6 +131,13 @@ export function buildProjectWorkResume(
       nextActionClaims: capsule.nextSafeWork.map((item) => display(item)),
       docReferences: cleanDocReferences(probe),
       frameworkHints: [...new Set(probe.manifests.flatMap((item) => item.hints).map((item) => display(item, 80)))].slice(0, 12)
+    },
+    policy: {
+      version: AGENT_STANDARDS_VERSION,
+      profile: "community",
+      provenance: "bundled_unpersonalized_defaults",
+      instructions: renderUniversalAgentInstructions(resolveAgentPolicy()),
+      ownerApproved: false
     },
     verification: {
       state: verification.state,

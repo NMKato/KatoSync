@@ -48,6 +48,12 @@ test("fresh project resume uses live head and gives only read-only verification 
   assert.equal(result.git.headSha, SHA);
   assert.equal(result.git.repository, "github.com/acme/demo");
   assert.equal(result.git.headChangedSinceRegistry, false);
+  assert.equal(result.policy.version, "kuas/v1");
+  assert.equal(result.policy.profile, "community");
+  assert.equal(result.policy.ownerApproved, false);
+  assert.match(result.policy.instructions, /\[human_gate\]/);
+  assert.match(result.policy.instructions, /\[one_writer\]/);
+  assert.match(result.policy.instructions, /\[provider_privacy\]/);
   assert.equal(result.governance.allowsCodeWrites, false);
   assert.equal(result.governance.writerLeaseVerified, false);
   assert.equal(result.verification.ciChecked, false);
@@ -99,4 +105,16 @@ test("packet never exports absolute device paths and does not claim cross-device
   assert.equal(report.governance.effectivePolicyVerified, false);
   assert.equal(report.project.docReferences.every((r) => !r.path.startsWith("/")), true);
   assert.doesNotMatch(JSON.stringify(report), /rootPath|mainWorktreePath|commonDir|KatoContext/);
+});
+
+test("integrated read-only context transports KUAS rules but never elevates trust or permits writes", () => {
+  const modelContext = buildProjectWorkResume(project(), probe(), SHA, TIME);
+  assert.match(modelContext.policy.instructions, /KatoSync Universal Agent Standards kuas\/v1/);
+  assert.equal(modelContext.policy.ownerApproved, false);
+  assert.equal(modelContext.governance.effectivePolicyVerified, false);
+  assert.equal(modelContext.governance.providerCloudTransferApproved, false);
+  assert.equal(modelContext.governance.writerLeaseVerified, false);
+  assert.equal(modelContext.governance.allowsCodeWrites, false);
+  const serialized = formatProjectWorkResume(modelContext);
+  assert.ok(serialized.indexOf('"git"') < serialized.indexOf('"policy"'));
 });

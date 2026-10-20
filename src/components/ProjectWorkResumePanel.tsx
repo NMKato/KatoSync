@@ -68,7 +68,8 @@ export function ProjectWorkResumePanel({ project }: { project: RegistryProject }
           ) : null}
           <p className="agent-empty">
             Hinweise aus Memory/Status sind noch keine geprüften Handlungsanweisungen.
-            Tests, KUAS-Profil und Writer-Lease müssen vor Codeänderungen gesondert geprüft werden.
+            Die unpersonalisierte KUAS-Basis ({packet.policy.version}) ist enthalten.
+            Persönliche Projektprofile, Tests und Writer-Lease müssen vor Codeänderungen gesondert geprüft werden.
             Teile das Paket mit Cloud-Modellen nur, wenn das Projekt dies erlaubt.
           </p>
           <button className="ghost compact-button" type="button" onClick={() => void copy()}>
