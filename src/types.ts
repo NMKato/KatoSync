@@ -1074,7 +1074,7 @@ export interface RegistryProject {
   commonDir: string | null;
   remote: string | null;
   addedAt: string;
-  source: "discovery" | "migration";
+  source: "discovery" | "migration" | "creation";
   focus: FocusEntry;
   scan: ProjectScanSummary | null;
   verification: ProjectVerification | null;

@@ -96,7 +96,7 @@ export function parseRegistry(raw: unknown, now: string): ProjectRegistry | null
       commonDir: str(item.commonDir),
       remote: sanitizeRemoteUrl(str(item.remote)),
       addedAt: str(item.addedAt) ?? now,
-      source: item.source === "migration" ? "migration" : "discovery",
+      source: item.source === "migration" ? "migration" : item.source === "creation" ? "creation" : "discovery",
       focus: parseFocus(item.focus, now),
       scan: item.scan && typeof item.scan === "object" ? (item.scan as ProjectScanSummary) : null,
       verification: item.verification && typeof item.verification === "object" ? (item.verification as RegistryProject["verification"]) : null,

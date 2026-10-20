@@ -25,13 +25,15 @@ import {
 import { askConfirm } from "../repositories/katoSyncRepository";
 import {
   chooseProjectFolder,
+  createLocalProject,
   discoverProjectRepos,
   loadRegistryRaw,
   openProjectFolder,
   probeProject,
   saveRegistryRaw,
   suggestProjectWorkspaceRoots,
-  type ProjectFolderKind
+  type ProjectFolderKind,
+  type ProjectCreationTemplate
 } from "../repositories/projectRegistryRepository";
 
 type NoticeKind = "ok" | "info" | "warn" | "error";
@@ -44,7 +46,7 @@ export interface DiscoveryState {
   truncated: boolean;
 }
 
-export type RegistryBusy = null | "discover" | "add" | "scan";
+export type RegistryBusy = null | "discover" | "add" | "scan" | "create";
 
 const messageOf = registryErrorMessage;
 const nowIso = () => new Date().toISOString();
@@ -258,6 +260,49 @@ export function useProjectRegistryViewModel(deps: { config: AppConfig | null; no
     );
   }, [commit, discovery, notify, rescan]);
 
+  const createNewProject = useCallback(async (args: {
+    name: string; slug: string; template: ProjectCreationTemplate;
+  }): Promise<boolean> => {
+    if (busy !== null || !loaded) return false;
+    const workspace = await chooseProjectFolder("workspace", config?.sourceRoots[0]);
+    if (!workspace) return false;
+    const confirmed = await askConfirm(
+      `Neues lokales Projekt „${args.name}“ im Ordner „${workspace}“ als Unterordner „${args.slug}“ erstellen?\n\n` +
+      "Es wird nur eine Grundstruktur mit StatusFlow, Memory und Git erstellt. Keine SDKs, Pakete oder Cloud-Dienste. Bestehende Ordner werden niemals überschrieben.",
+      { title: "Projekt lokal erstellen", okLabel: "Projekt erstellen", cancelLabel: "Abbrechen" }
+    );
+    if (!confirmed) return false;
+    setBusy("create");
+    try {
+      const created = await createLocalProject({ ...args, parentDir: workspace });
+      const candidates = groupDiscoveredRepos([created.probe.repo], registryRef.current);
+      const candidate = candidates.find((item) => item.rootPath === created.path && !item.alreadyRegistered);
+      if (!candidate) {
+        notify("error", "Projektdateien erzeugt, aber der Registry-Eintrag ist nicht eindeutig. Projekt bitte über Import hinzufügen.");
+        return false;
+      }
+      // Existing canonical Registry / Verification / Capsule pipeline. Never a second store.
+      const added = addDiscoveredProjects(registryRef.current, [{ ...candidate, name: args.name.trim() }], nowIso(), "creation");
+      if (!added.projects.some((item) => item.id === candidate.id)) {
+        notify("error", "Projektdateien erzeugt, aber Registry-Aufnahme scheiterte. Bitte importieren.");
+        return false;
+      }
+      const verified = applyProbe(added, candidate.id, created.probe, nowIso());
+      // Ensure the persisted version is acknowledged before declaring creation fully successful.
+      await saveChain.current;
+      await saveRegistryRaw(verified);
+      registryRef.current = verified;
+      setRegistry(verified);
+      notify("ok", `Projekt „${args.name}“ erstellt, registriert und lokal geprüft. Vorlage ist eine Grundstruktur, noch keine fertige IDE-App.`);
+      return true;
+    } catch (error) {
+      notify("error", `Projektanlage nicht abgeschlossen: ${messageOf(error)}. Falls Dateien bereits entstanden sind, bitte den Projektordner prüfen und über „Projekt hinzufügen“ importieren.`);
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, loaded, config?.sourceRoots, notify]);
+
   const setFocus = useCallback(
     (projectId: string, patch: Partial<Pick<FocusEntry, "status" | "priority" | "autoMode">>) => {
       commit(updateFocus(registryRef.current, projectId, patch, nowIso()));
@@ -336,6 +381,7 @@ export function useProjectRegistryViewModel(deps: { config: AppConfig | null; no
     selectAllCandidates,
     cancelDiscovery,
     addSelected,
+    createNewProject,
     rescan,
     rescanAtPath,
     rescanAll,

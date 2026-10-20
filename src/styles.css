@@ -9589,3 +9589,10 @@ button.agent-tile:hover {
 .projects-resume-result { margin-top:12px; }
 .projects-resume-result textarea { display:block; box-sizing:border-box; width:100%; margin-top:9px; padding:11px; border:1px solid var(--border, rgba(150,150,150,.25)); border-radius:10px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; resize:vertical; }
 .projects-resume-result ul { padding-left:20px; }
+
+
+/* First-class local project creation (no external scaffold tools). */
+.projects-create-form { display:grid; gap:13px; margin-top:14px; max-width:580px; }
+.projects-create-form label { display:grid; gap:6px; font-size:13px; }
+.projects-create-form input, .projects-create-form select { width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid var(--border, rgba(150,150,150,.25)); border-radius:9px; background:var(--input-bg, transparent); color:inherit; }
+.projects-create-form > button { justify-self:start; }
