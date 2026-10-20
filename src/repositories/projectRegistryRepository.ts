@@ -70,3 +70,16 @@ export async function openProjectFolder(path: string): Promise<void> {
   if (!isTauri()) throw new DesktopOnlyError();
   await invoke("project_registry_open", { path });
 }
+
+
+/** Fresh, registered-ID-only scan for provider-independent project resumption. */
+export interface RegisteredProjectResumeProbe {
+  projectId: string;
+  registeredHead: string | null;
+  probe: ProjectProbe;
+}
+
+export async function loadFreshProjectResume(projectId: string): Promise<RegisteredProjectResumeProbe> {
+  if (!isTauri()) throw new DesktopOnlyError();
+  return invoke<RegisteredProjectResumeProbe>("project_work_resume", { projectId });
+}

@@ -18,6 +18,7 @@ import {
   Trash2
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
+import { ProjectWorkResumePanel } from "./ProjectWorkResumePanel";
 import { AUTO_MODES, FOCUS_PRIORITIES, FOCUS_STATUSES } from "../lib/projectFocus";
 import { normalizeRemote } from "../lib/projectExclusions";
 import {
@@ -555,7 +556,12 @@ function ProjectCard({ project, vm }: { project: RegistryProject; vm: ViewModel 
           ))}
         </ul>
       ) : null}
-      {details ? <Capsule project={project} t={t} /> : null}
+      {details ? (
+        <>
+          <Capsule project={project} t={t} />
+          <ProjectWorkResumePanel project={project} />
+        </>
+      ) : null}
     </article>
   );
 }
