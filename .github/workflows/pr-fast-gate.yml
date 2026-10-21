@@ -39,6 +39,9 @@ jobs:
       - name: Node regression suite (including KUAS and MCP/CLI)
         run: npm test
 
+      - name: Trusted backend approval broker TypeScript
+        run: npm run typecheck:server
+
       - name: TypeScript + Vite production build
         run: npm run build
 
@@ -61,6 +64,9 @@ jobs:
 
       - name: Windows Node and MCP integration tests
         run: npm test
+
+      - name: Windows trusted backend approval broker TypeScript
+        run: npm run typecheck:server
 
       - name: Windows TypeScript
         run: npm run typecheck
