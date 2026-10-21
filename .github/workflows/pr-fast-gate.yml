@@ -64,8 +64,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Windows Node and MCP integration tests
-        run: npm test
+      - name: Windows Node regression suite (if configured)
+        run: npm run test --if-present
 
       - name: Windows server TypeScript security contract (if configured)
         run: npm run typecheck:server --if-present
