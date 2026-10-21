@@ -866,6 +866,14 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
     ))
 }
 
+pub(crate) fn owned_pid() -> Option<u32> {
+    child_slot()
+        .lock()
+        .ok()?
+        .as_ref()
+        .map(std::process::Child::id)
+}
+
 /// Beendet ausschliesslich die von dieser KatoSync-Sitzung gestartete Runtime.
 pub fn stop_owned() -> Result<()> {
     let mut guard = child_slot()

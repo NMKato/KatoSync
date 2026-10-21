@@ -38,6 +38,8 @@ import {
 import { safeHttpUrl } from "../lib/url";
 import { NO_PROJECT_ID } from "../repositories/katoSyncRepository";
 import { fallbackLabels } from "./ProviderManager";
+import { SystemResourcesCard } from "./SystemResourcesCard";
+import type { ResourceSnapshot } from "../lib/systemResources";
 import {
   AgentJobList,
   AutoLanePanel,
@@ -165,7 +167,13 @@ export function AgentReadinessStrip({ vm, onNavigate }: { vm: ViewModel; onNavig
 }
 
 // ===== Dashboard =====
-export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNavigate: Navigate }) {
+export function AgentSyncDashboard({ vm, onNavigate, resources, resourcesLoading, onRefreshResources }: {
+  vm: ViewModel;
+  onNavigate: Navigate;
+  resources: ResourceSnapshot | null;
+  resourcesLoading: boolean;
+  onRefreshResources: () => void;
+}) {
   const { t } = useT();
   const readiness = buildAgentReadiness(vm);
   const state = vm.agentSync;
@@ -188,6 +196,10 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   return (
     <section className="agent-dashboard" id="section-agent-dashboard">
       <ControlTower state={state} />
+      <SystemResourcesCard snapshot={resources} loading={resourcesLoading}
+        katoAiRunning={vm.localBrainStatus?.running === true}
+        katoAiInstalled={Boolean(vm.localBrainStatus?.runtimeInstalled && vm.localBrainStatus?.modelInstalled)}
+        onRefresh={onRefreshResources} />
 
       <section className="glass agent-project-linker" aria-label={t("agent.projects.quickTitle")}>
         <div className="agent-project-linker-copy">

@@ -65,6 +65,8 @@ import { RichMarkdown } from "./components/RichMarkdown";
 import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
 import { AgentLiveMonitor } from "./components/AgentJobViews";
 import { ProviderManager } from "./components/ProviderManager";
+import { ResourceWarningBanner } from "./components/SystemResourcesCard";
+import { useSystemResourceMonitor } from "./lib/useSystemResourceMonitor";
 import { ProjectRegistryWorkspace } from "./components/ProjectRegistryWorkspace";
 import { ModeGateway, ModeSwitch } from "./components/ModeGateway";
 import { VisionWorkspace } from "./components/VisionWorkspace";
@@ -245,6 +247,8 @@ interface OnboardingPosition {
 
 export default function App() {
   const vm = useKatoSyncViewModel();
+  const systemResources = useSystemResourceMonitor();
+  const [dismissedResourceLevel, setDismissedResourceLevel] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const stored = localStorage.getItem("katosync.theme");
     return stored === "light" ? "light" : "dark";
@@ -809,11 +813,18 @@ export default function App() {
           </div>
         ) : null}
 
+        {systemResources.snapshot?.warmupRecommendation !== dismissedResourceLevel ? (
+          <ResourceWarningBanner snapshot={systemResources.snapshot}
+            onDismiss={() => setDismissedResourceLevel(systemResources.snapshot?.warmupRecommendation ?? null)}
+            onOpen={() => enterModeAt("agentSync", "agentDashboard")}/>
+        ) : null}
         <section className={`dashboard-grid overview-grid page-${visibleStep}${isAgentSync ? " agent-page" : ""}`}>
           {visibleStep === "dashboard" ? <CockpitPanel vm={vm} runHistory={runHistory} /> : null}
 
           {visibleStep === "agentDashboard" ? (
-            <AgentSyncDashboard vm={vm} onNavigate={handleStepSelect} />
+            <AgentSyncDashboard vm={vm} onNavigate={handleStepSelect}
+              resources={systemResources.snapshot} resourcesLoading={systemResources.loading}
+              onRefreshResources={() => { void systemResources.refresh(); }} />
           ) : null}
           {visibleStep === "agentVision" ? <VisionWorkspace vm={vm} /> : null}
           {visibleStep === "agentJobs" ? (

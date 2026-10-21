@@ -37,6 +37,7 @@ mod project_registry;
 mod project_work_resume;
 mod provider_manager;
 mod provider_warmup;
+mod system_resources;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -362,6 +363,7 @@ pub fn run() {
             save_local_provider_key,
             discover_local_providers,
             local_brain_status,
+            system_resources::system_resource_snapshot,
             install_local_brain,
             start_local_brain,
             stop_local_brain,
