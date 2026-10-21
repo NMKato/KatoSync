@@ -37,9 +37,11 @@ test("orchestrator heartbeat writes a bounded 0600 lease that reports attached",
     assert.equal(data.schemaVersion, 1);
     assert.equal(data.leaseSeconds, 1800);
     assert.equal(data.transport.kind, "rdc");
-    // POSIX mode bits are not a Windows ACL; Node reports synthesized 0666 on
-    // NTFS. Keep functional/fencing tests on Windows, validate POSIX 0600 only.
-    if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600);
+    // Windows stat() mode is not a POSIX ACL. Keep strict 0600 on POSIX and
+    // cover Windows with functional/fencing checks below.
+    if (process.platform !== "win32") {
+      assert.equal(statSync(file).mode & 0o777, 0o600);
+    }
     assert.equal(lease(root, "status").stdout.trim(), "attached");
     assert.equal(lease(root, "detach", "--session", "rdc-1").status, 0);
     const detached = JSON.parse(readFileSync(file, "utf8"));
