@@ -37,9 +37,8 @@ test("orchestrator heartbeat writes a bounded 0600 lease that reports attached",
     assert.equal(data.schemaVersion, 1);
     assert.equal(data.leaseSeconds, 1800);
     assert.equal(data.transport.kind, "rdc");
-    // Windows does not expose POSIX 0600 semantics through stat().mode.
-    // Keep the strict permission check on POSIX hosts; Windows is covered by
-    // the heartbeat/status/detach and safe-path assertions below.
+    // Windows stat() mode is not a POSIX ACL. Keep strict 0600 on POSIX and
+    // cover Windows with functional/fencing checks below.
     if (process.platform !== "win32") {
       assert.equal(statSync(file).mode & 0o777, 0o600);
     }

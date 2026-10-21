@@ -25,15 +25,19 @@ use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
+mod agent_policy;
 mod context_pack;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
 mod model_distribution;
 mod orchestration;
+mod project_create;
 mod project_registry;
+mod project_work_resume;
 mod provider_manager;
 mod provider_warmup;
+mod system_resources;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -294,6 +298,8 @@ pub fn run() {
             project_registry::project_registry_smart_roots,
             project_registry::project_registry_scan,
             project_registry::project_registry_load,
+            project_work_resume::project_work_resume,
+            project_create::project_create,
             project_registry::project_registry_save,
             project_registry::project_registry_open,
             memory_fabric::memory_fabric_overview,
@@ -357,6 +363,7 @@ pub fn run() {
             save_local_provider_key,
             discover_local_providers,
             local_brain_status,
+            system_resources::system_resource_snapshot,
             install_local_brain,
             start_local_brain,
             stop_local_brain,
@@ -1591,6 +1598,10 @@ pub struct CodexRunRequest {
     risk_level: String,
     prompt: String,
     #[serde(default)]
+    agent_policy_version: String,
+    #[serde(default = "agent_policy_default_profile")]
+    agent_policy_profile: String,
+    #[serde(default)]
     input_plan: serde_json::Value,
     #[serde(default)]
     dry_run: bool,
@@ -1599,6 +1610,10 @@ pub struct CodexRunRequest {
     // Multi-Runner: welcher lokale Runner ausfuehrt ("codex_cli" Default, "claude_cli" = Claude Code CLI).
     #[serde(default)]
     runner: Option<String>,
+}
+
+fn agent_policy_default_profile() -> String {
+    agent_policy::DEFAULT_PROFILE.to_string()
 }
 
 #[derive(Debug, Serialize)]
@@ -2349,6 +2364,8 @@ async fn run_codex_task(
     req: CodexRunRequest,
     app: tauri::AppHandle,
 ) -> Result<CodexRunResult, String> {
+    // Fail closed before creating directories, writing files or probing a provider.
+    agent_policy::validate_policy(&req.agent_policy_version, &req.agent_policy_profile)?;
     let started = std::time::Instant::now();
     // Solange ein echter Runner-Job lebt, startet kein Provider-Warm-up.
     let _runner_activity = provider_warmup::RunnerActivity::begin();
@@ -2509,9 +2526,6 @@ async fn run_codex_task(
         serde_json::to_string_pretty(&req.input_plan).unwrap_or_else(|_| "{}".to_string()),
     )
     .map_err(error_to_string)?;
-    fs::write(format!("{run_dir}/prompt.md"), sanitize_log(&req.prompt))
-        .map_err(error_to_string)?;
-
     // Wahrheit: den Referenzordner IMMER als Faktenbasis materialisieren (beide Modi), wenn gesetzt
     // -> der Runner prueft gegen echte Daten. Die Git-Leak-Guards (.git/info/exclude + Pre-Cleanup,
     // oben) laufen modus-unabhaengig, KatoContext/ landet also nie in git/PR.
@@ -2566,12 +2580,42 @@ async fn run_codex_task(
         format!("{}{context_block}", req.prompt)
     };
 
+    // KUAS runtime-owned standard precedes both Codex and Claude prompts, regardless of
+    // user persona, task text or model provider. A prompt is not the security boundary.
+    let effective_prompt = agent_policy::coding_prompt(
+        &req.agent_policy_version,
+        &req.agent_policy_profile,
+        &effective_prompt,
+    )?;
+    // Persist the sanitized instructions that will actually reach either provider.
+    fs::write(
+        format!("{run_dir}/prompt.md"),
+        sanitize_log(&effective_prompt),
+    )
+    .map_err(error_to_string)?;
+
     // Immer von main/Default abzweigen (nicht vom aktuellen HEAD -> kein Codex-auf-Codex-Stapeln).
     let _ = git_capture(&repo_path, &["fetch", "origin", &default_branch]); // best effort
     git_capture(&repo_path, &["checkout", &default_branch])
         .map_err(|e| format!("Wechsel auf {default_branch} fehlgeschlagen: {e}"))?;
     git_capture(&repo_path, &["checkout", "-b", &branch])
         .map_err(|e| format!("Branch konnte nicht angelegt werden ({branch}): {e}"))?;
+
+    // Receipt records the branch's *actual* starting commit, not the prior
+    // checkout (which may point to an unrelated feature branch).
+    let git_head = git_capture(&repo_path, &["rev-parse", "HEAD"]).ok();
+    let runner_id = if is_claude { "claude_cli" } else { "codex_cli" };
+    let policy_receipt = agent_policy::receipt(
+        &req.agent_policy_profile,
+        git_head.as_deref(),
+        runner_id,
+        &req.trigger,
+    )?;
+    fs::write(
+        format!("{run_dir}/agent_policy_receipt.json"),
+        serde_json::to_vec_pretty(&policy_receipt).map_err(error_to_string)?,
+    )
+    .map_err(error_to_string)?;
     let _ = write_log(
         "codex",
         &format!(
@@ -3210,6 +3254,7 @@ async fn run_codex_task(
 /// `codex resume <id>`) und oeffnet sie mit `open` → Terminal.app startet die Session mit
 /// voller History UND den Connectoren des Nutzers (Gmail, Blender, …). Ohne bekannte
 /// Session-ID: `--continue` (Claude) bzw. `resume --last` (Codex).
+#[cfg(target_os = "macos")]
 #[tauri::command]
 fn resume_runner_session(
     repo_path: String,
@@ -3282,6 +3327,18 @@ fn resume_runner_session(
         return Err("Terminal konnte die Session nicht starten.".to_string());
     }
     Ok(())
+}
+
+// The interactive .command launcher intentionally depends on macOS Terminal.app.
+// Never write a Unix script or invoke `open -a Terminal` on unsupported platforms.
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn resume_runner_session(
+    _repo_path: String,
+    _runner: String,
+    _session_id: Option<String>,
+) -> Result<(), String> {
+    Err("Interaktive Terminal-Fortsetzung ist derzeit nur unter macOS verfügbar.".to_string())
 }
 
 #[tauri::command]

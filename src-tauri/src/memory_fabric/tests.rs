@@ -165,6 +165,7 @@ fn schema_uses_fts5_and_survives_reopen() {
     let result = query(&store, "alpha", "retrieval", None);
     assert_eq!(result.hits.len(), 1);
     assert_eq!(result.hits[0].truth_level, TruthLevel::Verified);
+    drop(store); // Windows cannot delete SQLite database files while open.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1259,5 +1260,6 @@ fn overview_is_read_only_counts_only_and_never_creates_a_store() {
         !json.contains("/fixture/"),
         "no machine paths in the overview"
     );
+    drop(store); // Close read-only SQLite connection before Windows cleanup.
     fs::remove_dir_all(dir).unwrap();
 }

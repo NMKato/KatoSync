@@ -70,3 +70,36 @@ export async function openProjectFolder(path: string): Promise<void> {
   if (!isTauri()) throw new DesktopOnlyError();
   await invoke("project_registry_open", { path });
 }
+
+
+/** Fresh, registered-ID-only scan for provider-independent project resumption. */
+export interface RegisteredProjectResumeProbe {
+  projectId: string;
+  registeredHead: string | null;
+  probe: ProjectProbe;
+}
+
+export async function loadFreshProjectResume(projectId: string): Promise<RegisteredProjectResumeProbe> {
+  if (!isTauri()) throw new DesktopOnlyError();
+  return invoke<RegisteredProjectResumeProbe>("project_work_resume", { projectId });
+}
+
+/** Creates only a new, previously absent local project folder under the user's home.
+ * Never invokes package managers, cloud endpoints or existing repo scripts. */
+export type ProjectCreationTemplate = "blank" | "web_typescript" | "ios_swiftui" | "android_kotlin" | "tauri_rust";
+
+export interface CreatedLocalProject {
+  path: string;
+  template: ProjectCreationTemplate;
+  probe: ProjectProbe;
+}
+
+export async function createLocalProject(input: {
+  parentDir: string;
+  name: string;
+  slug: string;
+  template: ProjectCreationTemplate;
+}): Promise<CreatedLocalProject> {
+  if (!isTauri()) throw new DesktopOnlyError();
+  return invoke<CreatedLocalProject>("project_create", input);
+}

@@ -673,3 +673,16 @@ test("registry save errors keep the real Tauri reason instead of 'Unbekannter Fe
   // Defense in Depth: ein Fehlertext darf nie ein Secret-Muster ins Banner tragen.
   assert.equal(registryErrorMessage("boom DATABASE_URL=x").includes("DATABASE_URL"), false);
 });
+
+test("locally created projects retain their creation provenance across Registry reloads", () => {
+  const fixture = emptyRegistry(NOW);
+  const discovered = groupDiscoveredRepos([repo("/work/new-project")], fixture);
+  assert.equal(discovered.length, 1);
+  const named = { ...discovered[0], name: "Meine neue App" };
+  const created = addDiscoveredProjects(fixture, [named], NOW, "creation");
+  const restored = parseRegistry(JSON.parse(JSON.stringify(created)), NOW);
+  assert.ok(restored);
+  assert.equal(restored.projects.length, 1);
+  assert.equal(restored.projects[0].source, "creation");
+  assert.equal(restored.projects[0].name, "Meine neue App");
+});

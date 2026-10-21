@@ -8,7 +8,7 @@
 
 ### Dein Projekt. Deine Agenten. Ein gemeinsamer Arbeitsraum.
 
-**Local-first Project Work Hub & AI Orchestration für macOS und Windows.**  
+**Local-first Project Work Hub & AI Orchestration für macOS und Windows.**
 Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kontrolliert ausführen.
 
 [![Status: Beta + Preview](https://img.shields.io/badge/Status-Beta%20%2B%20Preview-F97316)](https://github.com/NMKato/KatoSync/pulls)

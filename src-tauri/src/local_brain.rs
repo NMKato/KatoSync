@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager};
 use walkdir::WalkDir;
@@ -26,6 +26,11 @@ const PORT: &str = "17842";
 const MANIFEST_SCHEMA_VERSION: u32 = 2;
 static CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
 static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+// The dashboard samples every ~12s. Probe actual device/runtime once per
+// minute, but the launch path ALWAYS probes fresh before choosing offload.
+static BACKEND_PROBE_CACHE: OnceLock<
+    tokio::sync::Mutex<Option<(PathBuf, Instant, BackendCapability)>>,
+> = OnceLock::new();
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -794,6 +799,142 @@ async fn verified_model_for_launch(app: &AppHandle, model: &ModelManifest) -> Re
     .context("Local-Brain-Modell ist nicht installiert oder nicht verifiziert")
 }
 
+/// GPU device enumeration from KatoSync's OWN pinned llama.cpp runtime.
+/// An enumerated device is not proof of successful model inference.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BackendCapability {
+    pub runtime_installed: bool,
+    pub selected: &'static str,
+    pub enumerated: bool,
+    pub reason: &'static str,
+    pub inference_verified: bool,
+    pub free_device_mib: Option<u64>,
+}
+
+/// Conservative capacity estimate for the bundled Gemma Q4 + llama.cpp context.
+/// A real peak-memory/inference test is required for production tuning.
+pub(crate) const MODEL_BUDGET_MIB: u64 = 7 * 1024;
+
+fn device_free_mib(description: &str) -> Option<u64> {
+    // llama.cpp: MTL0: Apple M2 Pro (12124 MiB, 12123 MiB free)
+    let segment = description.rsplit_once(',')?.1;
+    let raw = segment.trim().split_once(" MiB free")?.0;
+    let parsed = raw.parse::<u64>().ok()?;
+    (parsed <= 262_144).then_some(parsed)
+}
+
+fn select_backend(output: &str, platform: &str) -> BackendCapability {
+    let devices: Vec<(&str, Option<u64>)> = output
+        .lines()
+        .filter_map(|line| {
+            let (id, description) = line.trim().split_once(':')?;
+            let gpu_prefix = id.starts_with("MTL")
+                || id.starts_with("CUDA")
+                || id.starts_with("Vulkan")
+                || id.starts_with("VK");
+            if !gpu_prefix
+                || id.len() < 3
+                || id.len() >= 18
+                || !id.chars().all(|c| c.is_ascii_alphanumeric())
+                || !id.chars().last().is_some_and(|c| c.is_ascii_digit())
+            {
+                return None;
+            }
+            Some((id, device_free_mib(description)))
+        })
+        .collect();
+    let candidate = devices.iter().find_map(|(id, free)| {
+        if platform == "macos" && id.starts_with("MTL") {
+            Some(("metal", *free))
+        } else if matches!(platform, "windows" | "linux") && id.starts_with("CUDA") {
+            Some(("cuda", *free))
+        } else if matches!(platform, "windows" | "linux")
+            && (id.starts_with("Vulkan") || id.starts_with("VK"))
+        {
+            Some(("vulkan", *free))
+        } else {
+            None
+        }
+    });
+    let enumerated = candidate.is_some();
+    let free_device_mib = candidate.and_then(|(_, free)| free);
+    let (selected, reason) = match candidate {
+        Some((backend, Some(free))) if free >= MODEL_BUDGET_MIB => {
+            (backend, "compatible_gpu_with_estimated_memory_headroom")
+        }
+        Some((_, Some(_))) => ("cpu", "device_memory_below_model_budget"),
+        Some((_, None)) => ("cpu", "device_memory_unverified"),
+        None => ("cpu", "no_compatible_gpu_enumerated"),
+    };
+    BackendCapability {
+        runtime_installed: true,
+        selected,
+        enumerated,
+        reason,
+        inference_verified: false,
+        free_device_mib,
+    }
+}
+
+async fn inspect_backend(binary: &Path) -> BackendCapability {
+    use std::process::Stdio;
+    let fallback = || BackendCapability {
+        runtime_installed: true,
+        selected: "cpu",
+        enumerated: false,
+        reason: "runtime_probe_unavailable",
+        inference_verified: false,
+        free_device_mib: None,
+    };
+    let mut cmd = tokio::process::Command::new(binary);
+    cmd.arg("--list-devices")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let result = tokio::time::timeout(Duration::from_secs(5), cmd.output()).await;
+    match result {
+        Ok(Ok(output)) if output.status.success() && output.stdout.len() <= 8192 => select_backend(
+            &String::from_utf8_lossy(&output.stdout),
+            std::env::consts::OS,
+        ),
+        _ => fallback(),
+    }
+}
+
+pub(crate) async fn backend_capability(app: &AppHandle) -> BackendCapability {
+    let absent = || BackendCapability {
+        runtime_installed: false,
+        selected: "cpu",
+        enumerated: false,
+        reason: "kato_runtime_not_installed",
+        inference_verified: false,
+        free_device_mib: None,
+    };
+    let Ok(manifest) = manifest() else {
+        return absent();
+    };
+    let Some(target) = manifest.runtime.targets.get(&target_key()) else {
+        return absent();
+    };
+    let Ok(dir) = runtime_dir(app, &manifest) else {
+        return absent();
+    };
+    let Some(binary) = find_runtime_binary(&dir, &target.executable) else {
+        return absent();
+    };
+    let cache = BACKEND_PROBE_CACHE.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut guard = cache.lock().await;
+    if let Some((path, measured_at, previous)) = guard.as_ref() {
+        if path == &binary && measured_at.elapsed() < Duration::from_secs(60) {
+            return previous.clone();
+        }
+    }
+    let current = inspect_backend(&binary).await;
+    *guard = Some((binary, Instant::now(), current.clone()));
+    current
+}
+
 pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
     let manifest = manifest()?;
     let model = recommended_model(&manifest)?;
@@ -819,7 +960,7 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
         .append(true)
         .open(logs.join("llama-server.log"))?;
 
-    let mut command = Command::new(binary);
+    let mut command = Command::new(&binary);
     command
         .arg("-m")
         .arg(&model_file)
@@ -836,10 +977,17 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
         .stdout(Stdio::from(log.try_clone()?))
         .stderr(Stdio::from(log));
 
-    #[cfg(target_os = "macos")]
-    {
-        command.args(["-ngl", "99"]);
-    }
+    // GPU offload only when our installed llama.cpp binary itself enumerates a
+    // compatible accelerator, otherwise explicitly use CPU (including Windows).
+    let runtime_backend = inspect_backend(&binary).await;
+    command.args([
+        "-ngl",
+        if runtime_backend.selected != "cpu" {
+            "99"
+        } else {
+            "0"
+        },
+    ]);
 
     let child = command
         .spawn()
@@ -864,6 +1012,23 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
     Err(anyhow!(
         "Local Brain wurde gestartet, aber der Health-Check blieb 45 Sekunden lang rot"
     ))
+}
+
+/// Trusted *managed* runtime root, also available after a desktop app restart.
+/// A previous Kato-owned llama-server process may survive the UI lifetime and
+/// must not be mislabeled as a foreign local model.
+pub(crate) fn managed_runtime_root(app: &AppHandle) -> Option<PathBuf> {
+    let current = manifest().ok()?;
+    let directory = runtime_dir(app, &current).ok()?;
+    fs::canonicalize(directory).ok()
+}
+
+pub(crate) fn owned_pid() -> Option<u32> {
+    child_slot()
+        .lock()
+        .ok()?
+        .as_ref()
+        .map(std::process::Child::id)
 }
 
 /// Beendet ausschliesslich die von dieser KatoSync-Sitzung gestartete Runtime.
@@ -1065,6 +1230,50 @@ mod tests {
         assert!(verdict.is_err());
         assert!(!part.exists(), "unverifizierte Gewichte werden verworfen");
         fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn native_runtime_gpu_selection_requires_device_and_memory_headroom() {
+        let mac = select_backend("Available devices:\n  MTL0: Apple M2 Pro (12124 MiB, 12123 MiB free)\n  BLAS: Accelerate\n", "macos");
+        assert_eq!(mac.selected, "metal");
+        assert_eq!(mac.free_device_mib, Some(12123));
+        assert!(mac.enumerated);
+        assert!(!mac.inference_verified);
+        assert_eq!(
+            select_backend("  MTL0: Apple M2 (12124 MiB, 12123 MiB free)\n", "windows").selected,
+            "cpu"
+        );
+        assert_eq!(
+            select_backend(
+                "  CUDA0: NVIDIA RTX (16384 MiB, 14000 MiB free)\n",
+                "windows"
+            )
+            .selected,
+            "cuda"
+        );
+        assert_eq!(
+            select_backend("  CUDA0: NVIDIA RTX (16384 MiB, 14000 MiB free)\n", "macos").selected,
+            "cpu"
+        );
+    }
+
+    #[test]
+    fn low_memory_or_unverifiable_device_capacity_falls_back_to_cpu() {
+        let low = select_backend("  CUDA0: GPU (4096 MiB, 2200 MiB free)\n", "windows");
+        assert_eq!(low.selected, "cpu");
+        assert!(low.enumerated);
+        assert_eq!(low.reason, "device_memory_below_model_budget");
+        let unknown = select_backend("  CUDA0: GPU (memory unavailable)\n", "windows");
+        assert_eq!(unknown.selected, "cpu");
+        assert_eq!(unknown.reason, "device_memory_unverified");
+        for text in [
+            "",
+            "Available devices:\n  BLAS: Accelerate\n",
+            "CUDA found in README",
+            "MTL0 not-a-device: test",
+        ] {
+            assert_eq!(select_backend(text, "macos").selected, "cpu", "{text}");
+        }
     }
 
     #[test]

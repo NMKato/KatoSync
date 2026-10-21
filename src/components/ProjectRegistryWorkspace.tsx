@@ -18,6 +18,7 @@ import {
   Trash2
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
+import { ProjectWorkResumePanel } from "./ProjectWorkResumePanel";
 import { AUTO_MODES, FOCUS_PRIORITIES, FOCUS_STATUSES } from "../lib/projectFocus";
 import { normalizeRemote } from "../lib/projectExclusions";
 import {
@@ -36,6 +37,7 @@ import type {
   VerificationState
 } from "../types";
 import type { useKatoSyncViewModel } from "../viewmodels/useKatoSyncViewModel";
+import type { ProjectCreationTemplate } from "../repositories/projectRegistryRepository";
 
 type ViewModel = ReturnType<typeof useKatoSyncViewModel>;
 
@@ -94,6 +96,7 @@ export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
   const { t } = useT();
   const projects = vm.projects;
   const [adding, setAdding] = useState(false);
+  const [creating, setCreating] = useState(false);
   const active = projects.portfolio.filter((project) => project.focus.status === "active");
   const inactive = projects.portfolio.filter((project) => project.focus.status !== "active");
   const excludedTasks = vm.agentSync.autoLanes.excluded.reduce((sum, entry) => sum + entry.taskIds.length, 0);
@@ -126,6 +129,16 @@ export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
       {adding && !projects.discovery ? (
         <div className="glass agent-card projects-add" role="group" aria-label={t("projects.add.title")}>
           <strong>{t("projects.add.title")}</strong>
+          <button className="secondary compact-button" type="button" disabled={busy}
+            onClick={() => setCreating((was) => !was)}>
+            <Plus size={14} /> {creating ? "Zurück zum Projektimport" : "Neues Projekt erstellen"}
+          </button>
+          {creating ? (
+            <ProjectCreateForm
+              vm={vm}
+              onDone={() => { setCreating(false); setAdding(false); }}
+            />
+          ) : (
           <div className="projects-add-choices">
             <AddChoice
               busy={projects.busy === "discover"}
@@ -142,6 +155,7 @@ export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
               title={t("projects.add.workspace")}
             />
           </div>
+          )}
           <small className="projects-privacy">
             <ShieldCheck size={13} /> {t("projects.add.privacy")}
           </small>
@@ -393,6 +407,70 @@ function MissingProfile({ vm }: { vm: ViewModel }) {
   );
 }
 
+const PROJECT_CREATION_TEMPLATES: Array<{ value: ProjectCreationTemplate; label: string }> = [
+  { value: "blank", label: "Leeres Projekt" },
+  { value: "web_typescript", label: "Web / TypeScript" },
+  { value: "ios_swiftui", label: "iOS / SwiftUI" },
+  { value: "android_kotlin", label: "Android / Kotlin" },
+  { value: "tauri_rust", label: "Tauri / Rust" }
+];
+
+function projectSlug(name: string): string {
+  return name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64).replace(/-+$/, "");
+}
+
+function ProjectCreateForm({ vm, onDone }: { vm: ViewModel; onDone: () => void }) {
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [template, setTemplate] = useState<ProjectCreationTemplate>("blank");
+  const [creating, setCreating] = useState(false);
+  const valid = name.trim().length >= 2 && name.trim().length <= 80
+    && /^[\p{L}\p{N} _-]+$/u.test(name.trim())
+    && /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])$/.test(slug);
+  return (
+    <form className="projects-create-form" onSubmit={(event) => {
+      event.preventDefault();
+      if (!valid || creating) return;
+      setCreating(true);
+      void vm.projects.createNewProject({ name: name.trim(), slug, template })
+        .then((success) => { if (success) onDone(); })
+        .finally(() => setCreating(false));
+    }}>
+      <label>Projektname
+        <input type="text" maxLength={80} required value={name}
+          placeholder="Meine neue App"
+          onChange={(event) => {
+            const next = event.target.value;
+            setName(next);
+            if (!slugEdited) setSlug(projectSlug(next));
+          }} />
+      </label>
+      <label>Ordnername (eindeutig, keine Leerzeichen)
+        <input type="text" maxLength={64} required value={slug}
+          placeholder="meine-neue-app"
+          onChange={(event) => { setSlugEdited(true); setSlug(event.target.value); }} />
+      </label>
+      <label>Technologie-Grundstruktur
+        <select value={template} onChange={(event) => setTemplate(event.target.value as ProjectCreationTemplate)}>
+          {PROJECT_CREATION_TEMPLATES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+      </label>
+      <p className="agent-empty">
+        Danach wählst du deinen lokalen Workspace-Ordner im Finder aus und bestätigst die Anlage.
+        KatoSync erstellt Projektstatus, Memory, AGENTS.md, Git und einen KUAS-Profilvorschlag.
+        Es werden keine SDKs oder Pakete installiert; bestehende Ordner werden nicht verändert.
+        In dieser ersten Version muss der Workspace innerhalb deines Benutzerverzeichnisses liegen.
+      </p>
+      <button type="submit" className="primary" disabled={!valid || creating || vm.projects.busy !== null}>
+        {creating ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}
+        {creating ? "Projekt wird angelegt…" : "Workspace wählen und Projekt anlegen"}
+      </button>
+    </form>
+  );
+}
+
 function targetLabel(kind: ProjectTargetKind, t: TFunc): string {
   return t(`projects.target.${kind}` as TKey);
 }
@@ -555,7 +633,12 @@ function ProjectCard({ project, vm }: { project: RegistryProject; vm: ViewModel 
           ))}
         </ul>
       ) : null}
-      {details ? <Capsule project={project} t={t} /> : null}
+      {details ? (
+        <>
+          <Capsule project={project} t={t} />
+          <ProjectWorkResumePanel project={project} />
+        </>
+      ) : null}
     </article>
   );
 }

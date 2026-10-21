@@ -263,10 +263,21 @@ fn status_counts(dir: &Path) -> Option<(usize, usize)> {
 }
 
 pub(crate) fn real_path(path: &Path) -> String {
-    fs::canonicalize(path)
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .into_owned()
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let display = canonical.to_string_lossy().into_owned();
+    // Windows canonicalize yields extended-length \\?\ paths. The Git CLI
+    // accepts normal drive/UNC paths, not the verbatim prefixes. Preserve
+    // canonical location while using a portable argument representation.
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(remote) = display.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{remote}");
+        }
+        if let Some(local) = display.strip_prefix(r"\\?\") {
+            return local.to_string();
+        }
+    }
+    display
 }
 
 fn absolute_git_path(repo: &Path, args: &[&str]) -> Option<String> {
@@ -1213,7 +1224,11 @@ mod tests {
         let alpha = result
             .repos
             .iter()
-            .find(|repo| repo.path.ends_with("/Alpha"))
+            .find(|repo| {
+                Path::new(&repo.path)
+                    .file_name()
+                    .is_some_and(|part| part == "Alpha")
+            })
             .unwrap();
         assert_eq!(
             alpha.remote.as_deref(),
@@ -1226,7 +1241,9 @@ mod tests {
         assert!(alpha
             .worktrees
             .iter()
-            .any(|worktree| worktree.path.ends_with("/Alpha-feat-x")));
+            .any(|worktree| Path::new(&worktree.path)
+                .file_name()
+                .is_some_and(|part| part == "Alpha-feat-x")));
 
         // Einzelnes Projekt: genau dieses Repo.
         assert_eq!(discover(&main).unwrap().repos.len(), 1);
