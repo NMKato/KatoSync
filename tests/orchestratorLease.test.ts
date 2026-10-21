@@ -37,7 +37,12 @@ test("orchestrator heartbeat writes a bounded 0600 lease that reports attached",
     assert.equal(data.schemaVersion, 1);
     assert.equal(data.leaseSeconds, 1800);
     assert.equal(data.transport.kind, "rdc");
-    assert.equal(statSync(file).mode & 0o777, 0o600);
+    // Windows does not expose POSIX 0600 semantics through stat().mode.
+    // Keep the strict permission check on POSIX hosts; Windows is covered by
+    // the heartbeat/status/detach and safe-path assertions below.
+    if (process.platform !== "win32") {
+      assert.equal(statSync(file).mode & 0o777, 0o600);
+    }
     assert.equal(lease(root, "status").stdout.trim(), "attached");
     assert.equal(lease(root, "detach", "--session", "rdc-1").status, 0);
     const detached = JSON.parse(readFileSync(file, "utf8"));
