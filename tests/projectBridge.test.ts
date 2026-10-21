@@ -44,6 +44,19 @@ function cli(args: string[]) {
   return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", timeout: 10000 });
 }
 
+/** Non-admin Windows often disallows symlink creation. Authorization and path
+ * rejection are still tested; only the OS-privileged symlink branch is skipped. */
+function createTestSymlink(target: string, link: string, kind: "file" | "dir"): boolean {
+  try {
+    symlinkSync(target, link, kind);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (process.platform === "win32" && (code === "EPERM" || code === "EACCES")) return false;
+    throw error;
+  }
+}
+
 test("CLI is deny-by-default without an explicit per-project allowlist", () => {
   const f = fixture();
   try {
@@ -104,12 +117,13 @@ test("registered Git HEAD drift is detected and arbitrary root path aliasing is 
     assert.notEqual(invalid.status, 0);
     assert.match(invalid.stderr, /registry_root_mismatch/);
     const link = join(f.root, "repo-link");
-    symlinkSync(f.repo, link);
-    f.record.projects[0].rootPath = link;
-    writeFileSync(f.registry, JSON.stringify(f.record));
-    const redirected = cli(["get", "our-demo", ...args]);
-    assert.notEqual(redirected.status, 0);
-    assert.match(redirected.stderr, /registered_root_unavailable/);
+    if (createTestSymlink(f.repo, link, "dir")) {
+      f.record.projects[0].rootPath = link;
+      writeFileSync(f.registry, JSON.stringify(f.record));
+      const redirected = cli(["get", "our-demo", ...args]);
+      assert.notEqual(redirected.status, 0);
+      assert.match(redirected.stderr, /registered_root_unavailable/);
+    }
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -117,10 +131,11 @@ test("registry symlink and denied project requests fail safely", () => {
   const f = fixture();
   try {
     const link = join(f.root, "registry-symlink.json");
-    symlinkSync(f.registry, link);
-    const denied = cli(["get", "our-demo", "--registry", link, "--allow-project-id", "our-demo"]);
-    assert.notEqual(denied.status, 0);
-    assert.match(denied.stderr, /registry_unavailable/);
+    if (createTestSymlink(f.registry, link, "file")) {
+      const denied = cli(["get", "our-demo", "--registry", link, "--allow-project-id", "our-demo"]);
+      assert.notEqual(denied.status, 0);
+      assert.match(denied.stderr, /registry_unavailable/);
+    }
     const traversal = cli(["get", "../../x", "--registry", f.registry, "--allow-project-id", "our-demo"]);
     assert.notEqual(traversal.status, 0);
     assert.doesNotMatch(traversal.stderr, /\/tmp\/|private/);

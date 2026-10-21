@@ -1,0 +1,3 @@
+# Versioned KUAS policy prompts must be byte-identical across Linux/macOS/Windows.
+# The native Rust runner embeds these files, and the MCP adapter fingerprints them.
+src-tauri/policies/kuas-*-v1.txt text eol=lf
