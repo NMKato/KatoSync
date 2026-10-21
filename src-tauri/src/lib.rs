@@ -32,6 +32,7 @@ mod local_control;
 mod memory_fabric;
 mod model_distribution;
 mod orchestration;
+mod owned_worktree;
 mod project_create;
 mod project_registry;
 mod project_work_resume;
