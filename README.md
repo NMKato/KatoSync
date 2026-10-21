@@ -32,7 +32,7 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
-> **Entwicklungsstatus (21.10.2026):** Die öffentlich verfügbaren Desktop-Betas und der neuere Project Work Hub haben unterschiedliche Freigabestände. Die Integration der neuen Projekt- und GPU-Funktionen ist erfolgreich getestet, aber **noch nicht in \`dev\` oder \`main\` gemergt oder als vollständig geprüfter Installer veröffentlicht**. Details: [Draft-PR #75](https://github.com/NMKato/KatoSync/pull/75).
+> **Entwicklungsstatus (21.10.2026):** Die öffentlich verfügbaren Desktop-Betas und der neuere Project Work Hub haben unterschiedliche Freigabestände. Die Integration der neuen Projekt- und GPU-Funktionen ist erfolgreich getestet, aber **noch nicht in `dev` oder `main` gemergt oder als vollständig geprüfter Installer veröffentlicht**. Details: [Draft-PR #75](https://github.com/NMKato/KatoSync/pull/75).
 
 ## Was KatoSync zusammenbringt
 
@@ -51,7 +51,7 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 ## Architektur
 
-\`\`\`mermaid
+```mermaid
 flowchart TD
     A["KatoSync Desktop · Tauri / Rust / React"] --> B["Project Registry"]
     B --> C["Project Resume · Context / KUAS"]
@@ -68,7 +68,7 @@ flowchart TD
     K --> L["Tests & Review"]
     L --> M["PR / Veröffentlichung nur nach separater Freigabe"]
     N["Optionale Konten / Cloud-Dienste"] -. "bewusste Anmeldung / Datenfreigabe" .-> A
-\`\`\`
+```
 
 Der Desktop-Kern basiert auf **Tauri 2 + Rust**, das Frontend auf **React und TypeScript**. Das Architekturziel ist **local-first und providerneutral**: Lokale Arbeitsdaten bleiben standardmäßig auf dem Gerät; Cloud- und Drittanbieterzugriffe benötigen passende Konten, Konfiguration und Freigaben. Externe Modellprovider können eigene Abonnements, API-Kosten und Datenverarbeitung mitbringen.
 
@@ -124,7 +124,7 @@ Details und Akzeptanzkriterien: [Security Gate #76](https://github.com/NMKato/Ka
 
 **Für Entwickler** (Node.js, Rust und native Tauri-Voraussetzungen erforderlich):
 
-\`\`\`bash
+```bash
 git clone https://github.com/NMKato/KatoSync.git
 cd KatoSync
 npm install
@@ -133,7 +133,7 @@ npm run dev
 npm run tauri dev
 # Frontend-Check:
 npm run build
-\`\`\`
+```
 
 Für die neue Projekt-/Ressourcenintegration siehe [PR #75](https://github.com/NMKato/KatoSync/pull/75). Ein Quellcode-Build ist nicht gleichbedeutend mit signierten offiziellen Installern oder einer freigegebenen Backend-Anbindung.
 
