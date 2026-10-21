@@ -95,11 +95,15 @@ fn prepare_owned(
     }
     let source = fs::canonicalize(&facts.canonical_root)
         .map_err(|_| "Projektordner hat sich geaendert.".to_string())?;
+    // Git for Windows does not accept \\?\ canonical paths in worktree add.
+    // Preserve canonical identity, but pass portable paths to Git.
+    let source = PathBuf::from(crate::project_registry::real_path(&source));
 
     // This parent must already be app-owned. Refuse to make directories based
     // on untrusted paths and never place worktrees inside the user's checkout.
     let root = fs::canonicalize(managed_root)
         .map_err(|_| "Verwalteter Task-Speicher nicht vorhanden.".to_string())?;
+    let root = PathBuf::from(crate::project_registry::real_path(&root));
     if !root.is_dir() || root.starts_with(&source) || source.starts_with(&root) {
         return Err(
             "Task-Speicher darf nicht im Projekt oder dessen Elternordner liegen.".to_string(),
@@ -171,6 +175,7 @@ fn prepare_owned(
     git(&source, &argv)?;
     let canonical_target =
         fs::canonicalize(&path).map_err(|_| "Neuer Worktree nicht vorhanden.".to_string())?;
+    let canonical_target = PathBuf::from(crate::project_registry::real_path(&canonical_target));
     if canonical_target != path {
         return Err(
             "Task-Worktree wurde unerwartet umgeleitet; manuelle Pruefung noetig.".to_string(),
@@ -205,6 +210,7 @@ impl OwnedTaskWorktree {
     fn remove_if_clean(self) -> Result<(), String> {
         let current = fs::canonicalize(&self.path)
             .map_err(|_| "Task-Worktree fehlt: manuelle Wiederherstellung.".to_string())?;
+        let current = PathBuf::from(crate::project_registry::real_path(&current));
         if current != self.path || self.fence == 0 || !valid_task_id(&self.task_id) {
             return Err("Worktree-Zuordnung ungueltig.".to_string());
         }
