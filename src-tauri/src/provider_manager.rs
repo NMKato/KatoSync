@@ -33,28 +33,45 @@ use tokio::{
     sync::{Mutex as AsyncMutex, Notify},
     time::timeout,
 };
+use zeroize::Zeroize;
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(60);
 const LOCAL_TIMEOUT: Duration = Duration::from_secs(8);
 const LOCAL_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(60);
+const API_TIMEOUT: Duration = Duration::from_secs(20);
+const API_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(90);
+const API_WORKER_TIMEOUT: Duration = Duration::from_secs(180);
+const MAX_API_WORKER_PROMPT_BYTES: usize = 32 * 1024;
+const MAX_API_WORKER_CONTEXT_BYTES: usize = 128 * 1024;
 const DISCOVERY_TIMEOUT: Duration = Duration::from_millis(1500);
 const MAX_LOCAL_RESPONSE_BYTES: usize = 1_048_576;
+// Remote-Modellkataloge (z. B. OpenRouter) sind deutlich groesser als lokale Listen.
+const MAX_API_CATALOG_BYTES: usize = 8 * 1_048_576;
+const MAX_API_CATALOG_MODELS: usize = 2_000;
 const MAX_CAPTURED_BYTES: usize = 262_144;
 const LOCAL_CONTROL_HEARTBEAT_MAX_AGE_SECS: i64 = 90;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const LOCAL_KEY_ACCOUNT: &str = "local-provider-api-key";
+// Legacy-Key aus Preview-Builds vor Multi-API. Neue Keys werden pro Connection-ID getrennt gespeichert.
+const API_KEY_ACCOUNT: &str = "api-provider-api-key";
+const API_KEY_ACCOUNT_PREFIX: &str = "api-provider-api-key:";
 const SMOKE_PROMPT: &str = "Reply with exactly READY and no other text.";
 /// Warm-up: dieselbe READY-Pruefung, aber ausdruecklich ohne Tools/Dateien/Repo-Zugriff, damit ein
 /// Abo-Provider sein rollierendes Nutzungsfenster startet, bevor echte Arbeit ansteht.
 pub(crate) const WARMUP_PROMPT: &str = "KatoSync provider warm-up health check. Do not use any tools. Do not read, list, create or modify any files and do not run any commands. Reply with exactly READY and no other text.";
+
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderId {
     Codex,
     Claude,
+    Api,
     Local,
     LocalControl,
 }
@@ -64,6 +81,7 @@ impl ProviderId {
         match self {
             Self::Codex => "OpenAI Codex",
             Self::Claude => "Anthropic Claude Code",
+            Self::Api => "API Provider",
             Self::Local => "Local Model",
             Self::LocalControl => "Local Control / RDC",
         }
@@ -127,6 +145,7 @@ pub enum ProviderReason {
     SecretStoreUnavailable,
     LocalControlRunning,
     LocalControlQueueOnly,
+    ApiKeyProviderMismatch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -149,6 +168,107 @@ pub struct LocalProviderConfig {
     pub model: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiProviderPreset {
+    Openai,
+    Anthropic,
+    OpenrouterGlobal,
+    #[default]
+    OpenrouterEu,
+    Deepseek,
+    Mistral,
+    Xai,
+    Zai,
+    CustomOpenai,
+}
+
+impl ApiProviderPreset {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Openai => "OpenAI API",
+            Self::Anthropic => "Anthropic API",
+            Self::OpenrouterGlobal => "OpenRouter Global",
+            Self::OpenrouterEu => "OpenRouter EU",
+            Self::Deepseek => "DeepSeek API",
+            Self::Mistral => "Mistral API",
+            Self::Xai => "xAI API",
+            Self::Zai => "Z.AI / GLM API",
+            Self::CustomOpenai => "Custom OpenAI-compatible",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiEffort {
+    #[default]
+    Auto,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiConnectionMode {
+    #[default]
+    Auto,
+    Specialist,
+    Fallback,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiProviderConfig {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub preset: ApiProviderPreset,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub effort: ApiEffort,
+    #[serde(default)]
+    pub mode: ApiConnectionMode,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    // Optionales Monatsbudget in USD; Durchsetzung ueber das Usage-Ledger der App.
+    #[serde(default)]
+    pub monthly_budget_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiProviderCatalog {
+    pub connection_id: String,
+    pub provider_label: String,
+    pub base_url: String,
+    pub models: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiWorkerResult {
+    pub connection_id: String,
+    pub provider_label: String,
+    pub model: String,
+    pub effort: ApiEffort,
+    pub content: String,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub reported_cost_usd: Option<f64>,
+    pub completed_at: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderSettings {
@@ -156,6 +276,8 @@ pub struct ProviderSettings {
     pub disabled_providers: Vec<ProviderId>,
     #[serde(default)]
     pub local_provider: LocalProviderConfig,
+    #[serde(default)]
+    pub api_providers: Vec<ApiProviderConfig>,
 }
 
 impl ProviderSettings {
@@ -727,9 +849,11 @@ pub fn redact(value: &str) -> String {
     let mut result = value.replace(['\r', '\n', '\t'], " ");
     let patterns = [
         (
-            r"(?i)\b(?:sk|sess|oauth|token|rk|pk|ghp|gho|xox[a-z])[-_][A-Za-z0-9._-]{8,}",
+            r"(?i)\b(?:sk|sess|oauth|token|rk|pk|ghp|gho|xai|xox[a-z])[-_][A-Za-z0-9._-]{8,}",
             "<redacted>",
         ),
+        // Z.AI-Keyform `<hex>.<token>`.
+        (r"\b[0-9a-f]{32}\.[A-Za-z0-9]{16}\b", "<redacted>"),
         (r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer <redacted>"),
         (
             r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+",
@@ -1335,9 +1459,45 @@ fn models_url(base: &Url, kind: LocalProviderKind) -> Option<Url> {
     join_api_path(base, "/models", native)
 }
 
-/// Alle drei Presets sprechen unter /v1 das OpenAI-Chat-Protokoll (Ollama inklusive).
+/// Lokale OpenAI-kompatible Endpunkte nutzen weiterhin die bekannte /v1-Normalisierung.
 fn chat_url(base: &Url) -> Option<Url> {
     join_api_path(base, "/chat/completions", None)
+}
+
+/// Remote-API-Presets tragen ihren Versionspfad bereits in der Base-URL. Daher niemals still
+/// noch ein weiteres /v1 einfügen (wichtig z. B. fuer Z.AI /api/paas/v4).
+fn remote_api_url(base: &Url, suffix: &str) -> Option<Url> {
+    Url::parse(&format!(
+        "{}{}",
+        base.as_str().trim_end_matches('/'),
+        suffix
+    ))
+    .ok()
+}
+
+fn api_models_url(base: &Url) -> Option<Url> {
+    remote_api_url(base, "/models")
+}
+
+fn api_generation_url(base: &Url, preset: ApiProviderPreset) -> Option<Url> {
+    match preset {
+        ApiProviderPreset::Openai => remote_api_url(base, "/responses"),
+        ApiProviderPreset::Anthropic => remote_api_url(base, "/messages"),
+        _ => remote_api_url(base, "/chat/completions"),
+    }
+}
+
+fn api_auth_request(
+    request: reqwest::RequestBuilder,
+    preset: ApiProviderPreset,
+    api_key: &str,
+) -> reqwest::RequestBuilder {
+    match preset {
+        ApiProviderPreset::Anthropic => request
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01"),
+        _ => request.bearer_auth(api_key),
+    }
 }
 
 fn extract_model_ids(value: &Value, kind: LocalProviderKind) -> Vec<String> {
@@ -1355,6 +1515,21 @@ fn extract_model_ids(value: &Value, kind: LocalProviderKind) -> Vec<String> {
         .collect()
 }
 
+fn extract_api_model_ids(value: &Value) -> Vec<String> {
+    let mut models = value
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .filter(|name| is_safe_model_name(name))
+        .map(str::to_string)
+        .take(MAX_API_CATALOG_MODELS)
+        .collect::<Vec<_>>();
+    models.dedup();
+    models
+}
+
 fn http_client(limit: Duration) -> Option<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(limit)
@@ -1364,7 +1539,7 @@ fn http_client(limit: Duration) -> Option<reqwest::Client> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct StoredLocalKey {
+struct StoredOriginKey {
     origin: String,
     key: String,
 }
@@ -1384,14 +1559,13 @@ fn key_transport_allowed(url: &Url) -> bool {
     url.scheme() == "https" || endpoint_scope(url) != "remote"
 }
 
-#[cfg(target_os = "macos")]
-fn key_entry() -> Option<keyring::Entry> {
-    keyring::Entry::new(crate::KEYCHAIN_SERVICE, LOCAL_KEY_ACCOUNT).ok()
+fn key_entry(account: &str) -> Result<keyring::Entry, ProviderReason> {
+    keyring::Entry::new(crate::KEYCHAIN_SERVICE, account)
+        .map_err(|_| ProviderReason::SecretStoreUnavailable)
 }
 
-#[cfg(target_os = "macos")]
-fn load_local_key() -> Result<Option<StoredLocalKey>, ProviderReason> {
-    let entry = key_entry().ok_or(ProviderReason::SecretStoreUnavailable)?;
+fn load_origin_key(account: &str) -> Result<Option<StoredOriginKey>, ProviderReason> {
+    let entry = key_entry(account)?;
     match entry.get_password() {
         Ok(raw) => Ok(serde_json::from_str(&raw).ok()),
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -1399,12 +1573,22 @@ fn load_local_key() -> Result<Option<StoredLocalKey>, ProviderReason> {
     }
 }
 
-// Windows/Linux: In diesem Build ist kein OS-gestuetzter Store fuer diesen Key aktiviert
-// (keyring ohne windows-native-Feature waere nur ein Mock). Bewusst sicherer Stopp statt
-// Klartext-Persistenz; siehe docs/ARCHITECTURE.md (Windows-Validierungsgate).
-#[cfg(not(target_os = "macos"))]
-fn load_local_key() -> Result<Option<StoredLocalKey>, ProviderReason> {
-    Ok(None)
+fn store_origin_key(account: &str, value: &StoredOriginKey) -> Result<(), ProviderReason> {
+    let raw = serde_json::to_string(value).map_err(|_| ProviderReason::SecretStoreUnavailable)?;
+    key_entry(account)?
+        .set_password(&raw)
+        .map_err(|_| ProviderReason::SecretStoreUnavailable)
+}
+
+fn delete_origin_key(account: &str) -> Result<(), ProviderReason> {
+    match key_entry(account)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(_) => Err(ProviderReason::SecretStoreUnavailable),
+    }
+}
+
+fn load_local_key() -> Result<Option<StoredOriginKey>, ProviderReason> {
+    load_origin_key(LOCAL_KEY_ACCOUNT)
 }
 
 /// Speichert den API-Key im OS-Schluesselbund, gebunden an den Endpoint-Origin.
@@ -1416,43 +1600,652 @@ pub fn save_local_key(base_url: &str, api_key: &str) -> Result<(), ProviderReaso
     if !key_transport_allowed(&url) {
         return Err(ProviderReason::InsecureRemoteKey);
     }
-    store_local_key(&StoredLocalKey {
-        origin: origin_of(&url),
-        key: api_key.trim().to_string(),
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn store_local_key(value: &StoredLocalKey) -> Result<(), ProviderReason> {
-    let raw = serde_json::to_string(value).map_err(|_| ProviderReason::SecretStoreUnavailable)?;
-    key_entry()
-        .ok_or(ProviderReason::SecretStoreUnavailable)?
-        .set_password(&raw)
-        .map_err(|_| ProviderReason::SecretStoreUnavailable)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn store_local_key(_value: &StoredLocalKey) -> Result<(), ProviderReason> {
-    Err(ProviderReason::SecretStoreUnavailable)
+    store_origin_key(
+        LOCAL_KEY_ACCOUNT,
+        &StoredOriginKey {
+            origin: origin_of(&url),
+            key: api_key.trim().to_string(),
+        },
+    )
 }
 
 /// Loescht ausschliesslich KatoSync-eigene Secrets. CLI-Credentials bleiben unangetastet.
 pub fn disconnect(provider: ProviderId) -> Result<(), ProviderReason> {
-    if provider != ProviderId::Local {
-        return Ok(());
+    match provider {
+        ProviderId::Api => delete_origin_key(API_KEY_ACCOUNT),
+        ProviderId::Local => delete_origin_key(LOCAL_KEY_ACCOUNT),
+        _ => Ok(()),
     }
-    #[cfg(target_os = "macos")]
+}
+
+fn api_base_url(config: &ApiProviderConfig) -> Result<Url, ProviderReason> {
+    let raw = match config.preset {
+        ApiProviderPreset::Openai => "https://api.openai.com/v1",
+        ApiProviderPreset::Anthropic => "https://api.anthropic.com/v1",
+        ApiProviderPreset::OpenrouterGlobal => "https://openrouter.ai/api/v1",
+        ApiProviderPreset::OpenrouterEu => "https://eu.openrouter.ai/api/v1",
+        ApiProviderPreset::Deepseek => "https://api.deepseek.com/v1",
+        ApiProviderPreset::Mistral => "https://api.mistral.ai/v1",
+        ApiProviderPreset::Xai => "https://api.x.ai/v1",
+        ApiProviderPreset::Zai => "https://api.z.ai/api/paas/v4",
+        ApiProviderPreset::CustomOpenai => config.base_url.trim(),
+    };
+    let url = validate_local_endpoint(raw)?;
+    if url.scheme() != "https" || endpoint_scope(&url) != "remote" {
+        return Err(ProviderReason::InsecureRemoteKey);
+    }
+    Ok(url)
+}
+
+fn api_key_account(connection_id: &str) -> Result<String, ProviderReason> {
+    let id = connection_id.trim();
+    if id.is_empty()
+        || id.len() > 64
+        || !id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
     {
-        let entry = key_entry().ok_or(ProviderReason::SecretStoreUnavailable)?;
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err(ProviderReason::SecretStoreUnavailable),
+        return Err(ProviderReason::InvalidEndpoint);
+    }
+    Ok(format!("{API_KEY_ACCOUNT_PREFIX}{id}"))
+}
+
+fn load_api_key_for(config: &ApiProviderConfig) -> Result<Option<String>, ProviderReason> {
+    let base = api_base_url(config)?;
+    let account = api_key_account(&config.id)?;
+    let stored = load_origin_key(&account)?;
+    if let Some(value) = stored {
+        return Ok((value.origin == origin_of(&base)).then_some(value.key));
+    }
+    // Einmalige, sichere Kompatibilitaet fuer den ersten migrierten Preview-Slot.
+    if config.id == "api-1" {
+        return Ok(load_origin_key(API_KEY_ACCOUNT)?
+            .filter(|value| value.origin == origin_of(&base))
+            .map(|value| value.key));
+    }
+    Ok(None)
+}
+
+/// Provider-Familie, die ein Key mit exklusivem Praefix zwingend verlangt. Spiegelt
+/// `src/lib/apiKeyInference.ts`; alles ohne eindeutiges Praefix bleibt Nutzerentscheidung.
+fn strong_key_family(api_key: &str) -> Option<&'static [ApiProviderPreset]> {
+    const RULES: [(&str, &[ApiProviderPreset]); 5] = [
+        ("sk-ant-", &[ApiProviderPreset::Anthropic]),
+        (
+            "sk-or-",
+            &[
+                ApiProviderPreset::OpenrouterEu,
+                ApiProviderPreset::OpenrouterGlobal,
+            ],
+        ),
+        ("sk-proj-", &[ApiProviderPreset::Openai]),
+        ("sk-svcacct-", &[ApiProviderPreset::Openai]),
+        ("xai-", &[ApiProviderPreset::Xai]),
+    ];
+    let key = api_key.trim();
+    RULES
+        .iter()
+        .find(|(prefix, _)| key.starts_with(prefix))
+        .map(|(_, family)| *family)
+}
+
+/// Ein eindeutig zuordenbarer Key wird nie an einen fremden Preset-Provider gesendet.
+/// Custom-Endpunkte (eigene Gateways) bleiben bewusst Nutzerentscheidung.
+fn key_conflicts_with_preset(api_key: &str, preset: ApiProviderPreset) -> bool {
+    if preset == ApiProviderPreset::CustomOpenai {
+        return false;
+    }
+    strong_key_family(api_key).is_some_and(|family| !family.contains(&preset))
+}
+
+pub fn save_api_provider_key(
+    config: &ApiProviderConfig,
+    api_key: &str,
+) -> Result<(), ProviderReason> {
+    let base = api_base_url(config)?;
+    if !validate_api_key(api_key) {
+        return Err(ProviderReason::EndpointAuthRequired);
+    }
+    if key_conflicts_with_preset(api_key, config.preset) {
+        return Err(ProviderReason::ApiKeyProviderMismatch);
+    }
+    let account = api_key_account(&config.id)?;
+    store_origin_key(
+        &account,
+        &StoredOriginKey {
+            origin: origin_of(&base),
+            key: api_key.trim().to_string(),
+        },
+    )
+}
+
+pub fn disconnect_api_provider_key(connection_id: &str) -> Result<(), ProviderReason> {
+    let account = api_key_account(connection_id)?;
+    delete_origin_key(&account)
+}
+
+fn effort_value(effort: ApiEffort) -> Option<&'static str> {
+    match effort {
+        ApiEffort::Auto => None,
+        ApiEffort::Low => Some("low"),
+        ApiEffort::Medium => Some("medium"),
+        ApiEffort::High => Some("high"),
+        ApiEffort::Xhigh => Some("xhigh"),
+        ApiEffort::Max => Some("max"),
+    }
+}
+
+fn api_generation_body(
+    config: &ApiProviderConfig,
+    model: &str,
+    system: Option<&str>,
+    prompt: &str,
+    max_tokens: u64,
+) -> Value {
+    let mut body = match config.preset {
+        ApiProviderPreset::Openai => {
+            let mut value = serde_json::json!({
+                "model": model,
+                "input": prompt,
+                "max_output_tokens": max_tokens
+            });
+            if let Some(system) = system.filter(|value| !value.is_empty()) {
+                value["instructions"] = Value::String(system.to_string());
+            }
+            value
+        }
+        ApiProviderPreset::Anthropic => serde_json::json!({
+            "model": model,
+            "max_tokens": max_tokens,
+            "system": system.unwrap_or(""),
+            "messages": [{ "role": "user", "content": prompt }]
+        }),
+        _ => {
+            let mut messages = Vec::new();
+            if let Some(system) = system.filter(|value| !value.is_empty()) {
+                messages.push(serde_json::json!({ "role": "system", "content": system }));
+            }
+            messages.push(serde_json::json!({ "role": "user", "content": prompt }));
+            serde_json::json!({
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "stream": false
+            })
+        }
+    };
+
+    if let Some(effort) = effort_value(config.effort) {
+        match config.preset {
+            ApiProviderPreset::Openai => {
+                body["reasoning"] = serde_json::json!({ "effort": effort });
+            }
+            ApiProviderPreset::OpenrouterGlobal | ApiProviderPreset::OpenrouterEu => {
+                body["reasoning"] = serde_json::json!({ "effort": effort });
+            }
+            ApiProviderPreset::Xai => {
+                body["reasoning_effort"] = Value::String(effort.to_string());
+            }
+            ApiProviderPreset::Anthropic
+            | ApiProviderPreset::Deepseek
+            | ApiProviderPreset::Mistral
+            | ApiProviderPreset::Zai
+            | ApiProviderPreset::CustomOpenai => {
+                // Provider-/modellabhaengige Effort-Semantik wird nicht geraten.
+            }
         }
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(())
+    body
+}
+
+fn api_smoke_body(config: &ApiProviderConfig, model: &str) -> Value {
+    api_generation_body(config, model, None, SMOKE_PROMPT, 32)
+}
+
+pub async fn api_provider_models(
+    config: &ApiProviderConfig,
+) -> Result<ApiProviderCatalog, ProviderReason> {
+    let base = api_base_url(config)?;
+    let key = tokio::task::spawn_blocking({
+        let config = config.clone();
+        move || load_api_key_for(&config)
+    })
+    .await
+    .map_err(|_| ProviderReason::SecretStoreUnavailable)??;
+    let key = key.ok_or(ProviderReason::EndpointAuthRequired)?;
+    let endpoint = api_models_url(&base).ok_or(ProviderReason::InvalidEndpoint)?;
+    let client = http_client(API_TIMEOUT).ok_or(ProviderReason::Offline)?;
+    let request = api_auth_request(client.get(endpoint), config.preset, &key);
+    let body = fetch_json_limited(request, MAX_API_CATALOG_BYTES)
+        .await
+        .map_err(|failure| match failure {
+            HttpFailure::Status(401 | 403) => ProviderReason::EndpointAuthRequired,
+            HttpFailure::Status(429) => ProviderReason::QuotaLimited,
+            HttpFailure::Timeout => ProviderReason::TimedOut,
+            HttpFailure::Unreachable => ProviderReason::Offline,
+            HttpFailure::Status(code) if code >= 500 => ProviderReason::CapacityLimited,
+            HttpFailure::Status(_) => ProviderReason::EndpointError,
+            HttpFailure::TooLarge | HttpFailure::Invalid => ProviderReason::EndpointInvalidResponse,
+        })?;
+    let models = extract_api_model_ids(&body);
+    if models.is_empty() {
+        return Err(ProviderReason::NoModels);
     }
+    Ok(ApiProviderCatalog {
+        connection_id: config.id.clone(),
+        provider_label: config.preset.label().to_string(),
+        base_url: base.to_string(),
+        models,
+    })
+}
+
+fn content_text(content: &Value) -> Option<String> {
+    if let Some(text) = content.as_str() {
+        let trimmed = text.trim();
+        return (!trimmed.is_empty()).then(|| trimmed.to_string());
+    }
+    let parts = content.as_array()?;
+    let text = parts
+        .iter()
+        .filter_map(|part| {
+            part.get("text")
+                .and_then(Value::as_str)
+                .or_else(|| part.get("content").and_then(Value::as_str))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let trimmed = text.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn api_message_content(value: &Value) -> Option<String> {
+    // OpenAI-compatible Chat Completions.
+    if let Some(content) = value
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(|item| item.get("message"))
+        .and_then(|item| item.get("content"))
+        .and_then(content_text)
+    {
+        return Some(content);
+    }
+
+    // Anthropic Messages.
+    if let Some(content) = value.get("content").and_then(content_text) {
+        return Some(content);
+    }
+
+    // OpenAI Responses API.
+    if let Some(text) = value.get("output_text").and_then(Value::as_str) {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    let output = value.get("output").and_then(Value::as_array)?;
+    let text = output
+        .iter()
+        .filter_map(|item| item.get("content").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let trimmed = text.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn usage_tokens(value: &Value) -> (Option<u64>, Option<u64>) {
+    let usage = value.get("usage");
+    let input = usage
+        .and_then(|item| {
+            item.get("prompt_tokens")
+                .or_else(|| item.get("input_tokens"))
+        })
+        .and_then(Value::as_u64);
+    let output = usage
+        .and_then(|item| {
+            item.get("completion_tokens")
+                .or_else(|| item.get("output_tokens"))
+        })
+        .and_then(Value::as_u64);
+    (input, output)
+}
+
+fn reported_cost_usd(value: &Value) -> Option<f64> {
+    let candidate = value
+        .get("usage")
+        .and_then(|usage| {
+            usage
+                .get("cost")
+                .or_else(|| usage.get("cost_usd"))
+                .or_else(|| usage.get("total_cost"))
+        })
+        .or_else(|| value.get("cost"))
+        .or_else(|| value.get("cost_usd"));
+    candidate
+        .and_then(|raw| raw.as_f64().or_else(|| raw.as_str()?.parse::<f64>().ok()))
+        .filter(|cost| cost.is_finite() && *cost >= 0.0)
+}
+
+/// Read-only reasoning worker. It receives a bounded, secret-scanned Context Pack and a concrete
+/// task, but no filesystem/shell tools. The result is intended for REX/handoff or human review.
+pub async fn run_api_worker(
+    config: &ApiProviderConfig,
+    prompt: &str,
+    context_pack: &str,
+) -> Result<ApiWorkerResult, ProviderReason> {
+    let prompt = prompt.trim();
+    if prompt.is_empty() || prompt.len() > MAX_API_WORKER_PROMPT_BYTES {
+        return Err(ProviderReason::CapabilityFailed);
+    }
+    if context_pack.len() > MAX_API_WORKER_CONTEXT_BYTES {
+        return Err(ProviderReason::CapabilityFailed);
+    }
+    let model = config.model.trim();
+    if model.is_empty() || !is_safe_model_name(model) {
+        return Err(ProviderReason::ModelMissing);
+    }
+
+    // Re-validate the selected model against the provider's live catalog before spending tokens.
+    let catalog = api_provider_models(config).await?;
+    if !catalog.models.iter().any(|candidate| candidate == model) {
+        return Err(ProviderReason::ModelMissing);
+    }
+
+    let base = api_base_url(config)?;
+    let mut api_key = tokio::task::spawn_blocking({
+        let config = config.clone();
+        move || load_api_key_for(&config)
+    })
+    .await
+    .map_err(|_| ProviderReason::SecretStoreUnavailable)??
+    .ok_or(ProviderReason::EndpointAuthRequired)?;
+
+    let Some(endpoint) = api_generation_url(&base, config.preset) else {
+        api_key.zeroize();
+        return Err(ProviderReason::InvalidEndpoint);
+    };
+    let Some(client) = http_client(API_WORKER_TIMEOUT) else {
+        api_key.zeroize();
+        return Err(ProviderReason::Offline);
+    };
+
+    let system = format!(
+        "You are a KatoSync read-only reasoning worker. Use only the supplied verified project context. \
+Do not claim to have edited files, run commands, deployed, merged, or accessed secrets. \
+Respect stated architecture, guardrails, dependencies and human gates. \
+Produce a concise implementation-ready result that can be handed to another lane.\n\nVERIFIED CONTEXT PACK:\n{}",
+        context_pack
+    );
+    let body = api_generation_body(config, model, Some(&system), prompt, 4096);
+    let request = api_auth_request(client.post(endpoint), config.preset, &api_key).json(&body);
+    let result = fetch_json(request).await;
+    api_key.zeroize();
+    let response = result.map_err(|failure| match failure {
+        HttpFailure::Status(401 | 403) => ProviderReason::EndpointAuthRequired,
+        HttpFailure::Status(429) => ProviderReason::QuotaLimited,
+        HttpFailure::Timeout => ProviderReason::TimedOut,
+        HttpFailure::Unreachable => ProviderReason::Offline,
+        HttpFailure::Status(code) if code >= 500 => ProviderReason::CapacityLimited,
+        HttpFailure::Status(_) => ProviderReason::EndpointError,
+        HttpFailure::TooLarge | HttpFailure::Invalid => ProviderReason::EndpointInvalidResponse,
+    })?;
+    let content = api_message_content(&response).ok_or(ProviderReason::CapabilityFailed)?;
+    let (input_tokens, output_tokens) = usage_tokens(&response);
+    let reported_cost_usd = reported_cost_usd(&response);
+    Ok(ApiWorkerResult {
+        connection_id: config.id.clone(),
+        provider_label: config.preset.label().to_string(),
+        model: model.to_string(),
+        effort: config.effort,
+        content,
+        input_tokens,
+        output_tokens,
+        reported_cost_usd,
+        completed_at: Utc::now().to_rfc3339(),
+    })
+}
+
+async fn api_status(
+    config: &ApiProviderConfig,
+    enabled: bool,
+    capability_test: bool,
+) -> ProviderStatus {
+    let mut status = ProviderStatus::base(ProviderId::Api, enabled);
+    status.installed = true;
+    status.capabilities = vec![
+        "text_code_agent".to_string(),
+        "remote_api".to_string(),
+        "secure_keychain".to_string(),
+        "rex_capability_handle".to_string(),
+    ];
+    status.model = Some(config.model.trim().to_string()).filter(|value| !value.is_empty());
+
+    let base = match api_base_url(config) {
+        Ok(value) => value,
+        Err(reason) => {
+            status.fail(ProviderState::Unknown, reason, None);
+            return status;
+        }
+    };
+    status.endpoint_scope = Some("remote".to_string());
+    status.detail = Some(format!("preset={}", config.preset.label()));
+
+    let stored = tokio::task::spawn_blocking({
+        let config = config.clone();
+        move || load_api_key_for(&config)
+    })
+    .await
+    .unwrap_or(Err(ProviderReason::SecretStoreUnavailable));
+    let api_key = match stored {
+        Ok(Some(key)) => {
+            status.secret_stored = true;
+            key
+        }
+        Ok(None) => {
+            status.fail(
+                ProviderState::AuthUnavailable,
+                ProviderReason::EndpointAuthRequired,
+                None,
+            );
+            return status;
+        }
+        Err(reason) => {
+            status.fail(ProviderState::AuthUnavailable, reason, None);
+            return status;
+        }
+    };
+
+    if !enabled {
+        status.reason = ProviderReason::DisabledInKatoSync;
+        return status;
+    }
+
+    let endpoint = match api_models_url(&base) {
+        Some(value) => value,
+        None => {
+            status.fail(
+                ProviderState::Unknown,
+                ProviderReason::InvalidEndpoint,
+                None,
+            );
+            return status;
+        }
+    };
+    let Some(client) = http_client(API_TIMEOUT) else {
+        status.fail(ProviderState::Offline, ProviderReason::Offline, None);
+        return status;
+    };
+    let request = api_auth_request(client.get(endpoint), config.preset, &api_key);
+    let models = match fetch_json_limited(request, MAX_API_CATALOG_BYTES).await {
+        Ok(body) => extract_api_model_ids(&body),
+        Err(failure) => {
+            apply_http_failure(&mut status, failure);
+            return status;
+        }
+    };
+    if models.is_empty() {
+        status.fail(ProviderState::Unknown, ProviderReason::NoModels, None);
+        return status;
+    }
+    let model = match status.model.clone() {
+        Some(requested) if models.iter().any(|value| value == &requested) => requested,
+        Some(_) => {
+            status.fail(ProviderState::Unknown, ProviderReason::ModelMissing, None);
+            return status;
+        }
+        None => models[0].clone(),
+    };
+    status.model = Some(model.clone());
+    status.authenticated = true;
+    status.state = ProviderState::Authenticated;
+    status.reason = ProviderReason::ReadyTestPending;
+    if !capability_test {
+        return status;
+    }
+
+    let Some(endpoint) = api_generation_url(&base, config.preset) else {
+        status.fail(
+            ProviderState::Unknown,
+            ProviderReason::InvalidEndpoint,
+            None,
+        );
+        return status;
+    };
+    let Some(client) = http_client(API_CAPABILITY_TIMEOUT) else {
+        status.fail(ProviderState::Offline, ProviderReason::Offline, None);
+        return status;
+    };
+    let request = api_auth_request(client.post(endpoint), config.preset, &api_key)
+        .json(&api_smoke_body(config, &model));
+    match fetch_json(request).await {
+        Ok(body) => {
+            if api_message_content(&body).is_some() {
+                status.ready(ProviderReason::Ready);
+                status.last_success_at = Some(Utc::now().to_rfc3339());
+            } else {
+                status.fail(
+                    ProviderState::Unknown,
+                    ProviderReason::CapabilityFailed,
+                    None,
+                );
+            }
+        }
+        Err(failure) => apply_http_failure(&mut status, failure),
+    }
+    status
+}
+
+/// Spiegelt `MAX_API_MONTHLY_BUDGET_USD` im Frontend. Ungueltig/<=0 = kein Budget.
+const MAX_API_MONTHLY_BUDGET_USD: f64 = 50_000.0;
+
+pub fn normalize_api_budget(value: Option<f64>) -> Option<f64> {
+    value
+        .filter(|amount| amount.is_finite() && *amount > 0.0)
+        .map(|amount| (amount.min(MAX_API_MONTHLY_BUDGET_USD) * 100.0).round() / 100.0)
+}
+
+fn api_connection_routable(connection: &ApiProviderConfig) -> bool {
+    connection.enabled && !connection.model.trim().is_empty()
+}
+
+/// Waehlt genau einen API-Slot fuer einen Worker-Lauf. Fail-closed: eine explizite oder
+/// projektbezogene Wahl wird nie still auf einen anderen bezahlten Provider umgeleitet.
+/// Auto nimmt den ersten regulaeren Slot, "fallback"-Slots erst ohne Alternative.
+pub fn select_api_connection<'a>(
+    connections: &'a [ApiProviderConfig],
+    project_preferences: &std::collections::HashMap<String, String>,
+    connection_id: Option<&str>,
+    project_id: Option<&str>,
+) -> Result<&'a ApiProviderConfig, ProviderReason> {
+    let pinned = connection_id.map(str::trim).filter(|id| !id.is_empty());
+    let preferred = pinned.or_else(|| {
+        project_id
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .and_then(|project| project_preferences.get(project))
+            .map(String::as_str)
+    });
+    if let Some(id) = preferred {
+        return connections
+            .iter()
+            .find(|item| item.id == id && api_connection_routable(item))
+            .ok_or(ProviderReason::NotConfigured);
+    }
+    let mut routable = connections
+        .iter()
+        .filter(|item| api_connection_routable(item));
+    let first = routable
+        .clone()
+        .next()
+        .ok_or(ProviderReason::NotConfigured)?;
+    Ok(routable
+        .find(|item| item.mode != ApiConnectionMode::Fallback)
+        .unwrap_or(first))
+}
+
+/// Prueft genau EINEN API-Slot (Key aus dem Schluesselbund, Modellliste, READY) beim eigenen
+/// Provider. Kein Pool-Fan-out: andere Slots/Provider werden dabei nie kontaktiert.
+pub async fn test_api_connection(config: &ApiProviderConfig) -> ProviderStatus {
+    api_status(config, config.enabled, true).await
+}
+
+async fn api_pool_status(
+    configs: &[ApiProviderConfig],
+    enabled: bool,
+    capability_test: bool,
+) -> ProviderStatus {
+    let active = configs
+        .iter()
+        .filter(|config| config.enabled)
+        .collect::<Vec<_>>();
+    if active.is_empty() {
+        let mut status = ProviderStatus::base(ProviderId::Api, enabled);
+        status.installed = true;
+        status.capabilities = vec![
+            "text_code_agent".to_string(),
+            "remote_api".to_string(),
+            "multi_connection".to_string(),
+            "secure_keychain".to_string(),
+        ];
+        status.reason = if enabled {
+            ProviderReason::NotConfigured
+        } else {
+            ProviderReason::DisabledInKatoSync
+        };
+        return status;
+    }
+
+    let mut results = Vec::with_capacity(active.len());
+    for config in active {
+        results.push(api_status(config, enabled, capability_test).await);
+    }
+
+    let chosen_index = results
+        .iter()
+        .position(|status| status.available)
+        .or_else(|| results.iter().position(|status| status.authenticated))
+        .or_else(|| results.iter().position(|status| status.secret_stored))
+        .unwrap_or(0);
+    let mut chosen = results.remove(chosen_index);
+    let ready =
+        usize::from(chosen.available) + results.iter().filter(|status| status.available).count();
+    let authenticated = usize::from(chosen.authenticated)
+        + results.iter().filter(|status| status.authenticated).count();
+    let secret_count = usize::from(chosen.secret_stored)
+        + results.iter().filter(|status| status.secret_stored).count();
+    chosen.label = format!("API Pool · {} Connections", configs.len());
+    chosen.capabilities.push("multi_connection".to_string());
+    chosen.secret_stored = secret_count > 0;
+    chosen.detail = Some(format!(
+        "connections={} ready={} authenticated={} secrets={}",
+        configs.len(),
+        ready,
+        authenticated,
+        secret_count
+    ));
+    chosen
 }
 
 async fn local_status(
@@ -1602,6 +2395,13 @@ enum HttpFailure {
 }
 
 async fn fetch_json(request: reqwest::RequestBuilder) -> Result<Value, HttpFailure> {
+    fetch_json_limited(request, MAX_LOCAL_RESPONSE_BYTES).await
+}
+
+async fn fetch_json_limited(
+    request: reqwest::RequestBuilder,
+    max_bytes: usize,
+) -> Result<Value, HttpFailure> {
     let response = request.send().await.map_err(|error| {
         if error.is_timeout() {
             HttpFailure::Timeout
@@ -1614,12 +2414,12 @@ async fn fetch_json(request: reqwest::RequestBuilder) -> Result<Value, HttpFailu
     }
     if response
         .content_length()
-        .is_some_and(|length| length as usize > MAX_LOCAL_RESPONSE_BYTES)
+        .is_some_and(|length| length as usize > max_bytes)
     {
         return Err(HttpFailure::TooLarge);
     }
     let bytes = response.bytes().await.map_err(|_| HttpFailure::Invalid)?;
-    if bytes.len() > MAX_LOCAL_RESPONSE_BYTES {
+    if bytes.len() > max_bytes {
         return Err(HttpFailure::TooLarge);
     }
     serde_json::from_slice(&bytes).map_err(|_| HttpFailure::Invalid)
@@ -1713,7 +2513,7 @@ fn local_control_status() -> ProviderStatus {
 
 /// Liest reale Auth-Zustaende; READY-/Faehigkeitstests laufen nur bei `run_smoke`.
 pub async fn statuses(settings: &ProviderSettings, run_smoke: bool) -> Vec<ProviderStatus> {
-    let (codex, claude, local) = tokio::join!(
+    let (codex, claude, api, local) = tokio::join!(
         cloud_status(
             ProviderId::Codex,
             settings.enabled(ProviderId::Codex),
@@ -1724,13 +2524,18 @@ pub async fn statuses(settings: &ProviderSettings, run_smoke: bool) -> Vec<Provi
             settings.enabled(ProviderId::Claude),
             run_smoke
         ),
+        api_pool_status(
+            &settings.api_providers,
+            settings.enabled(ProviderId::Api),
+            run_smoke
+        ),
         local_status(
             &settings.local_provider,
             settings.enabled(ProviderId::Local),
             run_smoke
         )
     );
-    vec![codex, claude, local, local_control_status()]
+    vec![codex, claude, api, local, local_control_status()]
 }
 
 /// Prueft genau einen Provider inklusive READY-/Faehigkeitstest, ohne Login auszuloesen.
@@ -1738,6 +2543,7 @@ pub async fn test_provider(provider: ProviderId, settings: &ProviderSettings) ->
     let enabled = settings.enabled(provider);
     match provider {
         ProviderId::Codex | ProviderId::Claude => cloud_status(provider, enabled, true).await,
+        ProviderId::Api => api_pool_status(&settings.api_providers, enabled, true).await,
         ProviderId::Local => local_status(&settings.local_provider, enabled, true).await,
         ProviderId::LocalControl => local_control_status(),
     }
@@ -2291,5 +3097,200 @@ mod tests {
             status.reason,
             ProviderReason::LocalControlRunning | ProviderReason::LocalControlQueueOnly
         ));
+    }
+    fn api_slot(id: &str, preset: ApiProviderPreset, model: &str) -> ApiProviderConfig {
+        ApiProviderConfig {
+            id: id.to_string(),
+            preset,
+            model: model.to_string(),
+            enabled: true,
+            ..ApiProviderConfig::default()
+        }
+    }
+
+    #[test]
+    fn strong_key_prefixes_map_to_exactly_one_provider_family() {
+        // Synthetische, nicht echte Testwerte.
+        assert_eq!(
+            strong_key_family("sk-ant-api03-EXAMPLEONLY0000"),
+            Some(&[ApiProviderPreset::Anthropic][..])
+        );
+        assert_eq!(
+            strong_key_family("sk-proj-EXAMPLEONLY0000"),
+            Some(&[ApiProviderPreset::Openai][..])
+        );
+        assert_eq!(
+            strong_key_family("xai-EXAMPLEONLY00000000"),
+            Some(&[ApiProviderPreset::Xai][..])
+        );
+        assert!(strong_key_family("sk-or-v1-EXAMPLEONLY0000")
+            .is_some_and(|family| family.contains(&ApiProviderPreset::OpenrouterEu)));
+        // Generisches sk- (OpenAI-Legacy, DeepSeek, Gateways) ist nie eindeutig.
+        assert_eq!(strong_key_family("sk-EXAMPLEONLY000000000000"), None);
+        assert_eq!(strong_key_family("EXAMPLEONLY0000000000000000000000"), None);
+    }
+
+    #[test]
+    fn keys_of_another_provider_are_never_stored_for_a_foreign_preset() {
+        let anthropic_key = "sk-ant-api03-EXAMPLEONLY0000";
+        assert!(key_conflicts_with_preset(
+            anthropic_key,
+            ApiProviderPreset::Openai
+        ));
+        assert!(!key_conflicts_with_preset(
+            anthropic_key,
+            ApiProviderPreset::Anthropic
+        ));
+        // Eigene Gateways bleiben bewusst Nutzerentscheidung.
+        assert!(!key_conflicts_with_preset(
+            anthropic_key,
+            ApiProviderPreset::CustomOpenai
+        ));
+        // Mehrdeutige Keys werden nicht blockiert, nur nicht automatisch zugeordnet.
+        assert!(!key_conflicts_with_preset(
+            "sk-EXAMPLEONLY000000000000",
+            ApiProviderPreset::Deepseek
+        ));
+        let slot = api_slot("api-1", ApiProviderPreset::Openai, "");
+        assert_eq!(
+            save_api_provider_key(&slot, anthropic_key),
+            Err(ProviderReason::ApiKeyProviderMismatch)
+        );
+    }
+
+    #[test]
+    fn api_errors_never_echo_key_material() {
+        let key = "sk-ant-api03-EXAMPLEONLY0000SECRET";
+        let reason = save_api_provider_key(&api_slot("api-1", ApiProviderPreset::Openai, ""), key)
+            .expect_err("mismatch must fail closed");
+        let serialized = serde_json::to_string(&reason).unwrap();
+        assert_eq!(serialized, "\"api_key_provider_mismatch\"");
+        assert!(!serialized.contains("EXAMPLEONLY"));
+        for sample in [
+            format!("auth failed for {key}"),
+            "xai-EXAMPLEONLY00000000 rejected".to_string(),
+            "zai key 0123456789abcdef0123456789abcdef.EXAMPLEONLY00000 bad".to_string(),
+        ] {
+            assert!(
+                !redact(&sample).contains("EXAMPLEONLY"),
+                "{}",
+                redact(&sample)
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_slot_ids_cannot_address_foreign_keychain_accounts() {
+        assert_eq!(
+            api_key_account("api-1").as_deref(),
+            Ok("api-provider-api-key:api-1")
+        );
+        for bad in ["", "../local-provider-api-key", "api 1", &"a".repeat(65)] {
+            assert_eq!(api_key_account(bad), Err(ProviderReason::InvalidEndpoint));
+        }
+    }
+
+    #[test]
+    fn remote_api_presets_require_https_and_custom_must_not_be_local() {
+        let mut custom = api_slot("api-1", ApiProviderPreset::CustomOpenai, "m");
+        custom.base_url = "http://api.example.com/v1".to_string();
+        assert_eq!(
+            api_base_url(&custom).err(),
+            Some(ProviderReason::InsecureRemoteKey)
+        );
+        custom.base_url = "https://127.0.0.1:8443/v1".to_string();
+        assert_eq!(
+            api_base_url(&custom).err(),
+            Some(ProviderReason::InsecureRemoteKey)
+        );
+        custom.base_url = "https://gateway.example.com/v1".to_string();
+        assert!(api_base_url(&custom).is_ok());
+        let zai = api_slot("api-2", ApiProviderPreset::Zai, "glm");
+        assert_eq!(
+            api_generation_url(&api_base_url(&zai).unwrap(), zai.preset)
+                .unwrap()
+                .as_str(),
+            "https://api.z.ai/api/paas/v4/chat/completions"
+        );
+    }
+
+    #[test]
+    fn effort_is_only_sent_where_the_provider_wiring_supports_it() {
+        let mut openai = api_slot("api-1", ApiProviderPreset::Openai, "gpt-5.6-sol");
+        openai.effort = ApiEffort::High;
+        let body = api_generation_body(&openai, "gpt-5.6-sol", None, "hi", 16);
+        assert_eq!(body["reasoning"]["effort"], "high");
+
+        let mut anthropic = api_slot("api-2", ApiProviderPreset::Anthropic, "claude-opus-5-5");
+        anthropic.effort = ApiEffort::High;
+        let body = api_generation_body(&anthropic, "claude-opus-5-5", None, "hi", 16);
+        assert!(body.get("reasoning").is_none());
+        assert!(body.get("reasoning_effort").is_none());
+
+        let mut auto = openai.clone();
+        auto.effort = ApiEffort::Auto;
+        let body = api_generation_body(&auto, "gpt-5.6-sol", None, "hi", 16);
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn api_slot_selection_fails_closed_and_never_hops_providers() {
+        let mut fallback = api_slot("api-1", ApiProviderPreset::Deepseek, "deepseek-v4-flash");
+        fallback.mode = ApiConnectionMode::Fallback;
+        let regular = api_slot("api-2", ApiProviderPreset::Mistral, "mistral-small-latest");
+        let mut disabled = api_slot("api-3", ApiProviderPreset::Openai, "gpt-5.6-sol");
+        disabled.enabled = false;
+        let slots = vec![fallback, regular, disabled];
+        let mut prefs = std::collections::HashMap::new();
+        prefs.insert("proj-a".to_string(), "api-3".to_string());
+
+        // Auto bevorzugt regulaere Slots vor "fallback".
+        assert_eq!(
+            select_api_connection(&slots, &prefs, None, None)
+                .unwrap()
+                .id,
+            "api-2"
+        );
+        // Explizit gewaehlter, deaktivierter Slot -> Fehler statt stiller Providerwechsel.
+        assert_eq!(
+            select_api_connection(&slots, &prefs, Some("api-3"), None).err(),
+            Some(ProviderReason::NotConfigured)
+        );
+        // Projektvorwahl auf deaktivierten Slot ebenfalls fail-closed.
+        assert_eq!(
+            select_api_connection(&slots, &prefs, None, Some("proj-a")).err(),
+            Some(ProviderReason::NotConfigured)
+        );
+        assert_eq!(
+            select_api_connection(&slots, &prefs, Some("api-1"), None)
+                .unwrap()
+                .id,
+            "api-1"
+        );
+        assert_eq!(
+            select_api_connection(&[], &prefs, None, None).err(),
+            Some(ProviderReason::NotConfigured)
+        );
+    }
+
+    #[test]
+    fn api_budget_normalization_rejects_nonsense() {
+        assert_eq!(normalize_api_budget(None), None);
+        assert_eq!(normalize_api_budget(Some(0.0)), None);
+        assert_eq!(normalize_api_budget(Some(-5.0)), None);
+        assert_eq!(normalize_api_budget(Some(f64::NAN)), None);
+        assert_eq!(normalize_api_budget(Some(25.555)), Some(25.56));
+        assert_eq!(normalize_api_budget(Some(1e9)), Some(50_000.0));
+    }
+
+    #[test]
+    fn api_model_catalog_is_bounded_and_filters_unsafe_ids() {
+        let entries = (0..2_500)
+            .map(|index| serde_json::json!({ "id": format!("vendor/model-{index}") }))
+            .chain([serde_json::json!({ "id": "bad id; rm -rf" })])
+            .collect::<Vec<_>>();
+        let models = extract_api_model_ids(&serde_json::json!({ "data": entries }));
+        assert_eq!(models.len(), MAX_API_CATALOG_MODELS);
+        assert!(models.iter().all(|model| is_safe_model_name(model)));
     }
 }

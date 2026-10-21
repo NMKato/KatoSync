@@ -91,11 +91,11 @@ Service einen `reason`-Code, den das Frontend übersetzt (Rust liefert keine UI-
 - READY-Tests laufen im System-Temp-Verzeichnis, damit keine Projektdateien oder Projekt-Instruktionen geladen werden.
 - Login-Prozesse bekommen ein offenes, nie beschriebenes stdin; KatoSync liest nur stdout/stderr, um eine offizielle HTTPS-Login-URL (Host-Allowlist) als Fallback-Link zu melden. Diese URL wird nie geloggt.
 - KatoSync besitzt die CLI-Credentials nicht und ruft beim Trennen keinen CLI-Logout auf.
-- Einziges KatoSync-eigenes Secret: optionaler Endpoint-API-Key im macOS-Schlüsselbund (`com.nmkato.katosync` / `local-provider-api-key`), gespeichert mit dem Endpoint-Origin. Er wird nur an genau diesen Origin gesendet, an entfernte Hosts nur über HTTPS, und beim Trennen gelöscht. Unter Windows/Linux ist dieser Pfad ein bewusster Safe Seam (kein OS-Store aktiviert → kein Speichern).
+- KatoSync-eigene Secrets liegen ausschließlich im OS-Schlüsselbund (`com.nmkato.katosync`; macOS Keychain, Windows Credential Manager, Linux Keyutils): der optionale lokale Endpoint-Key (`local-provider-api-key`) und je API-Slot ein Key (`api-provider-api-key:<slot-id>`). Jeder Key ist an den Endpoint-Origin gebunden, wird nur an genau diesen Origin gesendet (entfernt nur über HTTPS) und beim Trennen gelöscht. Config, REX, Ledger, Logs und Commits enthalten nie Rohkeys.
 
 ### Routingvertrag
 
-Standard: `Codex → Claude Code → Local Brain → Remote Orchestrator + RDC → Local Control`. Nur Auth-, Quota-,
+Standard: `Codex → Claude Code → API Lane → Local Brain → Remote Orchestrator + RDC → Local Control`. Nur Auth-, Quota-,
 Capacity- und Unavailable-Klassen sind failover-fähig (`nextProviderAfterFailure`). `job_failed`
 ist ausdrücklich nicht failover-fähig; ein gewöhnlicher Build-, Test- oder Codefehler bleibt beim
 aktuellen Besitzer. Local Control/RDC ist immer der letzte Platz und nimmt Jobs auch ohne
@@ -105,6 +105,30 @@ laufenden Daemon in die Queue auf (sie verschwinden nicht); „läuft“ wird au
 Das Cockpit zeigt Provider-Health, den aktuellen Besitzer und den letzten Statusübergang.
 Übergänge sind flüchtige, redigierte ViewModel-Events; Prompt-, Source- oder Token-Inhalte gehören
 nicht in dieses Modell.
+
+### API Lane (pay-per-token)
+
+Die API Lane ist eine zusätzliche, getrennt abgerechnete Lane neben Abo-CLIs, Local Brain/REX,
+Vision, AutoQ und Local Control; sie wird nie aufgewärmt und ersetzt keine andere Lane.
+
+- **Setup:** Key einfügen → `lib/apiKeyInference.ts` erkennt den Provider rein lokal am Key-Präfix.
+  Nur eindeutige Präfixe (`sk-ant-`, `sk-or-`, `sk-proj-`/`sk-svcacct-`, `xai-`) ergeben einen
+  Vorschlag; mehrdeutige/unbekannte Formate verlangen eine kurze Nutzerauswahl. Es gibt keinen
+  Probe-Request und kein Fan-out an mehrere Provider. Custom OpenAI-compatible bleibt wählbar (nur HTTPS).
+- **Verifikation:** Erst nach Bestätigung speichert Rust den Key im Schlüsselbund
+  (`save_api_provider_key`, lehnt Keys eines eindeutig anderen Providers mit
+  `api_key_provider_mismatch` ab), lädt die Modellliste nur bei diesem Provider
+  (`api_provider_models`, begrenzt auf 8 MiB / 2000 IDs, keine Redirects) und testet genau diesen
+  Slot (`test_api_connection`). Schlägt die Prüfung fehl, wird der Key wieder entfernt.
+- **Modelle/Effort:** Die Live-Liste des Providers ist maßgeblich; der eingebaute, datierte Katalog
+  (`API_CATALOG_AS_OF`) annotiert nur Preis, Tempo und Effort und erfindet keine Modell-IDs. Effort
+  wird nur angeboten, wo Rust ihn tatsächlich sendet (OpenAI, OpenRouter, xAI).
+- **Kosten/Budget:** Planwerte sind immer als Schätzung markiert. Das lokale Ledger trennt
+  provider-gemeldete Kosten von Snapshot-Schätzungen. Ein optionales Monatsbudget je Slot sperrt
+  den Slot für Auto-Routing und Worker-Läufe, sobald es erreicht ist.
+- **Routing:** `resolveApiConnection` (TS) bzw. `select_api_connection` (Rust) wählen genau einen
+  Slot. Explizite oder projektbezogene Wahl fällt nie still auf einen anderen bezahlten Provider
+  zurück; `fallback`-Slots kommen im Auto-Modus erst ohne Alternative.
 
 ### Validierungs-Gates
 

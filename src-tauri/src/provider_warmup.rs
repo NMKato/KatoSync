@@ -370,7 +370,7 @@ mod tests {
             external_work_active: false,
         };
 
-        for provider in [ProviderId::Local, ProviderId::LocalControl] {
+        for provider in [ProviderId::Api, ProviderId::Local, ProviderId::LocalControl] {
             let report = run(provider, &path, on()).await;
             assert_eq!(report.outcome, WarmupOutcome::SkippedUnsupported);
         }

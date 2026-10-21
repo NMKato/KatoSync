@@ -4,6 +4,20 @@
 import type { AgentLane } from "../types";
 
 export type AgentLaneBrand = "openai" | "claude" | "kai" | "katosync" | "remote";
+/** Brands with an approved local asset in public/. "remote" stays neutral (icon/initials). */
+export type AgentBrandAsset = Exclude<AgentLaneBrand, "remote">;
+
+export const AGENT_BRAND_ASSET_SRC: Record<AgentBrandAsset, string> = {
+  openai: "/agent-openai.png",
+  claude: "/agent-claude.png",
+  kai: "/kai-ai-icon.png",
+  katosync: "/katoos_icon_logo_trans.png"
+};
+
+/** Approved asset for a brand, or null when identity is unknown (neutral fallback). */
+export function agentBrandAsset(brand: AgentLaneBrand): AgentBrandAsset | null {
+  return brand === "remote" ? null : brand;
+}
 export type AgentLaneDisplayStatus =
   | "active"
   | "ready"
@@ -30,6 +44,8 @@ export function agentLaneBrand(lane: AgentLane): AgentLaneBrand {
   if (lane.id === "claude") return "claude";
   if (lane.id === "local") return "kai";
   if (lane.id === "local_control") return "katosync";
+  // Paid API lanes stay visually distinct from the Codex/Claude subscription lanes, whatever model they run.
+  if (lane.id === "api") return "remote";
 
   const model = normalized(lane.model);
   if (/(claude|anthropic)/.test(model)) return "claude";

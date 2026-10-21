@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   AGENT_LANE_ORDER,
+  API_PROVIDER_PRESETS,
+  MAX_API_MONTHLY_BUDGET_USD,
+  apiErrorCode,
+  normalizeApiBudget,
+  resolveApiConnection,
+  validateCustomApiEndpointInput,
   PROVIDER_RECHECK_INTERVAL_MS,
   buildSanitizedProviderDiagnostics,
   isIntelligentLane,
@@ -24,7 +30,7 @@ import {
   toProviderSettings,
   validateLocalEndpointInput
 } from "../src/lib/providerPolicy.ts";
-import type { ProviderId, ProviderStatus } from "../src/types.ts";
+import type { ApiProviderConfig, ProviderId, ProviderStatus } from "../src/types.ts";
 
 function status(provider: ProviderId, patch: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
@@ -56,39 +62,45 @@ test("failover routes only provider-class failures to the next healthy provider"
   const statuses = [
     status("codex"),
     status("claude", { state: "quota_limited", available: false }),
+    status("api"),
     status("local"),
     status("local_control")
   ];
-  const priority: ProviderId[] = ["codex", "claude", "local", "local_control"];
+  const priority: ProviderId[] = ["codex", "claude", "api", "local", "local_control"];
   // Code-/Testfehler bleiben beim aktuellen Provider (fail closed, kein stiller Wechsel).
   assert.equal(nextProviderAfterFailure(statuses, priority, "codex", "job_failed"), null);
-  // Quota bei Codex -> Claude ist selbst limitiert -> naechster gesunder Provider ist Local.
-  assert.equal(nextProviderAfterFailure(statuses, priority, "codex", "quota_limited"), "local");
-  // Deaktivierte Provider werden nie gewaehlt; Local Control bleibt der deterministische Rest.
-  const disabledLocal = statuses.map((entry) => (entry.provider === "local" ? { ...entry, enabled: false } : entry));
-  assert.equal(nextProviderAfterFailure(disabledLocal, priority, "codex", "auth_unavailable"), "local_control");
+  // Quota bei Codex -> Claude ist selbst limitiert -> die API-Lane ist der naechste gesunde Provider.
+  assert.equal(nextProviderAfterFailure(statuses, priority, "codex", "quota_limited"), "api");
+  // Deaktivierte intelligente Provider werden nie gewaehlt; Local Control bleibt der deterministische Rest.
+  const disabled = statuses.map((entry) =>
+    entry.provider === "api" || entry.provider === "local" ? { ...entry, enabled: false } : entry
+  );
+  assert.equal(nextProviderAfterFailure(disabled, priority, "codex", "auth_unavailable"), "local_control");
   assert.equal(nextProviderAfterFailure(statuses, priority, "local", "offline"), "local_control");
 });
 
 test("priority is deterministic and Local Control remains last", () => {
-  assert.deepEqual(normalizeProviderPriority(["local", "codex", "local"]), ["local", "codex", "claude", "local_control"]);
-  assert.deepEqual(normalizeProviderPriority(["local_control", "claude"]), ["claude", "codex", "local", "local_control"]);
-  assert.deepEqual(normalizeProviderPriority(undefined), ["codex", "claude", "local", "local_control"]);
-  assert.deepEqual(moveProvider(["codex", "claude", "local", "local_control"], "local", "down"), [
+  assert.deepEqual(normalizeProviderPriority(["local", "codex", "local"]), ["local", "codex", "claude", "api", "local_control"]);
+  assert.deepEqual(normalizeProviderPriority(["local_control", "claude"]), ["claude", "codex", "api", "local", "local_control"]);
+  assert.deepEqual(normalizeProviderPriority(undefined), ["codex", "claude", "api", "local", "local_control"]);
+  assert.deepEqual(moveProvider(["codex", "claude", "api", "local", "local_control"], "local", "down"), [
     "codex",
     "claude",
+    "api",
     "local",
     "local_control"
   ]);
-  assert.deepEqual(moveProvider(["codex", "claude", "local", "local_control"], "claude", "up"), [
+  assert.deepEqual(moveProvider(["codex", "claude", "api", "local", "local_control"], "claude", "up"), [
     "claude",
     "codex",
+    "api",
     "local",
     "local_control"
   ]);
-  assert.deepEqual(moveProvider(["codex", "claude", "local", "local_control"], "local_control", "up"), [
+  assert.deepEqual(moveProvider(["codex", "claude", "api", "local", "local_control"], "local_control", "up"), [
     "codex",
     "claude",
+    "api",
     "local",
     "local_control"
   ]);
@@ -159,15 +171,51 @@ test("local endpoint validation rejects credentials and injection-shaped URLs", 
   assert.equal(validateLocalEndpointInput("http://localhost:1234 ; rm -rf /"), "invalid");
 });
 
+test("API provider presets are remote HTTPS endpoints and keep EU routing explicit", () => {
+  for (const preset of Object.values(API_PROVIDER_PRESETS)) {
+    const url = new URL(preset.baseUrl);
+    assert.equal(url.protocol, "https:");
+    assert.ok(url.hostname);
+  }
+  assert.equal(API_PROVIDER_PRESETS.openrouter_eu.baseUrl, "https://eu.openrouter.ai/api/v1");
+});
+
 test("provider settings sent to Rust never contain secrets or the fallback toggle", () => {
-  const settings = toProviderSettings(["codex", "local_control"], {
-    kind: "open_ai_compatible",
-    baseUrl: "  http://127.0.0.1:8000/v1  ",
-    model: " qwen "
-  });
+  const settings = toProviderSettings(
+    ["codex", "local_control"],
+    {
+      kind: "open_ai_compatible",
+      baseUrl: "  http://127.0.0.1:8000/v1  ",
+      model: " qwen "
+    },
+    [{
+      id: "api-1",
+      label: " Primary ",
+      preset: "openrouter_eu",
+      baseUrl: "  ",
+      model: " openai/gpt-test ",
+      effort: "high",
+      mode: "auto",
+      capabilities: ["coding"],
+      enabled: true,
+      monthlyBudgetUsd: 12.345
+    }]
+  );
   assert.deepEqual(settings, {
     disabledProviders: ["codex"],
-    localProvider: { kind: "open_ai_compatible", baseUrl: "http://127.0.0.1:8000/v1", model: "qwen" }
+    localProvider: { kind: "open_ai_compatible", baseUrl: "http://127.0.0.1:8000/v1", model: "qwen" },
+    apiProviders: [{
+      id: "api-1",
+      label: "Primary",
+      preset: "openrouter_eu",
+      baseUrl: "",
+      model: "openai/gpt-test",
+      effort: "high",
+      mode: "auto",
+      capabilities: ["coding"],
+      enabled: true,
+      monthlyBudgetUsd: 12.35
+    }]
   });
   assert.equal(JSON.stringify(settings).toLowerCase().includes("key"), false);
 });
@@ -265,18 +313,118 @@ test("recheck plan keeps costly READY probes for waiting work at the reset time"
 });
 
 test("remote orchestrator is the intelligent fallback before the deterministic substrate", () => {
-  assert.deepEqual(AGENT_LANE_ORDER, ["codex", "claude", "local", "remote_orchestrator", "local_control"]);
+  assert.deepEqual(AGENT_LANE_ORDER, ["codex", "claude", "api", "local", "remote_orchestrator", "local_control"]);
+  assert.equal(isIntelligentLane("api"), true);
   assert.equal(isIntelligentLane("remote_orchestrator"), true);
   assert.equal(isIntelligentLane("local_control"), false);
   const limited = [
     status("codex", { state: "quota_limited", available: false }),
     status("claude", { state: "quota_limited", available: false }),
+    status("api", { available: false, state: "offline" }),
     status("local", { available: false, state: "offline" })
   ];
-  const priority: ProviderId[] = ["codex", "claude", "local", "local_control"];
+  const priority: ProviderId[] = ["codex", "claude", "api", "local", "local_control"];
   assert.equal(nextLaneAfterFailure(limited, priority, "codex", "quota_limited", true), "remote_orchestrator");
   assert.equal(nextLaneAfterFailure(limited, priority, "codex", "quota_limited", false), "local_control");
   assert.equal(nextLaneAfterFailure([...limited.slice(0, 1), status("claude")], priority, "codex", "quota_limited", true), "claude");
   assert.equal(nextLaneAfterFailure(limited, priority, "remote_orchestrator", "offline", true), "local_control");
   assert.equal(nextLaneAfterFailure(limited, priority, "codex", "job_failed", true), null);
+});
+
+function apiSlot(id: string, patch: Partial<ApiProviderConfig> = {}): ApiProviderConfig {
+  return {
+    id,
+    label: "",
+    preset: "openai",
+    baseUrl: "",
+    model: "gpt-5.6-sol",
+    effort: "auto",
+    mode: "auto",
+    capabilities: [],
+    enabled: true,
+    monthlyBudgetUsd: null,
+    ...patch
+  };
+}
+
+test("API routing: explicit and project choices fail closed instead of hopping to another paid provider", () => {
+  const slots = [
+    apiSlot("api-1", { preset: "deepseek", model: "deepseek-v4-flash", mode: "fallback" }),
+    apiSlot("api-2", { preset: "mistral", model: "mistral-small-latest" }),
+    apiSlot("api-3", { enabled: false })
+  ];
+  const projectPreferences = { "proj-a": "api-3", "proj-b": "api-1" };
+
+  assert.deepEqual(resolveApiConnection(slots, { connectionId: "api-3" }), {
+    connection: null,
+    source: "explicit",
+    block: "api_connection_unavailable"
+  });
+  assert.equal(resolveApiConnection(slots, { connectionId: "missing" }).block, "api_connection_unavailable");
+  assert.deepEqual(resolveApiConnection(slots, { projectId: "proj-a", projectPreferences }), {
+    connection: null,
+    source: "project",
+    block: "api_connection_unavailable"
+  });
+  assert.equal(resolveApiConnection(slots, { projectId: "proj-b", projectPreferences }).connection?.id, "api-1");
+  // Auto: regulaerer Slot vor "fallback".
+  const auto = resolveApiConnection(slots, { projectId: "proj-unset", projectPreferences });
+  assert.equal(auto.source, "auto");
+  assert.equal(auto.connection?.id, "api-2");
+  assert.equal(resolveApiConnection([], {}).block, "api_not_configured");
+  assert.equal(resolveApiConnection([apiSlot("api-9", { model: " " })], {}).block, "api_not_configured");
+});
+
+test("API routing: budgets block over-spent slots without silent provider switches", () => {
+  const slots = [
+    apiSlot("api-1", { monthlyBudgetUsd: 10 }),
+    apiSlot("api-2", { preset: "mistral", model: "mistral-small-latest", monthlyBudgetUsd: 50 })
+  ];
+  // Explizite Wahl ueber Budget -> Stopp, kein Ausweichen auf api-2.
+  assert.deepEqual(resolveApiConnection(slots, { connectionId: "api-1" }, { "api-1": 10 }), {
+    connection: null,
+    source: "explicit",
+    block: "api_budget_exceeded"
+  });
+  // Auto nimmt nur Slots im Budget.
+  assert.equal(resolveApiConnection(slots, {}, { "api-1": 12 }).connection?.id, "api-2");
+  assert.equal(resolveApiConnection(slots, {}, { "api-1": 12, "api-2": 60 }).block, "api_budget_exceeded");
+  assert.equal(resolveApiConnection(slots, {}, { "api-1": 9.99 }).connection?.id, "api-1");
+});
+
+test("API budgets normalize to a positive, capped amount", () => {
+  assert.equal(normalizeApiBudget(null), null);
+  assert.equal(normalizeApiBudget(""), null);
+  assert.equal(normalizeApiBudget("0"), null);
+  assert.equal(normalizeApiBudget(-3), null);
+  assert.equal(normalizeApiBudget("12,5"), 12.5);
+  assert.equal(normalizeApiBudget(1e9), MAX_API_MONTHLY_BUDGET_USD);
+  assert.equal(normalizeApiBudget(Number.POSITIVE_INFINITY), null);
+});
+
+test("custom OpenAI-compatible endpoints must be https without credentials or query", () => {
+  assert.equal(validateCustomApiEndpointInput("https://gateway.example.com/v1"), null);
+  assert.equal(validateCustomApiEndpointInput("http://gateway.example.com/v1"), "https_required");
+  assert.equal(validateCustomApiEndpointInput("https://user:pw@gateway.example.com/v1"), "credentials");
+  assert.equal(validateCustomApiEndpointInput("https://gateway.example.com/v1?key=x"), "query");
+  assert.equal(validateCustomApiEndpointInput(""), "missing");
+});
+
+test("API error codes are allow-listed and never echo raw messages or secrets", () => {
+  const secret = "sk-ant-api03-EXAMPLEONLYSECRET0000";
+  assert.equal(apiErrorCode("endpoint_auth_required"), "endpoint_auth_required");
+  assert.equal(apiErrorCode("api_key_provider_mismatch"), "api_key_provider_mismatch");
+  assert.equal(apiErrorCode(new Error("api_budget_exceeded")), "api_budget_exceeded");
+  for (const raw of [new Error(`401 invalid key ${secret}`), `bad ${secret}`, { key: secret }, null]) {
+    const code = apiErrorCode(raw);
+    assert.equal(code, "api_request_failed");
+    assert.equal(code.includes("EXAMPLEONLY"), false);
+  }
+});
+
+test("diagnostic redaction also covers xAI and Z.AI key shapes", () => {
+  const redacted = redactDiagnostic(
+    "xai-EXAMPLEONLY00000000 and 0123456789abcdef0123456789abcdef.EXAMPLEONLY00000 and sk-ant-api03-EXAMPLEONLY0000"
+  );
+  assert.equal(redacted.includes("EXAMPLEONLY"), false, redacted);
 });

@@ -30,7 +30,7 @@ Vision doesn't introduce a second source of truth. The graph is recomputed from 
 |---|---|---|
 | `project` | Project Registry | registered repositories |
 | `model` | Agent Sync lanes + provider status | Codex, Claude, a non-managed local model |
-| `local_brain` | Local Brain status (+ local lane if it *is* the managed brain) | REX (KAI mark) |
+| `local_brain` | Local Brain status (+ local lane if it *is* the managed brain) | Kai (KAI mark) |
 | `device` | persistent device ID / registered node identities | this device, other named nodes |
 | `memory` | Memory Fabric overview | per-project knowledge |
 | `service` | KatoSync, Memory Fabric store, Local Control, Remote Orchestrator, Mistral Library | |
@@ -39,8 +39,8 @@ Vision doesn't introduce a second source of truth. The graph is recomputed from 
 |---|---|---|
 | `knows` | holds knowledge about | KatoSync → project (registry), project memory → project |
 | `works_on` | a lane owns a non-terminal job | Claude → project |
-| `retrieves_from` | grounded retrieval | REX → Memory Fabric |
-| `runs_on` | executes on | KatoSync / REX / Local Control → this device |
+| `retrieves_from` | grounded retrieval | Kai → Memory Fabric |
+| `runs_on` | executes on | KatoSync / Kai / Local Control → this device |
 | `syncs_with` | synchronises | KatoSync → Mistral Library |
 | `routes_to` | can hand work to | KatoSync → provider lanes / Local Control |
 | `stores_in` | persists into | project memory → Memory Fabric |
@@ -67,14 +67,14 @@ Uniqueness: one ID is one node. A second source for the same ID adds facts but n
 - Jobs whose project isn't in the registry produce no node and no edge.
 - Lanes that are `not_configured`/`unknown` and an `unavailable` Remote Orchestrator aren't drawn.
 - In the browser preview, provider statuses are demo values, so lanes, the Local Brain and work edges are not projected there.
-- The "REX" label is only used when a `rex_main` identity is bound to *this* device's node ID. Otherwise the node is called "Local Brain".
+- The Local Brain node is always shown as "Kai" (same identity as Live Control; the technical alias such as `kato-local-brain` is never the visible label). A `rex_main` identity bound to *this* device's node ID is listed as an identity fact.
 
 ## Freiraum interaction
 
 - Dark cyber/space canvas with floating glass nodes. Active nodes pulse gently and active edges show a slow flow. Ready nodes stay calm. Offline/stale nodes are dimmed. The ring style shows reliability (solid = verified/canonical, dashed = observed, dotted = unknown).
-- Identity: approved local assets are used where they exist (`katoos_icon_logo_trans.png` for KatoSync, `kai-ai-icon.png` for the Local Brain/REX). Every other node shows initials plus a small kind badge.
+- Identity: provider nodes reuse the Live Control brand truth (`src/lib/agentLanePresentation.ts`, one shared asset map): Codex → `agent-openai.png`, Claude → `agent-claude.png`, Local Brain → `kai-ai-icon.png` (Kai), KatoSync / Local Control → `katoos_icon_logo_trans.png`. The Remote Orchestrator is branded only from its published model family (gpt/openai → OpenAI, claude/anthropic → Claude); without a known model it stays neutral. Every other node shows initials plus a small kind badge.
 - Clicking a node opens **one** floating card attached to it (with a leader line). The card lists status, type, truth, freshness, scope, facts, last activity, source and connections. Clicking a connection in the card opens the relationship card.
-- Clicking an edge opens a relationship card at the edge midpoint. It shows a plain-language sentence ("REX retrieves verified knowledge from Memory Fabric"), the endpoints, direction, trust boundary, evidence code, truth, freshness and last activity.
+- Clicking an edge opens a relationship card at the edge midpoint. It shows a plain-language sentence ("Kai retrieves verified knowledge from Memory Fabric"), the endpoints, direction, trust boundary, evidence code, truth, freshness and last activity.
 - Cards close via ×, Escape, a click on empty space, or by clicking the same element again. Cards contain **no actions and trigger no side effects**. "Refresh" only re-reads the read-only overview.
 - Drag pans, the mouse wheel zooms around the cursor, `+`/`-` and the buttons zoom, and ⌖ re-fits the graph. Nodes and edges are keyboard focusable (Enter/Space).
 - Filters: all / projects / models / devices & services / knowledge / cloud / local. Filters hide nodes (KatoSync stays as the anchor). Text search highlights matches and dims the rest. The layout is computed on the full graph, so filtering never makes nodes jump.

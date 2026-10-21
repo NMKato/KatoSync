@@ -7,7 +7,8 @@ import type { ReactNode } from "react";
 import { ArrowRight, Clock3, GitBranch, Layers, PauseCircle, PlayCircle, RadioTower, Route, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
 import { monitorProjection, overviewProjection } from "../lib/agentJobModel";
-import { agentLaneBrand, agentLaneDisplayModel, agentLaneDisplayStatus, splitAgentLaneTitle } from "../lib/agentLanePresentation";
+import { jobActivityPresentation } from "../lib/agentJobPresentation";
+import { AGENT_BRAND_ASSET_SRC, agentBrandAsset, agentLaneBrand, agentLaneDisplayModel, agentLaneDisplayStatus, splitAgentLaneTitle } from "../lib/agentLanePresentation";
 import { providerIcons } from "./ProviderManager";
 import type { AgentHandoff, AgentJob, AgentJobEvent, AgentLane, AgentLaneId, AgentSyncState, AutoLane, AutoLanePlan, AutoLaneState } from "../types";
 
@@ -48,6 +49,12 @@ function phaseLabel(t: TFunc, code: string): string {
   if (PHASES.includes(code)) return t(`agent.phase.${code}` as TKey);
   if (STATUSES.includes(code)) return t(`agent.status.${code}` as TKey);
   return reasonLabel(t, code);
+}
+
+/** Compact second line: friendly next safe step, otherwise the current phase. */
+function jobStepLine(t: TFunc, job: AgentJob): string {
+  if (job.nextStep) return t("agent.activity.nextStep", { step: t(`agent.nextShort.${job.nextStep}`) });
+  return phaseLabel(t, job.phase);
 }
 
 function ownerLabel(t: TFunc, job: AgentJob): string {
@@ -121,16 +128,9 @@ function laneStatusText(t: TFunc, lane: AgentLane): string {
   return t(`agent.userStatus.${status}` as TKey);
 }
 
-const brandAssets = {
-  openai: "/agent-openai.png",
-  claude: "/agent-claude.png",
-  kai: "/kai-ai-icon.png",
-  katosync: "/katoos_icon_logo_trans.png"
-} as const;
-
 function LaneBrandIcon({ lane, size = 20 }: { lane: AgentLane; size?: number }) {
-  const brand = agentLaneBrand(lane);
-  const src = brand === "remote" ? null : brandAssets[brand];
+  const asset = agentBrandAsset(agentLaneBrand(lane));
+  const src = asset ? AGENT_BRAND_ASSET_SRC[asset] : null;
   if (!src) {
     const Icon = laneIcons[lane.id];
     return <Icon size={size} aria-hidden="true" />;
@@ -159,27 +159,30 @@ function controlTowerNext(state: AgentSyncState, t: TFunc): string {
   if (!auto.enabled && auto.counts.planned) return t("agent.next.enable_auto_mode");
   const held = auto.enabled ? auto.lanes.find((lane) => lane.state === "queued" || lane.state === "waiting") : null;
   if (held) return `${held.projectId}: ${autoLaneReason(t, held)}`;
-  if (state.nextJob) return t("agent.control.queueNext", { task: state.nextJob.task });
+  if (state.nextJob) return t("agent.control.queueNext", { task: jobActivityPresentation(state.nextJob).title });
   if (state.scheduler.providerHealth.nextCheckAt) {
     return t("agent.control.schedulerNext", { time: clock(state.scheduler.providerHealth.nextCheckAt) });
   }
   return t("agent.control.noNext");
 }
 
-function controlTowerTruth(state: AgentSyncState, t: TFunc): { title: string; detail: string; tone: string } {
+function controlTowerTruth(state: AgentSyncState, t: TFunc): { title: string; detail: string; tone: string; raw?: string } {
   const job = state.currentJob;
-  if (job?.status === "running") {
+  const activity = job ? jobActivityPresentation(job) : null;
+  if (job?.status === "running" && activity) {
     return {
-      title: t("agent.control.working", { owner: ownerLabel(t, job), task: job.task }),
+      title: t("agent.control.working", { owner: ownerLabel(t, job), task: activity.title }),
+      raw: activity.tooltip,
       detail: [job.projectId, phaseLabel(t, job.phase), job.lastActivityAt ? t("agent.control.lastSeen", { time: clock(job.lastActivityAt, true) }) : null]
         .filter(Boolean)
         .join(" · "),
       tone: "working"
     };
   }
-  if (job) {
+  if (job && activity) {
     return {
-      title: t("agent.control.waiting", { task: job.task }),
+      title: t("agent.control.waiting", { task: activity.title }),
+      raw: activity.tooltip,
       detail: [ownerLabel(t, job), reasonLabel(t, job.reason ?? job.blocker), job.retryAt ? t("agent.lane.retry", { time: clock(job.retryAt) }) : null]
         .filter(Boolean)
         .join(" · "),
@@ -252,7 +255,7 @@ export function ControlTower({ state }: { state: AgentSyncState }) {
       <div className={`glass control-truth ${truth.tone}`}>
         <div>
           <span className="section-label">{t("agent.control.eyebrow")}</span>
-          <h2>{truth.title}</h2>
+          <h2 title={truth.raw}>{truth.title}</h2>
           <p>{truth.detail}</p>
           {activeJobs.length > 1 ? (
             <div className="control-active-jobs" aria-label={t("agent.control.activeJobs", { count: activeJobs.length })}>
@@ -292,6 +295,8 @@ export function ControlTower({ state }: { state: AgentSyncState }) {
               const owner = lane.id === currentOwner;
               const tone = heartbeatTone(lane);
               const displayModel = agentLaneDisplayModel(lane);
+              const ownedJob = owner ? state.currentJob : null;
+              const activity = ownedJob ? jobActivityPresentation(ownedJob) : null;
               return (
                 <li className={`control-lane-node ${tone}${owner ? " owner" : ""}`} key={lane.id}>
                   {index > 0 ? <span className="control-lane-connector" aria-hidden="true"><i /></span> : null}
@@ -301,8 +306,11 @@ export function ControlTower({ state }: { state: AgentSyncState }) {
                   </div>
                   <LaneTitle t={t} lane={lane} />
                   <small>{laneStatusText(t, lane)}</small>
-                  {owner && state.currentJob ? (
-                    <em title={state.currentJob.task}>{state.currentJob.task}</em>
+                  {ownedJob && activity ? (
+                    <>
+                      <em title={activity.tooltip}>{activity.title}</em>
+                      <span className="control-lane-step">{jobStepLine(t, ownedJob)}</span>
+                    </>
                   ) : displayModel ? (
                     <em title={lane.model ?? displayModel}>{displayModel}</em>
                   ) : null}
@@ -475,7 +483,7 @@ export function CurrentJobCard({ state, compact = false }: { state: AgentSyncSta
       {job ? (
         <>
           <div className="agent-current-head">
-            <strong title={job.task}>{job.task}</strong>
+            <strong title={jobActivityPresentation(job).tooltip}>{jobActivityPresentation(job).title}</strong>
             <small>
               {job.projectId} · {t(`agent.source.${job.source}` as TKey)}
             </small>
@@ -515,10 +523,10 @@ export function CurrentJobCard({ state, compact = false }: { state: AgentSyncSta
         <span>
           {t("agent.job.queue")}: <strong>{t("agent.job.queueValue", { count: view.queueCount })}</strong>
         </span>
-        <span title={view.next?.task}>
+        <span title={view.next ? jobActivityPresentation(view.next).tooltip : undefined}>
           {t("agent.job.nextQueued")}:{" "}
           <strong>
-            {view.next ? `${view.next.task} · ${t(`agent.status.${view.next.status}` as TKey)}` : t("agent.job.nextNone")}
+            {view.next ? `${jobActivityPresentation(view.next).title} · ${t(`agent.status.${view.next.status}` as TKey)}` : t("agent.job.nextNone")}
           </strong>
         </span>
       </div>
@@ -725,7 +733,7 @@ export function AgentJobList({ jobs, limit }: { jobs: AgentJob[]; limit?: number
         <li className={`agent-job selected ${job.status}`} key={job.id}>
           <span className="agent-job-order" title={ownerLabel(t, job)}>{job.owner ? <OwnerIcon lane={job.owner} /> : "·"}</span>
           <div>
-            <strong title={job.task}>{job.task}</strong>
+            <strong title={jobActivityPresentation(job).tooltip}>{jobActivityPresentation(job).title}</strong>
             <small>
               {job.projectId} · {t(`agent.source.${job.source}` as TKey)} · {ownerLabel(t, job)}
               {job.model ? ` · ${job.model}` : ""}

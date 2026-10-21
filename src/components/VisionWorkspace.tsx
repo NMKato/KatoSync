@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useT, type TFunc, type TKey } from "../i18n";
+import { AGENT_BRAND_ASSET_SRC } from "../lib/agentLanePresentation";
 import {
   HUB_NODE_ID,
   VISION_FILTERS,
@@ -46,10 +47,8 @@ interface Transform {
   k: number;
 }
 
-const ASSET_SRC: Record<VisionAsset, string> = {
-  katosync: "/katoos_icon_logo_trans.png",
-  kai: "/kai-ai-icon.png"
-};
+// Eine Markenwahrheit fuer Live Control und Vision (keine zweite Provider-Map).
+const ASSET_SRC: Record<VisionAsset, string> = AGENT_BRAND_ASSET_SRC;
 
 const KIND_ICON: Record<VisionNodeKind, typeof Bot> = {
   project: FolderGit2,

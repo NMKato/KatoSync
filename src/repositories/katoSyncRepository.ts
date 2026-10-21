@@ -13,6 +13,9 @@ import type {
   CodexEvent,
   SyncEvent,
   ApiCheckResponse,
+  ApiProviderCatalog,
+  ApiProviderConfig,
+  ApiWorkerResult,
   Briefing,
   BriefingPriority,
   BriefingStatus,
@@ -34,8 +37,14 @@ import type {
   SupabaseSessionStatus,
   SyncReport
 } from "../types";
-import { normalizeProviderPriority, toProviderSettings } from "../lib/providerPolicy";
+import {
+  normalizeApiBudget,
+  normalizeProviderPriority,
+  resolveApiConnection,
+  toProviderSettings
+} from "../lib/providerPolicy";
 import { emptyWarmupState } from "../lib/providerWarmupPolicy";
+import { apiMonthSpendByConnection, recordApiUsage } from "../lib/apiUsageLedger";
 import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 
 const mockConfigKey = "katosync.config";
@@ -301,14 +310,14 @@ export async function dirExists(path: string): Promise<boolean> {
 // nur nicht-geheime Metadaten; ein optionaler Endpoint-API-Key geht direkt in den OS-Schluesselbund.
 
 function providerSettings(config: AppConfig): ProviderSettings {
-  return toProviderSettings(config.disabledProviders, config.localProvider);
+  return toProviderSettings(config.disabledProviders, config.localProvider, config.apiProviders);
 }
 
 function demoStatus(provider: ProviderId, patch: Partial<ProviderStatus>): ProviderStatus {
   const now = new Date().toISOString();
   return {
     provider,
-    label: { codex: "OpenAI Codex", claude: "Anthropic Claude Code", local: "Local Model", local_control: "Local Control / RDC" }[provider],
+    label: { codex: "OpenAI Codex", claude: "Anthropic Claude Code", api: "API Provider", local: "Local Model", local_control: "Local Control / RDC" }[provider],
     state: "unknown",
     reason: "not_checked",
     installed: false,
@@ -327,9 +336,20 @@ function demoStatus(provider: ProviderId, patch: Partial<ProviderStatus>): Provi
 function demoProviderStatuses(config: AppConfig): ProviderStatus[] {
   const enabled = (provider: ProviderId) => !config.disabledProviders.includes(provider);
   const cloud = ["text_code_agent", "workspace_write", "cloud"];
+  const configuredApis = config.apiProviders.filter((connection) => connection.enabled && connection.model);
   return [
     demoStatus("codex", { state: "authenticated", reason: "ready_test_pending", installed: true, authenticated: true, enabled: enabled("codex"), version: "demo", capabilities: cloud }),
     demoStatus("claude", { state: "auth_unavailable", reason: "sign_in_required", installed: true, enabled: enabled("claude"), version: "demo", capabilities: cloud }),
+    demoStatus("api", {
+      state: configuredApis.length ? "authenticated" : "unknown",
+      reason: configuredApis.length ? "ready_test_pending" : "not_configured",
+      installed: true,
+      authenticated: Boolean(configuredApis.length),
+      enabled: enabled("api"),
+      model: configuredApis[0]?.model || null,
+      endpointScope: "remote",
+      capabilities: ["text_code_agent", "remote_api", "multi_connection"]
+    }),
     demoStatus("local", {
       state: config.localProvider.baseUrl ? "offline" : "unknown",
       reason: config.localProvider.baseUrl ? "offline" : "not_configured",
@@ -416,6 +436,68 @@ export async function disconnectProvider(provider: ProviderId): Promise<void> {
 export async function saveLocalProviderKey(baseUrl: string, apiKey: string): Promise<void> {
   if (!isTauri()) throw new Error("secret_store_unavailable");
   await invoke("save_local_provider_key", { baseUrl, apiKey });
+}
+
+export async function saveApiProviderKey(config: ApiProviderConfig, apiKey: string): Promise<void> {
+  if (!isTauri()) throw new Error("secret_store_unavailable");
+  await invoke("save_api_provider_key", { config, apiKey });
+}
+
+export async function fetchApiProviderModels(config: ApiProviderConfig): Promise<ApiProviderCatalog> {
+  if (!isTauri()) return { connectionId: config.id, providerLabel: "API Provider", baseUrl: config.baseUrl, models: [] };
+  return invoke<ApiProviderCatalog>("api_provider_models", { config });
+}
+
+// Prueft genau EINEN API-Slot (Modellliste + READY) beim eigenen Provider. Kein Pool-Fan-out.
+export async function testApiConnection(config: ApiProviderConfig): Promise<ProviderStatus> {
+  if (!isTauri()) {
+    return demoStatus("api", {
+      state: config.model ? "authenticated" : "unknown",
+      reason: config.model ? "ready_test_pending" : "not_configured",
+      installed: true,
+      authenticated: Boolean(config.model),
+      enabled: config.enabled,
+      model: config.model || null,
+      endpointScope: "remote",
+      capabilities: ["text_code_agent", "remote_api"]
+    });
+  }
+  return invoke<ProviderStatus>("test_api_connection", { config });
+}
+
+export async function removeApiProviderKey(connectionId: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("disconnect_api_provider_key", { connectionId });
+}
+
+export async function runApiWorker(
+  prompt: string,
+  options: { connectionId?: string | null; projectId?: string | null } = {}
+): Promise<ApiWorkerResult> {
+  if (!isTauri()) throw new Error("api_worker_unavailable");
+  // Route + Budget werden vor dem Lauf entschieden; Rust erhaelt immer eine konkrete Slot-ID und
+  // weicht nie still auf einen anderen bezahlten Provider aus.
+  const config = await loadConfig();
+  const route = resolveApiConnection(
+    config.apiProviders,
+    {
+      connectionId: options.connectionId,
+      projectId: options.projectId,
+      projectPreferences: config.apiProjectPreferences
+    },
+    apiMonthSpendByConnection()
+  );
+  if (!route.connection) throw new Error(route.block ?? "api_not_configured");
+  const result = await invoke<ApiWorkerResult>("run_api_worker", {
+    prompt,
+    connectionId: route.connection.id,
+    projectId: options.projectId ?? null
+  });
+  const connection = config.apiProviders.find((item) => item.id === result.connectionId);
+  if (connection) {
+    recordApiUsage(connection, result, options.projectId ?? null);
+  }
+  return result;
 }
 
 export async function discoverLocalProviders(): Promise<DiscoveredLocalProvider[]> {
@@ -1546,8 +1628,35 @@ function slugify(value: string) {
 }
 
 function normalizeConfig(config: AppConfig): AppConfig {
+  // Migration: Preview-Builds vor Multi-API speicherten genau eine `apiProvider`-Connection.
+  // Der Loader akzeptiert sie weiter, schreibt danach aber nur noch die neue Array-Struktur.
+  const rawConnections = config.apiProviders?.length
+    ? config.apiProviders
+    : config.apiProvider
+      ? [config.apiProvider]
+      : [];
+  const allowedPresets = new Set([
+    "openai", "anthropic", "openrouter_global", "openrouter_eu", "deepseek",
+    "mistral", "xai", "zai", "custom_openai"
+  ]);
+  const allowedEfforts = new Set(["auto", "low", "medium", "high", "xhigh", "max"]);
+  const allowedModes = new Set(["auto", "specialist", "fallback"]);
+  const apiProviders = rawConnections.map((connection, index) => ({
+    id: connection.id?.trim() || `api-${index + 1}`,
+    label: connection.label?.trim() || "",
+    preset: allowedPresets.has(connection.preset) ? connection.preset : "openrouter_eu",
+    baseUrl: connection.baseUrl ?? "",
+    model: connection.model ?? "",
+    effort: allowedEfforts.has(connection.effort) ? connection.effort : "auto",
+    mode: allowedModes.has(connection.mode) ? connection.mode : "auto",
+    capabilities: Array.isArray(connection.capabilities) ? connection.capabilities : [],
+    enabled: connection.enabled !== false,
+    monthlyBudgetUsd: normalizeApiBudget(connection.monthlyBudgetUsd)
+  })) as ApiProviderConfig[];
+  const { apiProvider: _legacyApiProvider, ...withoutLegacy } = config;
+
   return {
-    ...config,
+    ...withoutLegacy,
     mcp: {
       baseUrl: config.mcp?.baseUrl || defaultConfig.mcp.baseUrl
     },
@@ -1572,7 +1681,14 @@ function normalizeConfig(config: AppConfig): AppConfig {
       model: config.localProvider?.model ?? ""
     },
     // Alt-Configs ohne Feld: Warm-up an (Rust-Default identisch).
-    providerWarmupEnabled: config.providerWarmupEnabled ?? defaultConfig.providerWarmupEnabled
+    providerWarmupEnabled: config.providerWarmupEnabled ?? defaultConfig.providerWarmupEnabled,
+    apiProviders,
+    apiProjectPreferences: Object.fromEntries(
+      Object.entries(config.apiProjectPreferences ?? {}).filter(
+        ([projectId, connectionId]) =>
+          projectId.trim().length > 0 && apiProviders.some((connection) => connection.id === connectionId)
+      )
+    )
   };
 }
 

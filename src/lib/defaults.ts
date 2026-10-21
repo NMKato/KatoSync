@@ -48,14 +48,16 @@ export const defaultConfig: AppConfig = {
   runnerConnectorMode: false,
   referenceRoot: "",
   projectRepos: {},
-  providerPriority: ["codex", "claude", "local", "local_control"],
+  providerPriority: ["codex", "claude", "api", "local", "local_control"],
   disabledProviders: [],
   localProvider: {
     kind: "ollama",
     baseUrl: "",
     model: ""
   },
-  providerWarmupEnabled: true
+  providerWarmupEnabled: true,
+  apiProviders: [],
+  apiProjectPreferences: {}
 };
 
 export const weekdayLabels: Record<string, string> = {
