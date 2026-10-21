@@ -21,12 +21,13 @@ function Meter({ label, value, detail }: { label: string; value: number | null; 
   );
 }
 
-export function ResourceWarningBanner({ snapshot, onDismiss, onOpen }: {
+export function ResourceWarningBanner({ snapshot, katoAiRunning, onDismiss, onOpen }: {
   snapshot: ResourceSnapshot | null;
+  katoAiRunning: boolean;
   onDismiss: () => void;
   onOpen: () => void;
 }) {
-  const warning = snapshot ? resourceWarning(snapshot) : null;
+  const warning = snapshot ? resourceWarning(snapshot, katoAiRunning) : null;
   if (!warning) return null;
   return (
     <div className="resource-brief-warning" role="status">
@@ -47,7 +48,7 @@ export function SystemResourcesCard({ snapshot, loading, onRefresh, katoAiRunnin
 }) {
   const usage = snapshot ? percentUsed(snapshot.usedRamBytes, snapshot.totalRamBytes) : null;
   const available = snapshot ? formatGiB(snapshot.availableRamBytes) : "—";
-  const warning = snapshot && resourceWarning(snapshot);
+  const warning = snapshot && resourceWarning(snapshot, katoAiRunning);
   return (
     <section className="glass system-resource-card" aria-label="Systemressourcen">
       <div className="system-resource-title">
@@ -95,23 +96,27 @@ export function SystemResourcesCard({ snapshot, loading, onRefresh, katoAiRunnin
             </small>
           ) : null}
         </div>
-        <div className={`resource-ai-status ${snapshot.warmupRecommendation}`}>
+        <div className={`resource-ai-status ${katoAiRunning && snapshot.warmupRecommendation === "caution" ? "headroom" : snapshot.warmupRecommendation}`}>
           {warning ? <TriangleAlert size={16} /> : <Info size={16}/>}
           <div>
             <span className="resource-ai-running">{katoAiRunning ? "Kato AI läuft" : katoAiInstalled ? "Kato AI installiert · nicht gestartet" : "Kato AI noch nicht installiert"}</span>
-            <strong>{snapshot.warmupRecommendation === "headroom"
-              ? "Kato AI: Speicherreserve vorhanden"
-              : snapshot.warmupRecommendation === "caution"
-                ? "Kato AI: knappe Speicherreserve"
-                : "Kato AI: Speicher knapp"}</strong>
-            <p>{warning ?? "Keine aktuelle Speicherwarnung. Der tatsächliche Modellstart kann trotzdem mehr Speicher benötigen."}
-              {" "}Schätzung für Modell und Systemreserve: {formatGiB(snapshot.minimumFreeRamBytes)} frei.</p>
+            <strong>{katoAiRunning && snapshot.warmupRecommendation !== "constrained"
+              ? "Kato AI ist bereits geladen"
+              : snapshot.warmupRecommendation === "headroom"
+                ? "Kato AI: Speicherreserve vorhanden"
+                : snapshot.warmupRecommendation === "caution"
+                  ? "Kato AI: knappe Speicherreserve für einen neuen Start"
+                  : "Kato AI: Speicher knapp"}</strong>
+            <p>{katoAiRunning && snapshot.warmupRecommendation !== "constrained"
+              ? "Für das bereits geladene Modell ist keine zweite Speicherreserve nötig. Weitere Modelle benötigen jedoch zusätzliche Ressourcen."
+              : warning ?? "Kein aktueller Engpass erkennbar. Ein Modellstart kann dennoch zusätzlichen Speicher benötigen."}
+              {!katoAiRunning ? ` Geschätzte Reserve für einen neuen Modellstart: ${formatGiB(snapshot.minimumFreeRamBytes)}.` : ""}</p>
           </div>
         </div>
         {snapshot.externalModels.length ? (
           <p className="resource-other-models">
             <strong>Weitere lokale KI erkannt:</strong>{" "}
-            {snapshot.externalModels.map(p => `${p.label} (${p.instances}×, ${formatGiB(p.ramBytes)} RAM)`).join(" · ")}.
+            {snapshot.externalModels.map(p => `${p.label} (${p.instances}×, ${p.ramBytes > 0 ? formatGiB(p.ramBytes) : "RAM nicht messbar"})`).join(" · ")}.
             {" "}KatoSync beendet diese Prozesse nicht automatisch.
           </p>
         ) : (

@@ -41,3 +41,13 @@ test("backend enumeration is never confused with proven model inference", () => 
   assert.equal(result.localBrainBackend.enumerated, true);
   assert.equal(result.localBrainBackend.inferenceVerified, false);
 });
+
+
+test("already-loaded Kato AI does not get an additional fresh-model RAM requirement", () => {
+  const caution = sample("caution");
+  assert.equal(resourceWarning(caution, true), null);
+  assert.notEqual(resourceWarning(caution, false), null);
+  const pressured = resourceWarning(sample("constrained"), true) ?? "";
+  assert.match(pressured, /läuft bereits/);
+  assert.doesNotMatch(pressured, /nochmals|zusätzlichen freien Speicher für Kato AI/);
+});

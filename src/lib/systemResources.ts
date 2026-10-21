@@ -41,7 +41,11 @@ export function percentUsed(used: number, total: number): number | null {
   if (!(total > 0) || !Number.isFinite(total) || !Number.isFinite(used)) return null;
   return Math.round(Math.max(0, Math.min(100, used / total * 100)));
 }
-export function resourceWarning(snapshot: ResourceSnapshot): string | null {
+export function resourceWarning(snapshot: ResourceSnapshot, katoAiRunning = false): string | null {
+  if (snapshot.warmupRecommendation === "constrained" && katoAiRunning) {
+    return "Kato AI läuft bereits. Es ist sehr wenig Arbeitsspeicher frei; weitere Modelle oder Anwendungen können das System ausbremsen.";
+  }
+  if (snapshot.warmupRecommendation === "caution" && katoAiRunning) return null;
   if (snapshot.warmupRecommendation === "constrained") {
     return "Wenig freier Speicher für Kato AI. Die lokale KI kann langsam starten oder Speicherdruck auslösen. Andere Programme bitte nur nach eigener Entscheidung schließen.";
   }

@@ -1014,6 +1014,15 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
     ))
 }
 
+/// Trusted *managed* runtime root, also available after a desktop app restart.
+/// A previous Kato-owned llama-server process may survive the UI lifetime and
+/// must not be mislabeled as a foreign local model.
+pub(crate) fn managed_runtime_root(app: &AppHandle) -> Option<PathBuf> {
+    let current = manifest().ok()?;
+    let directory = runtime_dir(app, &current).ok()?;
+    fs::canonicalize(directory).ok()
+}
+
 pub(crate) fn owned_pid() -> Option<u32> {
     child_slot()
         .lock()

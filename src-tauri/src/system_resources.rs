@@ -2,7 +2,10 @@
 // Honest, read-only native host resource snapshot. Never terminates foreign processes,
 // adjusts GPU state, launches models, or reads private process arguments.
 use serde::Serialize;
-use std::time::Duration;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use sysinfo::{ProcessesToUpdate, System};
 
 #[derive(Debug, Clone, Serialize)]
@@ -77,7 +80,19 @@ fn model_label(raw: &str) -> Option<&'static str> {
     }
 }
 
-fn sample_host() -> (u64, u64, Option<f32>, Vec<ExternalModelProcess>) {
+/// Only paths within the canonical Kato-managed runtime may be excluded,
+/// never an arbitrary same-named executable elsewhere on the system.
+fn is_managed_runtime_executable(executable: Option<&Path>, runtime_root: Option<&Path>) -> bool {
+    let Some((exe, root)) = executable.zip(runtime_root) else {
+        return false;
+    };
+    exe.canonicalize()
+        .is_ok_and(|resolved| resolved.starts_with(root))
+}
+
+fn sample_host(
+    managed_runtime_root: Option<PathBuf>,
+) -> (u64, u64, Option<f32>, Vec<ExternalModelProcess>) {
     let mut system = System::new();
     system.refresh_memory();
     system.refresh_cpu_usage();
@@ -100,6 +115,11 @@ fn sample_host() -> (u64, u64, Option<f32>, Vec<ExternalModelProcess>) {
         }
         let name = p.name().to_string_lossy();
         if let Some(label) = model_label(&name) {
+            if label == "llama.cpp"
+                && is_managed_runtime_executable(p.exe(), managed_runtime_root.as_deref())
+            {
+                continue;
+            }
             let entry = tracked.entry(label).or_insert((0, 0));
             entry.0 += 1;
             entry.1 = entry.1.saturating_add(p.memory());
@@ -284,8 +304,9 @@ async fn detect_gpu() -> GpuObservation {
 pub(crate) async fn system_resource_snapshot(
     app: tauri::AppHandle,
 ) -> Result<ResourceSnapshot, String> {
+    let managed_runtime_root = crate::local_brain::managed_runtime_root(&app);
     let (total, available, cpu, external_models) =
-        tauri::async_runtime::spawn_blocking(sample_host)
+        tauri::async_runtime::spawn_blocking(move || sample_host(managed_runtime_root))
             .await
             .map_err(|_| "Ressourcenmessung unterbrochen.".to_string())?;
     // Device-wide macOS GPU telemetry is measured using IOAccelerator when available.
@@ -324,6 +345,25 @@ pub(crate) async fn system_resource_snapshot(
 mod tests {
     use super::*;
     #[test]
+    fn kato_managed_llama_is_not_classed_as_an_external_model_after_ui_restart() {
+        let base = std::env::temp_dir().join(format!("katosync-ownership-{}", std::process::id()));
+        let runtime = base.join("runtime").join("b11272");
+        let adjacent = base.join("runtime-other");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::create_dir_all(&adjacent).unwrap();
+        let owned = runtime.join("llama-server");
+        let foreign = adjacent.join("llama-server");
+        std::fs::write(&owned, b"synthetic").unwrap();
+        std::fs::write(&foreign, b"synthetic").unwrap();
+        let root = runtime.canonicalize().unwrap();
+        assert!(is_managed_runtime_executable(Some(&owned), Some(&root)));
+        assert!(!is_managed_runtime_executable(Some(&foreign), Some(&root)));
+        assert!(!is_managed_runtime_executable(None, Some(&root)));
+        assert!(!is_managed_runtime_executable(Some(&owned), None));
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
     fn recommendation_depends_on_available_not_only_installed_ram() {
         assert_eq!(observation(16 * GIB, 10 * GIB), "headroom");
         assert_eq!(observation(16 * GIB, 7 * GIB), "caution");
@@ -341,7 +381,7 @@ mod tests {
     }
     #[test]
     fn native_snapshot_reads_sane_host_ram_without_modifying_processes() {
-        let (total, available, cpu, _) = sample_host();
+        let (total, available, cpu, _) = sample_host(None);
         assert!(total >= GIB);
         assert!(available <= total);
         if let Some(value) = cpu {

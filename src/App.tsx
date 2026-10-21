@@ -815,6 +815,7 @@ export default function App() {
 
         {systemResources.snapshot?.warmupRecommendation !== dismissedResourceLevel ? (
           <ResourceWarningBanner snapshot={systemResources.snapshot}
+            katoAiRunning={vm.localBrainStatus?.running === true}
             onDismiss={() => setDismissedResourceLevel(systemResources.snapshot?.warmupRecommendation ?? null)}
             onOpen={() => enterModeAt("agentSync", "agentDashboard")}/>
         ) : null}
