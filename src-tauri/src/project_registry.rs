@@ -1224,7 +1224,11 @@ mod tests {
         let alpha = result
             .repos
             .iter()
-            .find(|repo| repo.path.ends_with("/Alpha"))
+            .find(|repo| {
+                Path::new(&repo.path)
+                    .file_name()
+                    .is_some_and(|part| part == "Alpha")
+            })
             .unwrap();
         assert_eq!(
             alpha.remote.as_deref(),
@@ -1237,7 +1241,9 @@ mod tests {
         assert!(alpha
             .worktrees
             .iter()
-            .any(|worktree| worktree.path.ends_with("/Alpha-feat-x")));
+            .any(|worktree| Path::new(&worktree.path)
+                .file_name()
+                .is_some_and(|part| part == "Alpha-feat-x")));
 
         // Einzelnes Projekt: genau dieses Repo.
         assert_eq!(discover(&main).unwrap().repos.len(), 1);
