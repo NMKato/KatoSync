@@ -39,12 +39,13 @@ pub(crate) struct ResourceSnapshot {
     model_ram_budget_bytes: u64,
     minimum_free_ram_bytes: u64,
     warmup_recommendation: &'static str,
+    local_brain_backend: crate::local_brain::BackendCapability,
 }
 
 const GIB: u64 = 1024 * 1024 * 1024;
 // A conservative *estimate* for Gemma E4B Q4 + llama.cpp context/runtime overhead.
 // It is NOT an actual GPU benchmark or guaranteed model memory allocation.
-const MODEL_BUDGET_GIB: u64 = 7;
+const MODEL_BUDGET_GIB: u64 = crate::local_brain::MODEL_BUDGET_MIB / 1024;
 const OS_HEADROOM_GIB: u64 = 2;
 const MIN_FREE_GIB: u64 = MODEL_BUDGET_GIB + OS_HEADROOM_GIB;
 static GPU_CACHE: tokio::sync::OnceCell<GpuObservation> = tokio::sync::OnceCell::const_new();
@@ -187,7 +188,7 @@ async fn detect_gpu() -> GpuObservation {
                     .and_then(|v| v.get("SPDisplaysDataType"))
                     .and_then(|v| v.as_array())
                     .and_then(|a| a.first())
-                    .and_then(|entry| entry.get("sppci_model"))
+                    .and_then(|entry| entry.get("sppci_model").or_else(|| entry.get("_name")))
                     .and_then(|v| v.as_str())
                     .filter(|s| s.len() <= 100 && !s.contains(['\n', '\r']))
                     .map(str::to_string);
@@ -247,7 +248,9 @@ async fn detect_gpu() -> GpuObservation {
 }
 
 #[tauri::command]
-pub(crate) async fn system_resource_snapshot() -> Result<ResourceSnapshot, String> {
+pub(crate) async fn system_resource_snapshot(
+    app: tauri::AppHandle,
+) -> Result<ResourceSnapshot, String> {
     let (total, available, cpu, external_models) =
         tauri::async_runtime::spawn_blocking(sample_host)
             .await
@@ -274,6 +277,7 @@ pub(crate) async fn system_resource_snapshot() -> Result<ResourceSnapshot, Strin
         model_ram_budget_bytes: MODEL_BUDGET_GIB * GIB,
         minimum_free_ram_bytes: MIN_FREE_GIB * GIB,
         warmup_recommendation: observation(total, available),
+        local_brain_backend: crate::local_brain::backend_capability(&app).await,
     })
 }
 

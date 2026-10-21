@@ -75,6 +75,26 @@ export function SystemResourcesCard({ snapshot, loading, onRefresh, katoAiRunnin
                 : "GPU-Auslastung derzeit nicht messbar"}/>
           </div>
         </div>
+        <div className="resource-backend-line">
+          <strong>Kato AI Rechenweg:</strong>{" "}
+          {!snapshot.localBrainBackend.runtimeInstalled
+            ? "Runtime nicht installiert"
+            : snapshot.localBrainBackend.selected !== "cpu"
+              ? snapshot.localBrainBackend.selected.toUpperCase() + " durch installierte Runtime erkannt, Speicherreserve plausibel"
+              : snapshot.localBrainBackend.enumerated
+                ? "CPU-Fallback: GPU-Speicher reicht möglicherweise nicht aus oder ist nicht messbar"
+                : "CPU-Fallback (kein kompatibles GPU-Gerät in der installierten Runtime)"}
+          {snapshot.localBrainBackend.selected !== "cpu"
+            ? " · GPU-Inferenz noch nicht separat bestätigt"
+            : ""}
+          {snapshot.localBrainBackend.freeDeviceMib !== null ? (
+            <small className="resource-backend-capacity">
+              {" · "}llama.cpp meldet {formatGiB(snapshot.localBrainBackend.freeDeviceMib * 1024 * 1024)} freien
+              {snapshot.gpu.memoryKind === "unified" ? " gemeinsamen GPU-Adressraum" : " Gerätespeicher"}
+              {" "} (Momentaufnahme, keine zweite RAM-Reserve).
+            </small>
+          ) : null}
+        </div>
         <div className={`resource-ai-status ${snapshot.warmupRecommendation}`}>
           {warning ? <TriangleAlert size={16} /> : <Info size={16}/>}
           <div>

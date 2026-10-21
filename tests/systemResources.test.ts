@@ -10,7 +10,10 @@ function sample(level: ResourceSnapshot["warmupRecommendation"]): ResourceSnapsh
     gpu: { name: "Apple GPU", memoryKind: "unified", totalVramBytes: null,
       utilizationPercent: null, backend: "metal_supported", evidence: "macos_display_hardware_metadata_only" },
     externalModels: [], modelDiskBytes: 4_590_807_392, modelRamBudgetBytes: 7*G,
-    minimumFreeRamBytes: 9*G, warmupRecommendation: level
+    minimumFreeRamBytes: 9*G, warmupRecommendation: level,
+    localBrainBackend: { runtimeInstalled: true, selected: "metal", enumerated: true,
+      reason: "compatible_gpu_with_estimated_memory_headroom", inferenceVerified: false,
+      freeDeviceMib: 12123 }
   };
 }
 test("correct percentages are derived only from measured values", () => {
@@ -30,4 +33,11 @@ test("GPU utilization remains explicitly unavailable without real telemetry", ()
   assert.equal(s.gpu.utilizationPercent, null);
   assert.equal(s.gpu.totalVramBytes, null);
   assert.equal(s.gpu.memoryKind, "unified");
+});
+
+test("backend enumeration is never confused with proven model inference", () => {
+  const result = sample("headroom");
+  assert.equal(result.localBrainBackend.selected, "metal");
+  assert.equal(result.localBrainBackend.enumerated, true);
+  assert.equal(result.localBrainBackend.inferenceVerified, false);
 });

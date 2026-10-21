@@ -14,6 +14,14 @@ export interface ExternalModelProcess {
   instances: number;
   ramBytes: number;
 }
+export interface RuntimeBackendCapability {
+  runtimeInstalled: boolean;
+  selected: "cpu" | "metal" | "cuda" | "vulkan";
+  enumerated: boolean;
+  reason: string;
+  inferenceVerified: boolean;
+  freeDeviceMib: number | null;
+}
 export interface ResourceSnapshot {
   measuredAt: string;
   os: string;
@@ -27,6 +35,7 @@ export interface ResourceSnapshot {
   modelRamBudgetBytes: number;
   minimumFreeRamBytes: number;
   warmupRecommendation: WarmupRecommendation;
+  localBrainBackend: RuntimeBackendCapability;
 }
 export function percentUsed(used: number, total: number): number | null {
   if (!(total > 0) || !Number.isFinite(total) || !Number.isFinite(used)) return null;
