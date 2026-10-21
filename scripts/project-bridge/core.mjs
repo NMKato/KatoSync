@@ -3,7 +3,7 @@
 // No shell, no arbitrary caller paths, no background network listener, no code writes.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -128,9 +128,20 @@ function trustworthyRoot(item) {
   // On Windows, a canonical Git path and a Node realpath may differ only by
   // drive-letter or directory casing; compare normalized filesystem identity.
   const canonicalTop = realpathSync(toplevel);
-  if ((process.platform === "win32" ? canonicalTop.toLowerCase() : canonicalTop)
-      !== (process.platform === "win32" ? root.toLowerCase() : root)) {
-    throw new BridgeError("registry_root_mismatch");
+  const normTop = process.platform === "win32" ? canonicalTop.toLowerCase() : canonicalTop;
+  const normRoot = process.platform === "win32" ? root.toLowerCase() : root;
+  if (normTop !== normRoot) {
+    // Git for Windows may traverse a temp-folder junction (e.g. hosted CI).
+    // Accept ONLY when both paths are the SAME filesystem object. A nonzero
+    // device/inode pair is required; unknown identities fail closed.
+    const fromGit = statSync(toplevel, { bigint: true });
+    const fromRegistry = statSync(root, { bigint: true });
+    const samePhysicalDirectory = fromGit.isDirectory()
+      && fromRegistry.isDirectory()
+      && fromGit.ino !== 0n
+      && fromGit.dev === fromRegistry.dev
+      && fromGit.ino === fromRegistry.ino;
+    if (!samePhysicalDirectory) throw new BridgeError("registry_root_mismatch");
   }
   return root;
 }
