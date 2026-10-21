@@ -3,7 +3,11 @@
 // This is NOT a writer lease, approval grant, sandbox or permission to run an agent.
 use serde::Serialize;
 use serde_json::Value;
-use std::{fs, path::Path, process::{Command, Stdio}};
+use std::{
+    fs,
+    path::Path,
+    process::{Command, Stdio},
+};
 
 const MAX_REGISTRY_SIZE: u64 = 4 * 1024 * 1024;
 
@@ -21,10 +25,14 @@ pub(crate) struct SecureProjectPreflight {
 /// No shell, no credential prompts, no hooks/fsmonitor or optional Git locks.
 fn git_read(repo: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let output = Command::new("git")
-        .arg("-c").arg("core.hooksPath=/dev/null")
-        .arg("-c").arg("core.fsmonitor=false")
-        .arg("-c").arg("submodule.recurse=false")
-        .arg("-C").arg(repo)
+        .arg("-c")
+        .arg("core.hooksPath=/dev/null")
+        .arg("-c")
+        .arg("core.fsmonitor=false")
+        .arg("-c")
+        .arg("submodule.recurse=false")
+        .arg("-C")
+        .arg(repo)
         .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -32,7 +40,10 @@ fn git_read(repo: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
         .output()
         .map_err(|_| "Sicherheitsprüfung: Git ist nicht verfügbar.".to_string())?;
     if !output.status.success() {
-        return Err("Sicherheitsprüfung: Git konnte den Projektzustand nicht eindeutig ermitteln.".to_string());
+        return Err(
+            "Sicherheitsprüfung: Git konnte den Projektzustand nicht eindeutig ermitteln."
+                .to_string(),
+        );
     }
     Ok(output.stdout)
 }
@@ -64,7 +75,9 @@ pub(crate) fn inspect_registered(
         return Err("Sicherheitsprüfung: Unbekannte Project-Registry-Version.".to_string());
     }
     if !valid_sha(expected_head) {
-        return Err("Sicherheitsprüfung: Vollständige erwartete Git-HEAD-SHA erforderlich.".to_string());
+        return Err(
+            "Sicherheitsprüfung: Vollständige erwartete Git-HEAD-SHA erforderlich.".to_string(),
+        );
     }
     let (root, recorded_head) = crate::project_work_resume::registered_root(registry, project_id)
         .map_err(str::to_string)?;
@@ -72,7 +85,9 @@ pub(crate) fn inspect_registered(
         "Sicherheitsprüfung: Projekt muss vor Arbeitsbeginn neu gescannt werden.".to_string()
     })?;
     if !valid_sha(&recorded_head) || !recorded_head.eq_ignore_ascii_case(expected_head) {
-        return Err("Sicherheitsprüfung: Registrierter Git-Stand weicht vom Auftrag ab.".to_string());
+        return Err(
+            "Sicherheitsprüfung: Registrierter Git-Stand weicht vom Auftrag ab.".to_string(),
+        );
     }
     let canonical = fs::canonicalize(Path::new(&root))
         .map_err(|_| "Sicherheitsprüfung: Projektordner nicht zugänglich.".to_string())?;
@@ -86,11 +101,15 @@ pub(crate) fn inspect_registered(
     let git_root = fs::canonicalize(Path::new(&top))
         .map_err(|_| "Sicherheitsprüfung: Git-Wurzel ungültig.".to_string())?;
     if git_root != canonical {
-        return Err("Sicherheitsprüfung: Registry-Pfad ist nicht die Git-Projektwurzel.".to_string());
+        return Err(
+            "Sicherheitsprüfung: Registry-Pfad ist nicht die Git-Projektwurzel.".to_string(),
+        );
     }
     let actual_head = git_line(Path::new(&git_path), &["rev-parse", "--verify", "HEAD"])?;
     if !valid_sha(&actual_head) || !actual_head.eq_ignore_ascii_case(expected_head) {
-        return Err("Sicherheitsprüfung: Git-HEAD hat sich verändert. Vorgang abbrechen.".to_string());
+        return Err(
+            "Sicherheitsprüfung: Git-HEAD hat sich verändert. Vorgang abbrechen.".to_string(),
+        );
     }
     let dirty = git_read(
         Path::new(&git_path),
@@ -138,10 +157,16 @@ mod tests {
     use serde_json::json;
     use std::{path::PathBuf, process::Command};
 
-    struct RepoFixture { path: PathBuf, head: String }
+    struct RepoFixture {
+        path: PathBuf,
+        head: String,
+    }
     impl RepoFixture {
         fn new() -> Self {
-            let path = std::env::temp_dir().join(format!("katosync-secure-preflight-{}", uuid::Uuid::new_v4()));
+            let path = std::env::temp_dir().join(format!(
+                "katosync-secure-preflight-{}",
+                uuid::Uuid::new_v4()
+            ));
             fs::create_dir_all(&path).unwrap();
             Self::git(&path, &["init", "-q"]);
             fs::write(path.join("README.md"), "initial\n").unwrap();
@@ -152,85 +177,101 @@ mod tests {
         }
         fn git(path: &Path, args: &[&str]) {
             let status = Command::new("git")
-                .arg("-C").arg(path)
-                .args(["-c", "user.name=KatoSync Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"])
+                .arg("-C")
+                .arg(path)
+                .args([
+                    "-c",
+                    "user.name=KatoSync Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
                 .args(args)
-                .stdout(Stdio::null()).stderr(Stdio::null()).status().unwrap();
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .unwrap();
             assert!(status.success(), "test Git invocation failed");
         }
         fn registry(&self) -> Value {
             json!({"schemaVersion":1,"projects":[{"id":"project-a","rootPath":self.path.to_string_lossy(),"scan":{"headSha":self.head}}]})
         }
         fn check(&self) -> Result<SecureProjectPreflight, String> {
-            inspect_registered(&self.registry(),"project-a",&self.head)
+            inspect_registered(&self.registry(), "project-a", &self.head)
         }
     }
     impl Drop for RepoFixture {
-        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.path); }
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
     }
 
     #[test]
     fn verified_clean_project_is_read_only_and_not_a_writer_lease() {
-        let fixture=RepoFixture::new();
-        let check=fixture.check().unwrap();
-        assert_eq!(check.project_id,"project-a");
-        assert_eq!(check.verified_head,fixture.head);
-        assert_eq!(check.status,"verified_read_only");
+        let fixture = RepoFixture::new();
+        let check = fixture.check().unwrap();
+        assert_eq!(check.project_id, "project-a");
+        assert_eq!(check.verified_head, fixture.head);
+        assert_eq!(check.status, "verified_read_only");
         assert!(!check.writer_authorized);
     }
     #[test]
     fn unknown_duplicate_and_unversioned_projects_fail_closed() {
-        let f=RepoFixture::new();
-        assert!(inspect_registered(&f.registry(),"../project-a",&f.head).is_err());
-        let mut dup=f.registry();
+        let f = RepoFixture::new();
+        assert!(inspect_registered(&f.registry(), "../project-a", &f.head).is_err());
+        let mut dup = f.registry();
         let original = dup["projects"][0].clone();
         dup["projects"].as_array_mut().unwrap().push(original);
-        assert!(inspect_registered(&dup,"project-a",&f.head).is_err());
-        let mut unversioned=f.registry();
-        unversioned["schemaVersion"]=json!(99);
-        assert!(inspect_registered(&unversioned,"project-a",&f.head).is_err());
-        assert!(inspect_registered(&f.registry(),"project-a","short").is_err());
+        assert!(inspect_registered(&dup, "project-a", &f.head).is_err());
+        let mut unversioned = f.registry();
+        unversioned["schemaVersion"] = json!(99);
+        assert!(inspect_registered(&unversioned, "project-a", &f.head).is_err());
+        assert!(inspect_registered(&f.registry(), "project-a", "short").is_err());
     }
     #[test]
     fn registry_head_mismatch_rejected_before_touching_git() {
-        let f=RepoFixture::new();
-        let bad="a".repeat(40);
-        assert!(inspect_registered(&f.registry(),"project-a",&bad).is_err());
-        let mut reg=f.registry();
-        reg["projects"][0]["scan"]["headSha"]=json!("z".repeat(40));
-        assert!(inspect_registered(&reg,"project-a",&f.head).is_err());
+        let f = RepoFixture::new();
+        let bad = "a".repeat(40);
+        assert!(inspect_registered(&f.registry(), "project-a", &bad).is_err());
+        let mut reg = f.registry();
+        reg["projects"][0]["scan"]["headSha"] = json!("z".repeat(40));
+        assert!(inspect_registered(&reg, "project-a", &f.head).is_err());
     }
     #[test]
     fn dirty_untracked_and_moved_head_all_fail_closed() {
-        let f=RepoFixture::new();
-        fs::write(f.path.join("README.md"),"changed\n").unwrap();
+        let f = RepoFixture::new();
+        fs::write(f.path.join("README.md"), "changed\n").unwrap();
         assert!(f.check().unwrap_err().contains("ungespeicherte"));
-        RepoFixture::git(&f.path,&["restore","README.md"]);
-        fs::write(f.path.join("untracked.txt"),"new").unwrap();
+        RepoFixture::git(&f.path, &["restore", "README.md"]);
+        fs::write(f.path.join("untracked.txt"), "new").unwrap();
         assert!(f.check().is_err());
         fs::remove_file(f.path.join("untracked.txt")).unwrap();
-        fs::write(f.path.join("README.md"),"second\n").unwrap();
-        RepoFixture::git(&f.path,&["add","README.md"]);
-        RepoFixture::git(&f.path,&["commit","-q","-m","second"]);
+        fs::write(f.path.join("README.md"), "second\n").unwrap();
+        RepoFixture::git(&f.path, &["add", "README.md"]);
+        RepoFixture::git(&f.path, &["commit", "-q", "-m", "second"]);
         assert!(f.check().unwrap_err().contains("Git-HEAD"));
     }
     #[test]
     fn registry_subfolder_must_not_masquerade_as_repo_root() {
-        let f=RepoFixture::new();
+        let f = RepoFixture::new();
         fs::create_dir_all(f.path.join("nested")).unwrap();
-        let mut reg=f.registry();
-        reg["projects"][0]["rootPath"]=json!(f.path.join("nested").to_string_lossy().to_string());
-        assert!(inspect_registered(&reg,"project-a",&f.head).unwrap_err().contains("Git-Projektwurzel"));
+        let mut reg = f.registry();
+        reg["projects"][0]["rootPath"] = json!(f.path.join("nested").to_string_lossy().to_string());
+        assert!(inspect_registered(&reg, "project-a", &f.head)
+            .unwrap_err()
+            .contains("Git-Projektwurzel"));
     }
     #[test]
     fn missing_git_repository_fails_without_initializing_it() {
-        let f=RepoFixture::new();
-        let nongit=std::env::temp_dir().join(format!("katosync-secure-no-git-{}", uuid::Uuid::new_v4()));
+        let f = RepoFixture::new();
+        let nongit =
+            std::env::temp_dir().join(format!("katosync-secure-no-git-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&nongit).unwrap();
-        let mut reg=f.registry();
-        reg["projects"][0]["rootPath"]=json!(nongit.to_string_lossy().to_string());
-        assert!(inspect_registered(&reg,"project-a",&f.head).is_err());
+        let mut reg = f.registry();
+        reg["projects"][0]["rootPath"] = json!(nongit.to_string_lossy().to_string());
+        assert!(inspect_registered(&reg, "project-a", &f.head).is_err());
         assert!(!nongit.join(".git").exists());
-        let _=fs::remove_dir_all(nongit);
+        let _ = fs::remove_dir_all(nongit);
     }
 }
