@@ -35,9 +35,9 @@ mod orchestration;
 mod project_create;
 mod project_registry;
 mod project_work_resume;
-mod secure_project_work;
 mod provider_manager;
 mod provider_warmup;
+mod secure_project_work;
 mod system_resources;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
