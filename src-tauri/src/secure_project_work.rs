@@ -183,7 +183,8 @@ mod tests {
         let f=RepoFixture::new();
         assert!(inspect_registered(&f.registry(),"../project-a",&f.head).is_err());
         let mut dup=f.registry();
-        dup["projects"].as_array_mut().unwrap().push(dup["projects"][0].clone());
+        let original = dup["projects"][0].clone();
+        dup["projects"].as_array_mut().unwrap().push(original);
         assert!(inspect_registered(&dup,"project-a",&f.head).is_err());
         let mut unversioned=f.registry();
         unversioned["schemaVersion"]=json!(99);
