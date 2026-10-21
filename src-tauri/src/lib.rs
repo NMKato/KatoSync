@@ -35,6 +35,7 @@ mod orchestration;
 mod project_create;
 mod project_registry;
 mod project_work_resume;
+mod secure_project_work;
 mod provider_manager;
 mod provider_warmup;
 mod system_resources;
@@ -299,6 +300,7 @@ pub fn run() {
             project_registry::project_registry_scan,
             project_registry::project_registry_load,
             project_work_resume::project_work_resume,
+            secure_project_work::secure_project_preflight,
             project_create::project_create,
             project_registry::project_registry_save,
             project_registry::project_registry_open,
