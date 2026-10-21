@@ -129,6 +129,9 @@ export function SystemResourcesCard({ snapshot, loading, onRefresh, katoAiRunnin
           </p>
         ) : null}
         <small className="resource-metrics-note">
+          {snapshot.gpu.evidence === "macos_ioreg_device_wide_utilization"
+            ? "GPU-% ist die Gesamtlast des Apple-Grafikchips, nicht allein die Last von Kato AI. "
+            : ""}
           GPU-Auslastung und separater VRAM nur bei verlässlicher Betriebssystem-Messung.
           Apple Silicon nutzt gemeinsamen Speicher. Status zuletzt geprüft: {new Date(snapshot.measuredAt).toLocaleTimeString("de-DE")}.
         </small>

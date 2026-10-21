@@ -162,6 +162,39 @@ async fn probe_nvidia() -> Option<GpuObservation> {
     parse_nvidia_row(text.lines().next()?)
 }
 
+// Apple IOAccelerator exposes an OS-wide device counter on supported Macs.
+// It is NOT a per-process llama.cpp utilization reading, nor a VRAM gauge.
+fn parse_macos_gpu_utilization(raw: &str) -> Option<f32> {
+    let (_, perf) = raw.split_once("\"PerformanceStatistics\" = {")?;
+    let stats = perf.split_once('}')?.0;
+    let (_, value) = stats.split_once("\"Device Utilization %\"=")?;
+    let digits: String = value
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let number = digits.parse::<u8>().ok()?;
+    (number <= 100).then_some(f32::from(number))
+}
+
+#[cfg(target_os = "macos")]
+async fn probe_macos_gpu_utilization() -> Option<f32> {
+    use std::process::Stdio;
+    let mut cmd = tokio::process::Command::new("ioreg");
+    cmd.args(["-r", "-c", "IOAccelerator"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(3), cmd.output())
+        .await
+        .ok()?
+        .ok()?;
+    if !output.status.success() || output.stdout.len() > 1024 * 1024 {
+        return None;
+    }
+    parse_macos_gpu_utilization(std::str::from_utf8(&output.stdout).ok()?)
+}
+
 async fn detect_gpu() -> GpuObservation {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     let (backend, memory_kind) = ("metal_supported", "unified");
@@ -255,8 +288,9 @@ pub(crate) async fn system_resource_snapshot(
         tauri::async_runtime::spawn_blocking(sample_host)
             .await
             .map_err(|_| "Ressourcenmessung unterbrochen.".to_string())?;
-    // NVIDIA telemetry is genuinely measurable; macOS unified-GPU utilization generally is not.
-    let gpu = if cfg!(target_os = "macos") {
+    // Device-wide macOS GPU telemetry is measured using IOAccelerator when available.
+    // This does not attribute GPU utilization to Kato AI.
+    let mut gpu = if cfg!(target_os = "macos") {
         GPU_CACHE.get_or_init(detect_gpu).await.clone()
     } else {
         match probe_nvidia().await {
@@ -264,6 +298,11 @@ pub(crate) async fn system_resource_snapshot(
             None => GPU_CACHE.get_or_init(detect_gpu).await.clone(),
         }
     };
+    #[cfg(target_os = "macos")]
+    if let Some(percent) = probe_macos_gpu_utilization().await {
+        gpu.utilization_percent = Some(percent);
+        gpu.evidence = "macos_ioreg_device_wide_utilization";
+    }
     Ok(ResourceSnapshot {
         measured_at: chrono::Utc::now().to_rfc3339(),
         os: std::env::consts::OS.to_string(),
@@ -318,6 +357,28 @@ mod tests {
         assert!(parse_nvidia_row("NVIDIA GPU, 16000, not_supported").is_none());
         assert!(parse_nvidia_row("NVIDIA GPU, 16000, 500").is_none());
     }
+    #[test]
+    fn macos_gpu_percent_requires_real_counter_bounded_to_100() {
+        let sample = r#"  |   "PerformanceStatistics" = {"Tiler Utilization %"=37,"Device Utilization %"=59,"Renderer Utilization %"=59}"#;
+        assert_eq!(parse_macos_gpu_utilization(sample), Some(59.0));
+        assert_eq!(
+            parse_macos_gpu_utilization(sample.replace("=59,", "=100,").as_str()),
+            Some(100.0)
+        );
+        assert_eq!(
+            parse_macos_gpu_utilization(sample.replace("=59,", "=101,").as_str()),
+            None
+        );
+        assert_eq!(
+            parse_macos_gpu_utilization("GPU present; no counters"),
+            None
+        );
+        assert_eq!(
+            parse_macos_gpu_utilization(r#"\"Device Utilization %\"=77"#),
+            None
+        );
+    }
+
     #[test]
     fn gpu_metrics_are_not_fabricated() {
         let _ = GpuObservation {

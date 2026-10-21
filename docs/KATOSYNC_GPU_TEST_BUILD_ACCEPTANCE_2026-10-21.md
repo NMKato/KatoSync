@@ -37,3 +37,21 @@ Date: 21 October 2026. Related Draft PR #73, nested under #72 → #71 → #70 �
 The first-run license currently describes KatoSync mainly as a Mistral project memory uploader, while the product is expanding to a provider-neutral Project Work Hub. Any revisions to legal terms require separate owner/legal review, not assistant-side silent acceptance or rewrite.
 
 Created by NMKato Solutions
+
+## Consent-driven GUI and Apple GPU telemetry follow-up — 21 October 2026
+- After user approved the Keychain prompt, the previously built test app reached the REAL Agent Sync Overview; display captured locally. CPU measured 24%, RAM 41% used, approximately 9.4 GiB available / 16 GiB installed, Kato AI running and native Metal backend detected. Earlier GPU metric was correctly shown as unavailable.
+- Read-only macOS IOAccelerator PerformanceStatistics were sampled during a SYNTHETIC Gemma workload:
+  - GPU device-wide baseline: 5 samples, mean 56.2%, min 32%, max 64%.
+  - GPU device-wide during inference: 58 samples, mean 73.1%, min 33%, max 99%.
+  - Device-wide allocated unified memory range about 8.20 to 8.54 GiB, NOT exclusive Kato model memory.
+  - Request generated 180 tokens in 15.13 seconds, stopped due to output-length limit and had no visible answer. This is a load observation, NOT a semantic generation pass. An earlier short synthetic request returned TEST_OK. correctly.
+  - These device-wide counters CANNOT isolate GPU load to llama-server; Metal libraries and the existing -ngl 99 command are corroborating, but no effective GPU-layer residency count is established.
+- Implemented native device-wide GPU utilization in System Resource Monitor by bounded, read-only ioreg -r -c IOAccelerator (3-second timeout, 1 MiB response cap), strict percent parsing and evidence flag macos_ioreg_device_wide_utilization. If absent/malformed, UI still displays unavailable. UI explicitly describes that GPU-% measures the entire device, not Kato-AI alone.
+- Additional Rust counter parser tests passed. Latest regression: 164/164 Node tests, 118 Rust library tests (3 intentionally ignored), TypeScript/typecheck, optimized macOS arm64 build, cargo fmt and diff-check PASS.
+- Rebuilt local test app with this telemetry; backed up the previous test app and pre-telemetry ZIP. The production KatoSync.app and the healthy existing Kato AI server remained unchanged. Updated app code signature verified; ZIP passed integrity check.
+- Updated ZIP path on authorized Mac: ~/Downloads/KatoSync-GPU-Test-2026-10-21-macOS-arm64.zip
+- Updated ZIP SHA256: 0e841ae5106040bbf79d7dba03fea96ebf8c77df38d13f9182d4078cd4262406
+- Outstanding USER CONSENT: macOS asked for Keychain confirmation again after the binary was rebuilt/re-signed. Assistant neither retrieved password nor granted access; the NEW GPU-% GUI display remains awaiting that local approval. The earlier version's GUI was verified, the updated parser is covered by unit tests and native build.
+- This macOS test build still excludes real Poppler/Typst package resources, is ad-hoc signed (not notarized) and is NOT a release or a proof of Windows GPU performance.
+
+Created by NMKato Solutions
