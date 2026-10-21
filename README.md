@@ -1,300 +1,182 @@
-<!-- Created by NMKato on 2026-07-01 -->
+<!-- KatoSync public project overview | 2026-10-21 -->
 
 <div align="center">
 
-<img src="docs/images/logo.png" width="120" alt="KatoSync Logo" />
+<img src="docs/images/logo.png" width="118" alt="KatoSync Logo" />
 
 # KatoSync
 
-**KI, die liefert statt nur redet.**
-Dein Projekt-Wissen → ausgeführte Arbeit. Lokal &amp; sicher.
+### Dein Projekt. Deine Agenten. Ein gemeinsamer Arbeitsraum.
 
-![Release](https://img.shields.io/badge/release-v2.0.0--beta.27-FF6B35)
-![macOS](https://img.shields.io/badge/macOS-signiert%20%2B%20notarisiert-000000?logo=apple&logoColor=white)
-![Tauri](https://img.shields.io/badge/Tauri_2-24C8DB?logo=tauri&logoColor=white)
-![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
-![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
+**Local-first Project Work Hub & AI Orchestration für macOS und Windows.**  
+Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kontrolliert ausführen.
 
-**[⬇️ Download (macOS) → Releases](https://github.com/NMKato/KatoSync/releases/latest)**
+[![Status: Beta + Preview](https://img.shields.io/badge/Status-Beta%20%2B%20Preview-F97316)](https://github.com/NMKato/KatoSync/pulls)
+[![macOS](https://img.shields.io/badge/macOS-Tested-111827?logo=apple)](https://github.com/NMKato/KatoSync/pull/75)
+[![Windows](https://img.shields.io/badge/Windows-Native%20tests%20pass-2563EB?logo=windows)](https://github.com/NMKato/KatoSync/pull/75)
+[![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri)](https://tauri.app/)
+[![Rust](https://img.shields.io/badge/Rust-Core-000000?logo=rust)](https://www.rust-lang.org/)
+[![React](https://img.shields.io/badge/React%20%2B%20TypeScript-UI-149ECA?logo=react)](https://react.dev/)
+
+**[Desktop-Releases](https://github.com/NMKato/KatoSync/releases) · [Aktuelle Integration](https://github.com/NMKato/KatoSync/pull/75) · [Roadmap](#roadmap) · [Sicherheit](#sicherheit-und-freigaben)**
+
+<sub>Aus einem Mistral-orientierten Schulprojekt wurde eine plattformübergreifende Arbeitsumgebung für Projekte, lokale KI und mehrere Agenten.</sub>
 
 </div>
 
-<p align="center">
-  <img src="docs/images/dashboard.png" width="840" alt="KatoSync Dashboard-Cockpit" />
-</p>
-
 ---
 
-## 🚀 Was ist KatoSync?
+## Vision
 
-**KatoSync verwandelt dein Projekt-Wissen in ausgeführte Arbeit.** Die KI (Mistral) versteht deine
-Projekte und plant konkrete Aufgaben — **du gibst frei** — und ein **lokaler Runner (Codex oder
-Claude)** setzt sie in deinem echten Repo um: eigener Branch, Commit, Pull Request.
+**KatoSync ist mehr als ein Chatfenster oder ein einzelner Coding-Agent.** Die Plattform soll den gesamten Arbeitszyklus zusammenführen: Projekt anlegen oder importieren, den tatsächlichen Stand ermitteln, Wissen für unterschiedliche Modelle aufbereiten, eine Aufgabe gezielt übergeben, Änderungen prüfen und später geräteübergreifend fortsetzen.
 
-> Kein Chat, der nur redet. Kein Auto-Agent, der unkontrolliert loslegt.
-> Sondern KI-Ergebnisse, die **du kontrollierst — lokal und sicher.**
+**Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
+
+> **Entwicklungsstatus (21.10.2026):** Die öffentlich verfügbaren Desktop-Betas und der neuere Project Work Hub haben unterschiedliche Freigabestände. Die Integration der neuen Projekt- und GPU-Funktionen ist erfolgreich getestet, aber **noch nicht in \`dev\` oder \`main\` gemergt oder als vollständig geprüfter Installer veröffentlicht**. Details: [Draft-PR #75](https://github.com/NMKato/KatoSync/pull/75).
+
+## Was KatoSync zusammenbringt
+
+| Bereich | Funktionen | Status |
+| :-- | :-- | :-- |
+| **Agent Sync & Live-Monitor** | Codex/Claude-Anbindung, Provider-Status, lokale Runner, Aufgaben- und Ausführungsansichten | Desktop-Beta; einzelne Geräteszenarien noch in Prüfung |
+| **Project Work Hub** | Projektregister, sichere lokale Projektanlage, Git-/Worktree-Kontext, Resume-Paket und Herkunftsnachweise | Integrierter, getesteter **Draft-PR #75** |
+| **Context Bridge** | Projektbezogene MCP-/CLI-Leseschnittstelle mit expliziter Allowlist; Übergabe zwischen Tools vorbereiten | **Read-only Preview** in PR #75 |
+| **KUAS** | Versionierte, providerübergreifende Agentenregeln und nachvollziehbare Laufmetadaten | In PR #75 integriert; **keine** Berechtigungssandbox |
+| **Kato AI / Local Brain** | Eigene lokale Modell-Runtime, Statusprüfung, Metal-/CUDA-Kandidatenerkennung und CPU-Fallback | macOS-Metal auf echtem Gerät geprüft; Windows-GPU-Inferenz offen |
+| **System Resources** | Live-CPU, verfügbarer RAM, GPU-Anzeige, Warnungen bei geringer Speicherreserve | macOS-GUI geprüft, Windows-Bibliothekstests grün; PR #75 |
+| **Local Control Bridge** | Strukturierte lokale Aufträge über Inbox/Outbox, Heartbeat und Ausführungsprotokolle | Bestehender lokaler Integrationspfad |
+| **Sichere autonome Zusammenarbeit** | Isolierte Task-Worktrees, exklusiver Writer-Lease, abgestufte Schreib-/Netzwerkfreigaben | **Release-Blocker**, [Issue #76](https://github.com/NMKato/KatoSync/issues/76) |
+
+**Wichtig:** „Integriert“ und „getestet“ bedeuten nicht automatisch „im Download enthalten“. Nicht freigegebene Workflows und unbeaufsichtigtes Codeschreiben bleiben ausdrücklich beschränkt.
+
+## Architektur
+
+\`\`\`mermaid
+flowchart TD
+    A["KatoSync Desktop · Tauri / Rust / React"] --> B["Project Registry"]
+    B --> C["Project Resume · Context / KUAS"]
+    C --> D["Freigabe & Ausführungssteuerung"]
+    D --> E["Codex CLI"]
+    D --> F["Claude Code CLI"]
+    D --> G["Kato AI · lokales Modell"]
+    D --> H["Local Control"]
+    G --> I["Runtime · CPU / Metal / geprüfte GPU-Backends"]
+    A --> J["CPU / RAM / GPU Monitor"]
+    E --> K["Aufgaben / Git / Checkpoints"]
+    F --> K
+    H --> K
+    K --> L["Tests & Review"]
+    L --> M["PR / Veröffentlichung nur nach separater Freigabe"]
+    N["Optionale Konten / Cloud-Dienste"] -. "bewusste Anmeldung / Datenfreigabe" .-> A
+\`\`\`
+
+Der Desktop-Kern basiert auf **Tauri 2 + Rust**, das Frontend auf **React und TypeScript**. Das Architekturziel ist **local-first und providerneutral**: Lokale Arbeitsdaten bleiben standardmäßig auf dem Gerät; Cloud- und Drittanbieterzugriffe benötigen passende Konten, Konfiguration und Freigaben. Externe Modellprovider können eigene Abonnements, API-Kosten und Datenverarbeitung mitbringen.
+
+### So soll sich die Arbeit anfühlen
+
+1. **Projekt öffnen:** Bestehendes Repository registrieren oder ein neues Projekt sicher anlegen.
+2. **Kontext verstehen:** Aktuellen Git-Stand, relevante Dateien, Regeln und den letzten Checkpoint zusammenstellen.
+3. **Agent wählen:** Codex, Claude, Kato AI oder eine andere unterstützte lokale Schnittstelle.
+4. **Arbeit freigeben:** Dateien, Netzwerkzugriffe und Schreibumfang vorab begrenzen.
+5. **Ergebnis prüfen:** Tests, Herkunft, Änderungen und Übergabestatus nachvollziehen.
+6. **Fortsetzen:** Projekt später auf demselben oder perspektivisch einem anderen Gerät weiterführen.
+
+Die Schritte 4–6 beschreiben teilweise den **Zielablauf**, nicht bereits eine allgemein freigegebene autonome Ausführung.
+
+## Kato AI – die lokale Intelligenz
+
+Kato AI kombiniert eine austauschbare lokale Modell-Runtime mit Status-, Speicher- und künftig Kontext- und Werkzeugfunktionen. Die lokale Ausführung ist unabhängig davon, ob Codex oder Claude angemeldet sind. Ein laufendes Modell kann beim Neustart der Oberfläche wiedererkannt werden; die Ressourcenanzeige berücksichtigt dabei den eigenen verwalteten Prozess.
+
+Der macOS-Test auf einem **M2 Pro** hat eine funktionierende lokale Inferenz mit **Metal** bestätigt. Die angezeigte GPU-Auslastung beschreibt dabei das **gesamte Gerät**, nicht die eindeutig gemessene GPU-Auslastung eines einzelnen Modells. Die Windows-Tests beweisen noch **keine** verpackte CUDA- oder Intel-GPU-Inferenz. Fremde Modellprozesse werden nicht automatisch beendet.
+
+## Plattformstatus & Qualitätsnachweise
+
+Stand: **21. Oktober 2026**, [Integrations-PR #75](https://github.com/NMKato/KatoSync/pull/75).
+
+| Test | Ergebnis |
+| :-- | :-- |
+| macOS Rust-Bibliothek | 119 bestanden, 3 bewusst ignoriert |
+| Windows Rust-Bibliothek | 118 bestanden, 3 bewusst ignoriert |
+| macOS Node | 165 bestanden |
+| Windows Node | 161 bestanden, 4 plattformbedingt übersprungen |
+| GitHub PR Fast Gate / Windows Node / Web-Build | erfolgreich |
+| GitHub Attribution Policy | erfolgreich |
+| Vollständiger Windows-GUI-/Installer-Test | **offen** |
+| Signierter/notarisierter vollständiger Release mit echten Typst-/Poppler-Ressourcen | **offen** |
+
+Die native QA der neuen Integration wurde aus isolierten Testständen gefahren. Eine vorhandene macOS-GPU-Test-App ist **kein** allgemein freigegebenes Installationspaket. Alle relevanten Ergebnisse und Grenzen stehen im [Release-Candidate-Protokoll](https://github.com/NMKato/KatoSync/blob/integration/katosync-work-hub-gpu-candidate-20261021/docs/KATOSYNC_UNIFIED_RELEASE_CANDIDATE_2026-10-21.md).
+
+## Sicherheit und Freigaben
+
+KatoSync soll **nachweisbare technische Freigaben** bieten, nicht nur freundliche Regeln in einem KI-Prompt. Deshalb bleiben folgende Grenzen sichtbar:
+
+- Ein KUAS-Regeltext oder ein „Auto“-Schalter verleiht **keine** Schreib-, Shell-, Netzwerk- oder Veröffentlichungserlaubnis.
+- Bestehende native Runner sind **noch nicht** vollständig auf isolierte Task-Worktrees mit einem geräteübergreifenden **Single-Writer-Lease** umgestellt.
+- Die neue Projekt-MCP-Brücke ist **lesend**; sie erteilt keine Schreibrechte.
+- Projektkontext, private Dokumente, Zugangsdaten und Provider-spezifische Berechtigungen werden nicht pauschal an andere Modelle übertragen.
+- Produktive Systeme, automatische Merges und unbeaufsichtigte Schreibaufgaben erhalten erst nach unabhängiger Sicherheitsabnahme eine Freigabe.
+
+Details und Akzeptanzkriterien: [Security Gate #76](https://github.com/NMKato/KatoSync/issues/76). Bitte die Beta nicht als unbeaufsichtigten Agenten mit uneingeschränkten Systemrechten einsetzen.
+
+## Installation und Entwicklung
+
+**Für Nutzer:** Bestehende macOS-Builds sind unter [GitHub Releases](https://github.com/NMKato/KatoSync/releases) verfügbar. Prüfe bei jedem Download Version, Plattform und Release-Hinweise. Der neue Project Work Hub und ein vollständig geprüfter Windows-Installer sind **noch nicht** als allgemeiner Release verfügbar.
+
+**Für Entwickler** (Node.js, Rust und native Tauri-Voraussetzungen erforderlich):
+
+\`\`\`bash
+git clone https://github.com/NMKato/KatoSync.git
+cd KatoSync
+npm install
+npm run dev
+# Native Desktop-Entwicklung:
+npm run tauri dev
+# Frontend-Check:
+npm run build
+\`\`\`
+
+Für die neue Projekt-/Ressourcenintegration siehe [PR #75](https://github.com/NMKato/KatoSync/pull/75). Ein Quellcode-Build ist nicht gleichbedeutend mit signierten offiziellen Installern oder einer freigegebenen Backend-Anbindung.
+
+## Community, Accounts und geplante Dienste
+
+Die **lokale Nutzung und selbst betriebene Infrastruktur** sollen vom optionalen verwalteten KatoOS-Dienst getrennt sein. Angedacht ist ein Einstiegsangebot für Konten und begrenzte Synchronisation sowie ein kostenpflichtiger Dienst für zusätzliche Cloud-Funktionen und Kapazitäten. **Tarife, Preise, Gratis-Kontingente und Hosted-AI-Nutzung sind noch nicht beschlossen oder zugesichert.**
+
+Ein Konto allein soll keine unbegrenzte Nutzung kostenpflichtiger KI-Modelle, GPU-Inferenz, Cloud-Speicher oder API-Weiterleitungen freischalten. Externe KI-Abos/API-Tarife können separat anfallen. Vor einem öffentlichen Ausbau werden Quoten, Missbrauchsschutz, Datenschutzbedingungen und Abrechnung geprüft.
+
+**Quellcode und Lizenz:** Dieses Repository ist öffentlich einsehbar. Eine ausdrückliche Open-Source-Lizenz ist zum Stand dieser README **noch nicht im Repository nachgewiesen**. Öffentlich zugänglicher Quellcode ist ohne passende Lizenz nicht automatisch Open Source. Nutzungs-, Änderungs- und Weitergaberechte müssen vor einem Open-Source-Release durch eine Lizenz geklärt werden. Eine spätere verwaltete Cloud-Leistung kann unabhängig davon kostenpflichtig sein.
+
+## Screenshots & Demo
+
+Eine neue, plattformübergreifende Bilderstrecke ist geplant: **Project Work Hub**, **Agent Sync**, **Kato AI**, **CPU/RAM/GPU**, **Live-Monitor**, **Checkpoints** und **Windows/macOS**. Wir ergänzen verifizierte Screenshots und kurze Demos erst nach der GUI-/Release-Abnahme, damit keine veraltete Mistral-Oberfläche als aktueller Funktionsstand erscheint.
+
+## Roadmap
+
+- [x] Lokaler Runner / Agent Sync und Local Control als technische Basis
+- [x] Projektregister, Projektanlage, Resume-Kontext, KUAS und read-only MCP-Brücke im Integrations-Draft
+- [x] CPU-/RAM-/GPU-Dashboard und realer macOS-Metal-Test
+- [x] Native macOS- und Windows-Regression der Integrationsrunde
+- [ ] [#76: isolierte Worktrees, Freigaben, dauerhafter Writer-Lease](https://github.com/NMKato/KatoSync/issues/76)
+- [ ] Durchgehender Test: Projekt → freigegebener Agentenwechsel → Edit → Checkpoint → unabhängige Tests
+- [ ] Vollständige Windows- und macOS-Installer mit realen Ressourcen, GUI-/Gerätetests, Signierung
+- [ ] Gerätesynchronisation und belastbare Projekt-Historie / Memory Fabric
+- [ ] Optionale Cloud-Tarife, Limits und Datenschutz-/Sicherheitsabnahme
+- [ ] Neue Screenshots, Demo-Video, Download-Seite und eindeutig definierte Open-Source-Lizenz
+
+## Herkunft des Projekts
+
+KatoSync begann als **Schulprojekt rund um Mistral und die Übergabe von KI-Aufgaben an lokale Runner**. Daraus entwickelte sich eine größere Vision: **ein gemeinsames Betriebssystem für projektbezogene KI-Arbeit**, das Werkzeuge, Modelle und Rechner koordinieren soll, ohne die Kontrolle über Code, Daten und Kosten aufzugeben.
 
 ---
-
-## ❌ Das Problem
-
-- **KI redet, liefert aber nicht** — Vorschläge statt fertiger, eingecheckter Arbeit → Copy-Paste-Chaos.
-- **Projekt-Wissen ist verstreut** — Status, Notizen, Roadmaps, Code überall; die KI hat nie den vollen Kontext.
-- **Auto-Agenten sind ein Blindflug** — Ausführen/Mergen ohne Freigabe = Risiko für Code, Secrets und Kosten.
-
----
-
-## ✅ Die Lösung — der Coding-Workflow
-
-KatoSync ist der **kontrollierte Brückenkopf** zwischen KI-Verständnis und lokaler Ausführung:
-
-- [x] **Scannen** — deine Projektordner werden als saubere Wissensbasis bereitgestellt _(Secrets ausgeschlossen)_
-- [x] **Planen** — Mistral-Agenten erzeugen projektbezogene Aufgaben → ein aufgeräumtes **Aufgaben-Board** (Vorschau, nach Projekt gruppiert)
-- [x] **Freigeben** — du prüfst, gibst Pläne frei oder entfernst sie _(Human-in-the-Loop — nichts läuft automatisch)_
-- [x] **Ausführen** — lokaler Runner (**Codex CLI** oder **Claude Code CLI**) arbeitet auf einem **eigenen Branch von main**
-- [x] **Liefern** — Auto-Commit → Push → **Pull Request** _(opt-in)_. **Kein Auto-Merge in main.**
-- [x] **Abschließen** — Task ist „ausgeführt" → du prüfst/merged → „erledigt"; ein **Live-Feed** zeigt **jeden echten Schritt** (Befehl · Datei · Websuche · Denken) mit Icon
-- [x] **Fortsetzen** — nach dem Lauf eine **interaktive Terminal-Session** öffnen: volle History + **deine eigenen Connectoren** (Gmail, Blender …), Human-in-the-Loop — z. B. eine E-Mail direkt über den Connector senden
-
-<p align="center">
-  <img src="docs/images/briefings.png" width="840" alt="Briefings – Mistral-Ergebnisse kommen als lesbare Briefings zurück" /><br/>
-  <sub>📨 <b>Die KI-Ergebnisse kommen zurück</b> — als lesbare, priorisierte Briefings (Executive Summary, Status-Ampeln, To-dos). Annehmen · an den Runner übergeben · ablehnen.</sub>
-</p>
-
-<p align="center">
-  <img src="docs/images/codex-bridge.png" width="840" alt="Codex Bridge – Runner (Codex/Claude) &amp; Modus (Datei/Coding)" /><br/>
-  <sub>⚙️ <b>… und werden lokal ausgeführt</b> — Runner-Picker (Codex/Claude) &amp; Modus (Datei/Coding), eigener Branch, kein Auto-Merge.</sub>
-</p>
-
----
-
-## 🎯 Nutzen
-
-- [x] Von der **Idee zum Pull Request** — ohne Copy-Paste
-- [x] **Volle Kontrolle** — jede Ausführung ist freigegeben, nachvollziehbar (Branch/PR/Audit-Trail), reversibel
-- [x] **Kein Vendor-Lock** — Codex ODER Claude, ein Klick
-- [x] **Keine API-Kosten** — läuft über dein Abo-Login (ChatGPT/Claude), kein API-Key im Runner
-- [x] **Lokal &amp; privat** — Code und Daten bleiben auf deinem Gerät
-
----
-
-## 🔒 Sicherheit
-
-- [x] **Human-in-the-Loop-Gate** — keine automatischen Merges, keine kritischen Aktionen ohne Freigabe
-- [x] **Nichts läuft blind in main** — eigener Branch + Pull Request, du merged selbst
-- [x] **Secrets bleiben lokal** — API-Key &amp; Connector-Token in der macOS-Keychain; **kein** Service-Role-Key in der App
-- [x] **Cloud-Profil Zero-Knowledge** — Ende-zu-Ende verschlüsselt (Argon2id + AES-256-GCM, Schlüssel nur im RAM); der Server kann sie **nicht** lesen
-- [x] **Gehärtet gegen Missbrauch** — Prompt-Injection-Leitplanken, Host-Allowlist, strikte CSP, Out-of-Scope-Schutz für den Runner
-- [x] **Referenzdaten bleiben lokal** — private Dokumente (z. B. Lebenslauf) landen nie in Git oder der Cloud-Library
-
-### Agent Sync: Provider verbinden, ohne Passwörter zu teilen
-
-Unter **Agent Sync** verwaltet KatoSync die Ausführungswege in einer klaren Standardreihenfolge
-(per Pfeil-Buttons änderbar, Local Control bleibt immer letzter Fallback):
-
-`OpenAI Codex → Anthropic Claude Code → Local Model → Local Control / RDC`
-
-| Schritt | Was passiert |
-|---|---|
-| **Verbinden** (Codex) | startet `codex login` → offizieller ChatGPT-Login im Browser |
-| **Verbinden** (Claude Code) | startet `claude auth login` → offizieller Anthropic-Login im Browser; falls Anthropic einen Einmalcode zeigt, wird er direkt in der Provider-Karte bestätigt |
-| Nach dem Login | KatoSync prüft den echten CLI-Status und erst danach einen kurzen `READY`-Test |
-| **Verbunden** | erscheint nur, wenn beides erfolgreich war |
-| **Anmeldung abbrechen** | beendet nur den von KatoSync gestarteten Login-Prozess (Timeout 5 Min.) |
-| **Trennen** | KatoSync nutzt den Provider nicht mehr; die CLI-Anmeldung bleibt beim Provider |
-
-- KatoSync fragt nie nach dem OpenAI-/Anthropic-Passwort und liest oder speichert keine CLI-Tokens. Ein eventuell nötiger Claude-Einmalcode wird nur flüchtig an den wartenden CLI-Prozess weitergereicht und nicht persistiert oder geloggt.
-- Öffnet sich der Browser nicht, zeigt die Karte einen Link zur offiziellen Anmeldeseite (nur HTTPS auf offiziellen Provider-Hosts).
-- Zustände auf den Karten: *Nicht installiert*, *Verbinden*, *Verbunden*, *Erneute Anmeldung nötig*, *Kontingent erschöpft*, *Offline / Nicht verfügbar*. Kontingent-, Kapazitäts- und Offline-Fälle werden höchstens alle 15 Minuten automatisch neu geprüft.
-- **Lokale Modelle** funktionieren ohne Cloud-Konto: *Lokale Modelle suchen* findet Ollama/LM Studio auf diesem Rechner; alternativ einen OpenAI-kompatiblen Endpunkt eintragen. *Speichern & testen* prüft Modellliste und eine kurze Antwort.
-- Ein optionaler Endpoint-API-Key liegt ausschließlich im **macOS-Schlüsselbund**, ist an genau diesen Endpoint gebunden und wird an entfernte Hosts nur über `https://` gesendet.
-
-Automatisches Failover ist absichtlich begrenzt: Nur Anmelde-, Kontingent-, Kapazitäts- oder Erreichbarkeitsprobleme qualifizieren. Ein normaler Code-, Test- oder Jobfehler wechselt niemals still den Provider.
-
-> Login und UI bleiben Human-Gates: Der Nutzer schließt die offizielle Browser-Anmeldung selbst ab und prüft die Darstellung vor einem Release.
-
----
-
-## 🗂️ Auch für den Alltag (Datei-Modus)
-
-Derselbe Ablauf **ohne GitHub**: das Ergebnis landet lokal im Ordner `KatoResults` statt als Pull
-Request — ideal für **Dokumente, Bewerbungen, Präsentationen**. KatoSync ist nicht nur für Code,
-sondern für **jede wissensbasierte Aufgabe**.
-
----
-
-## 📸 Screenshots
-
-<table>
-  <tr>
-    <td align="center"><b>Mistral-Zugang &amp; MCP</b><br/><img src="docs/images/settings.png" width="420" alt="Einstellungen – Mistral-Zugang" /></td>
-    <td align="center"><b>Sync-Regeln &amp; Uploadplan</b><br/><img src="docs/images/sync-rules.png" width="420" alt="Sync-Regeln und lokaler Uploadplan" /></td>
-  </tr>
-</table>
-
----
-
-## 🧩 Architektur
-
-Ein schlanker **MCP-Server** (Cloudflare Worker + Supabase) ist der Rückkanal: Mistral Work pusht
-Aufgaben/Briefings via MCP-Tools, die Desktop-App liest sie über eine kontrollierte REST-Brücke und
-führt **lokal** aus. **Der Server führt selbst nichts aus.**
-
-- **Frontend** — React/TypeScript in **MVVM + Repository** (`src/App.tsx` ↔ `viewmodels/` ↔ `repositories/`)
-- **Core** — Rust/Tauri (`src-tauri/src/lib.rs`): Scan, Secret-Filter, CURRENT-Dateien, Upload, macOS-Keychain, Runner-Lauf, LaunchAgent
-- **Provider Service** — Rust/Tauri (`src-tauri/src/provider_manager.rs`): validierte CLI-Erkennung, offizielle Browser-Logins, normalisierte Health-States, redigierte Diagnosen und begrenzte READY-/Endpoint-Tests
-- **i18n** De/En/Es/Ru · Light/Dark · Präsentationsmodus (maskiert Token/IDs/E-Mail für Screenshots)
-- Mistral-API-Key &amp; Connector-Token liegen ausschließlich in der macOS-Keychain
-
----
-
-## ⬇️ Installation (macOS)
-
-Signiert (Developer ID, MK Heartbeat UG) + Apple-notarisiert — kein Gatekeeper-Umweg.
-
-1. **[Neueste Version → Releases](https://github.com/NMKato/KatoSync/releases/latest)** laden
-2. ZIP entpacken → `KatoSync.app` nach **„Programme"** ziehen
-3. Starten → geführtes Onboarding (Login → 5-Schritt-Tour)
-
----
-
-## 🛠️ Entwicklung &amp; Build
 
 <details>
-<summary>Setup, Dev-Server, Desktop-Build</summary>
+<summary><strong>English summary</strong></summary>
 
-```bash
-npm install --cache ./.npm-cache
-npm run dev          # Frontend (Browser-Demo)
+**KatoSync** is a local-first project workspace and AI orchestration desktop app built with Tauri, Rust, React and TypeScript. It brings project registration and resumption, context sharing, Codex/Claude runners, a local **Kato AI** runtime, and CPU/RAM/GPU monitoring into one interface.
 
-# Desktop (braucht Rust):
-rustup default stable
-npm run tauri dev
-
-# Build:
-npm run build        # tsc + Vite (Frontend)
-npm run tauri build  # Desktop-Bundle
-```
-
-Release-Builds werden auf einer APFS-Kopie signiert (Developer ID, MK Heartbeat UG) und von Apple notarisiert.
-Hinweis: Auf exFAT-Volumes scheitert Tauris Signier-Schritt an `xattr` → daher die APFS-Kopie.
+The latest Project Work Hub + GPU integration has passed macOS and Windows native source tests, but remains a **draft integration**, not a generally released cross-platform installer. Safe unattended code-writing is blocked until isolated worktrees, scoped permissions and a verifiable single-writer lease are independently reviewed. Managed accounts and paid cloud services are being considered, but no pricing or service entitlements are promised. Repository licensing has not yet been finalized.
 
 </details>
 
----
-
-## 🔭 Als Nächstes: KatoSync 3.0 — lokal-first
-
 <div align="center">
-
-**Die Intelligenz wandert auf dein Gerät.**
-Eigene Domain-Agenten statt externem Chat — direkt über deine lokalen Runner, direkt auf deinen Ordnern.
-_Deine Daten bleiben lokal — im Sinne des EU AI Act._
-
+<sub>Ein Projekt von <strong>KatoOS / NMKato Solutions</strong> · Entwicklung und Dokumentation: Oktober 2026</sub>
 </div>
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-#### 🤖 Eigene Domain-Agenten
-Vorgefertigte, editierbare Personas — **ein Klick**:
-
-🧑‍💼 HR &nbsp;·&nbsp; 🗂️ Projektstatus
-🛡️ Cybersecurity &nbsp;·&nbsp; 🤝 Assistenz
-📸 Fotograf &nbsp;·&nbsp; 🎨 Grafikdesign
-
-</td>
-<td width="50%" valign="top">
-
-#### 🪄 Skill-Generator 2.0
-**Beschreibe deine Rolle** (oder die eines Mitarbeiters) → fertiger Agent-Skill, sofort einsatzbereit.
-Custom-Skills bleiben natürlich möglich.
-
-</td>
-</tr>
-</table>
-
-**So läuft's — vollautomatisch, aber unter deiner Kontrolle:**
-
-`📁 Ordner sammeln` → `⏰ zur festgelegten Zeit auswerten` → `📨 Briefing / Aufgabe` → `✅ du gibst frei` → `⚙️ lokaler Runner führt aus`
-
-- [x] **Lokal-first** — planen **und** ausführen on-device, keine Remote-Library
-- [x] **Optional vollständig lokal** — kleines Modell (z. B. via Ollama) für Planung/Triage; fokussierte Aufgaben brauchen keine Top-Maschine
-- [x] **Zero-Config** — installieren → Runner-Login → Agent wählen → läuft
-- [x] **Zeitgesteuert pro Skill** — wann gesammelt, wann ausgewertet
-
-> Gleiche kontrollierte UX (Briefings + Aufgaben, Human-in-the-Loop) — nur wandert das „Gehirn" auf **dein** Gerät.
-
----
-
-## 🗺️ Roadmap
-
-- [x] Cloud-Profil (Zero-Knowledge) — Zugangsdaten folgen dem Konto
-- [x] Multi-Runner (Codex CLI + Claude Code CLI)
-- [x] Auth-Flows (Bestätigung/Passwort-Reset) + Sicherheitshärtung
-- [x] Modus-Umschalter (Datei-Modus | Coding-Modus)
-- [x] Datei-Modus end-to-end verifiziert — professionelle PDFs via gebündeltem Typst
-- [x] Fortsetzbare Sessions — interaktive Runner-Session mit deinen Connectoren (Human-in-the-Loop)
-- [x] Live-Feed mit benannten Schritten &amp; Icons
-- [x] Aufgaben konsolidiert — ein Task-Surface (freigeben · ausführen · entfernen, mit Bestätigung) statt getrennter Board/Queue
-- [x] Briefings als Vollbild-Reader (Liste → Detail mit Zurück)
-- [ ] Connector-Aktionen live (Gmail/Blender) end-to-end getestet
-- [ ] Weitere Ausgabeformate (Word/ODT/PowerPoint)
-- [ ] Google-Login / KatoOS-Föderation
-
----
-
-<div align="center">
-<sub>Ein Produkt von <b>KatoOS</b> · MK Heartbeat UG — kein Auto-Merge, keine automatischen Zahlungen/E-Mails, keine Löschlogik für die Mistral-Library.</sub>
-</div>
-
-
----
-
-## Local Control Bridge (kein LLM erforderlich)
-
-KatoSync kann zusätzlich als lokaler Ausführungs-Bus für einen externen Orchestrator laufen.
-Dieser Modus benötigt **keinen Mistral-Key, keinen OpenAI-API-Key und keinen Codex-/Claude-Runner**.
-
-Der Daemon verwendet ausschließlich lokale Dateien:
-
-- `~/Library/Application Support/KatoSync/control/inbox/` — atomar eingestellte Jobs
-- `.../outbox/` — maschinenlesbare Ergebnisse
-- `.../state.json` — `idle` / `busy` + Heartbeat
-- `.../feed.log` — kompakter Live-Feed
-- `.../logs/<job>.log` — stdout/stderr je Job
-
-Start manuell:
-
-```bash
-/Applications/KatoSync.app/Contents/MacOS/katosync --local-control-daemon
-```
-
-Oder als Benutzer-LaunchAgent:
-
-```bash
-./scripts/install-local-control-agent.sh /Applications/KatoSync.app
-```
-
-Sicheren Testjob einstellen:
-
-```bash
-python3 scripts/katosync-control-submit.py \
-  --cwd ~/Projects/MeinRepo \
-  --wait \
-  -- git status --short
-```
-
-Jobs sind strukturiert (`command` + `args`), nicht freie Shell-Skripte. Der Daemon blockiert
-privilegierte/destruktive Shell-Einstiege und unterscheidet `read_only` von explizitem
-`workspace_write`. `requireCleanGit` kann für schreibende Repo-Jobs fail-closed aktiviert werden.
-
-Der Local-Control-Pfad ist unabhängig vom bestehenden Mistral-/Briefing-Workflow; beide Modi
-können parallel installiert bleiben.
-
-### Plattformhinweise für Agent Sync
-
-- **macOS:** Codex/Claude werden in bekannten Benutzer-, App- und Homebrew-Pfaden sowie in absoluten `PATH`-Einträgen gesucht, nach Name und Ausführungsrecht validiert und ohne Shell mit festen Argumenten gestartet. Laufzeit-verifiziert.
-- **Windows:** `codex.exe`/`codex.cmd` bzw. `claude.exe`/`claude.cmd` aus Benutzerpfaden, `%APPDATA%\npm` und `PATH`; Prozesse starten ohne Konsolenfenster. Kommandoverträge sind unit-getestet; echter Browser-Login, Abbruch und Windows-PATH-Erkennung sind ein **offenes Release-Gate** auf einem Windows-Testsystem. Endpoint-API-Keys werden unter Windows in diesem Build bewusst **nicht** gespeichert (kein Klartext-Fallback).
-- Login-Ausgaben landen nie in KatoSync-Logs. „Sichere Diagnose kopieren“ enthält nur normalisierte Zustände und redigierte Details (keine Tokens, E-Mails, Home-Pfade oder OAuth-Parameter).
