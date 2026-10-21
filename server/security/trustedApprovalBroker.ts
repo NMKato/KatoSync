@@ -13,6 +13,8 @@ export type Ports = {
   auth: { verifyUserAccessToken(token:string):Promise<Session|null> };
   policy: {
     canApprove(userId:string,accountId:string,projectId:string):Promise<boolean>;
+    // Explicit signer-to-user binding: account membership alone is insufficient.
+    canUseApproverDevice(userId:string,accountId:string,deviceId:string):Promise<boolean>;
     registeredDevice(accountId:string,deviceId:string):Promise<Device|null>;
   };
   challenges: {
@@ -66,6 +68,7 @@ export class TrustedApprovalBroker {
   private async authorized(s:Session,t:Task):Promise<Device>{
     if(!valid(t))deny();
     if(!await this.ports.policy.canApprove(s.userId,t.accountId,t.projectId))deny();
+    if(!await this.ports.policy.canUseApproverDevice(s.userId,t.accountId,t.approverDeviceId))deny();
     const signer=await this.ports.policy.registeredDevice(t.accountId,t.approverDeviceId);
     const worker=await this.ports.policy.registeredDevice(t.accountId,t.executorDeviceId);
     if(!signer || !worker || !signer.trusted || signer.revoked || !worker.trusted ||

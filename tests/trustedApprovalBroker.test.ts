@@ -20,7 +20,7 @@ const SIGNER_PEM=publicKey.export({type:"spki",format:"pem"}).toString();
 
 function fixture(){
   const state={
-    now:NOW,allowed:true,anonymous:false,signerTrusted:true,workerTrusted:true,
+    now:NOW,allowed:true,deviceOwned:true,anonymous:false,signerTrusted:true,workerTrusted:true,
     signerRevoked:false,workerRevoked:false,expired:false,sessionId:SESSION,
     recorded:[],challenges:new Map(),failStore:false,
   };
@@ -40,6 +40,9 @@ function fixture(){
     policy:{
       async canApprove(actor,account,project){
         return state.allowed && actor===OWNER && account===ACCOUNT && project==="project-a";
+      },
+      async canUseApproverDevice(user,account,device){
+        return state.deviceOwned && user===OWNER && account===ACCOUNT && device===SIGNER;
       },
       async registeredDevice(account,device){
         if(account!==ACCOUNT)return null;
@@ -176,4 +179,10 @@ test("auth-device key substitution after challenge invalidates signed consent",a
     ApprovalDenied,
   );
   assert.equal(f.state.recorded.length,0);
+});
+
+test("account approval right without ownership of signing device is rejected",async()=>{
+  const f=fixture(); f.state.deviceOwned=false;
+  await assert.rejects(f.broker.issueChallenge(TOKEN,f.request),ApprovalDenied);
+  assert.equal(f.state.challenges.size,0);
 });
