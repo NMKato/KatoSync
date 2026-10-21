@@ -11,7 +11,8 @@
     "lint": "tsc --noEmit",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "typecheck:server": "tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
@@ -28,6 +29,7 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.1",
     "@tauri-apps/cli": "^2.5.0",
+    "@types/node": "22.20.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.0.2",
