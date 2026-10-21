@@ -14,6 +14,8 @@ const BUSY_HEARTBEAT_SECS: u64 = 10;
 const IDLE_FEED_HEARTBEAT_SECS: u64 = 60;
 const DEFAULT_TIMEOUT_SECS: u64 = 900;
 const MAX_TIMEOUT_SECS: u64 = 7200;
+// Auth-Probe darf die Lane nie blockieren (z.B. haengender Keychain-Dialog) -> hart gekappt.
+const AUTH_PROBE_MAX_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -173,6 +175,72 @@ fn command_basename(command: &str) -> &str {
         .unwrap_or(command)
 }
 
+// Bekannte Claude-CLI-Installorte (analog claude_bin() in lib.rs). launchd/GUI erben den
+// Shell-PATH nicht -> absolute Pfade, keine beliebigen Binaries namens "claude".
+fn claude_candidates() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        v.push(home.join(".local/bin/claude"));
+    }
+    v.push(PathBuf::from("/opt/homebrew/bin/claude"));
+    v.push(PathBuf::from("/usr/local/bin/claude"));
+    v
+}
+
+fn is_auth_probe(job: &LocalControlJob) -> bool {
+    command_basename(&job.command) == "claude"
+}
+
+// Provider-Health: `claude auth status` muss frisch aus der Daemon-Umgebung (launchd,
+// GUI-Session, Keychain) abfragbar sein. Erlaubt ist NUR genau dieser read-only Probe;
+// Prompts, login/logout, setup-token usw. bleiben fail-closed gesperrt.
+fn validate_auth_probe(job: &LocalControlJob) -> Result<(), String> {
+    if job.mode != "read_only" {
+        return Err("Local Control: Claude-Auth-Probe ist nur read_only erlaubt.".to_string());
+    }
+    let known = job.command == "claude"
+        || claude_candidates()
+            .iter()
+            .any(|p| Path::new(&job.command) == p.as_path());
+    if !known {
+        return Err(
+            "Local Control: claude nur als 'claude' oder bekannter Installpfad erlaubt."
+                .to_string(),
+        );
+    }
+    let args: Vec<&str> = job.args.iter().map(String::as_str).collect();
+    let ok = matches!(
+        args.as_slice(),
+        ["auth", "status"] | ["auth", "status", "--json"] | ["auth", "status", "--text"]
+    );
+    if !ok {
+        return Err("Local Control: claude ist nur als 'claude auth status' erlaubt.".to_string());
+    }
+    Ok(())
+}
+
+fn resolve_program(job: &LocalControlJob) -> Result<String, String> {
+    if is_auth_probe(job) && job.command == "claude" {
+        return claude_candidates()
+            .into_iter()
+            .find(|p| p.is_file())
+            .map(|p| p.to_string_lossy().to_string())
+            .ok_or_else(|| {
+                "Local Control: Claude CLI an keinem bekannten Installpfad gefunden.".to_string()
+            });
+    }
+    Ok(job.command.clone())
+}
+
+fn effective_timeout(job: &LocalControlJob) -> u64 {
+    let max = if is_auth_probe(job) {
+        AUTH_PROBE_MAX_TIMEOUT_SECS
+    } else {
+        MAX_TIMEOUT_SECS
+    };
+    job.timeout_seconds.clamp(1, max)
+}
+
 fn validate_command(job: &LocalControlJob) -> Result<(), String> {
     let mode = job.mode.as_str();
     if !matches!(mode, "read_only" | "workspace_write") {
@@ -180,6 +248,9 @@ fn validate_command(job: &LocalControlJob) -> Result<(), String> {
     }
 
     let base = command_basename(&job.command);
+    if base == "claude" {
+        return validate_auth_probe(job);
+    }
     let denied = [
         "sudo",
         "su",
@@ -381,7 +452,16 @@ fn execute_job(root: &Path, job: &LocalControlJob) -> LocalControlResult {
         return result;
     }
 
-    let timeout_secs = job.timeout_seconds.clamp(1, MAX_TIMEOUT_SECS);
+    let program = match resolve_program(job) {
+        Ok(p) => p,
+        Err(e) => {
+            result.error = Some(e);
+            result.finished_at = now();
+            result.duration_ms = started.elapsed().as_millis();
+            return result;
+        }
+    };
+    let timeout_secs = effective_timeout(job);
     let out = match OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -406,7 +486,7 @@ fn execute_job(root: &Path, job: &LocalControlJob) -> LocalControlResult {
         }
     };
 
-    let mut child = match Command::new(&job.command)
+    let mut child = match Command::new(&program)
         .args(&job.args)
         .current_dir(&job.cwd)
         .env("PATH", child_path())
@@ -644,6 +724,56 @@ mod tests {
     #[test]
     fn workspace_write_allows_structured_git_mutation() {
         assert!(validate_command(&job("git", &["fetch", "origin"], "workspace_write")).is_ok());
+    }
+
+    #[test]
+    fn claude_auth_status_probe_is_allowed_read_only() {
+        assert!(validate_command(&job("claude", &["auth", "status"], "read_only")).is_ok());
+        assert!(
+            validate_command(&job("claude", &["auth", "status", "--json"], "read_only")).is_ok()
+        );
+        let home = dirs::home_dir().unwrap().join(".local/bin/claude");
+        let abs = home.to_string_lossy().to_string();
+        assert!(validate_command(&job(&abs, &["auth", "status"], "read_only")).is_ok());
+    }
+
+    #[test]
+    fn claude_other_invocations_stay_blocked() {
+        for args in [
+            &["-p", "hi"][..],
+            &["auth", "login"][..],
+            &["auth", "logout"][..],
+            &["setup-token"][..],
+            &["auth", "status", "--json", "-p"][..],
+            &[][..],
+        ] {
+            assert!(
+                validate_command(&job("claude", args, "workspace_write")).is_err(),
+                "must block claude {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_auth_probe_is_never_workspace_write() {
+        assert!(validate_command(&job("claude", &["auth", "status"], "workspace_write")).is_err());
+    }
+
+    #[test]
+    fn claude_from_unknown_path_is_blocked() {
+        let err = validate_command(&job("/tmp/evil/claude", &["auth", "status"], "read_only"))
+            .expect_err("unknown claude path must be blocked");
+        assert!(err.contains("Installpfad"));
+    }
+
+    #[test]
+    fn auth_probe_timeout_is_capped() {
+        let mut j = job("claude", &["auth", "status"], "read_only");
+        j.timeout_seconds = 900;
+        assert_eq!(effective_timeout(&j), AUTH_PROBE_MAX_TIMEOUT_SECS);
+        let mut g = job("git", &["status"], "read_only");
+        g.timeout_seconds = 900;
+        assert_eq!(effective_timeout(&g), 900);
     }
 
     #[test]
