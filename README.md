@@ -28,7 +28,7 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 ## Vision
 
-**KatoSync ist mehr als ein Chatfenster oder ein einzelner Coding-Agent.** Die Plattform soll den gesamten Arbeitszyklus zusammenführen: Projekt anlegen oder importieren, den tatsächlichen Stand ermitteln, Wissen für unterschiedliche Modelle aufbereiten, eine Aufgabe gezielt übergeben, Änderungen prüfen und später geräteübergreifend fortsetzen.
+**KatoSync ist mehr als ein Chatfenster oder ein einzelner Coding-Agent.** Die Plattform soll den gesamten Arbeitszyklus zusammenführen: Projekt anlegen oder importieren, den tatsächlichen Stand ermitteln, Wissen für unterschiedliche Modelle aufbereiten, eine Aufgabe gezielt übergeben, Änderungen prüfen und später geräteübergreifend fortsetzen. Das geplante **SmartMesh** macht mehrere autorisierte Geräte zu einem intelligenten Netzwerk für Projektkontext, lokale KI und verteilte Aufgaben.
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
@@ -45,6 +45,7 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 | **Kato AI / Local Brain** | Eigene lokale Modell-Runtime, Statusprüfung, Metal-/CUDA-Kandidatenerkennung und CPU-Fallback | macOS-Metal auf echtem Gerät geprüft; Windows-GPU-Inferenz offen |
 | **System Resources** | Live-CPU, verfügbarer RAM, GPU-Anzeige, Warnungen bei geringer Speicherreserve | macOS-GUI geprüft, Windows-Bibliothekstests grün; PR #75 |
 | **Local Control Bridge** | Strukturierte lokale Aufträge über Inbox/Outbox, Heartbeat und Ausführungsprotokolle | Bestehender lokaler Integrationspfad |
+| **SmartMesh / Fleet** | Persönliche Nodes, Hardware-Rollen, Git-first-Projektübergabe, direkte verschlüsselte Peer-Transfers und adaptive Arbeitsverteilung | **Geplant** – [#13](https://github.com/NMKato/KatoSync/issues/13) / [#15](https://github.com/NMKato/KatoSync/issues/15); kein freigegebener Multi-Node-Release |
 | **Sichere autonome Zusammenarbeit** | Isolierte Task-Worktrees, exklusiver Writer-Lease, abgestufte Schreib-/Netzwerkfreigaben | **Release-Blocker**, [Issue #76](https://github.com/NMKato/KatoSync/issues/76) |
 
 **Wichtig:** „Integriert“ und „getestet“ bedeuten nicht automatisch „im Download enthalten“. Nicht freigegebene Workflows und unbeaufsichtigtes Codeschreiben bleiben ausdrücklich beschränkt.
@@ -88,6 +89,39 @@ Die Schritte 4–6 beschreiben teilweise den **Zielablauf**, nicht bereits eine 
 Kato AI kombiniert eine austauschbare lokale Modell-Runtime mit Status-, Speicher- und künftig Kontext- und Werkzeugfunktionen. Die lokale Ausführung ist unabhängig davon, ob Codex oder Claude angemeldet sind. Ein laufendes Modell kann beim Neustart der Oberfläche wiedererkannt werden; die Ressourcenanzeige berücksichtigt dabei den eigenen verwalteten Prozess.
 
 Der macOS-Test auf einem **M2 Pro** hat eine funktionierende lokale Inferenz mit **Metal** bestätigt. Die angezeigte GPU-Auslastung beschreibt dabei das **gesamte Gerät**, nicht die eindeutig gemessene GPU-Auslastung eines einzelnen Modells. Die Windows-Tests beweisen noch **keine** verpackte CUDA- oder Intel-GPU-Inferenz. Fremde Modellprozesse werden nicht automatisch beendet.
+
+## KatoSync SmartMesh – gemeinsam arbeiten, Hardware sinnvoll nutzen
+
+> **In Entwicklung / Architekturziel:** SmartMesh ist als [Fleet Mode #13](https://github.com/NMKato/KatoSync/issues/13) und [Core Mesh #15](https://github.com/NMKato/KatoSync/issues/15) spezifiziert. Eine vollständig autonome, sicher abgenommene Geräteverbindung, Git-Übergabe und verteilte Ausführung ist **noch kein veröffentlichter Funktionsumfang**. Sicherheitsvoraussetzung: [#76](https://github.com/NMKato/KatoSync/issues/76).
+
+**Eine Installation, ein intelligenter Node. Mehrere autorisierte Installationen, ein koordinierter Projektarbeitsraum.** Jeder Node erhält eine dauerhafte, widerrufbare Geräteidentität und einen selbst vorgeschlagenen, vom Nutzer änderbaren Namen – zum Beispiel „M2 Koordinator“, „M3 Builder“ oder „Windows Operator“. Seine Rolle orientiert sich an **wirklich gemessenen** Fähigkeiten, nicht an einer bloßen KI-Behauptung.
+
+```mermaid
+flowchart TD
+    A["Node A · Mac M2 / Koordinator"] --> R{"SmartMesh: Was wird benötigt?"}
+    R -->|"Repository / Git-Deltas"| G["Freigegebener Git-Remote · Feature-Branch"]
+    G -->|"Fetch + SHA-Prüfung"| B["Node B · Mac M3 / Builder"]
+    R -->|"Einzeldatei / Artefakt"| P["Verschlüsselter Direkttransfer LAN / P2P"]
+    P --> C["Node C · Windows / Operator"]
+    P -. "Nur bei Bedarf · Quoten" .-> X["Cloud-Relay"]
+    A -. "Nur Metadaten / Signalisierung" .-> S["Optionales KatoSync Control Plane"]
+    B -. "Status / Checkpoints" .-> S
+    C -. "Status / Checkpoints" .-> S
+```
+
+### Git-first statt ganze Repositories durchs Netz zu kopieren
+
+Für ein **bestehendes, genehmigtes Git-Projekt** ist Git normalerweise der effizienteste Austauschweg: Ein berechtigter Node erstellt nach der erforderlichen Arbeitsfreigabe einen überprüften Commit auf einem **separaten Feature-Branch**. Andere berechtigte Nodes holen mit ihren **eigenen** Git-Zugängen nur die benötigten Objekte und prüfen Commit-SHA, Branch und Projektkontext. Ein geschützter Hauptzweig wird nicht automatisch verändert; Push, Merge und Veröffentlichung haben gesonderte Freigaben.
+
+Für **einzelne genehmigte Dateien, Artefakte oder private lokale Projekte** wird vorzugsweise direkt verschlüsselt übertragen: zuerst LAN/WLAN, dann direkte Internet-P2P-Verbindung, erst bei Bedarf ein kostenpflichtiger Relay. Hashes, begrenzte Pfadberechtigungen und wiederaufnehmbare Transfers schützen die Übergabe. Nicht jedes private Projekt darf auf einem externen Git-Server veröffentlicht werden.
+
+**Nodes koordinieren Berechtigungen, nicht Geheimnisse:** Jeder Node prüft selbst, ob er für einen Remote Lese- oder Schreibrechte besitzt. Fehlt ein Zugang, fragt KatoSync nach einer ordentlichen Autorisierung. **Keine Weitergabe von Git-Tokens, privaten SSH-Schlüsseln, Passwörtern oder Provider-Sitzungen von Gerät zu Gerät.** KI-Agenten schlagen Arbeitsweg und zuständigen Node vor; technische Richtlinien und die geräteübergreifende Einzel-Schreibsperre entscheiden, was tatsächlich ausgeführt werden darf.
+
+### Leistung intelligent verteilen
+
+SmartMesh soll verfügbare CPU, **freien** Arbeitsspeicher, erkannte GPU, nachgewiesene Backend-Beschleunigung, dedizierten VRAM **oder** gemeinsam genutzten Speicher sowie Toolchains, Laufzeitlast und Akkuzustand berücksichtigen. Damit kann beispielsweise ein GPU-Node eine lokale Modellanfrage, ein Mac den Xcode-Build und Windows eine plattformspezifische Prüfung übernehmen. **Mehrere Computer bilden dadurch aber nicht automatisch einen gemeinsamen RAM-/VRAM-Speicher.** Die aktuelle Ressourcenüberwachung liefert dafür erste technische Grundlagen; die automatische geräteübergreifende Planung ist noch offen.
+
+Für die geplante Cloud-Beta sind **2 registrierte Mesh-Geräte im Free-Modell** und **bis zu 10 in Pro** vorgesehen. Direkte LAN-/P2P-Nutzdaten sollen nicht auf ein kostenpflichtiges Relay-Datenbudget angerechnet werden. Geplante Relay-Startkontingente: **2 GiB/Monat Free**, **50 GiB/Monat Pro** – vorläufige Werte, **nicht** als live verfügbare Leistung zugesichert. Siehe [Cloud-Plan #37](https://github.com/NMKato/KatoSync/issues/37) und [Invite-Beta #79](https://github.com/NMKato/KatoSync/issues/79).
 
 ## Plattformstatus & Qualitätsnachweise
 
@@ -147,7 +181,7 @@ Ein Konto allein soll keine unbegrenzte Nutzung kostenpflichtiger KI-Modelle, GP
 
 ## Screenshots & Demo
 
-Eine neue, plattformübergreifende Bilderstrecke ist geplant: **Project Work Hub**, **Agent Sync**, **Kato AI**, **CPU/RAM/GPU**, **Live-Monitor**, **Checkpoints** und **Windows/macOS**. Wir ergänzen verifizierte Screenshots und kurze Demos erst nach der GUI-/Release-Abnahme, damit keine veraltete Mistral-Oberfläche als aktueller Funktionsstand erscheint.
+Eine neue, plattformübergreifende Bilderstrecke ist geplant: **Project Work Hub**, **Agent Sync**, **Kato AI**, **CPU/RAM/GPU**, **SmartMesh / Fleet-Topologie**, **Live-Monitor**, **Checkpoints** und **Windows/macOS**. Wir ergänzen verifizierte Screenshots und kurze Demos erst nach der GUI-/Release-Abnahme, damit keine veraltete Mistral-Oberfläche als aktueller Funktionsstand erscheint.
 
 ## Roadmap
 
@@ -158,6 +192,7 @@ Eine neue, plattformübergreifende Bilderstrecke ist geplant: **Project Work Hub
 - [ ] [#76: isolierte Worktrees, Freigaben, dauerhafter Writer-Lease](https://github.com/NMKato/KatoSync/issues/76)
 - [ ] Durchgehender Test: Projekt → freigegebener Agentenwechsel → Edit → Checkpoint → unabhängige Tests
 - [ ] Vollständige Windows- und macOS-Installer mit realen Ressourcen, GUI-/Gerätetests, Signierung
+- [ ] SmartMesh: vertrauenswürdige Gerätenamen/Identitäten, Fähigkeitsrouting, Git-first-Handoff, LAN/P2P/Relay-Fallback, unabhängige Git-Logins und Remote-Writer-Lease
 - [ ] Gerätesynchronisation und belastbare Projekt-Historie / Memory Fabric
 - [ ] Optionale Cloud-Tarife, Limits und Datenschutz-/Sicherheitsabnahme
 - [ ] Neue Screenshots, Demo-Video, Download-Seite und eindeutig definierte Open-Source-Lizenz
@@ -171,7 +206,7 @@ KatoSync begann als **Schulprojekt rund um Mistral und die Übergabe von KI-Aufg
 <details>
 <summary><strong>English summary</strong></summary>
 
-**KatoSync** is a local-first project workspace and AI orchestration desktop app built with Tauri, Rust, React and TypeScript. It brings project registration and resumption, context sharing, Codex/Claude runners, a local **Kato AI** runtime, and CPU/RAM/GPU monitoring into one interface.
+**KatoSync** is a local-first project workspace and AI orchestration desktop app built with Tauri, Rust, React and TypeScript. It brings project registration and resumption, context sharing, Codex/Claude runners, a local **Kato AI** runtime, and CPU/RAM/GPU monitoring into one interface. The planned **SmartMesh** connects independently authenticated nodes, prefers Git for approved repository handoffs and encrypted LAN/P2P transfers for files, and routes authorized tasks to capable CPU/GPU machines. Nodes do not share raw credentials or magically pool physical RAM/VRAM.
 
 The latest Project Work Hub + GPU integration has passed macOS and Windows native source tests, but remains a **draft integration**, not a generally released cross-platform installer. Safe unattended code-writing is blocked until isolated worktrees, scoped permissions and a verifiable single-writer lease are independently reviewed. Managed accounts and paid cloud services are being considered, but no pricing or service entitlements are promised. Repository licensing has not yet been finalized.
 
