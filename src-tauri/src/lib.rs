@@ -3254,6 +3254,7 @@ async fn run_codex_task(
 /// `codex resume <id>`) und oeffnet sie mit `open` → Terminal.app startet die Session mit
 /// voller History UND den Connectoren des Nutzers (Gmail, Blender, …). Ohne bekannte
 /// Session-ID: `--continue` (Claude) bzw. `resume --last` (Codex).
+#[cfg(target_os = "macos")]
 #[tauri::command]
 fn resume_runner_session(
     repo_path: String,
@@ -3326,6 +3327,18 @@ fn resume_runner_session(
         return Err("Terminal konnte die Session nicht starten.".to_string());
     }
     Ok(())
+}
+
+// The interactive .command launcher intentionally depends on macOS Terminal.app.
+// Never write a Unix script or invoke `open -a Terminal` on unsupported platforms.
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn resume_runner_session(
+    _repo_path: String,
+    _runner: String,
+    _session_id: Option<String>,
+) -> Result<(), String> {
+    Err("Interaktive Terminal-Fortsetzung ist derzeit nur unter macOS verfügbar.".to_string())
 }
 
 #[tauri::command]
