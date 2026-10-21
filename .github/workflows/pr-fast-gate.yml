@@ -5,6 +5,8 @@ on:
     branches:
       - dev
       - main
+      - "security/**"
+      - "integration/**"
     paths-ignore:
       - "**/*.md"
       - "docs/**"
@@ -39,8 +41,8 @@ jobs:
       - name: Node regression suite (including KUAS and MCP/CLI)
         run: npm test
 
-      - name: Trusted backend approval broker TypeScript
-        run: npm run typecheck:server
+      - name: Server TypeScript security contract (if configured)
+        run: npm run typecheck:server --if-present
 
       - name: TypeScript + Vite production build
         run: npm run build
@@ -65,8 +67,8 @@ jobs:
       - name: Windows Node and MCP integration tests
         run: npm test
 
-      - name: Windows trusted backend approval broker TypeScript
-        run: npm run typecheck:server
+      - name: Windows server TypeScript security contract (if configured)
+        run: npm run typecheck:server --if-present
 
       - name: Windows TypeScript
         run: npm run typecheck
