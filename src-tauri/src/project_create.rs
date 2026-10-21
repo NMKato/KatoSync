@@ -257,9 +257,12 @@ mod tests {
 
     fn temp_workspace() -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "katosync-create-{}-{:?}",
+            "katosync-create-{}-{}",
             std::process::id(),
             SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir(&root).unwrap();
         root

@@ -73,9 +73,11 @@ mod tests {
 
     #[test]
     fn logical_project_identity_only_no_freeform_path() {
+        let root_a = std::env::temp_dir().join("katosync-resume-a");
+        let root_b = std::env::temp_dir().join("katosync-resume-b");
         let reg = json!({"projects": [
-            {"id":"a","rootPath":"/tmp/repo-a","scan":{"headSha":"abcd0123456789"}},
-            {"id":"b","rootPath":"/tmp/repo-b"}
+            {"id":"a","rootPath":root_a.to_string_lossy(),"scan":{"headSha":"abcd0123456789"}},
+            {"id":"b","rootPath":root_b.to_string_lossy()}
         ]});
         assert_eq!(
             registered_root(&reg, "a").unwrap().1.as_deref(),
