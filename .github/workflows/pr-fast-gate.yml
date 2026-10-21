@@ -1,0 +1,74 @@
+name: KatoSync PR Fast Gate
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+      - "security/**"
+      - "integration/**"
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: katosync-fast-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-build:
+    name: Web Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Node regression suite (including KUAS and MCP/CLI)
+        run: npm run test --if-present
+
+      - name: Server TypeScript security contract (if configured)
+        run: npm run typecheck:server --if-present
+
+      - name: TypeScript + Vite production build
+        run: npm run build
+
+  windows-node-regression:
+    name: Windows Node Regression
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Windows Node regression suite (if configured)
+        run: npm run test --if-present
+
+      - name: Windows server TypeScript security contract (if configured)
+        run: npm run typecheck:server --if-present
+
+      - name: Windows TypeScript
+        run: npm run typecheck --if-present
