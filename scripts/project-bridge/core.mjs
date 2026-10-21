@@ -125,7 +125,13 @@ function trustworthyRoot(item) {
     if (!lstatSync(root).isDirectory()) throw new BridgeError("registered_root_invalid");
   } catch { throw new BridgeError("registered_root_unavailable"); }
   const toplevel = fixedGit(root, "rev-parse", "--show-toplevel");
-  if (realpathSync(toplevel) !== root) throw new BridgeError("registry_root_mismatch");
+  // On Windows, a canonical Git path and a Node realpath may differ only by
+  // drive-letter or directory casing; compare normalized filesystem identity.
+  const canonicalTop = realpathSync(toplevel);
+  if ((process.platform === "win32" ? canonicalTop.toLowerCase() : canonicalTop)
+      !== (process.platform === "win32" ? root.toLowerCase() : root)) {
+    throw new BridgeError("registry_root_mismatch");
+  }
   return root;
 }
 

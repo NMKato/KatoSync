@@ -71,7 +71,7 @@ test("CLI lists only approved Registry IDs and omits device paths, private proje
   const f = fixture();
   try {
     const result = cli(["list", "--registry", f.registry, "--allow-project-id", "our-demo"]);
-    assert.equal(result.status, 0);
+    assert.equal(result.status, 0, result.stderr || "read-only CLI failed with no stderr");
     const output = JSON.parse(result.stdout);
     assert.deepEqual(output.projects.map((p: { id: string }) => p.id), ["our-demo"]);
     assert.doesNotMatch(result.stdout, /other-private|do-not-share|test-proj|rootPath|tmp\//);
@@ -83,7 +83,7 @@ test("fresh CLI context has Git truth, explicit KUAS, safe references and no per
   try {
     const args = ["--registry", f.registry, "--allow-project-id", "our-demo"];
     const result = cli(["get", "our-demo", ...args]);
-    assert.equal(result.status, 0);
+    assert.equal(result.status, 0, result.stderr || "read-only CLI failed with no stderr");
     const output = JSON.parse(result.stdout);
     assert.equal(output.git.headSha, f.head);
     assert.equal(output.git.branch, "main");
@@ -106,7 +106,9 @@ test("registered Git HEAD drift is detected and arbitrary root path aliasing is 
     f.record.projects[0].scan.headSha = SH;
     writeFileSync(f.registry, JSON.stringify(f.record));
     const args = ["--registry", f.registry, "--allow-project-id", "our-demo"];
-    const drift = JSON.parse(cli(["get", "our-demo", ...args]).stdout);
+    const response = cli(["get", "our-demo", ...args]);
+    assert.equal(response.status, 0, response.stderr || "read-only CLI returned no JSON");
+    const drift = JSON.parse(response.stdout);
     assert.equal(drift.git.headChangedSinceRegistry, true);
     assert.ok(drift.reasons.includes("head_changed_since_registry"));
     // The registered project root must be the actual Git root, not a parent/child arbitrary path.
@@ -157,7 +159,7 @@ test("official MCP client can connect, list tools and call read-only context; un
     assert.equal(list.isError, undefined);
     assert.equal(list.structuredContent?.projects?.[0]?.id, "our-demo");
     const context = await client.callTool({ name: "project_context_get", arguments: { projectId: "our-demo" } });
-    assert.equal(context.isError, undefined);
+    assert.equal(context.isError, undefined, JSON.stringify(context.content));
     assert.equal(context.structuredContent?.git?.headSha, f.head);
     assert.equal(context.structuredContent?.authorization?.codeWritesAllowed, false);
     const denied = await client.callTool({ name: "project_context_get", arguments: { projectId: "other-private" } });
