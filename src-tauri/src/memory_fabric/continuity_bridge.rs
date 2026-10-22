@@ -304,6 +304,56 @@ pub(crate) async fn continuity_timeline(project_id: String) -> Result<Continuity
     .await
 }
 
+/// User-requested read-only feature audit, anchored to exactly one registered project.
+/// Local Git objects are checked as existence/ancestry, never as feature test proof.
+#[tauri::command]
+pub(crate) async fn continuity_feature_trace(
+    project_id: String,
+    section_key: String,
+) -> Result<super::feature_trace::FeatureTrace, String> {
+    blocking(move || {
+        let path = crate::app_support_dir()
+            .map_err(crate::error_to_string)?
+            .join(STORE_DIR)
+            .join(STORE_FILE);
+        let store = MemoryStore::open_read_only(&path)?
+            .ok_or_else(|| "Memory Fabric ist nicht indexiert.".to_string())?;
+        let head = registered_head(&store, &project_id)?;
+        let schema: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| "Unbekannte Memory-Fabric-Version.".to_string())?;
+        if schema < 4 {
+            return Err("Blueprint-Featureindex fehlt.".to_string());
+        }
+        let registry = project_registry::project_registry_load()?
+            .ok_or_else(|| "Projekt-Registry fehlt.".to_string())?;
+        let root = registry
+            .get("projects")
+            .and_then(|v| v.as_array())
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|x| x.get("id").and_then(|v| v.as_str()) == Some(&project_id))
+            })
+            .and_then(|item| item.get("rootPath").and_then(|v| v.as_str()))
+            .ok_or_else(|| "Projektordner ist nicht registriert.".to_string())?;
+        let live = super::live_state_for(&store, &project_id, root)?;
+        if live.head_sha.as_deref() != Some(head.as_str()) {
+            return Err("Git-HEAD änderte sich bei der Quellenprüfung.".to_string());
+        }
+        super::feature_trace::build_feature_trace(
+            &store,
+            &project_id,
+            &section_key,
+            Path::new(root),
+            &live,
+            &head,
+        )
+    })
+    .await
+}
+
 /// Local-only feature lookup over UNVERIFIED imported Blueprint/milestone sections.
 /// The live HEAD comparison is not evidence of feature completion.
 #[tauri::command]

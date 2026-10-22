@@ -1938,3 +1938,139 @@ fn feature_index_v3_migration_backfills_existing_blueprints_transactionally() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn feature_trace_joins_exact_adr_revision_and_milestone_with_no_false_completion() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store
+        .ingest(batch(
+            "alpha",
+            Some(HEAD),
+            vec![source(
+                "docs/ADR-10.md",
+                "architecture",
+                "# ADR-10\nADR-10 describes a verified telephone architecture.",
+                true,
+            )],
+        ))
+        .unwrap();
+    store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+    let mut first = journal_draft("alpha", "blueprint:orig-trace", None);
+    first.payload_json = feature_blueprint("alpha");
+    let initial = store.append_continuity(first).unwrap();
+    let mut revision = journal_draft(
+        "alpha",
+        "blueprint:revision-trace",
+        Some(&initial.event.event_hash),
+    );
+    revision.payload_json = feature_blueprint("alpha").replace(
+        "Prevent forgotten warm containers",
+        "Use no idle cloud workers",
+    );
+    let updated = store.append_continuity(revision).unwrap();
+    let mut milestone = journal_draft("alpha", "milestone:ADR-10", Some(&updated.event.event_hash));
+    milestone.kind = "checkpoint".into();
+    milestone.payload_json = serde_json::json!({
+        "projectId":"alpha","featureKey":"ADR-10","title":"Phone routing",
+        "summary":"Claims feature completed","rationale":"Prototype ran",
+        "status":"completed","evidence":[{"kind":"git_commit","ref":"a".repeat(40)}]
+    })
+    .to_string();
+    store.append_continuity(milestone).unwrap();
+    let check = live(
+        HEAD,
+        &[(
+            "docs/ADR-10.md",
+            "# ADR-10\nADR-10 describes a verified telephone architecture.",
+        )],
+    );
+    let report = super::feature_trace::build_feature_trace(
+        &store,
+        "alpha",
+        "decision:ADR-10",
+        std::path::Path::new("/nonexistent/katosync-git"),
+        &check,
+        HEAD,
+    )
+    .unwrap();
+    assert_eq!(report.feature_id, "ADR-10");
+    assert_eq!(report.versions.len(), 3);
+    assert_eq!(report.versions[0].event_kind, "milestone");
+    assert_eq!(report.versions[1].event_kind, "blueprint");
+    assert_eq!(report.versions[2].event_kind, "blueprint");
+    assert_eq!(
+        report.completion,
+        "unknown_requires_feature_specific_tests_and_owner_review"
+    );
+    assert!(report
+        .claimed_evidence
+        .iter()
+        .any(|ev| ev.check == "unverified_reference"));
+    assert!(report
+        .claimed_evidence
+        .iter()
+        .any(|ev| ev.check == "commit_not_present_locally"));
+    assert!(
+        !report.matching_verified_sources.is_empty(),
+        "independent indexed source text may be a candidate without proving completion"
+    );
+    assert!(report
+        .matching_verified_sources
+        .iter()
+        .all(|s| s.match_basis == "lexical_candidate_not_implementation_proof"));
+    let from_milestone = store
+        .feature_versions("alpha", "milestone:ADR-10", HEAD)
+        .unwrap();
+    assert_eq!(from_milestone.len(), 3);
+    assert!(store
+        .feature_versions("beta", "decision:ADR-10", HEAD)
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .feature_versions("../alpha", "decision:ADR-10", HEAD)
+        .is_err());
+    assert!(
+        store
+            .feature_versions("alpha", "decision:ADR-11", HEAD)
+            .unwrap()
+            .len()
+            == 2
+    );
+}
+
+#[test]
+fn feature_trace_stale_verified_sources_and_unrelated_keys_are_not_auto_joined() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    let original = "# ADR-10\nADR-10 was the original choice";
+    store
+        .ingest(batch(
+            "alpha",
+            Some(HEAD),
+            vec![source("docs/ADR-10.md", "architecture", original, true)],
+        ))
+        .unwrap();
+    let mut proposal = journal_draft("alpha", "blueprint:stale-trace", None);
+    proposal.payload_json = feature_blueprint("alpha");
+    store.append_continuity(proposal).unwrap();
+    let check = live(
+        HEAD,
+        &[("docs/ADR-10.md", "# ADR-10\nCHANGED since last index")],
+    );
+    let trace = super::feature_trace::build_feature_trace(
+        &store,
+        "alpha",
+        "decision:ADR-10",
+        std::path::Path::new("/none"),
+        &check,
+        HEAD,
+    )
+    .unwrap();
+    assert!(
+        trace.matching_verified_sources.is_empty(),
+        "source content changed, so it must not be treated as fresh evidence"
+    );
+    assert!(store
+        .feature_versions("alpha", "milestone:unrelated", HEAD)
+        .unwrap()
+        .is_empty());
+}

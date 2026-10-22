@@ -1,6 +1,7 @@
 // Created by NMKato Solutions
 // Read-only scoped FTS5 feature search in imported unverified Blueprint proposals.
 import { useEffect, useRef, useState } from "react";
+import { ContinuityFeatureTrace } from "./ContinuityFeatureTrace";
 import { invoke } from "@tauri-apps/api/core";
 import { Search, AlertTriangle } from "lucide-react";
 import { useT } from "../i18n";
@@ -36,6 +37,7 @@ export function ContinuityBlueprintSearchPanel({
   const [matches, setMatches] = useState<IndexedSection[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  const [activeSection, setActiveSection] = useState("");
   const requestRef = useRef(0);
   const projectRef = useRef(projectId);
   projectRef.current = projectId;
@@ -44,6 +46,7 @@ export function ContinuityBlueprintSearchPanel({
     requestRef.current += 1;
     setQuery("");
     setMatches([]);
+    setActiveSection("");
     setBusy(false);
     setError(false);
   }, [projectId, refreshSequence]);
@@ -102,6 +105,12 @@ export function ContinuityBlueprintSearchPanel({
               <small>{match.eventKind === "milestone" ? t("continuity.index.milestone") : t("continuity.index.blueprint")}</small>
             </div>
             <small>{t("continuity.index.origin")} #{match.eventSequence} · {match.sectionKey}</small>
+            {match.sectionKey !== "overview" ? (
+              <button type="button" className="secondary compact-button"
+                onClick={() => setActiveSection(match.sectionKey)}>
+                {t("continuity.trace.open")}
+              </button>
+            ) : null}
             <p>{match.excerpt}</p>
             {listedEvidence(match.evidenceJson).length > 0 ? (
               <small>{t("continuity.index.evidence")}: {listedEvidence(match.evidenceJson).join(" · ")}</small>
@@ -114,6 +123,8 @@ export function ContinuityBlueprintSearchPanel({
           </article>
         ))}
       </div>
+      {activeSection ? <ContinuityFeatureTrace key={projectId+":"+activeSection}
+        projectId={projectId} sectionKey={activeSection} onClose={() => setActiveSection("")} /> : null}
       {matches.length === 0 && !busy && query.trim() && !error
         ? <small>{t("continuity.index.noResultsHint")}</small> : null}
       <p className="continuity-notice">{t("continuity.index.disclaimer")}</p>

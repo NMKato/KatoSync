@@ -9672,3 +9672,15 @@ button.agent-tile:hover {
 .continuity-index-hit {display:grid;gap:7px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);padding:11px;min-width:0;overflow-wrap:anywhere;}
 .continuity-index-hit p {font-size:12px;white-space:pre-wrap;margin:0;}
 .continuity-index-hit small {color:var(--text-muted);}
+
+/* Evidence dossier remains read-only and uses the inherited project-card design tokens. */
+.continuity-feature-trace {display:grid;gap:11px;border-top:1px solid var(--line);padding-top:13px;min-width:0;}
+.continuity-feature-trace h4,.continuity-feature-trace h5 {margin:0;}
+.continuity-feature-trace h5 {font-size:13px;}
+.continuity-trace-history,.continuity-trace-lines {display:grid;gap:8px;list-style:none;padding:0;margin:0;min-width:0;}
+.continuity-trace-history>li {display:grid;gap:5px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);padding:10px;overflow-wrap:anywhere;}
+.continuity-trace-history p {white-space:pre-wrap;margin:0;font-size:12px;}
+.continuity-trace-history small {color:var(--text-muted);}
+.continuity-trace-lines>li {display:flex;flex-wrap:wrap;align-items:flex-start;gap:7px;font-size:12px;overflow-wrap:anywhere;}
+.continuity-trace-lines>li span {min-width:0;overflow-wrap:anywhere;}
+.continuity-trace-lines strong {font-weight:600;color:var(--text-muted);}

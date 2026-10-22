@@ -13,6 +13,7 @@ mod blueprint_index;
 pub(crate) mod continuity_bridge;
 mod continuity_chat;
 mod continuity_context;
+mod feature_trace;
 mod identity;
 mod ingest;
 mod journal;
