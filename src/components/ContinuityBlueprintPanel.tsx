@@ -9,6 +9,7 @@ import {
   type ContinuityBlueprintPreview
 } from "../lib/continuityBlueprint";
 import type { RegistryProject } from "../types";
+import { ContinuityTimelinePanel } from "./ContinuityTimelinePanel";
 
 const FILE_LIMIT = 32_768;
 const JOURNAL_LIMIT = 8192;
@@ -203,6 +204,8 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
       {error ? (
         <p className="tone-danger" role="alert"><AlertTriangle size={14} /> {error}</p>
       ) : null}
+
+      <ContinuityTimelinePanel projectId={project?.id ?? ""} refreshSequence={saved?.event.sequence ?? 0} />
 
       {validPreview ? (
         <div className="continuity-results" role="region" aria-label={t("continuity.previewTitle")}>

@@ -15,6 +15,52 @@ const MAX_IMPORT_BYTES: usize = 8192;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ContinuityTimeline {
+    pub project_id: String,
+    pub live_git_head: String,
+    pub events: Vec<super::JournalEvent>,
+    pub latest_sequence: i64,
+    pub unverified: bool,
+    pub offline_local_only: bool,
+}
+
+/// Local read-only timeline. Does not index, create or migrate a database, and
+/// never returns events until the project registry, Git root and Fabric match.
+#[tauri::command]
+pub(crate) async fn continuity_timeline(project_id: String) -> Result<ContinuityTimeline, String> {
+    blocking(move || {
+        let path = crate::app_support_dir()
+            .map_err(crate::error_to_string)?
+            .join(STORE_DIR)
+            .join(STORE_FILE);
+        let store = MemoryStore::open_read_only(&path)?
+            .ok_or_else(|| "Memory Fabric ist noch nicht indexiert.".to_string())?;
+        let head = registered_head(&store, &project_id)?;
+        let schema: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| "Memory-Fabric-Schema konnte nicht gelesen werden.".to_string())?;
+        // Older v1 Fabric has no continuity_events yet: do NOT trigger migration on read.
+        let events = if schema == 1 {
+            Vec::new()
+        } else {
+            store.recent_continuity_events(&project_id, 20)?
+        };
+        let latest_sequence = events.first().map(|event| event.sequence).unwrap_or(0);
+        Ok(ContinuityTimeline {
+            project_id,
+            live_git_head: head,
+            events,
+            latest_sequence,
+            unverified: true,
+            offline_local_only: true,
+        })
+    })
+    .await
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ContinuityPreflight {
     pub project_id: String,
     pub git_head: String,

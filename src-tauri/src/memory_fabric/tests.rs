@@ -1521,3 +1521,33 @@ fn journal_two_independent_sqlite_writers_cannot_claim_one_predecessor() {
     );
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn continuity_recent_timeline_is_newest_first_bounded_and_project_isolated() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+    let mut previous: Option<String> = None;
+    for seq in 1..=25 {
+        let saved = store
+            .append_continuity(journal_draft(
+                "alpha",
+                &format!("timeline-{seq}"),
+                previous.as_deref(),
+            ))
+            .unwrap();
+        previous = Some(saved.event.event_hash);
+    }
+    store
+        .append_continuity(journal_draft("beta", "timeline-1", None))
+        .unwrap();
+    let recent = store.recent_continuity_events("alpha", 20).unwrap();
+    assert_eq!(recent.len(), 20);
+    assert_eq!(recent[0].sequence, 25);
+    assert_eq!(recent[19].sequence, 6);
+    assert!(recent.iter().all(|event| event.project_id == "alpha"));
+    assert_eq!(store.recent_continuity_events("beta", 10).unwrap().len(), 1);
+    assert!(store.recent_continuity_events("alpha", 0).is_err());
+    assert!(store.recent_continuity_events("alpha", 31).is_err());
+    assert!(store.recent_continuity_events("../alpha", 10).is_err());
+}

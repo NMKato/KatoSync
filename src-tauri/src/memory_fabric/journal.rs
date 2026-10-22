@@ -300,6 +300,33 @@ impl MemoryStore {
         })
     }
 
+    /// Last N events for local Timeline UI. Always scoped; never returns another project.
+    pub(crate) fn recent_continuity_events(
+        &self,
+        project_id: &str,
+        limit: usize,
+    ) -> Result<Vec<JournalEvent>, String> {
+        let project_id = validate_project_id(project_id)?;
+        if !(1..=30).contains(&limit) {
+            return Err("Ungültige Timeline-Lesemenge.".to_string());
+        }
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT sequence, event_id, device_id, kind, summary, payload_json, base_git_head,
+                    created_at, previous_hash, event_hash
+             FROM continuity_events WHERE project_id = ?1
+             ORDER BY sequence DESC LIMIT ?2",
+            )
+            .map_err(safe_error)?;
+        let rows = stmt
+            .query_map(params![project_id, limit as i64], |row| {
+                read_event_row(row, project_id)
+            })
+            .map_err(safe_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(safe_error)
+    }
+
     /// A bounded read with mandatory project scope. No cross-project query API.
     pub(crate) fn continuity_events(
         &self,
