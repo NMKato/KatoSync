@@ -340,11 +340,11 @@ pub(crate) async fn continuity_github_ci(
         }
     })
     .await?;
-    let report =
+    let mut report =
         super::github_ci::github_ci_for_registered_root(&project_id, Path::new(&root), &head)
             .await?;
     // Detect project checkout change WHILE provider requests were underway.
-    let now = blocking({
+    let (now, tasks) = blocking({
         let project_id = project_id.clone();
         move || {
             let path = crate::app_support_dir()
@@ -353,13 +353,16 @@ pub(crate) async fn continuity_github_ci(
                 .join(STORE_FILE);
             let store = MemoryStore::open_read_only(&path)?
                 .ok_or_else(|| "Memory Fabric ist nicht indexiert.".to_string())?;
-            registered_head(&store, &project_id)
+            let current = registered_head(&store, &project_id)?;
+            let progress = store.project_mvp_progress(&project_id, &current)?;
+            Ok((current, progress.tasks))
         }
     })
     .await?;
     if now != head {
         return Err("Projekt-Git-Stand änderte sich während der CI-Abfrage.".into());
     }
+    report.feature_ci_coverage = super::mvp_ci_matrix::feature_ci_coverage(&report, &tasks);
     Ok(report)
 }
 
@@ -501,6 +504,15 @@ struct BlueprintMvpItem {
     lane: String,
     weight: u8,
     acceptance_criteria: String,
+    #[serde(default)]
+    ci_checks: Vec<BlueprintCiCheck>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BlueprintCiCheck {
+    workflow: String,
+    job: String,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -566,6 +578,18 @@ fn parse_blueprint(raw: &str, project_id: &str) -> Result<BlueprintDocument, Str
                 || !["mvp", "side"].contains(&step.lane.as_str())
                 || !(1..=5).contains(&step.weight)
                 || !text(&step.acceptance_criteria, 400)
+                || step.ci_checks.len() > 4
+                || step
+                    .ci_checks
+                    .iter()
+                    .any(|c| !text(&c.workflow, 120) || !text(&c.job, 120))
+                || step
+                    .ci_checks
+                    .iter()
+                    .map(|c| (&c.workflow, &c.job))
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    != step.ci_checks.len()
         })
         || doc
             .mvp_scope
@@ -767,6 +791,27 @@ mod tests {
         assert!(parse_blueprint(&doc.to_string(), "alpha").is_err());
         doc["mvpScope"][1]["featureId"] = serde_json::json!("EXTRA");
         doc["mvpScope"][0]["ownerApproved"] = serde_json::json!(true);
+        assert!(parse_blueprint(&doc.to_string(), "alpha").is_err());
+    }
+
+    #[test]
+    fn native_mvp_ci_checks_require_exact_names_and_reject_fake_approvals() {
+        let mut doc: serde_json::Value = serde_json::from_str(DOC).unwrap();
+        doc["mvpScope"] = serde_json::json!([{
+            "featureId":"PHONE","title":"Phone","lane":"mvp",
+            "weight":3,"acceptanceCriteria":"Dedicated phone smoke",
+            "ciChecks":[
+                {"workflow":"Fast Gate","job":"Windows Node Regression"},
+                {"workflow":"Fast Gate","job":"Web Build"}
+            ]
+        }]);
+        let accepted = parse_blueprint(&doc.to_string(), "alpha").unwrap();
+        assert_eq!(accepted.mvp_scope[0].ci_checks.len(), 2);
+        doc["mvpScope"][0]["ciChecks"][1] = doc["mvpScope"][0]["ciChecks"][0].clone();
+        assert!(parse_blueprint(&doc.to_string(), "alpha").is_err());
+        doc["mvpScope"][0]["ciChecks"][1] = serde_json::json!({
+            "workflow":"Fast Gate","job":"Web Build","ownerApproved":true
+        });
         assert!(parse_blueprint(&doc.to_string(), "alpha").is_err());
     }
 

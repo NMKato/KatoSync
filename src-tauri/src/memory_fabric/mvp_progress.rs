@@ -7,12 +7,20 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct RequiredCiCheck {
+    pub workflow: String,
+    pub job: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct MvpTaskProgress {
     pub feature_id: String,
     pub title: String,
     pub lane: String,
     pub weight: u8,
     pub acceptance_criteria: String,
+    pub ci_checks: Vec<RequiredCiCheck>,
     pub reported_status: &'static str,
     pub status_journal_sequence: Option<i64>,
     pub verified: bool,
@@ -143,12 +151,45 @@ impl MemoryStore {
             {
                 return Ok(progress);
             }
+            // Strict, bounded, backwards-compatible optional feature-level CI coverage plan.
+            let raw_checks = item.get("ciChecks").and_then(|v| v.as_array());
+            if item.get("ciChecks").is_some() && raw_checks.is_none() {
+                return Ok(progress);
+            }
+            let mut ci_checks = Vec::new();
+            let mut seen_ci = BTreeSet::new();
+            if let Some(checks) = raw_checks {
+                if checks.len() > 4 {
+                    return Ok(progress);
+                }
+                for check in checks {
+                    let Some(workflow) = check.get("workflow").and_then(|v| v.as_str()) else {
+                        return Ok(progress);
+                    };
+                    let Some(job) = check.get("job").and_then(|v| v.as_str()) else {
+                        return Ok(progress);
+                    };
+                    if workflow.is_empty()
+                        || workflow.chars().count() > 120
+                        || job.is_empty()
+                        || job.chars().count() > 120
+                        || !seen_ci.insert((workflow.to_string(), job.to_string()))
+                    {
+                        return Ok(progress);
+                    }
+                    ci_checks.push(RequiredCiCheck {
+                        workflow: workflow.into(),
+                        job: job.into(),
+                    });
+                }
+            }
             tasks.push(MvpTaskProgress {
                 feature_id: feature.to_string(),
                 title: title.to_string(),
                 lane: lane.to_string(),
                 weight: weight as u8,
                 acceptance_criteria: criteria.to_string(),
+                ci_checks,
                 reported_status: "not_reported",
                 status_journal_sequence: None,
                 verified: false,

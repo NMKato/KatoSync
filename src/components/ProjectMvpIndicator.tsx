@@ -7,6 +7,7 @@ import { useT } from "../i18n";
 export type MvpScopeTask = {
   featureId:string; title:string; lane:"mvp"|"side";weight:number;acceptanceCriteria:string;
   reportedStatus:string;statusJournalSequence:number|null;verified:boolean;
+  ciChecks:{workflow:string;job:string}[];
   testClaim:string;testName:string|null;testJournalSequence:number|null;
 };
 export type ProjectMvpProgress = {

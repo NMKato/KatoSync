@@ -37,6 +37,7 @@ pub(crate) struct GithubCiReport {
     pub jobs: Vec<GithubJob>,
     pub feature_acceptance_verified: bool,
     pub ci_identity_verified: bool,
+    pub feature_ci_coverage: Vec<super::mvp_ci_matrix::FeatureCiCoverage>,
 }
 fn valid_git_head(s: &str) -> bool {
     matches!(s.len(), 40 | 64) && s.bytes().all(|b| b.is_ascii_hexdigit())
@@ -245,6 +246,7 @@ pub(crate) async fn github_ci_for_registered_root(
         jobs,
         feature_acceptance_verified: false,
         ci_identity_verified: true,
+        feature_ci_coverage: Vec::new(),
     })
 }
 #[cfg(test)]

@@ -9768,3 +9768,11 @@ button.agent-tile:hover {
 .mvp-ci-jobs {display:grid;gap:5px;list-style:none;padding:0;margin:0;}
 .mvp-ci-jobs>li {display:flex;justify-content:space-between;gap:9px;flex-wrap:wrap;font-size:11px;overflow-wrap:anywhere;}
 .mvp-ci-jobs small {color:var(--text-muted);}
+
+/* Feature CI matrix is nested inside explicit on-demand project CI evidence. */
+.mvp-ci-feature-list {display:grid;gap:9px;border-top:1px solid var(--line);padding-top:10px;}
+.mvp-ci-feature-list>strong {font-size:12px;}
+.mvp-ci-feature-item {display:grid;border:1px solid var(--line);border-radius:var(--r-md);padding:9px 11px;min-width:0;}
+.mvp-ci-feature-item summary {cursor:pointer;font-size:12px;font-weight:600;overflow-wrap:anywhere;}
+.mvp-ci-feature-item>small {display:block;color:var(--text-muted);font-size:11px;margin:7px 0;}
+.mvp-ci-feature-item .mvp-ci-jobs {margin-top:7px;}

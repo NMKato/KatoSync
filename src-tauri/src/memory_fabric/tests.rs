@@ -2286,3 +2286,47 @@ fn mvp_latest_test_receipt_can_revoke_prior_pass_and_unbound_is_not_fresh() {
     assert_eq!(now.tasks[0].test_claim, "claimed_stale_or_unbound");
     assert_eq!(now.verified_percent, None);
 }
+
+#[test]
+fn mvp_ci_requirements_survive_local_journal_roundtrip_without_granting_approval() {
+    let dir = temp_dir("ci-gate-persistence");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+        let mut draft = journal_draft("alpha", "blueprint:feature-gates", None);
+        draft.payload_json = serde_json::json!({
+            "schemaVersion":"katosync.continuity-blueprint/v1",
+            "projectId":"alpha","blueprintId":"feature-gates",
+            "mvpScope":[
+                {"featureId":"PHONE","title":"Booking","lane":"mvp","weight":5,
+                 "acceptanceCriteria":"Windows booking E2E plus owner review",
+                 "ciChecks":[
+                     {"workflow":"KatoSync PR Fast Gate","job":"Windows Node Regression"},
+                     {"workflow":"KatoSync PR Fast Gate","job":"Web Build"}
+                 ]},
+                {"featureId":"SIDE","title":"Polish","lane":"side","weight":1,
+                 "acceptanceCriteria":"Visual review"}
+            ]
+        })
+        .to_string();
+        store.append_continuity(draft).unwrap();
+    }
+    {
+        let store = MemoryStore::open_read_only(&path).unwrap().unwrap();
+        let plan = store.project_mvp_progress("alpha", HEAD).unwrap();
+        assert_eq!(plan.tasks.len(), 2);
+        assert_eq!(plan.tasks[0].ci_checks.len(), 2);
+        assert_eq!(plan.tasks[0].ci_checks[1].job, "Web Build");
+        assert!(plan.tasks[1].ci_checks.is_empty());
+        assert_eq!(plan.verified_percent, None);
+        assert!(!plan.tasks[0].verified);
+        assert!(store
+            .project_mvp_progress("beta", HEAD)
+            .unwrap()
+            .tasks
+            .is_empty());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}

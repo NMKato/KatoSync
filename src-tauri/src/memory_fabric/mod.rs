@@ -18,6 +18,7 @@ mod github_ci;
 mod identity;
 mod ingest;
 mod journal;
+mod mvp_ci_matrix;
 mod mvp_progress;
 #[allow(unused_imports)]
 pub(crate) use continuity_chat::{ChatTurn, ChatTurnDraft};

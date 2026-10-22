@@ -31,12 +31,19 @@ export interface ContinuityDecision {
   status: "proposed";
 }
 
+export interface ContinuityCiCheck {
+  workflow: string;
+  job: string;
+}
+
 export interface ContinuityMvpItem {
   featureId: string;
   title: string;
   lane: "mvp" | "side";
   weight: number;
   acceptanceCriteria: string;
+  /** Proposed CI coverage mapping, never an owner approval. */
+  ciChecks: ContinuityCiCheck[];
 }
 
 export interface ContinuityBlueprintPreview {
@@ -136,18 +143,31 @@ function parseDecision(value: unknown): ContinuityDecision {
   };
 }
 
+function parseCiCheck(value: unknown): ContinuityCiCheck {
+  const item = record(value, "mvp_ci_check", ["workflow","job"]);
+  return {
+    workflow: requiredText(item.workflow, "ci_workflow", 120),
+    job: requiredText(item.job, "ci_job", 120)
+  };
+}
+
 function parseMvpItem(value: unknown): ContinuityMvpItem {
-  const item = record(value, "mvp_scope_item", ["featureId", "title", "lane", "weight", "acceptanceCriteria"]);
+  const item = record(value, "mvp_scope_item", ["featureId", "title", "lane", "weight", "acceptanceCriteria", "ciChecks"]);
   if (item.lane !== "mvp" && item.lane !== "side") fail("mvp_scope_lane");
   if (!Number.isSafeInteger(item.weight) || (item.weight as number) < 1 || (item.weight as number) > 5) {
     fail("mvp_scope_weight");
   }
+  const rawChecks = item.ciChecks ?? [];
+  if (!Array.isArray(rawChecks) || rawChecks.length > 4) fail("ci_checks_size");
+  const ciChecks = rawChecks.map(parseCiCheck);
+  if (new Set(ciChecks.map((c) => c.workflow+"\u0000"+c.job)).size !== ciChecks.length) fail("ci_checks_duplicate");
   return {
     featureId: id(item.featureId, "feature_id"),
     title: requiredText(item.title, "mvp_title", 150),
     lane: item.lane as "mvp" | "side",
     weight: item.weight as number,
-    acceptanceCriteria: requiredText(item.acceptanceCriteria, "acceptance_criteria", 400)
+    acceptanceCriteria: requiredText(item.acceptanceCriteria, "acceptance_criteria", 400),
+    ciChecks
   };
 }
 

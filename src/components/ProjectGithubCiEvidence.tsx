@@ -10,10 +10,15 @@ type CiRun = {
   conclusion:string|null;source:string;
 };
 type CiJob = {runId:number;name:string;status:string;conclusion:string|null};
+type FeatureGateCheck = {workflow:string;job:string;providerStatus:string;runId:number|null};
+type FeatureGate = {
+  featureId:string;lane:string;acceptanceCriteria:string;checks:FeatureGateCheck[];
+  ciRequirementsSatisfied:boolean;featureAccepted:boolean;coverageStatus:string;
+};
 type CiReport = {
   projectId:string;repository:string;headSha:string;source:string;
   runs:CiRun[];jobs:CiJob[];featureAcceptanceVerified:boolean;
-  ciIdentityVerified:boolean;
+  ciIdentityVerified:boolean;featureCiCoverage:FeatureGate[];
 };
 function stateText(status:string,conclusion:string|null):string{
   if(status!=="completed")return status;
@@ -77,6 +82,27 @@ export function ProjectGithubCiEvidence({projectId}:{projectId:string}){
             )}</ul>:null}
         </li>)}
       </ul>:<p className="agent-empty">{t("mvp.ciNoRuns")}</p>}
+      {data.featureCiCoverage.length ? <div className="mvp-ci-feature-list">
+        <strong>{t("mvp.featureGates")}</strong>
+        <p className="mvp-verified-notice">{t("mvp.featureGatesCaveat")}</p>
+        {data.featureCiCoverage.map(feature=><details className="mvp-ci-feature-item" key={feature.featureId}>
+          <summary>{feature.featureId} · {feature.coverageStatus==="ci_jobs_passed_unapproved"
+            ? t("mvp.providerGatesPass") : feature.coverageStatus==="not_configured"
+              ? t("mvp.providerGatesMissing") : t("mvp.providerGatesIncomplete")}</summary>
+          <small>{feature.acceptanceCriteria}</small>
+          {feature.checks.length ? <ul className="mvp-ci-jobs">
+            {feature.checks.map(check=><li key={check.workflow+":"+check.job}>
+              <span>{check.workflow} / {check.job}</span>
+              <small>{check.providerStatus === "provider_pass" ? t("mvp.providerJobPass")
+                : check.providerStatus === "missing_workflow" || check.providerStatus==="missing_job"
+                  ? t("mvp.providerJobMissing")
+                  : check.providerStatus==="workflow_incomplete" || check.providerStatus==="job_incomplete"
+                    ? t("mvp.providerJobRunning")
+                    : t("mvp.providerJobNotPassed")}</small>
+            </li>)}
+          </ul> : <small>{t("mvp.providerGatesMissing")}</small>}
+        </details>)}
+      </div> : null}
       <p className="continuity-notice">{t("mvp.ciNoAcceptance")}</p>
     </div>:null}
   </div>;

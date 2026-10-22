@@ -129,3 +129,31 @@ test("rejects fake MVP weight, duplicate feature IDs, and smuggled completion",(
   assert.throws(()=>parseContinuityBlueprint(encode({...blueprint(),mvpScope:[{...item,status:"approved"}]}),scope),/unknown_fields/);
   assert.throws(()=>parseContinuityBlueprint(encode({...blueprint(),mvpScope:[{...item,lane:"cloud"}]}),scope),/lane/);
 });
+
+
+test("MVP CI gates preserve exact workflow/job mapping but never approve the feature", () => {
+  const base={featureId:"PHONE",title:"Local phone assistant",lane:"mvp",weight:5,
+    acceptanceCriteria:"Telephony smoke and review",
+    ciChecks:[{workflow:"KatoSync PR Fast Gate",job:"Windows Node Regression"},
+      {workflow:"KatoSync PR Fast Gate",job:"Web Build"}]};
+  const parsed=parseContinuityBlueprint(encode({...blueprint(),mvpScope:[base]}),scope);
+  assert.deepEqual(parsed.mvpScope[0].ciChecks,base.ciChecks);
+  assert.equal(parsed.ownerApproved,false);
+  assert.deepEqual(parseContinuityBlueprint(encode({...blueprint(),
+    mvpScope:[{featureId:"LEGACY",title:"Old MVP",lane:"mvp",weight:1,
+      acceptanceCriteria:"Check"}]}),scope).mvpScope[0].ciChecks,[]);
+});
+
+test("MVP CI mappings reject duplicate gates, poisoned fields and oversized lists", () => {
+  const item={featureId:"PHONE",title:"Local phone",lane:"mvp",weight:1,
+    acceptanceCriteria:"Acceptance",ciChecks:[{workflow:"Fast Gate",job:"Web Build"}]};
+  const withChecks=(ciChecks:unknown)=>({...blueprint(),mvpScope:[{...item,ciChecks}]});
+  assert.throws(()=>parseContinuityBlueprint(encode(withChecks(
+    [item.ciChecks[0],item.ciChecks[0]])),scope),/ci_checks_duplicate/);
+  assert.throws(()=>parseContinuityBlueprint(encode(withChecks(
+    [{workflow:"Fast Gate",job:"Web Build",ownerApproved:true}])),scope),/unknown_fields/);
+  assert.throws(()=>parseContinuityBlueprint(encode(withChecks(
+    [{workflow:"Fast Gate",job:""}])),scope),/ci_job/);
+  assert.throws(()=>parseContinuityBlueprint(encode(withChecks(
+    Array.from({length:5},(_,i)=>({workflow:"Fast Gate",job:"Test "+i})))),scope),/ci_checks_size/);
+});
