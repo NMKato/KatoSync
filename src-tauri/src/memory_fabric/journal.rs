@@ -300,6 +300,27 @@ impl MemoryStore {
         })
     }
 
+    /// Initial Blueprint is a provenance anchor, NOT human-approved architecture truth.
+    /// Never auto-replace this first handoff when revisions or journal entries arrive.
+    pub(crate) fn original_continuity_blueprint(
+        &self,
+        project_id: &str,
+    ) -> Result<Option<JournalEvent>, String> {
+        let project_id = validate_project_id(project_id)?;
+        self.conn
+            .query_row(
+                "SELECT sequence, event_id, device_id, kind, summary, payload_json, base_git_head,
+                    created_at, previous_hash, event_hash
+             FROM continuity_events
+             WHERE project_id=?1 AND kind='decision_proposal' AND event_id LIKE 'blueprint:%'
+             ORDER BY sequence ASC LIMIT 1",
+                params![project_id],
+                |row| read_event_row(row, project_id),
+            )
+            .optional()
+            .map_err(safe_error)
+    }
+
     /// Last N events for local Timeline UI. Always scoped; never returns another project.
     pub(crate) fn recent_continuity_events(
         &self,

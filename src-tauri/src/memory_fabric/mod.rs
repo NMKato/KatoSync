@@ -11,6 +11,7 @@
 mod assemble;
 pub(crate) mod continuity_bridge;
 mod continuity_chat;
+mod continuity_context;
 mod identity;
 mod ingest;
 mod journal;

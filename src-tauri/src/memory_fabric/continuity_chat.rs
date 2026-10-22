@@ -68,6 +68,20 @@ impl MemoryStore {
         Ok(turns)
     }
 
+    /// The three immutable project-start anchors, unaffected by later history growth.
+    pub(crate) fn local_chat_first_three(&self, project_id: &str) -> Result<Vec<ChatTurn>, String> {
+        let project_id = validate_project_id(project_id)?;
+        let mut stmt = self.conn.prepare(
+            "SELECT project_id, sequence, question, answer, git_head, citations_json, created_at
+             FROM continuity_chat_turns WHERE project_id = ?1
+             ORDER BY sequence ASC LIMIT 3"
+        ).map_err(db_error)?;
+        let rows = stmt
+            .query_map(params![project_id], read_turn)
+            .map_err(db_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(db_error)
+    }
+
     /// Durable atomic compare-and-append. Foreign project and competing writers fail closed.
     pub(crate) fn append_local_chat_turn(
         &mut self,

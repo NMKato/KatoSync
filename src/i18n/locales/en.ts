@@ -1105,6 +1105,7 @@ const en: Record<TKey, string> = {
   "continuity.chat.saveError": "Answer not saved or history changed. Reload before retrying.",
   "continuity.chat.durableLabel": "Stored locally · no cloud fallback",
   "continuity.chat.persistNotice": "Questions and answers are stored in the local project database. Previous model answers are unverified; only verified Memory Fabric sources can support facts.",
+  "continuity.chat.projectTag": "Project tag",
   "continuity.chat.title": "Local project chat",
   "continuity.chat.subtitle": "Ask about verified project documents. Answers use only the local Gemma model and Memory Fabric.",
   "continuity.chat.desktopOnly": "Available only in KatoSync Desktop.",

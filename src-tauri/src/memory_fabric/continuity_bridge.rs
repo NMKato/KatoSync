@@ -151,7 +151,7 @@ pub(crate) async fn continuity_chat_send(
     if expected_sequence < 0 || expected_sequence >= 1000 {
         return Err("Ungültiger lokaler Chat-Zustand.".to_string());
     }
-    let (rag, head, previous) = blocking({
+    let (rag, head, orientation) = blocking({
         let project_id = project_id.clone();
         let question = question.clone();
         move || {
@@ -212,20 +212,27 @@ pub(crate) async fn continuity_chat_send(
                 &super::retrieve::LexicalOnly,
             )?;
             let rag = super::assemble::assemble_rag_block(&result, &super::RagOptions::default());
-            Ok((rag, head, previous))
+            let orientation = if schema < 3 {
+                String::new()
+            } else {
+                super::continuity_context::format_model_orientation(
+                    &store.project_context_anchors(&project_id)?,
+                )
+            };
+            Ok((rag, head, orientation))
         }
     })
     .await?;
     let answer = if rag.citations.is_empty() {
         "NOT_IN_MEMORY".to_string()
     } else {
-        let history: Vec<(String, String)> = previous
-            .iter()
-            .map(|turn| (turn.question.clone(), turn.answer.clone()))
-            .collect();
-        crate::local_brain::grounded_chat_with_history(&rag.text, &question, &history)
-            .await
-            .map_err(|_| "Gemma lokal nicht bereit; kein Cloud-Fallback.".to_string())?
+        crate::local_brain::grounded_chat_with_project_orientation(
+            &rag.text,
+            &question,
+            &orientation,
+        )
+        .await
+        .map_err(|_| "Gemma lokal nicht bereit; kein Cloud-Fallback.".to_string())?
     };
     blocking(move || {
         let _guard = WRITE_LOCK

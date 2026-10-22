@@ -1105,6 +1105,7 @@ const es: Record<TKey, string> = {
   "continuity.chat.saveError": "Respuesta no guardada o historial modificado. Recarga antes de reintentar.",
   "continuity.chat.durableLabel": "Guardado localmente · sin nube",
   "continuity.chat.persistNotice": "Las preguntas y respuestas se guardan en la base de datos local. Respuestas anteriores sin verificar; solo fuentes verificadas aportan hechos.",
+  "continuity.chat.projectTag": "Etiqueta del proyecto",
   "continuity.chat.title": "Chat local del proyecto",
   "continuity.chat.subtitle": "Consulta documentos verificados. Solo se usan Gemma local y Memory Fabric.",
   "continuity.chat.desktopOnly": "Disponible solo en KatoSync Desktop.",

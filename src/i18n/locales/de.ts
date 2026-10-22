@@ -1126,6 +1126,7 @@ const de = {
   "continuity.chat.saveError": "Antwort nicht gespeichert oder Chat-Verlauf inzwischen geändert. Verlauf neu laden, bevor du erneut sendest.",
   "continuity.chat.durableLabel": "Lokal gespeichert · kein Cloud-Fallback",
   "continuity.chat.persistNotice": "Die Fragen und Antworten werden in der lokalen Projekt-Datenbank gespeichert. Vorherige Antworten bleiben ungeprüft; nur verifizierte Memory-Fabric-Quellen dürfen Fakten belegen.",
+  "continuity.chat.projectTag": "Projekt-Tag",
   "continuity.chat.title": "Lokaler Projekt-Chat",
   "continuity.chat.subtitle": "Stelle Fragen zu verifizierten Projektunterlagen. Antworten kommen nur aus dem lokalen Gemma-Modell und der Memory Fabric.",
   "continuity.chat.desktopOnly": "Nur in KatoSync Desktop verfügbar.",

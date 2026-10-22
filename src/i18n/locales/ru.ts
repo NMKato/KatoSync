@@ -1105,6 +1105,7 @@ const ru: Record<TKey, string> = {
   "continuity.chat.saveError": "Ответ не сохранён или история изменилась. Обновите перед повтором.",
   "continuity.chat.durableLabel": "Хранится локально · без облака",
   "continuity.chat.persistNotice": "Вопросы и ответы сохраняются в локальной базе проекта. Предыдущие ответы не проверены; факты подтверждаются только проверенной памятью.",
+  "continuity.chat.projectTag": "Метка проекта",
   "continuity.chat.title": "Локальный чат проекта",
   "continuity.chat.subtitle": "Вопросы по проверенным документам. Только локальная Gemma и Memory Fabric.",
   "continuity.chat.desktopOnly": "Доступно только в KatoSync Desktop.",

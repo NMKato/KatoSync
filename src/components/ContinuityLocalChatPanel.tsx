@@ -30,7 +30,7 @@ function citationsFor(turn: ChatTurn): Citation[] {
   }
 }
 
-export function ContinuityLocalChatPanel({ projectId }: { projectId: string }) {
+export function ContinuityLocalChatPanel({ projectId, projectName }: { projectId: string; projectName: string }) {
   const { t } = useT();
   const [question, setQuestion] = useState("");
   const [session, setSession] = useState<{ projectId: string; turns: ChatTurn[] }>({ projectId: "", turns: [] });
@@ -118,6 +118,7 @@ export function ContinuityLocalChatPanel({ projectId }: { projectId: string }) {
         </button>
       </div>
       <p className="agent-empty">{t("continuity.chat.persistentSubtitle")}</p>
+      <div className="continuity-project-tag"><span>{t("continuity.chat.projectTag")}:</span> <strong>{projectName} · {projectId}</strong></div>
       {!window.__TAURI_INTERNALS__ ? <p className="tone-warn">{t("continuity.chat.desktopOnly")}</p> : null}
       <div className="continuity-chat-transcript" role="log" aria-live="polite"
         aria-label={t("continuity.chat.history")}>

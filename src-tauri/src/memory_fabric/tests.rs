@@ -1699,3 +1699,90 @@ fn durable_chat_two_writers_require_matching_previous_sequence() {
     );
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn project_context_anchors_first_blueprint_three_starters_and_recent_twenty() {
+    let dir = temp_dir("continuity-origin-context");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+        let blueprint = |id: &str, intent: &str| {
+            serde_json::json!({
+                "schemaVersion":"katosync.continuity-blueprint/v1",
+                "projectId":"alpha","blueprintId":id,
+                "title":"Initial design","intent":intent
+            })
+            .to_string()
+        };
+        let first = store
+            .append_continuity(super::JournalDraft {
+                project_id: "alpha".into(),
+                event_id: "blueprint:origin".into(),
+                device_id: "m2".into(),
+                kind: "decision_proposal".into(),
+                summary: "Initial".into(),
+                payload_json: blueprint("origin", "What we build from day one"),
+                base_git_head: Some(HEAD.into()),
+                created_at: "2026-10-22T09:00:00Z".into(),
+                expected_prev_hash: None,
+            })
+            .unwrap();
+        store
+            .append_continuity(super::JournalDraft {
+                project_id: "alpha".into(),
+                event_id: "blueprint:revision".into(),
+                device_id: "m2".into(),
+                kind: "decision_proposal".into(),
+                summary: "Revision".into(),
+                payload_json: blueprint("revision", "Do not replace the pinned original"),
+                base_git_head: Some(HEAD.into()),
+                created_at: "2026-10-22T10:00:00Z".into(),
+                expected_prev_hash: Some(first.event.event_hash),
+            })
+            .unwrap();
+        for i in 0..25 {
+            store
+                .append_local_chat_turn(chat_draft("alpha", i, &format!("Question {i}")))
+                .unwrap();
+        }
+        store
+            .append_local_chat_turn(chat_draft("beta", 0, "Secret project beta"))
+            .unwrap();
+    }
+    {
+        let store = MemoryStore::open_read_only(&path).unwrap().unwrap();
+        let anchored = store.project_context_anchors("alpha").unwrap();
+        assert_eq!(anchored.project_id, "alpha");
+        let origin = anchored.pinned_origin.unwrap();
+        assert_eq!(origin.blueprint_id, "origin");
+        assert_eq!(origin.original_sequence, 1);
+        assert_eq!(origin.verification, "imported_unverified_origin");
+        assert_eq!(anchored.first_three.len(), 3);
+        assert_eq!(
+            anchored
+                .first_three
+                .iter()
+                .map(|x| x.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(anchored.latest_twenty.len(), 20);
+        assert_eq!(anchored.latest_twenty.first().unwrap().sequence, 6);
+        assert_eq!(anchored.latest_twenty.last().unwrap().sequence, 25);
+        assert!(!anchored
+            .latest_twenty
+            .iter()
+            .any(|turn| turn.question.contains("Secret")));
+        assert!(store
+            .project_context_anchors("beta")
+            .unwrap()
+            .pinned_origin
+            .is_none());
+        assert!(store.project_context_anchors("../alpha").is_err());
+        // Origin/answers are context DATA only; not indexed into verified source memory.
+        assert!(store.snapshot("alpha").unwrap().sources.is_empty());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}

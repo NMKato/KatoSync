@@ -207,7 +207,7 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
       ) : null}
 
       <ContinuityTimelinePanel projectId={project?.id ?? ""} refreshSequence={saved?.event.sequence ?? 0} />
-      <ContinuityLocalChatPanel key={project?.id ?? ""} projectId={project?.id ?? ""} />
+      <ContinuityLocalChatPanel key={project?.id ?? ""} projectId={project?.id ?? ""} projectName={project?.name ?? ""} />
 
       {validPreview ? (
         <div className="continuity-results" role="region" aria-label={t("continuity.previewTitle")}>
