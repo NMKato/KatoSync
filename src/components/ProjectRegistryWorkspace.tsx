@@ -18,6 +18,7 @@ import {
   Trash2
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
+import { ContinuityBlueprintPanel } from "./ContinuityBlueprintPanel";
 import { AUTO_MODES, FOCUS_PRIORITIES, FOCUS_STATUSES } from "../lib/projectFocus";
 import { normalizeRemote } from "../lib/projectExclusions";
 import {
@@ -168,6 +169,8 @@ export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
       {projects.legacyRoots.length && projects.legacyStatus.sourceRoots.status === "done" ? (
         <p className="agent-empty projects-legacy-done">{t("projects.legacy.done")}</p>
       ) : null}
+
+      <ContinuityBlueprintPanel projects={projects.registry.projects} />
 
       <section className="glass agent-card projects-portfolio" aria-label={t("projects.focus.title")}>
         <div className="agent-card-title">
