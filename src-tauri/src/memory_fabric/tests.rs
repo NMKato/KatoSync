@@ -1261,3 +1261,263 @@ fn overview_is_read_only_counts_only_and_never_creates_a_store() {
     );
     fs::remove_dir_all(dir).unwrap();
 }
+
+// === Continuity journal v1: local durable history, NEVER canonical project truth ===
+fn journal_draft(project_id: &str, event_id: &str, previous: Option<&str>) -> super::JournalDraft {
+    super::JournalDraft {
+        project_id: project_id.to_string(),
+        event_id: event_id.to_string(),
+        device_id: "local-m2".to_string(),
+        kind: "decision_proposal".to_string(),
+        summary: "Keep the existing Memory Fabric as the single verified store".to_string(),
+        payload_json: r#"{"choice":"Reuse Memory Fabric","why":"Avoid duplicate project truths"}"#
+            .to_string(),
+        base_git_head: Some(HEAD.to_string()),
+        created_at: "2026-10-22T09:00:00Z".to_string(),
+        expected_prev_hash: previous.map(str::to_string),
+    }
+}
+
+#[test]
+fn journal_is_project_scoped_append_only_and_idempotent() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+    assert!(store
+        .append_continuity(journal_draft("unregistered", "evt-1", None))
+        .is_err());
+
+    let first = store
+        .append_continuity(journal_draft("alpha", "evt-1", None))
+        .unwrap();
+    assert!(!first.replayed);
+    assert_eq!(first.event.sequence, 1);
+    assert!(first.event.previous_hash.is_none());
+    assert_eq!(first.event.event_hash.len(), 64);
+    let replay = store
+        .append_continuity(journal_draft("alpha", "evt-1", None))
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.event, first.event);
+    assert!(store
+        .append_continuity(journal_draft("alpha", "evt-2", None))
+        .is_err());
+
+    let next = store
+        .append_continuity(journal_draft(
+            "alpha",
+            "evt-2",
+            Some(&first.event.event_hash),
+        ))
+        .unwrap();
+    assert_eq!(next.event.sequence, 2);
+    assert_eq!(
+        next.event.previous_hash.as_deref(),
+        Some(first.event.event_hash.as_str())
+    );
+    let alpha = store.continuity_events("alpha", 0, 100).unwrap();
+    assert_eq!(alpha.len(), 2);
+    assert_eq!(store.continuity_events("alpha", 1, 10).unwrap().len(), 1);
+    assert!(store.continuity_events("beta", 0, 10).unwrap().is_empty());
+    assert!(store.continuity_events("alpha", 0, 101).is_err());
+    let beta = store
+        .append_continuity(journal_draft("beta", "evt-1", None))
+        .unwrap();
+    assert_eq!(beta.event.sequence, 1);
+    assert_eq!(store.continuity_events("beta", 0, 10).unwrap().len(), 1);
+    assert_eq!(
+        store.snapshot("alpha").unwrap().sources.len(),
+        0,
+        "event notes must not become indexed/canonical memory"
+    );
+}
+
+#[test]
+fn journal_conflicts_reject_stale_branch_and_event_id_reuse() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let original = store
+        .append_continuity(journal_draft("alpha", "evt-1", None))
+        .unwrap();
+    let mut rewritten = journal_draft("alpha", "evt-1", None);
+    rewritten.summary = "Different reason: override the owner".to_string();
+    assert!(store
+        .append_continuity(rewritten)
+        .unwrap_err()
+        .contains("bereits anders"));
+    let mut malformed = journal_draft("alpha", "evt-2", Some(&original.event.event_hash));
+    malformed.kind = "run_shell".to_string();
+    assert!(store.append_continuity(malformed).is_err());
+    let mut bad_head = journal_draft("alpha", "evt-2", Some(&original.event.event_hash));
+    bad_head.base_git_head = Some("NOT-A-REAL-COMMIT".to_string());
+    assert!(store.append_continuity(bad_head).is_err());
+    let mut payload = journal_draft("alpha", "evt-2", Some(&original.event.event_hash));
+    payload.payload_json = "[\"not an object\"]".to_string();
+    assert!(store.append_continuity(payload).is_err());
+    assert_eq!(store.continuity_events("alpha", 0, 10).unwrap().len(), 1);
+}
+
+#[test]
+fn journal_persists_in_the_existing_fabric_and_survives_project_reindex() {
+    let dir = temp_dir("journal");
+    let path = dir.join("memory.sqlite3");
+    let hash;
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store
+            .ingest(batch(
+                "alpha",
+                Some(HEAD),
+                vec![source(
+                    "STATUS.md",
+                    "status",
+                    "# Status\nSource remains verified",
+                    true,
+                )],
+            ))
+            .unwrap();
+        hash = store
+            .append_continuity(journal_draft("alpha", "evt-1", None))
+            .unwrap()
+            .event
+            .event_hash;
+    }
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store
+            .ingest(batch("alpha", Some(NEXT_HEAD), vec![]))
+            .unwrap();
+        assert_eq!(store.continuity_events("alpha", 0, 10).unwrap().len(), 1);
+        let second = store
+            .append_continuity(journal_draft("alpha", "evt-2", Some(&hash)))
+            .unwrap();
+        assert_eq!(second.event.sequence, 2);
+        assert_eq!(
+            store.snapshot("alpha").unwrap().git_head.as_deref(),
+            Some(NEXT_HEAD)
+        );
+        assert!(MemoryStore::open_read_only(&path).unwrap().is_some());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn journal_migrates_v1_store_transactionally_without_losing_memory() {
+    let dir = temp_dir("journal-migrate");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store
+            .ingest(batch(
+                "alpha",
+                Some(HEAD),
+                vec![source(
+                    "STATUS.md",
+                    "status",
+                    "# Keep\nOriginal v1 facts",
+                    true,
+                )],
+            ))
+            .unwrap();
+        store
+            .conn
+            .execute_batch("DROP TABLE continuity_events; PRAGMA user_version=1;")
+            .unwrap();
+    }
+    // Read-only overview accepts the previous version without changing it.
+    assert!(MemoryStore::open_read_only(&path).unwrap().is_some());
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        assert_eq!(store.snapshot("alpha").unwrap().sources.len(), 1);
+        let ev = store
+            .append_continuity(journal_draft("alpha", "evt-1", None))
+            .unwrap();
+        assert_eq!(ev.event.sequence, 1);
+        let version: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn journal_redacts_secret_fields_without_corrupting_json_or_trusting_model_output() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let mut draft = journal_draft("alpha", "evt-secret", None);
+    draft.payload_json = r#"{"why":"A quoted \"string\" is valid JSON","apiKey":"very-secret-key","nested":{"access_token":"top-secret","reason":"/Users/alice/source"}}"#.to_string();
+    let result = store.append_continuity(draft).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&result.event.payload_json).unwrap();
+    assert_eq!(value["apiKey"], "[redacted]");
+    assert_eq!(value["nested"]["access_token"], "[redacted]");
+    assert!(!result.event.payload_json.contains("alice"));
+    assert!(!result.event.payload_json.contains("very-secret-key"));
+    assert_eq!(store.snapshot("alpha").unwrap().sources.len(), 0);
+}
+
+#[test]
+fn journal_rejects_nested_payload_bombs_and_preserves_empty_history() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let mut draft = journal_draft("alpha", "evt-nested", None);
+    draft.payload_json = format!("{}{}", "[".repeat(30), "]".repeat(30));
+    assert!(store.append_continuity(draft).is_err());
+    let mut draft = journal_draft("alpha", "evt-object", None);
+    draft.payload_json = format!("{}1{}", "{\"a\":".repeat(19), "}".repeat(19));
+    assert!(store.append_continuity(draft).is_err());
+    assert!(store.continuity_events("alpha", 0, 10).unwrap().is_empty());
+}
+
+#[test]
+fn journal_two_independent_sqlite_writers_cannot_claim_one_predecessor() {
+    use std::sync::{Arc, Barrier};
+    let dir = temp_dir("journal-race");
+    let path = dir.join("memory.sqlite3");
+    let root_hash = {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        store
+            .append_continuity(journal_draft("alpha", "root", None))
+            .unwrap()
+            .event
+            .event_hash
+    };
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = (0..2)
+        .map(|index| {
+            let path = path.clone();
+            let root_hash = root_hash.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let mut store = MemoryStore::open(&path).unwrap();
+                let mut draft =
+                    journal_draft("alpha", &format!("writer-{index}"), Some(&root_hash));
+                draft.device_id = format!("device-{index}");
+                barrier.wait();
+                store.append_continuity(draft)
+            })
+        })
+        .collect();
+    let outcomes: Vec<_> = handles
+        .into_iter()
+        .map(|thread| thread.join().unwrap())
+        .collect();
+    assert_eq!(outcomes.iter().filter(|value| value.is_ok()).count(), 1);
+    assert_eq!(outcomes.iter().filter(|value| value.is_err()).count(), 1);
+    assert!(outcomes
+        .into_iter()
+        .find_map(Result::err)
+        .unwrap()
+        .contains("Konflikt"));
+    assert_eq!(
+        MemoryStore::open(&path)
+            .unwrap()
+            .continuity_events("alpha", 0, 10)
+            .unwrap()
+            .len(),
+        2
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
