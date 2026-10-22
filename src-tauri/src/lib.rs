@@ -308,6 +308,7 @@ pub fn run() {
             memory_fabric::memory_fabric_export,
             memory_fabric::continuity_bridge::continuity_preflight,
             memory_fabric::continuity_bridge::continuity_timeline,
+            memory_fabric::continuity_bridge::continuity_local_answer,
             memory_fabric::continuity_bridge::continuity_save_blueprint,
             load_config,
             save_config,

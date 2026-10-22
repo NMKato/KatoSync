@@ -15,6 +15,107 @@ const MAX_IMPORT_BYTES: usize = 8192;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ContinuityLocalAnswer {
+    pub project_id: String,
+    pub live_git_head: String,
+    pub answer: String,
+    pub citations: Vec<super::RagCitation>,
+    pub local_brain_used: bool,
+    pub verified_memory_only: bool,
+    pub session_only: bool,
+}
+
+fn validated_local_question(question: &str) -> Result<String, String> {
+    let text = question.trim();
+    if text.is_empty()
+        || text.chars().count() > 1200
+        || text
+            .chars()
+            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+    {
+        return Err("Lokale Frage ist leer, zu lang oder ungültig.".to_string());
+    }
+    Ok(text.to_string())
+}
+
+/// One question per read-only grounded inference, not a persisted multi-turn chat yet.
+/// Imported unverified journal events are deliberately excluded from model RAG.
+#[tauri::command]
+pub(crate) async fn continuity_local_answer(
+    project_id: String,
+    question: String,
+) -> Result<ContinuityLocalAnswer, String> {
+    let question = validated_local_question(&question)?;
+    let (rag, head) = blocking({
+        let project_id = project_id.clone();
+        let question = question.clone();
+        move || {
+            let path = crate::app_support_dir()
+                .map_err(crate::error_to_string)?
+                .join(STORE_DIR)
+                .join(STORE_FILE);
+            let store = MemoryStore::open_read_only(&path)?
+                .ok_or_else(|| "Memory Fabric ist nicht indexiert.".to_string())?;
+            let head = registered_head(&store, &project_id)?;
+            // Root comes from trusted registered project state, never IPC or model output.
+            let registry = project_registry::project_registry_load()?
+                .ok_or_else(|| "Keine lokale Projekt-Registry gefunden.".to_string())?;
+            let root = registry
+                .get("projects")
+                .and_then(|v| v.as_array())
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|item| item.get("id").and_then(|v| v.as_str()) == Some(&project_id))
+                })
+                .and_then(|item| item.get("rootPath").and_then(|v| v.as_str()))
+                .ok_or_else(|| "Registrierter Projektpfad fehlt.".to_string())?;
+            let live = super::live_state_for(&store, &project_id, root)?;
+            if live.head_sha.as_deref() != Some(head.as_str()) {
+                return Err(
+                    "Git-Stand hat sich während des Kontextabgleichs verändert.".to_string()
+                );
+            }
+            let result = store.query(
+                &super::retrieve::MemoryQuery::new(&project_id, &question, Some(8)),
+                Some(&live),
+                &super::retrieve::LexicalOnly,
+            )?;
+            let rag = super::assemble::assemble_rag_block(&result, &super::RagOptions::default());
+            Ok((rag, head))
+        }
+    })
+    .await?;
+    if rag.citations.is_empty() {
+        return Ok(ContinuityLocalAnswer {
+            project_id,
+            live_git_head: head,
+            answer: "NOT_IN_MEMORY".to_string(),
+            citations: Vec::new(),
+            local_brain_used: false,
+            verified_memory_only: true,
+            session_only: true,
+        });
+    }
+    // Existing Local Brain path explicitly restricts HTTP to 127.0.0.1 and pinned model alias.
+    let answer = crate::local_brain::grounded_chat(&rag.text, &question)
+        .await
+        .map_err(|_| {
+            "Lokales Gemma ist nicht bereit; kein Cloud-Fallback ausgeführt.".to_string()
+        })?;
+    Ok(ContinuityLocalAnswer {
+        project_id,
+        live_git_head: head,
+        answer,
+        citations: rag.citations,
+        local_brain_used: true,
+        verified_memory_only: true,
+        session_only: true,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ContinuityTimeline {
     pub project_id: String,
     pub live_git_head: String,
@@ -303,6 +404,14 @@ pub(crate) async fn continuity_save_blueprint(
 mod tests {
     use super::*;
     const DOC: &str = r#"{"schemaVersion":"katosync.continuity-blueprint/v1","projectId":"alpha","blueprintId":"v1","revision":1,"title":"Why local","intent":"Work without cloud","source":{"kind":"chat_handoff","label":"Chat","capturedAt":"2026-10-22T10:00:00Z","reference":null},"baseGitHead":null,"decisions":[{"id":"ADR-1","title":"Local store","choice":"SQLite","rationale":"Offline first","alternatives":[],"consequences":[],"evidence":[]}],"nextSteps":[]}"#;
+    #[test]
+    fn local_question_must_be_short_nonempty_and_never_executable() {
+        assert!(validated_local_question("Why was SQLite selected?").is_ok());
+        assert!(validated_local_question("   ").is_err());
+        assert!(validated_local_question(&"x".repeat(1201)).is_err());
+        assert!(validated_local_question("stop\u{0000}").is_err());
+        assert!(validated_local_question("multiline\nquestion").is_ok());
+    }
     #[test]
     fn native_blueprint_schema_rejects_cross_project_approval_smuggling_and_bad_decisions() {
         assert!(parse_blueprint(DOC, "alpha").is_ok());

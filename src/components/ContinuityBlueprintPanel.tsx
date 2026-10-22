@@ -1,5 +1,5 @@
 // Created by NMKato Solutions
-// Blueprint handoff preview only: no persistence, upload, approval, memory mutation or agent execution.
+// User-reviewed handoff: preview plus explicit unverified local journal save, never canonical approval or agent execution.
 import { useRef, useState, type ChangeEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AlertTriangle, FileJson2, FileUp, ShieldCheck } from "lucide-react";
@@ -10,6 +10,7 @@ import {
 } from "../lib/continuityBlueprint";
 import type { RegistryProject } from "../types";
 import { ContinuityTimelinePanel } from "./ContinuityTimelinePanel";
+import { ContinuityLocalChatPanel } from "./ContinuityLocalChatPanel";
 
 const FILE_LIMIT = 32_768;
 const JOURNAL_LIMIT = 8192;
@@ -206,6 +207,7 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
       ) : null}
 
       <ContinuityTimelinePanel projectId={project?.id ?? ""} refreshSequence={saved?.event.sequence ?? 0} />
+      <ContinuityLocalChatPanel key={project?.id ?? ""} projectId={project?.id ?? ""} />
 
       {validPreview ? (
         <div className="continuity-results" role="region" aria-label={t("continuity.previewTitle")}>
