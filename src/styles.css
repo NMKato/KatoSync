@@ -9776,3 +9776,8 @@ button.agent-tile:hover {
 .mvp-ci-feature-item summary {cursor:pointer;font-size:12px;font-weight:600;overflow-wrap:anywhere;}
 .mvp-ci-feature-item>small {display:block;color:var(--text-muted);font-size:11px;margin:7px 0;}
 .mvp-ci-feature-item .mvp-ci-jobs {margin-top:7px;}
+
+/* Optional Git-committed MVP coverage policy stays within project CI details. */
+.mvp-policy-audit {display:grid;gap:5px;padding:9px 10px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);margin:7px 0;font-size:11px;overflow-wrap:anywhere;}
+.mvp-policy-audit strong {font-size:11px;}
+.mvp-policy-audit small {font-size:11px;color:var(--text-muted);}

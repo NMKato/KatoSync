@@ -363,6 +363,32 @@ pub(crate) async fn continuity_github_ci(
         return Err("Projekt-Git-Stand änderte sich während der CI-Abfrage.".into());
     }
     report.feature_ci_coverage = super::mvp_ci_matrix::feature_ci_coverage(&report, &tasks);
+    let policy = super::mvp_policy::audit_policy(
+        Path::new(&root),
+        &project_id,
+        &head,
+        &report.feature_ci_coverage,
+    )
+    .await?;
+    // The policy object is fetched from an immutable Git object at the checked
+    // HEAD. Still reject a live checkout that changed while inspecting it.
+    let after_policy = blocking({
+        let project_id = project_id.clone();
+        move || {
+            let path = crate::app_support_dir()
+                .map_err(crate::error_to_string)?
+                .join(STORE_DIR)
+                .join(STORE_FILE);
+            let store = MemoryStore::open_read_only(&path)?
+                .ok_or_else(|| "Memory Fabric ist nicht indexiert.".to_string())?;
+            registered_head(&store, &project_id)
+        }
+    })
+    .await?;
+    if after_policy != head {
+        return Err("Projekt-Git-Stand änderte sich während der Policy-Prüfung.".into());
+    }
+    report.acceptance_policy_audit = Some(policy);
     Ok(report)
 }
 

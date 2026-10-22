@@ -165,6 +165,7 @@ mod tests {
             feature_acceptance_verified: false,
             ci_identity_verified: true,
             feature_ci_coverage: vec![],
+            acceptance_policy_audit: None,
         }
     }
     #[test]

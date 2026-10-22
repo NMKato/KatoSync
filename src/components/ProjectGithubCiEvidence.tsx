@@ -15,10 +15,19 @@ type FeatureGate = {
   featureId:string;lane:string;acceptanceCriteria:string;checks:FeatureGateCheck[];
   ciRequirementsSatisfied:boolean;featureAccepted:boolean;coverageStatus:string;
 };
+type PolicyEntry = {
+  featureId:string;status:string;trackedTestSource:string|null;
+  readyForCoverageReview:boolean;ownerApproved:boolean;
+};
+type PolicyAudit = {
+  status:string;headSha:string;source:string;checks:PolicyEntry[];
+  featureAcceptanceVerified:boolean;
+};
 type CiReport = {
   projectId:string;repository:string;headSha:string;source:string;
   runs:CiRun[];jobs:CiJob[];featureAcceptanceVerified:boolean;
   ciIdentityVerified:boolean;featureCiCoverage:FeatureGate[];
+  acceptancePolicyAudit:PolicyAudit|null;
 };
 function stateText(status:string,conclusion:string|null):string{
   if(status!=="completed")return status;
@@ -45,7 +54,10 @@ export function ProjectGithubCiEvidence({projectId}:{projectId:string}){
       const info=await invoke<CiReport>("continuity_github_ci",{projectId:selected});
       if(version!==request.current||projectRef.current!==selected)return;
       if(info.projectId!==selected||info.source!=="github_authenticated_readonly" ||
-         info.featureAcceptanceVerified!==false||info.ciIdentityVerified!==true){
+         info.featureAcceptanceVerified!==false||info.ciIdentityVerified!==true ||
+         (info.acceptancePolicyAudit && (info.acceptancePolicyAudit.headSha!==info.headSha ||
+          info.acceptancePolicyAudit.featureAcceptanceVerified!==false ||
+          info.acceptancePolicyAudit.checks.some(entry=>entry.ownerApproved)))){
         setError(true);return;
       }
       setData(info);
@@ -84,12 +96,26 @@ export function ProjectGithubCiEvidence({projectId}:{projectId:string}){
       </ul>:<p className="agent-empty">{t("mvp.ciNoRuns")}</p>}
       {data.featureCiCoverage.length ? <div className="mvp-ci-feature-list">
         <strong>{t("mvp.featureGates")}</strong>
+        <small className="mvp-verified-notice">{t("mvp.policySource")}: {data.acceptancePolicyAudit?.status==="tracked_policy_read"
+          ? t("mvp.policyRead") : t("mvp.policyMissing")}</small>
         <p className="mvp-verified-notice">{t("mvp.featureGatesCaveat")}</p>
         {data.featureCiCoverage.map(feature=><details className="mvp-ci-feature-item" key={feature.featureId}>
           <summary>{feature.featureId} · {feature.coverageStatus==="ci_jobs_passed_unapproved"
             ? t("mvp.providerGatesPass") : feature.coverageStatus==="not_configured"
               ? t("mvp.providerGatesMissing") : t("mvp.providerGatesIncomplete")}</summary>
           <small>{feature.acceptanceCriteria}</small>
+          {(() => {
+            const evidence=data.acceptancePolicyAudit?.checks.find(x=>x.featureId===feature.featureId);
+            if (!evidence) return null;
+            return <div className="mvp-policy-audit">
+              <strong>{evidence.readyForCoverageReview
+                ? t("mvp.policyReviewable") : evidence.status==="criteria_mismatch" || evidence.status==="ci_mapping_mismatch"
+                  ? t("mvp.policyMismatch") : evidence.status==="test_source_missing"
+                    ? t("mvp.policyTestMissing") : t("mvp.policyNotReady")}</strong>
+              {evidence.trackedTestSource?<small>{t("mvp.policyTestSource")}: {evidence.trackedTestSource}</small>:null}
+              <small>{t("mvp.policyNotApproved")}</small>
+            </div>;
+          })()}
           {feature.checks.length ? <ul className="mvp-ci-jobs">
             {feature.checks.map(check=><li key={check.workflow+":"+check.job}>
               <span>{check.workflow} / {check.job}</span>
