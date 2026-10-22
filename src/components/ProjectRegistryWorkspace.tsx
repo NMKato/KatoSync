@@ -96,6 +96,7 @@ export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
   const { t } = useT();
   const projects = vm.projects;
   const [adding, setAdding] = useState(false);
+  const [allActiveOpen, setAllActiveOpen] = useState(false);
   const active = projects.portfolio.filter((project) => project.focus.status === "active");
   const inactive = projects.portfolio.filter((project) => project.focus.status !== "active");
   const excludedTasks = vm.agentSync.autoLanes.excluded.reduce((sum, entry) => sum + entry.taskIds.length, 0);
@@ -180,7 +181,7 @@ export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
         </div>
         {active.length ? (
           <ul className="projects-focus-list">
-            {active.map((project) => (
+            {active.slice(0, 3).map((project) => (
               <li key={project.id}>
                 <span className={`projects-prio ${project.focus.priority}`}>{project.focus.priority}</span>
                 <strong>{project.name}</strong>
@@ -192,6 +193,10 @@ export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
         ) : (
           <p className="agent-empty">{t("projects.focus.empty")}</p>
         )}
+        {active.length > 3 ? <button className="ghost compact-button" type="button"
+          aria-expanded={allActiveOpen} onClick={() => setAllActiveOpen(open => !open)}>
+          {t("mvp.moreProjects")} ({active.length-3})
+        </button> : null}
         {!projects.registry.projects.length ? <p className="agent-empty">{t("projects.focus.noRegistry")}</p> : null}
         {excludedTasks > 0 ? <p className="agent-empty">{t("projects.focus.excluded", { count: excludedTasks })}</p> : null}
         {projects.missingProfile.length && projects.registry.projects.length ? <MissingProfile vm={vm} /> : null}
@@ -200,10 +205,20 @@ export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
       {!projects.registry.projects.length && !projects.discovery ? <p className="agent-empty projects-empty">{t("projects.empty")}</p> : null}
 
       <div className="projects-cards">
-        {active.map((project) => (
+        {active.slice(0, 3).map((project) => (
           <ProjectCard key={project.id} project={project} vm={vm} />
         ))}
       </div>
+      {active.length > 3 && allActiveOpen ? (
+        <section className="projects-extra-active" aria-label={t("mvp.moreProjects")}>
+          <div className="projects-extra-scroll" role="region"
+            aria-label={t("mvp.moreProjects")} tabIndex={0}>
+            <div className="projects-cards">
+              {active.slice(3).map(project => <ProjectCard key={project.id} project={project} vm={vm} />)}
+            </div>
+          </div>
+        </section>
+      ) : null}
       {inactive.length ? (
         <details className="projects-inactive">
           <summary>
@@ -433,7 +448,7 @@ function ProjectCard({ project, vm }: { project: RegistryProject; vm: ViewModel 
         <span className={`projects-badge tone-${STATE_TONE[state]}`}>{scanning ? t("projects.card.scanning") : t(`projects.state.${state}` as TKey)}</span>
       </div>
 
-      <ProjectMvpIndicator projectId={project.id} />
+      <ProjectMvpIndicator key={project.id+":"+String(details)} projectId={project.id} compact={!details} defaultExpanded={details} />
 
       <p className="projects-wave">
         <span className="agent-mini-title">{t("projects.card.wave")}</span>

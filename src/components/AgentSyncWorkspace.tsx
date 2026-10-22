@@ -24,7 +24,8 @@ import {
   XCircle
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
-import { ProjectMvpIndicator } from "./ProjectMvpIndicator";
+import { ProjectMvpPortfolio } from "./ProjectMvpPortfolio";
+import { partitionMvpDashboard } from "../lib/mvpDashboardLayout.ts";
 import { providerDisplayState } from "../lib/providerPolicy";
 import { isInActiveFocus } from "../lib/projectFocus";
 import {
@@ -171,6 +172,7 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   const readiness = buildAgentReadiness(vm);
   const state = vm.agentSync;
   const hasLinkedProjects = vm.projects.registry.projects.length > 0;
+  const projectHighlights = partitionMvpDashboard(vm.projects.portfolio);
   const approvalPlans = hasLinkedProjects
     ? vm.actionPlans.filter(
         (plan) =>
@@ -236,7 +238,7 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
           </small>
           {vm.projects.registry.projects.length ? (
             <div className="agent-project-linker-chips">
-              {vm.projects.portfolio.map((project) => (
+              {projectHighlights.top.map((project) => (
                 <button
                   className={`agent-project-chip ${project.focus.autoMode === "off" ? "manual" : ""}`}
                   key={project.id}
@@ -249,25 +251,18 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
                   {project.focus.autoMode === "off" ? <em>{t("projects.auto.off")}</em> : null}
                 </button>
               ))}
+              {projectHighlights.rest.length > 0 ? <button
+                className="agent-project-chip"
+                type="button"
+                onClick={() => onNavigate("agentProjects")}>
+                +{projectHighlights.rest.length} {t("mvp.moreProjects")}
+              </button> : null}
             </div>
           ) : null}
         </div>
       </section>
 
-      {vm.projects.portfolio.length ? (
-        <section className="glass agent-card mvp-dashboard" aria-label={t("mvp.portfolio")}>
-          <div className="agent-card-title"><h3>{t("mvp.portfolio")}</h3></div>
-          <p className="agent-empty">{t("mvp.portfolioHint")}</p>
-          <div className="mvp-dashboard-grid">
-            {vm.projects.portfolio.map(project => (
-              <article className="mvp-dashboard-project" key={project.id}>
-                <strong>{project.name}</strong>
-                <ProjectMvpIndicator projectId={project.id} compact />
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
+      <ProjectMvpPortfolio projects={vm.projects.portfolio} />
 
       <AutoQStarter vm={vm} onOpenProjects={() => onNavigate("agentProjects")} />
 

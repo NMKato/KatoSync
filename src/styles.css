@@ -9701,3 +9701,49 @@ button.agent-tile:hover {
 .mvp-task-list {display:grid;gap:8px;list-style:none;margin:2px 0;padding:0;}
 .mvp-task-list>li {display:grid;gap:4px;padding:9px;border:1px solid var(--line);border-radius:var(--r-md);overflow-wrap:anywhere;}
 .mvp-task-list small {font-size:11px;color:var(--text-muted);}
+
+/* Progressive disclosure for many registered projects; no visual overload. */
+.mvp-portfolio-head {display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;}
+.mvp-portfolio-head>.agent-card-title,.mvp-portfolio-head .agent-card-title {margin:0;}
+.mvp-portfolio-head p {margin:5px 0 0;}
+.mvp-portfolio-head>small {font-size:11px;color:var(--text-muted);}
+.mvp-project-head {display:flex;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0;}
+.mvp-project-head strong {overflow-wrap:anywhere;}
+.mvp-project-head small {color:var(--text-muted);white-space:nowrap;}
+.mvp-open-project {justify-self:start;font-size:11px;}
+.mvp-overflow {display:grid;gap:8px;border-top:1px solid var(--line);padding-top:10px;}
+.mvp-overflow-trigger {display:flex;align-items:center;gap:8px;align-self:start;width:max-content;max-width:100%;padding:5px 2px;font-size:12px;font-weight:600;cursor:pointer;}
+.mvp-overflow-scroll {max-height:290px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;min-width:0;border:1px solid var(--line);border-radius:var(--r-md);}
+.mvp-overflow-scroll:focus-visible {outline:2px solid var(--text-muted);outline-offset:2px;}
+.mvp-overflow-list {list-style:none;display:grid;gap:0;margin:0;padding:0;}
+.mvp-overflow-list>li+li {border-top:1px solid var(--line);}
+.mvp-overflow-project {display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:10px 12px;background:transparent;color:var(--text);border:0;text-align:left;cursor:pointer;}
+.mvp-overflow-project:hover,.mvp-overflow-project:focus-visible {background:var(--surface-2);}
+.mvp-overflow-project-copy {display:grid;gap:2px;min-width:0;}
+.mvp-overflow-project-copy strong {font-size:12px;overflow-wrap:anywhere;}
+.mvp-overflow-project-copy small {font-size:11px;color:var(--text-muted);}
+.mvp-project-dossier {display:grid;gap:14px;padding:14px;border:1px solid var(--line);border-radius:var(--r-md);min-width:0;}
+.mvp-dossier-head {display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;min-width:0;}
+.mvp-dossier-head h4 {margin:0;font-size:14px;}
+.mvp-dossier-head small {color:var(--text-muted);overflow-wrap:anywhere;}
+.mvp-dossier-section {padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-md);min-width:0;}
+.mvp-dossier-section>summary {cursor:pointer;font-size:12px;font-weight:650;}
+.mvp-dossier-section p,.mvp-dossier-section li {overflow-wrap:anywhere;font-size:12px;}
+.mvp-dossier-section ul,.mvp-dossier-section ol {margin:8px 0;padding-left:20px;}
+.mvp-context-summary {display:grid;gap:6px;margin-top:10px;min-width:0;}
+.mvp-context-summary p {margin:0;}
+@media(max-width:700px){
+  .mvp-dashboard-grid {grid-template-columns:minmax(0,1fr);}
+  .mvp-project-dossier {padding:10px;}
+  .mvp-overflow-scroll {max-height:240px;}
+}
+@media(prefers-reduced-motion:reduce){
+  .mvp-track>span {transition:none;}
+}
+
+/* Projects & Focus shares the Top 3 disclosure rule; overflow remains keyboard-scrollable. */
+.projects-extra-active {min-width:0;}
+.projects-extra-scroll {max-height:590px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;min-width:0;padding:3px;border:1px solid var(--line);border-radius:var(--r-md);}
+.projects-extra-scroll:focus-visible {outline:2px solid var(--text-muted);outline-offset:2px;}
+.mvp-attention-hint {font-size:11px;line-height:1.35;}
+@media(max-width:700px){.projects-extra-scroll {max-height:440px;}}

@@ -14,12 +14,12 @@ export type ProjectMvpProgress = {
   reportedPercent:number|null;verifiedPercent:number|null;tasks:MvpScopeTask[];
 };
 
-export function ProjectMvpIndicator({projectId,compact=false}:{projectId:string;compact?:boolean}) {
+export function ProjectMvpIndicator({projectId,compact=false,defaultExpanded=false}:{projectId:string;compact?:boolean;defaultExpanded?:boolean}) {
   const {t}=useT();
   const [data,setData]=useState<ProjectMvpProgress|null>(null);
   const [unavailable,setUnavailable]=useState(false);
   const [loading,setLoading]=useState(false);
-  const [expanded,setExpanded]=useState(false);
+  const [expanded,setExpanded]=useState(defaultExpanded);
   const request=useRef(0);
   const selected=useRef(projectId);
   selected.current=projectId;
