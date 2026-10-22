@@ -1,6 +1,7 @@
 // Created by NMKato Solutions
 // Blueprint handoff preview only: no persistence, upload, approval, memory mutation or agent execution.
 import { useRef, useState, type ChangeEvent } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { AlertTriangle, FileJson2, FileUp, ShieldCheck } from "lucide-react";
 import { useT } from "../i18n";
 import {
@@ -10,6 +11,16 @@ import {
 import type { RegistryProject } from "../types";
 
 const FILE_LIMIT = 32_768;
+const JOURNAL_LIMIT = 8192;
+
+type NativePreflight = {
+  projectId: string;
+  gitHead: string;
+  previousHash: string | null;
+  nextSequence: number;
+  proposalOnly: true;
+};
+type JournalAppendResult = { event: { sequence: number; eventHash: string }; replayed: boolean };
 
 export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProject[] }) {
   const { t } = useT();
@@ -17,6 +28,12 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
   const [input, setInput] = useState("");
   const [preview, setPreview] = useState<ContinuityBlueprintPreview | null>(null);
   const [error, setError] = useState("");
+  const [nativePreflight, setNativePreflight] = useState<NativePreflight | null>(null);
+  const [preflightError, setPreflightError] = useState("");
+  const [preflighting, setPreflighting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [reviewed, setReviewed] = useState(false);
+  const [saved, setSaved] = useState<JournalAppendResult | null>(null);
   const inputRevision = useRef(0);
   const project = projects.find((entry) => entry.id === selected);
   const validPreview = preview?.projectId === project?.id ? preview : null;
@@ -24,9 +41,15 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
   function clearResult() {
     setPreview(null);
     setError("");
+    setNativePreflight(null);
+    setPreflightError("");
+    setPreflighting(false);
+    setReviewed(false);
+    setSaved(null);
   }
 
-  function readPreview(text: string) {
+  async function readPreview(text: string) {
+    const revision = ++inputRevision.current;
     clearResult();
     if (!project) {
       setError(t("continuity.error.project"));
@@ -40,9 +63,46 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
         currentGitHead: null
       });
       setPreview(parsed);
+      if (!window.__TAURI_INTERNALS__) return;
+      setPreflighting(true);
+      try {
+        const fresh = await invoke<NativePreflight>("continuity_preflight", { projectId: project.id });
+        if (revision !== inputRevision.current) return;
+        setNativePreflight(fresh);
+        setPreview(parseContinuityBlueprint(text, { registeredProjectId: project.id, currentGitHead: fresh.gitHead }));
+      } catch {
+        if (revision === inputRevision.current) setPreflightError(t("continuity.error.preflight"));
+      } finally {
+        if (revision === inputRevision.current) setPreflighting(false);
+      }
     } catch {
       // Deliberately never display raw imported JSON or a potentially sensitive parser exception.
       setError(t("continuity.error.invalid"));
+    }
+  }
+
+  async function saveBlueprint() {
+    if (!project || !validPreview || !nativePreflight || saving || !reviewed || saved) return;
+    if (new TextEncoder().encode(input).byteLength > JOURNAL_LIMIT) {
+      setError(t("continuity.error.journalSize"));
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const receipt = await invoke<JournalAppendResult>("continuity_save_blueprint", {
+        projectId: project.id,
+        rawJson: input,
+        expectedHead: nativePreflight.gitHead,
+        expectedPrevHash: nativePreflight.previousHash
+      });
+      setSaved(receipt);
+    } catch {
+      setError(t("continuity.error.save"));
+      setNativePreflight(null);
+      setReviewed(false);
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -85,6 +145,7 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
           <span>{t("continuity.project")}</span>
           <select
             value={project?.id ?? ""}
+            disabled={saving}
             onChange={(event) => {
               inputRevision.current += 1;
               setSelected(event.target.value);
@@ -104,7 +165,7 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
           <input
             type="file"
             accept=".json,application/json"
-            disabled={!project}
+            disabled={!project || saving}
             onChange={(event) => void fileChanged(event)}
           />
         </label>
@@ -114,7 +175,7 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
             rows={5}
             autoCapitalize="off"
             spellCheck={false}
-            disabled={!project}
+            disabled={!project || saving}
             placeholder={t("continuity.placeholder")}
             value={input}
             onChange={(event) => {
@@ -128,8 +189,8 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
           <button
             className="secondary compact-button"
             type="button"
-            disabled={!project || !input.trim()}
-            onClick={() => readPreview(input)}
+            disabled={!project || !input.trim() || saving || preflighting}
+            onClick={() => void readPreview(input)}
           >
             {t("continuity.previewButton")}
           </button>
@@ -137,6 +198,8 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
         </div>
       </div>
 
+      {preflighting ? <p className="agent-empty" role="status">{t("continuity.checking")}</p> : null}
+      {preflightError ? <p className="tone-warn" role="status">{preflightError}</p> : null}
       {error ? (
         <p className="tone-danger" role="alert"><AlertTriangle size={14} /> {error}</p>
       ) : null}
@@ -152,11 +215,11 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
             <div><dt>{t("continuity.blueprintId")}</dt><dd>{validPreview.blueprintId} · v{validPreview.revision}</dd></div>
             <div><dt>{t("continuity.origin")}</dt><dd>{validPreview.source.label}</dd></div>
             <div><dt>{t("continuity.baseHead")}</dt><dd>{validPreview.baseGitHead?.slice(0, 12) ?? "—"}</dd></div>
-            <div><dt>{t("continuity.liveHead")}</dt><dd>{t("continuity.headUnknown")}</dd></div>
+            <div><dt>{t("continuity.liveHead")}</dt><dd>{nativePreflight?.gitHead.slice(0, 12) ?? t("continuity.headUnknown")}</dd></div>
           </dl>
           <div className="continuity-notice tone-warn">
             <AlertTriangle size={15} />
-            <span>{t("continuity.headWarning")}</span>
+            <span>{!nativePreflight ? t("continuity.headWarning") : validPreview.headState === "stale" ? t("continuity.headMismatch") : t("continuity.headConfirmed")}</span>
           </div>
           <h4>{t("continuity.decisions")} ({validPreview.decisions.length})</h4>
           {validPreview.decisions.length ? (
@@ -181,6 +244,23 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
             <ShieldCheck size={15} />
             <span>{t("continuity.readOnly")}</span>
           </p>
+          {nativePreflight && validPreview.headState !== "stale" ? (
+            <div className="continuity-save">
+              <label>
+                <input type="checkbox" checked={reviewed} disabled={saving || Boolean(saved)}
+                  onChange={(event) => setReviewed(event.target.checked)} />
+                {t("continuity.reviewConfirm")}
+              </label>
+              <div className="continuity-actions">
+                <button type="button" className="secondary compact-button"
+                  disabled={!reviewed || saving || Boolean(saved) || new TextEncoder().encode(input).byteLength > JOURNAL_LIMIT}
+                  onClick={() => void saveBlueprint()}>{saving ? t("continuity.saving") : t("continuity.saveProposal")}</button>
+                {saved ? <span className="tone-ok" role="status">{t("continuity.saved")} #{saved.event.sequence}</span> : null}
+              </div>
+              <small>{t("continuity.journalHint")}</small>
+              {new TextEncoder().encode(input).byteLength > JOURNAL_LIMIT ? <small className="tone-warn">{t("continuity.error.journalSize")}</small> : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>

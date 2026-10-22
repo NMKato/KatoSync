@@ -164,6 +164,21 @@ impl JournalDraft {
 }
 
 impl MemoryStore {
+    /// Most recent event in one project, for optimistic and explicit UI preflight.
+    pub(crate) fn continuity_tail(&self, project_id: &str) -> Result<Option<JournalEvent>, String> {
+        let project_id = validate_project_id(project_id)?;
+        self.conn
+            .query_row(
+                "SELECT sequence, event_id, device_id, kind, summary, payload_json, base_git_head,
+                    created_at, previous_hash, event_hash
+             FROM continuity_events WHERE project_id = ?1 ORDER BY sequence DESC LIMIT 1",
+                params![project_id],
+                |row| read_event_row(row, project_id),
+            )
+            .optional()
+            .map_err(safe_error)
+    }
+
     /// Single-writer, project-bound compare-and-append. No new project or permission is created.
     pub(crate) fn append_continuity(
         &mut self,
