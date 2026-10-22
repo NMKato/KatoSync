@@ -114,6 +114,143 @@ pub(crate) async fn continuity_local_answer(
     })
 }
 
+/// Native history read: no migration/write, no caller-controlled root or endpoint.
+#[tauri::command]
+pub(crate) async fn continuity_chat_history(
+    project_id: String,
+) -> Result<Vec<super::ChatTurn>, String> {
+    blocking(move || {
+        let path = crate::app_support_dir()
+            .map_err(crate::error_to_string)?
+            .join(STORE_DIR)
+            .join(STORE_FILE);
+        let store = MemoryStore::open_read_only(&path)?
+            .ok_or_else(|| "Memory Fabric ist nicht indexiert.".to_string())?;
+        registered_head(&store, &project_id)?;
+        let schema: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| "Memory-Fabric-Schema ist nicht lesbar.".to_string())?;
+        if schema < 3 {
+            return Ok(Vec::new());
+        }
+        store.local_chat_history(&project_id, 20)
+    })
+    .await
+}
+
+/// A follow-up is grounded afresh. Previous turns help resolve references but NEVER
+/// become canonical truth, model system policy, tool access or another project's data.
+#[tauri::command]
+pub(crate) async fn continuity_chat_send(
+    project_id: String,
+    question: String,
+    expected_sequence: i64,
+) -> Result<super::ChatTurn, String> {
+    let question = validated_local_question(&question)?;
+    if expected_sequence < 0 || expected_sequence >= 1000 {
+        return Err("Ungültiger lokaler Chat-Zustand.".to_string());
+    }
+    let (rag, head, previous) = blocking({
+        let project_id = project_id.clone();
+        let question = question.clone();
+        move || {
+            let path = crate::app_support_dir()
+                .map_err(crate::error_to_string)?
+                .join(STORE_DIR)
+                .join(STORE_FILE);
+            let store = MemoryStore::open_read_only(&path)?
+                .ok_or_else(|| "Memory Fabric ist nicht indexiert.".to_string())?;
+            let head = registered_head(&store, &project_id)?;
+            let registry = project_registry::project_registry_load()?
+                .ok_or_else(|| "Keine lokale Projekt-Registry gefunden.".to_string())?;
+            let root = registry
+                .get("projects")
+                .and_then(|v| v.as_array())
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|i| i.get("id").and_then(|v| v.as_str()) == Some(&project_id))
+                })
+                .and_then(|i| i.get("rootPath").and_then(|v| v.as_str()))
+                .ok_or_else(|| "Registrierter Projektordner fehlt.".to_string())?;
+            let live = super::live_state_for(&store, &project_id, root)?;
+            if live.head_sha.as_deref() != Some(head.as_str()) {
+                return Err("Git-HEAD veränderte sich vor der Abfrage.".to_string());
+            }
+            let schema: i64 = store
+                .conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .map_err(|_| "Ungültige Memory-Fabric-Version.".to_string())?;
+            let previous = if schema < 3 {
+                Vec::new()
+            } else {
+                store.local_chat_history(&project_id, 3)?
+            };
+            let last = if schema < 3 {
+                0
+            } else {
+                store
+                    .local_chat_history(&project_id, 1)?
+                    .last()
+                    .map(|turn| turn.sequence)
+                    .unwrap_or(0)
+            };
+            if last != expected_sequence {
+                return Err("Chat-Historie hat sich verändert; bitte neu laden.".to_string());
+            }
+            // Earlier user questions only assist search disambiguation. Model-generated answers
+            // are never used to retrieve candidate facts.
+            let lookup = format!(
+                "{} {}",
+                previous.last().map(|t| t.question.as_str()).unwrap_or(""),
+                question
+            );
+            let result = store.query(
+                &super::retrieve::MemoryQuery::new(&project_id, &lookup, Some(8)),
+                Some(&live),
+                &super::retrieve::LexicalOnly,
+            )?;
+            let rag = super::assemble::assemble_rag_block(&result, &super::RagOptions::default());
+            Ok((rag, head, previous))
+        }
+    })
+    .await?;
+    let answer = if rag.citations.is_empty() {
+        "NOT_IN_MEMORY".to_string()
+    } else {
+        let history: Vec<(String, String)> = previous
+            .iter()
+            .map(|turn| (turn.question.clone(), turn.answer.clone()))
+            .collect();
+        crate::local_brain::grounded_chat_with_history(&rag.text, &question, &history)
+            .await
+            .map_err(|_| "Gemma lokal nicht bereit; kein Cloud-Fallback.".to_string())?
+    };
+    blocking(move || {
+        let _guard = WRITE_LOCK
+            .lock()
+            .map_err(|_| "Memory Fabric ist gesperrt.".to_string())?;
+        let mut store = open_store()?;
+        let current = registered_head(&store, &project_id)?;
+        if current != head {
+            return Err("Git-HEAD hat sich geändert; Antwort nicht gespeichert.".to_string());
+        }
+        let citations_json = serde_json::to_string(&rag.citations)
+            .map_err(|_| "Chat-Nachweise konnten nicht kodiert werden.".to_string())?;
+        store.append_local_chat_turn(super::ChatTurnDraft {
+            project_id,
+            expected_sequence,
+            question,
+            answer,
+            git_head: current,
+            citations_json,
+            created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        })
+    })
+    .await
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ContinuityTimeline {

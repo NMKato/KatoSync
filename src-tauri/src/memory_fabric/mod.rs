@@ -10,9 +10,12 @@
 // Kein zweites Context-System: Context Pack bleibt der Handoff-Vertrag; die Fabric ist Retrieval darunter.
 mod assemble;
 pub(crate) mod continuity_bridge;
+mod continuity_chat;
 mod identity;
 mod ingest;
 mod journal;
+#[allow(unused_imports)]
+pub(crate) use continuity_chat::{ChatTurn, ChatTurnDraft};
 mod overview;
 mod projection;
 mod retrieve;

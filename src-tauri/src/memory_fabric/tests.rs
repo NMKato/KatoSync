@@ -1421,7 +1421,7 @@ fn journal_migrates_v1_store_transactionally_without_losing_memory() {
             .unwrap();
         store
             .conn
-            .execute_batch("DROP TABLE continuity_events; PRAGMA user_version=1;")
+            .execute_batch("DROP TABLE continuity_events; DROP TABLE continuity_chat_turns; PRAGMA user_version=1;")
             .unwrap();
     }
     // Read-only overview accepts the previous version without changing it.
@@ -1437,7 +1437,7 @@ fn journal_migrates_v1_store_transactionally_without_losing_memory() {
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -1550,4 +1550,152 @@ fn continuity_recent_timeline_is_newest_first_bounded_and_project_isolated() {
     assert!(store.recent_continuity_events("alpha", 0).is_err());
     assert!(store.recent_continuity_events("alpha", 31).is_err());
     assert!(store.recent_continuity_events("../alpha", 10).is_err());
+}
+
+fn chat_draft(project: &str, expected: i64, question: &str) -> super::ChatTurnDraft {
+    super::ChatTurnDraft {
+        project_id: project.to_string(),
+        expected_sequence: expected,
+        question: question.to_string(),
+        answer: "An answer grounded only in current verified sources.".to_string(),
+        git_head: HEAD.to_string(),
+        citations_json: "[]".to_string(),
+        created_at: "2026-10-22T15:20:00Z".to_string(),
+    }
+}
+
+#[test]
+fn durable_chat_preserves_sequence_restart_and_project_isolation() {
+    let dir = temp_dir("continuity-chat");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+        let first = store
+            .append_local_chat_turn(chat_draft("alpha", 0, "Why SQLite?"))
+            .unwrap();
+        assert_eq!(first.sequence, 1);
+        let second = store
+            .append_local_chat_turn(chat_draft("alpha", 1, "What about offline?"))
+            .unwrap();
+        assert_eq!(second.sequence, 2);
+        assert!(store
+            .append_local_chat_turn(chat_draft("alpha", 0, "stale"))
+            .is_err());
+        assert!(store
+            .append_local_chat_turn(chat_draft("foreign", 0, "foreign"))
+            .is_err());
+        assert!(store.local_chat_history("beta", 20).unwrap().is_empty());
+    }
+    {
+        let store = MemoryStore::open_read_only(&path).unwrap().unwrap();
+        let turns = store.local_chat_history("alpha", 20).unwrap();
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].question, "Why SQLite?");
+        assert_eq!(turns[1].sequence, 2);
+        assert!(
+            store.snapshot("alpha").unwrap().sources.is_empty(),
+            "transcript must not enter canonical RAG"
+        );
+        assert!(store.local_chat_history("other", 20).unwrap().is_empty());
+        assert!(store.local_chat_history("alpha", 21).is_err());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn durable_chat_migrates_v2_without_overwriting_journal() {
+    let dir = temp_dir("continuity-chat-migration");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        store
+            .append_continuity(journal_draft("alpha", "keep-me", None))
+            .unwrap();
+        store
+            .conn
+            .execute_batch("DROP TABLE continuity_chat_turns; PRAGMA user_version=2;")
+            .unwrap();
+    }
+    assert!(MemoryStore::open_read_only(&path).unwrap().is_some());
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        assert_eq!(store.continuity_events("alpha", 0, 5).unwrap().len(), 1);
+        store
+            .append_local_chat_turn(chat_draft("alpha", 0, "Why retain journal?"))
+            .unwrap();
+        let version: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 3);
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn durable_chat_redacts_secrets_rejects_invalid_payloads_and_conflicts() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let mut bad = chat_draft("alpha", 0, "");
+    assert!(store.append_local_chat_turn(bad.clone()).is_err());
+    bad.question = "a".repeat(1201);
+    assert!(store.append_local_chat_turn(bad.clone()).is_err());
+    bad.question = "Safe?".into();
+    bad.answer = "".into();
+    assert!(store.append_local_chat_turn(bad.clone()).is_err());
+    bad.answer = "Possible.".into();
+    bad.citations_json = "{\"not\":\"array\"}".into();
+    assert!(store.append_local_chat_turn(bad.clone()).is_err());
+    bad.citations_json = "[]".into();
+    bad.git_head = "not-sha".into();
+    assert!(store.append_local_chat_turn(bad).is_err());
+    let mut secret = chat_draft(
+        "alpha",
+        0,
+        "My token is sk-test-long-not-for-sharing please",
+    );
+    secret.answer = "See /Users/alice/private".into();
+    let stored = store.append_local_chat_turn(secret).unwrap();
+    assert!(!stored.question.contains("sk-test-long"));
+    assert!(!stored.answer.contains("/Users/alice/private"));
+    assert_eq!(store.local_chat_history("alpha", 20).unwrap().len(), 1);
+}
+
+#[test]
+fn durable_chat_two_writers_require_matching_previous_sequence() {
+    use std::sync::{Arc, Barrier};
+    let dir = temp_dir("continuity-chat-race");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    }
+    let barrier = Arc::new(Barrier::new(2));
+    let threads: Vec<_> = (0..2)
+        .map(|n| {
+            let b = barrier.clone();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let mut store = MemoryStore::open(&path).unwrap();
+                b.wait();
+                store.append_local_chat_turn(chat_draft("alpha", 0, &format!("question-{n}")))
+            })
+        })
+        .collect();
+    let results: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert_eq!(results.iter().filter(|r| r.is_err()).count(), 1);
+    assert_eq!(
+        MemoryStore::open_read_only(&path)
+            .unwrap()
+            .unwrap()
+            .local_chat_history("alpha", 20)
+            .unwrap()
+            .len(),
+        1
+    );
+    fs::remove_dir_all(dir).unwrap();
 }
