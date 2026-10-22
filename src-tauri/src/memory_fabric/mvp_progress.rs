@@ -16,6 +16,9 @@ pub(crate) struct MvpTaskProgress {
     pub reported_status: &'static str,
     pub status_journal_sequence: Option<i64>,
     pub verified: bool,
+    pub test_claim: &'static str,
+    pub test_name: Option<String>,
+    pub test_journal_sequence: Option<i64>,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +31,9 @@ pub(crate) struct MvpProgress {
     pub total_weight: u32,
     pub reported_done_weight: u32,
     pub reported_percent: Option<u8>,
+    pub tests_claimed_pass: usize,
+    pub tests_claimed_fail: usize,
+    pub tests_outdated: usize,
     /// Null until independently checked feature-level test + reviewer approvals exist.
     pub verified_percent: Option<u8>,
     pub tasks: Vec<MvpTaskProgress>,
@@ -39,8 +45,17 @@ fn error(_: rusqlite::Error) -> String {
 impl MemoryStore {
     /// Deliberately does not calculate "verified completion" from untrusted notes,
     /// present commit objects, or generic GitHub CI runs.
-    pub(crate) fn project_mvp_progress(&self, project_id: &str) -> Result<MvpProgress, String> {
+    pub(crate) fn project_mvp_progress(
+        &self,
+        project_id: &str,
+        current_head: &str,
+    ) -> Result<MvpProgress, String> {
         let id = validate_project_id(project_id)?;
+        if !(current_head.len() == 40 || current_head.len() == 64)
+            || !current_head.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err("Ungültiger aktueller Git-Stand für Testnachweise.".into());
+        }
         let mut progress = MvpProgress {
             project_id: id.to_string(),
             plan_journal_sequence: None,
@@ -50,6 +65,9 @@ impl MemoryStore {
             total_weight: 0,
             reported_done_weight: 0,
             reported_percent: None,
+            tests_claimed_pass: 0,
+            tests_claimed_fail: 0,
+            tests_outdated: 0,
             verified_percent: None,
             tasks: Vec::new(),
         };
@@ -134,6 +152,9 @@ impl MemoryStore {
                 reported_status: "not_reported",
                 status_journal_sequence: None,
                 verified: false,
+                test_claim: "not_reported",
+                test_name: None,
+                test_journal_sequence: None,
             });
         }
         // Latest claim by stable feature ID wins, scoped strictly to the SAME project.
@@ -175,6 +196,60 @@ impl MemoryStore {
                 .entry(feature.to_string())
                 .or_insert((sequence, status.to_string()));
         }
+        // Evidence receipt candidates are *claims*, not measured test executions.
+        // Read only immutable, project-specific journal events after this plan.
+        // A matching Git baseline is a consistency hint, not a test signature or
+        // proof that a feature passed on the actual machine/CI provider.
+        let mut test_stmt = self
+            .conn
+            .prepare(
+                "SELECT sequence,payload_json,base_git_head FROM continuity_events
+             WHERE project_id=?1 AND kind='test_result' AND sequence>=?2
+             ORDER BY sequence DESC LIMIT 400",
+            )
+            .map_err(error)?;
+        let test_rows = test_stmt
+            .query_map(params![id, seq], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .map_err(error)?;
+        let mut test_claims: BTreeMap<String, (i64, String, String, Option<String>)> =
+            BTreeMap::new();
+        for record in test_rows {
+            let (sequence, raw, baseline) = record.map_err(error)?;
+            let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                continue;
+            };
+            if json.get("projectId").and_then(|v| v.as_str()) != Some(id) {
+                continue;
+            }
+            let Some(feature) = json.get("featureKey").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(status) = json.get("status").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(name) = json.get("testName").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if !matches!(status, "passed" | "failed")
+                || name.is_empty()
+                || name.chars().count() > 120
+                || feature.len() > 80
+            {
+                continue;
+            }
+            test_claims.entry(feature.to_string()).or_insert((
+                sequence,
+                status.to_string(),
+                name.to_string(),
+                baseline,
+            ));
+        }
         progress.plan_journal_sequence = Some(seq);
         progress.plan_status = "imported_unverified";
         for task in &mut tasks {
@@ -186,6 +261,31 @@ impl MemoryStore {
                     _ => "claimed_pending",
                 };
                 task.status_journal_sequence = Some(*claim_seq);
+            }
+            if let Some((claim_seq, status, test_name, baseline)) =
+                test_claims.get(&task.feature_id)
+            {
+                task.test_journal_sequence = Some(*claim_seq);
+                task.test_name = Some(test_name.to_string());
+                let matches_head = baseline
+                    .as_deref()
+                    .is_some_and(|sha| sha.eq_ignore_ascii_case(current_head));
+                task.test_claim = if !matches_head {
+                    "claimed_stale_or_unbound"
+                } else if status == "passed" {
+                    "claimed_pass_current_head"
+                } else {
+                    "claimed_fail_current_head"
+                };
+                if task.lane == "mvp" {
+                    if !matches_head {
+                        progress.tests_outdated += 1;
+                    } else if status == "passed" {
+                        progress.tests_claimed_pass += 1;
+                    } else {
+                        progress.tests_claimed_fail += 1;
+                    }
+                }
             }
             if task.lane == "mvp" {
                 progress.mvp_task_count += 1;

@@ -317,7 +317,7 @@ pub(crate) async fn continuity_mvp_progress(
             .join(STORE_FILE);
         let store = MemoryStore::open_read_only(&path)?
             .ok_or_else(|| "Memory Fabric ist noch nicht indexiert.".to_string())?;
-        registered_head(&store, &project_id)?;
+        let head = registered_head(&store, &project_id)?;
         let schema: i64 = store
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
@@ -325,7 +325,7 @@ pub(crate) async fn continuity_mvp_progress(
         if schema < 4 {
             return Err("MVP-Tracking benötigt Blueprint-Index v4.".to_string());
         }
-        store.project_mvp_progress(&project_id)
+        store.project_mvp_progress(&project_id, &head)
     })
     .await
 }

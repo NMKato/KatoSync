@@ -2110,7 +2110,7 @@ fn mvp_progress_scopes_weighted_claims_and_separates_side_tasks_without_fake_acc
     add_claim("A", "completed");
     add_claim("B", "in_progress");
     add_claim("EXTRA", "completed");
-    let current = store.project_mvp_progress("alpha").unwrap();
+    let current = store.project_mvp_progress("alpha", HEAD).unwrap();
     assert_eq!(current.mvp_task_count, 2);
     assert_eq!(current.side_task_count, 1);
     assert_eq!(current.total_weight, 4);
@@ -2120,7 +2120,7 @@ fn mvp_progress_scopes_weighted_claims_and_separates_side_tasks_without_fake_acc
     assert_eq!(current.plan_status, "imported_unverified");
     assert_eq!(current.tasks[0].reported_status, "claimed_done");
     assert!(!current.tasks[0].verified);
-    let other = store.project_mvp_progress("beta").unwrap();
+    let other = store.project_mvp_progress("beta", HEAD).unwrap();
     assert_eq!(other.reported_percent, None);
     assert_eq!(other.plan_status, "missing_explicit_mvp_scope");
 }
@@ -2131,7 +2131,7 @@ fn mvp_progress_newer_checkpoint_can_reopen_claimed_done_and_legacy_has_no_perce
     store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
     assert_eq!(
         store
-            .project_mvp_progress("alpha")
+            .project_mvp_progress("alpha", HEAD)
             .unwrap()
             .reported_percent,
         None
@@ -2153,7 +2153,7 @@ fn mvp_progress_newer_checkpoint_can_reopen_claimed_done_and_legacy_has_no_perce
     let prior = store.append_continuity(one).unwrap();
     assert_eq!(
         store
-            .project_mvp_progress("alpha")
+            .project_mvp_progress("alpha", HEAD)
             .unwrap()
             .reported_percent,
         Some(100)
@@ -2169,8 +2169,120 @@ fn mvp_progress_newer_checkpoint_can_reopen_claimed_done_and_legacy_has_no_perce
     })
     .to_string();
     store.append_continuity(reopened).unwrap();
-    let result = store.project_mvp_progress("alpha").unwrap();
+    let result = store.project_mvp_progress("alpha", HEAD).unwrap();
     assert_eq!(result.reported_percent, Some(0));
     assert_eq!(result.verified_percent, None);
     assert_eq!(result.tasks[0].reported_status, "claimed_blocked");
+}
+
+#[test]
+fn mvp_test_receipts_are_scoped_git_bound_but_never_verified() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+    let mut blueprint = journal_draft("alpha", "blueprint:test-evidence", None);
+    blueprint.payload_json = serde_json::json!({
+        "schemaVersion":"katosync.continuity-blueprint/v1",
+        "projectId":"alpha","blueprintId":"local-test-plan",
+        "mvpScope":[
+           {"featureId":"A","title":"Local milestone","lane":"mvp","weight":3,
+            "acceptanceCriteria":"Real runtime test, verified CI and owner review"},
+           {"featureId":"B","title":"Booking flow","lane":"mvp","weight":1,
+            "acceptanceCriteria":"Independent booking smoke"},
+           {"featureId":"SIDE","title":"Optional polish","lane":"side","weight":5,
+            "acceptanceCriteria":"Visual review"}
+        ]
+    })
+    .to_string();
+    let first = store.append_continuity(blueprint).unwrap();
+    let mut tail = first.event.event_hash;
+    let mut add_test =
+        |project: &str, event_id: &str, feature: &str, status: &str, base: Option<&str>| {
+            let mut draft = journal_draft(project, event_id, Some(&tail));
+            draft.kind = "test_result".into();
+            draft.base_git_head = base.map(str::to_string);
+            draft.payload_json = serde_json::json!({
+                "projectId":project,"featureKey":feature,
+                "testName":"synthetic feature acceptance smoke","status":status,
+                "claimedBy":"simulated-untrusted-agent"
+            })
+            .to_string();
+            let event = store.append_continuity(draft).unwrap().event;
+            tail = event.event_hash;
+        };
+    add_test("alpha", "test:A:old", "A", "passed", Some(NEXT_HEAD));
+    add_test("alpha", "test:A:current", "A", "passed", Some(HEAD));
+    add_test("alpha", "test:B:fail", "B", "failed", Some(HEAD));
+    add_test("alpha", "test:SIDE:pass", "SIDE", "passed", Some(HEAD));
+    let result = store.project_mvp_progress("alpha", HEAD).unwrap();
+    assert_eq!(
+        result.tests_claimed_pass, 1,
+        "side task tests must not affect MVP summary"
+    );
+    assert_eq!(result.tests_claimed_fail, 1);
+    assert_eq!(result.tests_outdated, 0);
+    assert_eq!(result.tasks[0].test_claim, "claimed_pass_current_head");
+    assert_eq!(result.tasks[1].test_claim, "claimed_fail_current_head");
+    assert_eq!(result.tasks[2].test_claim, "claimed_pass_current_head");
+    assert!(result.tasks.iter().all(|task| !task.verified));
+    assert_eq!(result.verified_percent, None);
+    assert_eq!(
+        result.reported_percent,
+        Some(0),
+        "test receipt alone cannot mark work done"
+    );
+    assert_eq!(
+        store
+            .project_mvp_progress("beta", HEAD)
+            .unwrap()
+            .tests_claimed_pass,
+        0
+    );
+    let drifted = store.project_mvp_progress("alpha", NEXT_HEAD).unwrap();
+    assert_eq!(drifted.tests_outdated, 2);
+    assert_eq!(drifted.tests_claimed_pass, 0);
+    assert_eq!(drifted.tasks[0].test_claim, "claimed_stale_or_unbound");
+    assert_eq!(drifted.verified_percent, None);
+}
+
+#[test]
+fn mvp_latest_test_receipt_can_revoke_prior_pass_and_unbound_is_not_fresh() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let mut plan = journal_draft("alpha", "blueprint:receipts", None);
+    plan.payload_json = serde_json::json!({
+        "schemaVersion":"katosync.continuity-blueprint/v1","projectId":"alpha",
+        "mvpScope":[{"featureId":"A","title":"Initial test","lane":"mvp",
+            "weight":5,"acceptanceCriteria":"Human-reviewed passing CI"}]
+    })
+    .to_string();
+    let parent = store.append_continuity(plan).unwrap().event;
+    let mut first = journal_draft("alpha", "test:passing", Some(&parent.event_hash));
+    first.kind = "test_result".into();
+    first.base_git_head = Some(HEAD.into());
+    first.payload_json = serde_json::json!({
+        "projectId":"alpha","featureKey":"A","testName":"test-a","status":"passed"
+    })
+    .to_string();
+    let prev = store.append_continuity(first).unwrap().event;
+    assert_eq!(
+        store
+            .project_mvp_progress("alpha", HEAD)
+            .unwrap()
+            .tests_claimed_pass,
+        1
+    );
+    let mut fail = journal_draft("alpha", "test:latest", Some(&prev.event_hash));
+    fail.kind = "test_result".into();
+    fail.base_git_head = None;
+    fail.payload_json = serde_json::json!({
+        "projectId":"alpha","featureKey":"A","testName":"test-a","status":"failed"
+    })
+    .to_string();
+    store.append_continuity(fail).unwrap();
+    let now = store.project_mvp_progress("alpha", HEAD).unwrap();
+    assert_eq!(now.tests_claimed_pass, 0);
+    assert_eq!(now.tests_outdated, 1);
+    assert_eq!(now.tasks[0].test_claim, "claimed_stale_or_unbound");
+    assert_eq!(now.verified_percent, None);
 }

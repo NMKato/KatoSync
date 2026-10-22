@@ -7,11 +7,13 @@ import { useT } from "../i18n";
 export type MvpScopeTask = {
   featureId:string; title:string; lane:"mvp"|"side";weight:number;acceptanceCriteria:string;
   reportedStatus:string;statusJournalSequence:number|null;verified:boolean;
+  testClaim:string;testName:string|null;testJournalSequence:number|null;
 };
 export type ProjectMvpProgress = {
   projectId:string;planJournalSequence:number|null;planStatus:string;
   mvpTaskCount:number;sideTaskCount:number;totalWeight:number;reportedDoneWeight:number;
   reportedPercent:number|null;verifiedPercent:number|null;tasks:MvpScopeTask[];
+  testsClaimedPass:number;testsClaimedFail:number;testsOutdated:number;
 };
 
 export function ProjectMvpIndicator({projectId,compact=false,defaultExpanded=false}:{projectId:string;compact?:boolean;defaultExpanded?:boolean}) {
@@ -73,6 +75,13 @@ export function ProjectMvpIndicator({projectId,compact=false,defaultExpanded=fal
       </div>
       <small className="mvp-verified-notice">{t("mvp.notVerified")}</small>
       {!compact&&data&&data.tasks.length>0?<>
+        <div className="mvp-evidence-line" aria-label={t("mvp.evidenceHeading")}>
+          <strong>{t("mvp.evidenceHeading")}</strong>
+          <small>{data.testsClaimedPass} {t("mvp.claimedPass")}</small>
+          <small>{data.testsClaimedFail} {t("mvp.claimedFail")}</small>
+          {data.testsOutdated ? <small className="tone-warn">{data.testsOutdated} {t("mvp.staleTest")}</small> : null}
+          <small>{t("mvp.evidenceNotVerified")}</small>
+        </div>
         <button type="button" className="ghost compact-button" aria-expanded={expanded}
           onClick={()=>setExpanded(x=>!x)}>{expanded?t("mvp.hide"):t("mvp.details")}</button>
         {expanded?<ul className="mvp-task-list">{data.tasks.map(task=><li key={task.featureId}>
@@ -80,6 +89,11 @@ export function ProjectMvpIndicator({projectId,compact=false,defaultExpanded=fal
           <small>{task.featureId} · {task.lane==="mvp"?t("mvp.title"):t("mvp.side")} · {t("mvp.weight")} {task.weight}</small>
           <small>{t("mvp.acceptance")}: {task.acceptanceCriteria}</small>
           <small>{task.reportedStatus==="claimed_done"?t("mvp.claimedDone"):t("mvp.open")}</small>
+          <small>{t("mvp.reportedTest")}: {task.testClaim==="claimed_pass_current_head"
+            ? t("mvp.claimedPass") : task.testClaim==="claimed_fail_current_head"
+              ? t("mvp.claimedFail") : task.testClaim==="claimed_stale_or_unbound"
+                ? t("mvp.staleTest") : t("mvp.noTest")}
+            {task.testName ? " · "+task.testName : ""}</small>
         </li>)}</ul>:null}
       </>:null}
     </>:null}
