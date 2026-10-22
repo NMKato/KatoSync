@@ -13,7 +13,42 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBeha
 use serde::Serialize;
 use std::{collections::BTreeSet, path::Path, time::Duration};
 
-pub(super) const SCHEMA_USER_VERSION: i64 = 1;
+pub(super) const SCHEMA_USER_VERSION: i64 = 3;
+
+// Private per-project dialogue; untrusted conversation DATA, never indexed/canonical RAG.
+const CONTINUITY_CHAT_SCHEMA_V3: &str = r#"
+CREATE TABLE continuity_chat_turns (
+  project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL CHECK (sequence > 0 AND sequence <= 1000),
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  git_head TEXT NOT NULL,
+  citations_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, sequence)
+) STRICT;
+"#;
+
+// Additive migration on the existing Memory Fabric database. The established project
+// sources/chunks/promotions remain the canonical store; this is unverified work history.
+const CONTINUITY_SCHEMA_V2: &str = r#"
+CREATE TABLE continuity_events (
+    project_id    TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    sequence      INTEGER NOT NULL CHECK (sequence > 0),
+    event_id      TEXT NOT NULL,
+    device_id     TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('checkpoint','decision_proposal','work_note','handoff','test_result')),
+    summary       TEXT NOT NULL,
+    payload_json  TEXT NOT NULL,
+    base_git_head TEXT,
+    created_at    TEXT NOT NULL,
+    previous_hash TEXT,
+    event_hash    TEXT NOT NULL,
+    PRIMARY KEY (project_id, sequence),
+    UNIQUE (project_id, event_id)
+) STRICT;
+CREATE INDEX continuity_events_by_project ON continuity_events(project_id, sequence);
+"#;
 
 const SCHEMA: &str = r#"
 CREATE TABLE node_identities (
@@ -210,11 +245,22 @@ impl MemoryStore {
         match version {
             0 => {
                 conn.execute_batch(&format!(
-                    "BEGIN;{SCHEMA}PRAGMA user_version = {SCHEMA_USER_VERSION};COMMIT;"
+                    "BEGIN;{SCHEMA}{CONTINUITY_SCHEMA_V2}{CONTINUITY_CHAT_SCHEMA_V3}PRAGMA user_version = {SCHEMA_USER_VERSION};COMMIT;"
                 ))
                 .map_err(|error| {
                     format!("Memory-Fabric-Schema konnte nicht angelegt werden (FTS5 erforderlich): {error}")
                 })?;
+            }
+            1 => {
+                conn.execute_batch(&format!(
+                    "BEGIN IMMEDIATE;{CONTINUITY_SCHEMA_V2}{CONTINUITY_CHAT_SCHEMA_V3}PRAGMA user_version = {SCHEMA_USER_VERSION};COMMIT;"
+                ))
+                .map_err(|_| "Memory-Fabric-Journal-Migration fehlgeschlagen; Daten unverändert.".to_string())?;
+            }
+            2 => {
+                conn.execute_batch(&format!(
+                    "BEGIN IMMEDIATE;{CONTINUITY_CHAT_SCHEMA_V3}PRAGMA user_version = {SCHEMA_USER_VERSION};COMMIT;"
+                )).map_err(|_| "Memory-Fabric-Chat-Migration fehlgeschlagen; Daten unverändert.".to_string())?;
             }
             SCHEMA_USER_VERSION => {}
             _ => {
