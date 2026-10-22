@@ -9,8 +9,14 @@
 // - Jeder Lese-/Schreibzugriff ist an eine Projekt-ID gebunden (keine projektuebergreifenden Treffer).
 // Kein zweites Context-System: Context Pack bleibt der Handoff-Vertrag; die Fabric ist Retrieval darunter.
 mod assemble;
+pub(crate) mod continuity_bridge;
+mod continuity_chat;
+mod continuity_context;
 mod identity;
 mod ingest;
+mod journal;
+#[allow(unused_imports)]
+pub(crate) use continuity_chat::{ChatTurn, ChatTurnDraft};
 mod overview;
 mod projection;
 mod retrieve;
@@ -39,6 +45,8 @@ pub(crate) use identity::{
 pub(crate) use ingest::{
     collect_project_sources, probe_live_state, redact_for_memory, MemorySource,
 };
+#[allow(unused_imports)]
+pub(crate) use journal::{JournalAppendResult, JournalDraft, JournalEvent, JOURNAL_SCHEMA_VERSION};
 #[allow(unused_imports)]
 pub(crate) use overview::{
     MemoryFabricOverview, NodeIdentityOverview, ProjectMemoryOverview,
