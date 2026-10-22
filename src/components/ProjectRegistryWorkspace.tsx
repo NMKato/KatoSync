@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
 import { ContinuityBlueprintPanel } from "./ContinuityBlueprintPanel";
+import { ProjectMvpIndicator } from "./ProjectMvpIndicator";
 import { AUTO_MODES, FOCUS_PRIORITIES, FOCUS_STATUSES } from "../lib/projectFocus";
 import { normalizeRemote } from "../lib/projectExclusions";
 import {
@@ -431,6 +432,8 @@ function ProjectCard({ project, vm }: { project: RegistryProject; vm: ViewModel 
         </div>
         <span className={`projects-badge tone-${STATE_TONE[state]}`}>{scanning ? t("projects.card.scanning") : t(`projects.state.${state}` as TKey)}</span>
       </div>
+
+      <ProjectMvpIndicator projectId={project.id} />
 
       <p className="projects-wave">
         <span className="agent-mini-title">{t("projects.card.wave")}</span>

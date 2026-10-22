@@ -24,6 +24,7 @@ import {
   XCircle
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
+import { ProjectMvpIndicator } from "./ProjectMvpIndicator";
 import { providerDisplayState } from "../lib/providerPolicy";
 import { isInActiveFocus } from "../lib/projectFocus";
 import {
@@ -252,6 +253,21 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
           ) : null}
         </div>
       </section>
+
+      {vm.projects.portfolio.length ? (
+        <section className="glass agent-card mvp-dashboard" aria-label={t("mvp.portfolio")}>
+          <div className="agent-card-title"><h3>{t("mvp.portfolio")}</h3></div>
+          <p className="agent-empty">{t("mvp.portfolioHint")}</p>
+          <div className="mvp-dashboard-grid">
+            {vm.projects.portfolio.map(project => (
+              <article className="mvp-dashboard-project" key={project.id}>
+                <strong>{project.name}</strong>
+                <ProjectMvpIndicator projectId={project.id} compact />
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <AutoQStarter vm={vm} onOpenProjects={() => onNavigate("agentProjects")} />
 

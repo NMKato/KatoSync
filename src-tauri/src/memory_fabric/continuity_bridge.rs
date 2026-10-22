@@ -304,6 +304,32 @@ pub(crate) async fn continuity_timeline(project_id: String) -> Result<Continuity
     .await
 }
 
+/// Read-only per-project MVP tracking. Unverified checkpoint claims never count as
+/// verified acceptance; a null verified_percent must not be rendered as 0% built.
+#[tauri::command]
+pub(crate) async fn continuity_mvp_progress(
+    project_id: String,
+) -> Result<super::mvp_progress::MvpProgress, String> {
+    blocking(move || {
+        let path = crate::app_support_dir()
+            .map_err(crate::error_to_string)?
+            .join(STORE_DIR)
+            .join(STORE_FILE);
+        let store = MemoryStore::open_read_only(&path)?
+            .ok_or_else(|| "Memory Fabric ist noch nicht indexiert.".to_string())?;
+        registered_head(&store, &project_id)?;
+        let schema: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .map_err(|_| "Memory-Fabric-Schema konnte nicht gelesen werden.".to_string())?;
+        if schema < 4 {
+            return Err("MVP-Tracking benötigt Blueprint-Index v4.".to_string());
+        }
+        store.project_mvp_progress(&project_id)
+    })
+    .await
+}
+
 /// User-requested read-only feature audit, anchored to exactly one registered project.
 /// Local Git objects are checked as existence/ancestry, never as feature test proof.
 #[tauri::command]
@@ -404,6 +430,18 @@ struct BlueprintDocument {
     base_git_head: Option<String>,
     decisions: Vec<BlueprintDecision>,
     next_steps: Vec<String>,
+    #[serde(default)]
+    mvp_scope: Vec<BlueprintMvpItem>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BlueprintMvpItem {
+    feature_id: String,
+    title: String,
+    lane: String,
+    weight: u8,
+    acceptance_criteria: String,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -462,6 +500,21 @@ fn parse_blueprint(raw: &str, project_id: &str) -> Result<BlueprintDocument, Str
         || doc.decisions.len() > 16
         || doc.next_steps.len() > 12
         || !doc.next_steps.iter().all(|step| text(step, 500))
+        || doc.mvp_scope.len() > 24
+        || doc.mvp_scope.iter().any(|step| {
+            !id(&step.feature_id)
+                || !text(&step.title, 150)
+                || !["mvp", "side"].contains(&step.lane.as_str())
+                || !(1..=5).contains(&step.weight)
+                || !text(&step.acceptance_criteria, 400)
+        })
+        || doc
+            .mvp_scope
+            .iter()
+            .map(|s| s.feature_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != doc.mvp_scope.len()
     {
         return Err("Blueprint-Projekt, Version oder Inhalt ungültig.".into());
     }
@@ -633,6 +686,31 @@ mod tests {
         assert!(validated_local_question("stop\u{0000}").is_err());
         assert!(validated_local_question("multiline\nquestion").is_ok());
     }
+    #[test]
+    fn mvp_scope_schema_is_explicit_weighted_and_has_no_approval_fields() {
+        let base: serde_json::Value = serde_json::from_str(DOC).unwrap();
+        let mut doc = base.clone();
+        doc["mvpScope"] = serde_json::json!([
+            {"featureId":"A","title":"Launch","lane":"mvp","weight":5,
+             "acceptanceCriteria":"Independent tests + review"},
+            {"featureId":"EXTRA","title":"Polish","lane":"side","weight":1,
+             "acceptanceCriteria":"Owner visual approval"}
+        ]);
+        let serialized = doc.to_string();
+        let checked = parse_blueprint(&serialized, "alpha").unwrap();
+        assert_eq!(checked.mvp_scope.len(), 2);
+        assert_eq!(checked.mvp_scope[0].weight, 5);
+        assert_eq!(checked.mvp_scope[1].lane, "side");
+        doc["mvpScope"][0]["weight"] = serde_json::json!(0);
+        assert!(parse_blueprint(&doc.to_string(), "alpha").is_err());
+        doc["mvpScope"][0]["weight"] = serde_json::json!(1);
+        doc["mvpScope"][1]["featureId"] = serde_json::json!("A");
+        assert!(parse_blueprint(&doc.to_string(), "alpha").is_err());
+        doc["mvpScope"][1]["featureId"] = serde_json::json!("EXTRA");
+        doc["mvpScope"][0]["ownerApproved"] = serde_json::json!(true);
+        assert!(parse_blueprint(&doc.to_string(), "alpha").is_err());
+    }
+
     #[test]
     fn native_blueprint_schema_rejects_cross_project_approval_smuggling_and_bad_decisions() {
         assert!(parse_blueprint(DOC, "alpha").is_ok());

@@ -2074,3 +2074,103 @@ fn feature_trace_stale_verified_sources_and_unrelated_keys_are_not_auto_joined()
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn mvp_progress_scopes_weighted_claims_and_separates_side_tasks_without_fake_acceptance() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+    let mut blueprint = journal_draft("alpha", "blueprint:mvp-scope", None);
+    blueprint.payload_json = serde_json::json!({
+        "schemaVersion":"katosync.continuity-blueprint/v1",
+        "projectId":"alpha","blueprintId":"mvp-v1",
+        "mvpScope":[
+            {"featureId":"A","title":"Main feature","lane":"mvp","weight":3,
+             "acceptanceCriteria":"Automated regression test and operator review"},
+            {"featureId":"B","title":"Second feature","lane":"mvp","weight":1,
+             "acceptanceCriteria":"Live user flow verified"},
+            {"featureId":"EXTRA","title":"Animation polish","lane":"side","weight":5,
+             "acceptanceCriteria":"Visual style review"}
+        ]
+    })
+    .to_string();
+    let first = store.append_continuity(blueprint).unwrap();
+    let mut tail = first.event.event_hash;
+    let mut add_claim = |key: &str, status: &str| {
+        let mut draft = journal_draft("alpha", &format!("checkpoint:{key}:{status}"), Some(&tail));
+        draft.kind = "checkpoint".into();
+        draft.payload_json = serde_json::json!({
+            "projectId":"alpha","featureKey":key,"title":key,
+            "summary":"A model says this is complete","rationale":"Unverified claim",
+            "status":status,"evidence":[]
+        })
+        .to_string();
+        tail = store.append_continuity(draft).unwrap().event.event_hash;
+    };
+    add_claim("A", "completed");
+    add_claim("B", "in_progress");
+    add_claim("EXTRA", "completed");
+    let current = store.project_mvp_progress("alpha").unwrap();
+    assert_eq!(current.mvp_task_count, 2);
+    assert_eq!(current.side_task_count, 1);
+    assert_eq!(current.total_weight, 4);
+    assert_eq!(current.reported_done_weight, 3);
+    assert_eq!(current.reported_percent, Some(75));
+    assert_eq!(current.verified_percent, None);
+    assert_eq!(current.plan_status, "imported_unverified");
+    assert_eq!(current.tasks[0].reported_status, "claimed_done");
+    assert!(!current.tasks[0].verified);
+    let other = store.project_mvp_progress("beta").unwrap();
+    assert_eq!(other.reported_percent, None);
+    assert_eq!(other.plan_status, "missing_explicit_mvp_scope");
+}
+
+#[test]
+fn mvp_progress_newer_checkpoint_can_reopen_claimed_done_and_legacy_has_no_percent() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    assert_eq!(
+        store
+            .project_mvp_progress("alpha")
+            .unwrap()
+            .reported_percent,
+        None
+    );
+    let mut draft = journal_draft("alpha", "blueprint:defined", None);
+    draft.payload_json = serde_json::json!({
+       "schemaVersion":"katosync.continuity-blueprint/v1","projectId":"alpha",
+       "mvpScope":[{"featureId":"A","title":"Primary","lane":"mvp","weight":5,
+                    "acceptanceCriteria":"Human-approved release test"}]
+    })
+    .to_string();
+    let first = store.append_continuity(draft).unwrap();
+    let mut one = journal_draft("alpha", "checkpoint:done", Some(&first.event.event_hash));
+    one.kind = "checkpoint".into();
+    one.payload_json = serde_json::json!({
+       "projectId":"alpha","featureKey":"A","title":"Primary","status":"done"
+    })
+    .to_string();
+    let prior = store.append_continuity(one).unwrap();
+    assert_eq!(
+        store
+            .project_mvp_progress("alpha")
+            .unwrap()
+            .reported_percent,
+        Some(100)
+    );
+    let mut reopened = journal_draft(
+        "alpha",
+        "checkpoint:reopened",
+        Some(&prior.event.event_hash),
+    );
+    reopened.kind = "checkpoint".into();
+    reopened.payload_json = serde_json::json!({
+        "projectId":"alpha","featureKey":"A","title":"Primary","status":"blocked"
+    })
+    .to_string();
+    store.append_continuity(reopened).unwrap();
+    let result = store.project_mvp_progress("alpha").unwrap();
+    assert_eq!(result.reported_percent, Some(0));
+    assert_eq!(result.verified_percent, None);
+    assert_eq!(result.tasks[0].reported_status, "claimed_blocked");
+}

@@ -17,6 +17,7 @@ mod feature_trace;
 mod identity;
 mod ingest;
 mod journal;
+mod mvp_progress;
 #[allow(unused_imports)]
 pub(crate) use continuity_chat::{ChatTurn, ChatTurnDraft};
 mod overview;

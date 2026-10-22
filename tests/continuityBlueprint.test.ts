@@ -107,3 +107,25 @@ test("reports differing decisions and prohibits cross-project reconciliation", (
   ]);
   assert.throws(() => compareContinuityDecisions(original, { ...changed, projectId: "other" }), /project_mismatch/);
 });
+
+
+test("accepts explicit weighted MVP and side-task scope without elevating approvals",()=>{
+  const data={...blueprint(),mvpScope:[
+    {featureId:"A",title:"Core launch",lane:"mvp",weight:5,acceptanceCriteria:"Independent product tests pass"},
+    {featureId:"SIDE",title:"Extra animation",lane:"side",weight:1,acceptanceCriteria:"Visual review"}
+  ]};
+  const parsed=parseContinuityBlueprint(encode(data),scope);
+  assert.equal(parsed.mvpScope.length,2);
+  assert.equal(parsed.mvpScope[0].weight,5);
+  assert.equal(parsed.mvpScope[1].lane,"side");
+  assert.equal(parsed.ownerApproved,false);
+  assert.deepEqual(parseContinuityBlueprint(encode(blueprint()),scope).mvpScope,[]);
+});
+
+test("rejects fake MVP weight, duplicate feature IDs, and smuggled completion",()=>{
+  const item={featureId:"A",title:"Core launch",lane:"mvp",weight:5,acceptanceCriteria:"Regression green"};
+  assert.throws(()=>parseContinuityBlueprint(encode({...blueprint(),mvpScope:[item,{...item}]}),scope),/duplicate/);
+  assert.throws(()=>parseContinuityBlueprint(encode({...blueprint(),mvpScope:[{...item,weight:0}]}),scope),/weight/);
+  assert.throws(()=>parseContinuityBlueprint(encode({...blueprint(),mvpScope:[{...item,status:"approved"}]}),scope),/unknown_fields/);
+  assert.throws(()=>parseContinuityBlueprint(encode({...blueprint(),mvpScope:[{...item,lane:"cloud"}]}),scope),/lane/);
+});

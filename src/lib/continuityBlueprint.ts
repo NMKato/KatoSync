@@ -31,6 +31,14 @@ export interface ContinuityDecision {
   status: "proposed";
 }
 
+export interface ContinuityMvpItem {
+  featureId: string;
+  title: string;
+  lane: "mvp" | "side";
+  weight: number;
+  acceptanceCriteria: string;
+}
+
 export interface ContinuityBlueprintPreview {
   schemaVersion: typeof CONTINUITY_BLUEPRINT_SCHEMA;
   projectId: string;
@@ -43,6 +51,7 @@ export interface ContinuityBlueprintPreview {
   headState: "matches" | "stale" | "unknown";
   decisions: ContinuityDecision[];
   nextSteps: string[];
+  mvpScope: ContinuityMvpItem[];
   trust: "imported_unverified";
   codeWritesAllowed: false;
   ownerApproved: false;
@@ -127,6 +136,21 @@ function parseDecision(value: unknown): ContinuityDecision {
   };
 }
 
+function parseMvpItem(value: unknown): ContinuityMvpItem {
+  const item = record(value, "mvp_scope_item", ["featureId", "title", "lane", "weight", "acceptanceCriteria"]);
+  if (item.lane !== "mvp" && item.lane !== "side") fail("mvp_scope_lane");
+  if (!Number.isSafeInteger(item.weight) || (item.weight as number) < 1 || (item.weight as number) > 5) {
+    fail("mvp_scope_weight");
+  }
+  return {
+    featureId: id(item.featureId, "feature_id"),
+    title: requiredText(item.title, "mvp_title", 150),
+    lane: item.lane as "mvp" | "side",
+    weight: item.weight as number,
+    acceptanceCriteria: requiredText(item.acceptanceCriteria, "acceptance_criteria", 400)
+  };
+}
+
 /** Untrusted, offline-safe import preview: no filesystem, network, provider or storage effects. */
 export function parseContinuityBlueprint(rawJson: string, scope: ContinuityImportScope): ContinuityBlueprintPreview {
   if (typeof rawJson !== "string" || new TextEncoder().encode(rawJson).byteLength > MAX_DOCUMENT_BYTES) {
@@ -142,7 +166,7 @@ export function parseContinuityBlueprint(rawJson: string, scope: ContinuityImpor
   }
   const doc = record(decoded, "document", [
     "schemaVersion", "projectId", "blueprintId", "revision", "title", "intent",
-    "source", "baseGitHead", "decisions", "nextSteps"
+    "source", "baseGitHead", "decisions", "nextSteps", "mvpScope"
   ]);
   if (doc.schemaVersion !== CONTINUITY_BLUEPRINT_SCHEMA) fail("schema_version");
   if (id(doc.projectId, "project_id") !== registeredId) fail("project_mismatch");
@@ -155,6 +179,10 @@ export function parseContinuityBlueprint(rawJson: string, scope: ContinuityImpor
   if (!Array.isArray(doc.decisions) || doc.decisions.length > MAX_DECISIONS) fail("decisions");
   const decisions = doc.decisions.map(parseDecision);
   if (new Set(decisions.map((entry) => entry.id)).size !== decisions.length) fail("duplicate_decision");
+  const rawScope = doc.mvpScope ?? [];
+  if (!Array.isArray(rawScope) || rawScope.length > 24) fail("mvp_scope_size");
+  const mvpScope = rawScope.map(parseMvpItem);
+  if (new Set(mvpScope.map((item) => item.featureId)).size !== mvpScope.length) fail("mvp_scope_duplicate");
   const baseGitHead = head(doc.baseGitHead, "base_git_head");
   return {
     schemaVersion: CONTINUITY_BLUEPRINT_SCHEMA,
@@ -173,6 +201,7 @@ export function parseContinuityBlueprint(rawJson: string, scope: ContinuityImpor
     headState: !baseGitHead || !liveHead ? "unknown" : baseGitHead === liveHead ? "matches" : "stale",
     decisions,
     nextSteps: list(doc.nextSteps, "next_steps", MAX_STEPS, 500),
+    mvpScope,
     trust: "imported_unverified",
     codeWritesAllowed: false,
     ownerApproved: false
