@@ -6,6 +6,7 @@ import { useT } from "../i18n";
 import { partitionMvpDashboard } from "../lib/mvpDashboardLayout.ts";
 import type { RegistryProject } from "../types";
 import { ProjectMvpIndicator } from "./ProjectMvpIndicator";
+import { ProjectGithubCiEvidence } from "./ProjectGithubCiEvidence";
 
 export function ProjectMvpPortfolio({projects}: {projects:readonly RegistryProject[]}) {
   const {t}=useT();
@@ -102,6 +103,11 @@ export function ProjectMvpPortfolio({projects}: {projects:readonly RegistryProje
           )}
         </ul>:null}
         <p className="mvp-verified-notice">{t("mvp.scanCaveat")}</p>
+      </details>
+
+      <details className="mvp-dossier-section">
+        <summary>{t("mvp.ciDetails")}</summary>
+        <ProjectGithubCiEvidence key={selected.id} projectId={selected.id}/>
       </details>
 
       <details className="mvp-dossier-section">

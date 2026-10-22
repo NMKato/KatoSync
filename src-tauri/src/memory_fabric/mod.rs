@@ -14,6 +14,7 @@ pub(crate) mod continuity_bridge;
 mod continuity_chat;
 mod continuity_context;
 mod feature_trace;
+mod github_ci;
 mod identity;
 mod ingest;
 mod journal;

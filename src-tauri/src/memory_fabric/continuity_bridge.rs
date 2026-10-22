@@ -304,6 +304,65 @@ pub(crate) async fn continuity_timeline(project_id: String) -> Result<Continuity
     .await
 }
 
+/// Explicit operator-requested, authenticated, READ-ONLY GitHub CI provenance.
+/// GitHub-issued workflow/job success is NOT the same as accepted MVP feature work.
+#[tauri::command]
+pub(crate) async fn continuity_github_ci(
+    project_id: String,
+) -> Result<super::github_ci::GithubCiReport, String> {
+    let (root, head) = blocking({
+        let project_id = project_id.clone();
+        move || {
+            let path = crate::app_support_dir()
+                .map_err(crate::error_to_string)?
+                .join(STORE_DIR)
+                .join(STORE_FILE);
+            let store = MemoryStore::open_read_only(&path)?
+                .ok_or_else(|| "Memory Fabric ist nicht indexiert.".to_string())?;
+            let head = registered_head(&store, &project_id)?;
+            let registry = project_registry::project_registry_load()?
+                .ok_or_else(|| "Projekt-Registry fehlt.".to_string())?;
+            let root = registry
+                .get("projects")
+                .and_then(|v| v.as_array())
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|v| v.get("id").and_then(|id| id.as_str()) == Some(&project_id))
+                })
+                .and_then(|item| item.get("rootPath").and_then(|v| v.as_str()))
+                .ok_or_else(|| "Projektverzeichnis ist nicht registriert.".to_string())?;
+            let live = super::live_state_for(&store, &project_id, root)?;
+            if live.head_sha.as_deref() != Some(head.as_str()) {
+                return Err("Git-HEAD weicht von der Memory-Fabric-Quelle ab.".into());
+            }
+            Ok((root.to_string(), head))
+        }
+    })
+    .await?;
+    let report =
+        super::github_ci::github_ci_for_registered_root(&project_id, Path::new(&root), &head)
+            .await?;
+    // Detect project checkout change WHILE provider requests were underway.
+    let now = blocking({
+        let project_id = project_id.clone();
+        move || {
+            let path = crate::app_support_dir()
+                .map_err(crate::error_to_string)?
+                .join(STORE_DIR)
+                .join(STORE_FILE);
+            let store = MemoryStore::open_read_only(&path)?
+                .ok_or_else(|| "Memory Fabric ist nicht indexiert.".to_string())?;
+            registered_head(&store, &project_id)
+        }
+    })
+    .await?;
+    if now != head {
+        return Err("Projekt-Git-Stand änderte sich während der CI-Abfrage.".into());
+    }
+    Ok(report)
+}
+
 /// Read-only per-project MVP tracking. Unverified checkpoint claims never count as
 /// verified acceptance; a null verified_percent must not be rendered as 0% built.
 #[tauri::command]
