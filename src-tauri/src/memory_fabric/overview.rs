@@ -77,7 +77,13 @@ impl MemoryStore {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(db_error)?;
-        if version != super::store::SCHEMA_USER_VERSION {
+        // Historical v1 remains readable without a schema write; only an explicit
+        // MemoryStore::open() upgrades it to v2.
+        if version != 1
+            && version != 2
+            && version != 3
+            && version != super::store::SCHEMA_USER_VERSION
+        {
             return Ok(None);
         }
         Ok(Some(Self { conn }))

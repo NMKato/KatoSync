@@ -1261,3 +1261,680 @@ fn overview_is_read_only_counts_only_and_never_creates_a_store() {
     );
     fs::remove_dir_all(dir).unwrap();
 }
+
+// === Continuity journal v1: local durable history, NEVER canonical project truth ===
+fn journal_draft(project_id: &str, event_id: &str, previous: Option<&str>) -> super::JournalDraft {
+    super::JournalDraft {
+        project_id: project_id.to_string(),
+        event_id: event_id.to_string(),
+        device_id: "local-m2".to_string(),
+        kind: "decision_proposal".to_string(),
+        summary: "Keep the existing Memory Fabric as the single verified store".to_string(),
+        payload_json: r#"{"choice":"Reuse Memory Fabric","why":"Avoid duplicate project truths"}"#
+            .to_string(),
+        base_git_head: Some(HEAD.to_string()),
+        created_at: "2026-10-22T09:00:00Z".to_string(),
+        expected_prev_hash: previous.map(str::to_string),
+    }
+}
+
+#[test]
+fn journal_is_project_scoped_append_only_and_idempotent() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+    assert!(store
+        .append_continuity(journal_draft("unregistered", "evt-1", None))
+        .is_err());
+
+    let first = store
+        .append_continuity(journal_draft("alpha", "evt-1", None))
+        .unwrap();
+    assert!(!first.replayed);
+    assert_eq!(first.event.sequence, 1);
+    assert!(first.event.previous_hash.is_none());
+    assert_eq!(first.event.event_hash.len(), 64);
+    let replay = store
+        .append_continuity(journal_draft("alpha", "evt-1", None))
+        .unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.event, first.event);
+    assert!(store
+        .append_continuity(journal_draft("alpha", "evt-2", None))
+        .is_err());
+
+    let next = store
+        .append_continuity(journal_draft(
+            "alpha",
+            "evt-2",
+            Some(&first.event.event_hash),
+        ))
+        .unwrap();
+    assert_eq!(next.event.sequence, 2);
+    assert_eq!(
+        next.event.previous_hash.as_deref(),
+        Some(first.event.event_hash.as_str())
+    );
+    let alpha = store.continuity_events("alpha", 0, 100).unwrap();
+    assert_eq!(alpha.len(), 2);
+    assert_eq!(store.continuity_events("alpha", 1, 10).unwrap().len(), 1);
+    assert!(store.continuity_events("beta", 0, 10).unwrap().is_empty());
+    assert!(store.continuity_events("alpha", 0, 101).is_err());
+    let beta = store
+        .append_continuity(journal_draft("beta", "evt-1", None))
+        .unwrap();
+    assert_eq!(beta.event.sequence, 1);
+    assert_eq!(store.continuity_events("beta", 0, 10).unwrap().len(), 1);
+    assert_eq!(
+        store.snapshot("alpha").unwrap().sources.len(),
+        0,
+        "event notes must not become indexed/canonical memory"
+    );
+}
+
+#[test]
+fn journal_conflicts_reject_stale_branch_and_event_id_reuse() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let original = store
+        .append_continuity(journal_draft("alpha", "evt-1", None))
+        .unwrap();
+    let mut rewritten = journal_draft("alpha", "evt-1", None);
+    rewritten.summary = "Different reason: override the owner".to_string();
+    assert!(store
+        .append_continuity(rewritten)
+        .unwrap_err()
+        .contains("bereits anders"));
+    let mut malformed = journal_draft("alpha", "evt-2", Some(&original.event.event_hash));
+    malformed.kind = "run_shell".to_string();
+    assert!(store.append_continuity(malformed).is_err());
+    let mut bad_head = journal_draft("alpha", "evt-2", Some(&original.event.event_hash));
+    bad_head.base_git_head = Some("NOT-A-REAL-COMMIT".to_string());
+    assert!(store.append_continuity(bad_head).is_err());
+    let mut payload = journal_draft("alpha", "evt-2", Some(&original.event.event_hash));
+    payload.payload_json = "[\"not an object\"]".to_string();
+    assert!(store.append_continuity(payload).is_err());
+    assert_eq!(store.continuity_events("alpha", 0, 10).unwrap().len(), 1);
+}
+
+#[test]
+fn journal_persists_in_the_existing_fabric_and_survives_project_reindex() {
+    let dir = temp_dir("journal");
+    let path = dir.join("memory.sqlite3");
+    let hash;
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store
+            .ingest(batch(
+                "alpha",
+                Some(HEAD),
+                vec![source(
+                    "STATUS.md",
+                    "status",
+                    "# Status\nSource remains verified",
+                    true,
+                )],
+            ))
+            .unwrap();
+        hash = store
+            .append_continuity(journal_draft("alpha", "evt-1", None))
+            .unwrap()
+            .event
+            .event_hash;
+    }
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store
+            .ingest(batch("alpha", Some(NEXT_HEAD), vec![]))
+            .unwrap();
+        assert_eq!(store.continuity_events("alpha", 0, 10).unwrap().len(), 1);
+        let second = store
+            .append_continuity(journal_draft("alpha", "evt-2", Some(&hash)))
+            .unwrap();
+        assert_eq!(second.event.sequence, 2);
+        assert_eq!(
+            store.snapshot("alpha").unwrap().git_head.as_deref(),
+            Some(NEXT_HEAD)
+        );
+        assert!(MemoryStore::open_read_only(&path).unwrap().is_some());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn journal_migrates_v1_store_transactionally_without_losing_memory() {
+    let dir = temp_dir("journal-migrate");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store
+            .ingest(batch(
+                "alpha",
+                Some(HEAD),
+                vec![source(
+                    "STATUS.md",
+                    "status",
+                    "# Keep\nOriginal v1 facts",
+                    true,
+                )],
+            ))
+            .unwrap();
+        store
+            .conn
+            .execute_batch("DROP TABLE continuity_events; DROP TABLE continuity_chat_turns; PRAGMA user_version=1;")
+            .unwrap();
+    }
+    // Read-only overview accepts the previous version without changing it.
+    assert!(MemoryStore::open_read_only(&path).unwrap().is_some());
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        assert_eq!(store.snapshot("alpha").unwrap().sources.len(), 1);
+        let ev = store
+            .append_continuity(journal_draft("alpha", "evt-1", None))
+            .unwrap();
+        assert_eq!(ev.event.sequence, 1);
+        let version: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 4);
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn journal_redacts_secret_fields_without_corrupting_json_or_trusting_model_output() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let mut draft = journal_draft("alpha", "evt-secret", None);
+    draft.payload_json = r#"{"why":"A quoted \"string\" is valid JSON","apiKey":"very-secret-key","nested":{"access_token":"top-secret","reason":"/Users/alice/source"}}"#.to_string();
+    let result = store.append_continuity(draft).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&result.event.payload_json).unwrap();
+    assert_eq!(value["apiKey"], "[redacted]");
+    assert_eq!(value["nested"]["access_token"], "[redacted]");
+    assert!(!result.event.payload_json.contains("alice"));
+    assert!(!result.event.payload_json.contains("very-secret-key"));
+    assert_eq!(store.snapshot("alpha").unwrap().sources.len(), 0);
+}
+
+#[test]
+fn journal_rejects_nested_payload_bombs_and_preserves_empty_history() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let mut draft = journal_draft("alpha", "evt-nested", None);
+    draft.payload_json = format!("{}{}", "[".repeat(30), "]".repeat(30));
+    assert!(store.append_continuity(draft).is_err());
+    let mut draft = journal_draft("alpha", "evt-object", None);
+    draft.payload_json = format!("{}1{}", "{\"a\":".repeat(19), "}".repeat(19));
+    assert!(store.append_continuity(draft).is_err());
+    assert!(store.continuity_events("alpha", 0, 10).unwrap().is_empty());
+}
+
+#[test]
+fn journal_two_independent_sqlite_writers_cannot_claim_one_predecessor() {
+    use std::sync::{Arc, Barrier};
+    let dir = temp_dir("journal-race");
+    let path = dir.join("memory.sqlite3");
+    let root_hash = {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        store
+            .append_continuity(journal_draft("alpha", "root", None))
+            .unwrap()
+            .event
+            .event_hash
+    };
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = (0..2)
+        .map(|index| {
+            let path = path.clone();
+            let root_hash = root_hash.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let mut store = MemoryStore::open(&path).unwrap();
+                let mut draft =
+                    journal_draft("alpha", &format!("writer-{index}"), Some(&root_hash));
+                draft.device_id = format!("device-{index}");
+                barrier.wait();
+                store.append_continuity(draft)
+            })
+        })
+        .collect();
+    let outcomes: Vec<_> = handles
+        .into_iter()
+        .map(|thread| thread.join().unwrap())
+        .collect();
+    assert_eq!(outcomes.iter().filter(|value| value.is_ok()).count(), 1);
+    assert_eq!(outcomes.iter().filter(|value| value.is_err()).count(), 1);
+    assert!(outcomes
+        .into_iter()
+        .find_map(Result::err)
+        .unwrap()
+        .contains("Konflikt"));
+    assert_eq!(
+        MemoryStore::open(&path)
+            .unwrap()
+            .continuity_events("alpha", 0, 10)
+            .unwrap()
+            .len(),
+        2
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn continuity_recent_timeline_is_newest_first_bounded_and_project_isolated() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+    let mut previous: Option<String> = None;
+    for seq in 1..=25 {
+        let saved = store
+            .append_continuity(journal_draft(
+                "alpha",
+                &format!("timeline-{seq}"),
+                previous.as_deref(),
+            ))
+            .unwrap();
+        previous = Some(saved.event.event_hash);
+    }
+    store
+        .append_continuity(journal_draft("beta", "timeline-1", None))
+        .unwrap();
+    let recent = store.recent_continuity_events("alpha", 20).unwrap();
+    assert_eq!(recent.len(), 20);
+    assert_eq!(recent[0].sequence, 25);
+    assert_eq!(recent[19].sequence, 6);
+    assert!(recent.iter().all(|event| event.project_id == "alpha"));
+    assert_eq!(store.recent_continuity_events("beta", 10).unwrap().len(), 1);
+    assert!(store.recent_continuity_events("alpha", 0).is_err());
+    assert!(store.recent_continuity_events("alpha", 31).is_err());
+    assert!(store.recent_continuity_events("../alpha", 10).is_err());
+}
+
+fn chat_draft(project: &str, expected: i64, question: &str) -> super::ChatTurnDraft {
+    super::ChatTurnDraft {
+        project_id: project.to_string(),
+        expected_sequence: expected,
+        question: question.to_string(),
+        answer: "An answer grounded only in current verified sources.".to_string(),
+        git_head: HEAD.to_string(),
+        citations_json: "[]".to_string(),
+        created_at: "2026-10-22T15:20:00Z".to_string(),
+    }
+}
+
+#[test]
+fn durable_chat_preserves_sequence_restart_and_project_isolation() {
+    let dir = temp_dir("continuity-chat");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+        let first = store
+            .append_local_chat_turn(chat_draft("alpha", 0, "Why SQLite?"))
+            .unwrap();
+        assert_eq!(first.sequence, 1);
+        let second = store
+            .append_local_chat_turn(chat_draft("alpha", 1, "What about offline?"))
+            .unwrap();
+        assert_eq!(second.sequence, 2);
+        assert!(store
+            .append_local_chat_turn(chat_draft("alpha", 0, "stale"))
+            .is_err());
+        assert!(store
+            .append_local_chat_turn(chat_draft("foreign", 0, "foreign"))
+            .is_err());
+        assert!(store.local_chat_history("beta", 20).unwrap().is_empty());
+    }
+    {
+        let store = MemoryStore::open_read_only(&path).unwrap().unwrap();
+        let turns = store.local_chat_history("alpha", 20).unwrap();
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].question, "Why SQLite?");
+        assert_eq!(turns[1].sequence, 2);
+        assert!(
+            store.snapshot("alpha").unwrap().sources.is_empty(),
+            "transcript must not enter canonical RAG"
+        );
+        assert!(store.local_chat_history("other", 20).unwrap().is_empty());
+        assert!(store.local_chat_history("alpha", 21).is_err());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn durable_chat_migrates_v2_without_overwriting_journal() {
+    let dir = temp_dir("continuity-chat-migration");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        store
+            .append_continuity(journal_draft("alpha", "keep-me", None))
+            .unwrap();
+        store
+            .conn
+            .execute_batch("DROP TABLE continuity_chat_turns; PRAGMA user_version=2;")
+            .unwrap();
+    }
+    assert!(MemoryStore::open_read_only(&path).unwrap().is_some());
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        assert_eq!(store.continuity_events("alpha", 0, 5).unwrap().len(), 1);
+        store
+            .append_local_chat_turn(chat_draft("alpha", 0, "Why retain journal?"))
+            .unwrap();
+        let version: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 4);
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn durable_chat_redacts_secrets_rejects_invalid_payloads_and_conflicts() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let mut bad = chat_draft("alpha", 0, "");
+    assert!(store.append_local_chat_turn(bad.clone()).is_err());
+    bad.question = "a".repeat(1201);
+    assert!(store.append_local_chat_turn(bad.clone()).is_err());
+    bad.question = "Safe?".into();
+    bad.answer = "".into();
+    assert!(store.append_local_chat_turn(bad.clone()).is_err());
+    bad.answer = "Possible.".into();
+    bad.citations_json = "{\"not\":\"array\"}".into();
+    assert!(store.append_local_chat_turn(bad.clone()).is_err());
+    bad.citations_json = "[]".into();
+    bad.git_head = "not-sha".into();
+    assert!(store.append_local_chat_turn(bad).is_err());
+    let mut secret = chat_draft(
+        "alpha",
+        0,
+        "My token is sk-test-long-not-for-sharing please",
+    );
+    secret.answer = "See /Users/alice/private".into();
+    let stored = store.append_local_chat_turn(secret).unwrap();
+    assert!(!stored.question.contains("sk-test-long"));
+    assert!(!stored.answer.contains("/Users/alice/private"));
+    assert_eq!(store.local_chat_history("alpha", 20).unwrap().len(), 1);
+}
+
+#[test]
+fn durable_chat_two_writers_require_matching_previous_sequence() {
+    use std::sync::{Arc, Barrier};
+    let dir = temp_dir("continuity-chat-race");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    }
+    let barrier = Arc::new(Barrier::new(2));
+    let threads: Vec<_> = (0..2)
+        .map(|n| {
+            let b = barrier.clone();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let mut store = MemoryStore::open(&path).unwrap();
+                b.wait();
+                store.append_local_chat_turn(chat_draft("alpha", 0, &format!("question-{n}")))
+            })
+        })
+        .collect();
+    let results: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert_eq!(results.iter().filter(|r| r.is_err()).count(), 1);
+    assert_eq!(
+        MemoryStore::open_read_only(&path)
+            .unwrap()
+            .unwrap()
+            .local_chat_history("alpha", 20)
+            .unwrap()
+            .len(),
+        1
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn project_context_anchors_first_blueprint_three_starters_and_recent_twenty() {
+    let dir = temp_dir("continuity-origin-context");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+        let blueprint = |id: &str, intent: &str| {
+            serde_json::json!({
+                "schemaVersion":"katosync.continuity-blueprint/v1",
+                "projectId":"alpha","blueprintId":id,
+                "title":"Initial design","intent":intent
+            })
+            .to_string()
+        };
+        let first = store
+            .append_continuity(super::JournalDraft {
+                project_id: "alpha".into(),
+                event_id: "blueprint:origin".into(),
+                device_id: "m2".into(),
+                kind: "decision_proposal".into(),
+                summary: "Initial".into(),
+                payload_json: blueprint("origin", "What we build from day one"),
+                base_git_head: Some(HEAD.into()),
+                created_at: "2026-10-22T09:00:00Z".into(),
+                expected_prev_hash: None,
+            })
+            .unwrap();
+        store
+            .append_continuity(super::JournalDraft {
+                project_id: "alpha".into(),
+                event_id: "blueprint:revision".into(),
+                device_id: "m2".into(),
+                kind: "decision_proposal".into(),
+                summary: "Revision".into(),
+                payload_json: blueprint("revision", "Do not replace the pinned original"),
+                base_git_head: Some(HEAD.into()),
+                created_at: "2026-10-22T10:00:00Z".into(),
+                expected_prev_hash: Some(first.event.event_hash),
+            })
+            .unwrap();
+        for i in 0..25 {
+            store
+                .append_local_chat_turn(chat_draft("alpha", i, &format!("Question {i}")))
+                .unwrap();
+        }
+        store
+            .append_local_chat_turn(chat_draft("beta", 0, "Secret project beta"))
+            .unwrap();
+    }
+    {
+        let store = MemoryStore::open_read_only(&path).unwrap().unwrap();
+        let anchored = store.project_context_anchors("alpha").unwrap();
+        assert_eq!(anchored.project_id, "alpha");
+        let origin = anchored.pinned_origin.unwrap();
+        assert_eq!(origin.blueprint_id, "origin");
+        assert_eq!(origin.original_sequence, 1);
+        assert_eq!(origin.verification, "imported_unverified_origin");
+        assert_eq!(anchored.first_three.len(), 3);
+        assert_eq!(
+            anchored
+                .first_three
+                .iter()
+                .map(|x| x.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(anchored.latest_twenty.len(), 20);
+        assert_eq!(anchored.latest_twenty.first().unwrap().sequence, 6);
+        assert_eq!(anchored.latest_twenty.last().unwrap().sequence, 25);
+        assert!(!anchored
+            .latest_twenty
+            .iter()
+            .any(|turn| turn.question.contains("Secret")));
+        assert!(store
+            .project_context_anchors("beta")
+            .unwrap()
+            .pinned_origin
+            .is_none());
+        assert!(store.project_context_anchors("../alpha").is_err());
+        // Origin/answers are context DATA only; not indexed into verified source memory.
+        assert!(store.snapshot("alpha").unwrap().sources.is_empty());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+fn feature_blueprint(project: &str) -> String {
+    serde_json::json!({
+        "schemaVersion":"katosync.continuity-blueprint/v1",
+        "projectId":project,
+        "blueprintId":"genxline-plan",
+        "revision":1,
+        "title":"GENXLine family memory roadmap",
+        "intent":"Private family timeline, planet and offline project tools",
+        "nextSteps":["Test the photo landing experience"],
+        "decisions":[
+            {"id":"ADR-10","title":"Telephone assistant routing",
+             "choice":"One on-demand telephony worker",
+             "rationale":"Prevent forgotten warm containers and reduce costs",
+             "alternatives":["Multiple always-on workers"],"consequences":["Startup latency"],
+             "evidence":[{"kind":"issue","ref":"issue:76"}]},
+            {"id":"ADR-11","title":"3D photo timeline",
+             "choice":"Local panorama thumbnail anchored to the building",
+             "rationale":"Ground images in the correct world location",
+             "alternatives":[],"consequences":[],"evidence":[]}
+        ]
+    })
+    .to_string()
+}
+
+#[test]
+fn blueprint_feature_index_scopes_reasons_to_project_and_compares_baseline_only() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+    let mut proposal = journal_draft("alpha", "blueprint:initial", None);
+    proposal.payload_json = feature_blueprint("alpha");
+    let first = store.append_continuity(proposal).unwrap();
+    let result = store
+        .search_blueprint_sections("alpha", "telephony", HEAD)
+        .unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].section_key, "decision:ADR-10");
+    assert!(result[0]
+        .excerpt
+        .contains("Prevent forgotten warm containers"));
+    assert_eq!(result[0].truth_status, "imported_unverified");
+    assert_eq!(result[0].git_baseline_matches, Some(true));
+    assert_eq!(result[0].event_sequence, first.event.sequence);
+    let stale = store
+        .search_blueprint_sections("alpha", "telephony", NEXT_HEAD)
+        .unwrap();
+    assert_eq!(stale[0].git_baseline_matches, Some(false));
+    assert!(store
+        .search_blueprint_sections("beta", "telephony", HEAD)
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .search_blueprint_sections("../alpha", "telephony", HEAD)
+        .is_err());
+    assert!(store
+        .search_blueprint_sections("alpha", "\" OR *", HEAD)
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .search_blueprint_sections("alpha", &"t".repeat(210), HEAD)
+        .is_err());
+    assert!(
+        store.snapshot("alpha").unwrap().sources.is_empty(),
+        "imported Blueprint must never become verified/canonical project fact"
+    );
+    assert!(store
+        .append_continuity(journal_draft(
+            "alpha",
+            "reused-unrelated",
+            Some(&first.event.event_hash)
+        ))
+        .is_ok());
+    assert_eq!(
+        store
+            .search_blueprint_sections("alpha", "telephony", HEAD)
+            .unwrap()
+            .len(),
+        1,
+        "non-blueprint notes must not duplicate indexed decisions"
+    );
+}
+
+#[test]
+fn feature_index_stores_structured_milestones_without_claiming_completion() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let mut milestone = journal_draft("alpha", "checkpoint:planet-textures", None);
+    milestone.kind = "checkpoint".into();
+    milestone.payload_json = serde_json::json!({
+        "projectId":"alpha","featureKey":"3d-roofs",
+        "title":"Photorealistic roofs","summary":"Roof geometry visual review pending",
+        "rationale":"Need geometry verified on Hannover reference area",
+        "status":"completed","evidence":["unverified screenshot"]
+    })
+    .to_string();
+    store.append_continuity(milestone).unwrap();
+    let hits = store
+        .search_blueprint_sections("alpha", "roofs", HEAD)
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].event_kind, "milestone");
+    assert_eq!(hits[0].truth_status, "imported_unverified");
+    assert!(hits[0].excerpt.contains("Claimed status: completed"));
+    assert!(store
+        .search_blueprint_sections("beta", "roofs", HEAD)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn feature_index_v3_migration_backfills_existing_blueprints_transactionally() {
+    let dir = temp_dir("blueprint-backfill");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        let mut proposal = journal_draft("alpha", "blueprint:from-v3", None);
+        proposal.payload_json = feature_blueprint("alpha");
+        store.append_continuity(proposal).unwrap();
+        store
+            .conn
+            .execute_batch(
+                "DROP TRIGGER IF EXISTS bp_section_ai;
+             DROP TRIGGER IF EXISTS bp_section_ad;
+             DROP TRIGGER IF EXISTS bp_section_au;
+             DROP TABLE blueprint_sections_fts;
+             DROP TABLE blueprint_sections;
+             PRAGMA user_version=3;",
+            )
+            .unwrap();
+    }
+    assert!(MemoryStore::open_read_only(&path).unwrap().is_some());
+    {
+        let store = MemoryStore::open(&path).unwrap();
+        assert_eq!(
+            store
+                .search_blueprint_sections("alpha", "telephony", HEAD)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(store.continuity_events("alpha", 0, 10).unwrap().len(), 1);
+        assert_eq!(store.snapshot("alpha").unwrap().project_id, "alpha");
+        let schema: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(schema, 4);
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
