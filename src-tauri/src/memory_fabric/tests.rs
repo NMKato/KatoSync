@@ -1437,7 +1437,7 @@ fn journal_migrates_v1_store_transactionally_without_losing_memory() {
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -1630,7 +1630,7 @@ fn durable_chat_migrates_v2_without_overwriting_journal() {
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -1783,6 +1783,158 @@ fn project_context_anchors_first_blueprint_three_starters_and_recent_twenty() {
         assert!(store.project_context_anchors("../alpha").is_err());
         // Origin/answers are context DATA only; not indexed into verified source memory.
         assert!(store.snapshot("alpha").unwrap().sources.is_empty());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+fn feature_blueprint(project: &str) -> String {
+    serde_json::json!({
+        "schemaVersion":"katosync.continuity-blueprint/v1",
+        "projectId":project,
+        "blueprintId":"genxline-plan",
+        "revision":1,
+        "title":"GENXLine family memory roadmap",
+        "intent":"Private family timeline, planet and offline project tools",
+        "nextSteps":["Test the photo landing experience"],
+        "decisions":[
+            {"id":"ADR-10","title":"Telephone assistant routing",
+             "choice":"One on-demand telephony worker",
+             "rationale":"Prevent forgotten warm containers and reduce costs",
+             "alternatives":["Multiple always-on workers"],"consequences":["Startup latency"],
+             "evidence":[{"kind":"issue","ref":"issue:76"}]},
+            {"id":"ADR-11","title":"3D photo timeline",
+             "choice":"Local panorama thumbnail anchored to the building",
+             "rationale":"Ground images in the correct world location",
+             "alternatives":[],"consequences":[],"evidence":[]}
+        ]
+    })
+    .to_string()
+}
+
+#[test]
+fn blueprint_feature_index_scopes_reasons_to_project_and_compares_baseline_only() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    store.ingest(batch("beta", Some(HEAD), vec![])).unwrap();
+    let mut proposal = journal_draft("alpha", "blueprint:initial", None);
+    proposal.payload_json = feature_blueprint("alpha");
+    let first = store.append_continuity(proposal).unwrap();
+    let result = store
+        .search_blueprint_sections("alpha", "telephony", HEAD)
+        .unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].section_key, "decision:ADR-10");
+    assert!(result[0]
+        .excerpt
+        .contains("Prevent forgotten warm containers"));
+    assert_eq!(result[0].truth_status, "imported_unverified");
+    assert_eq!(result[0].git_baseline_matches, Some(true));
+    assert_eq!(result[0].event_sequence, first.event.sequence);
+    let stale = store
+        .search_blueprint_sections("alpha", "telephony", NEXT_HEAD)
+        .unwrap();
+    assert_eq!(stale[0].git_baseline_matches, Some(false));
+    assert!(store
+        .search_blueprint_sections("beta", "telephony", HEAD)
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .search_blueprint_sections("../alpha", "telephony", HEAD)
+        .is_err());
+    assert!(store
+        .search_blueprint_sections("alpha", "\" OR *", HEAD)
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .search_blueprint_sections("alpha", &"t".repeat(210), HEAD)
+        .is_err());
+    assert!(
+        store.snapshot("alpha").unwrap().sources.is_empty(),
+        "imported Blueprint must never become verified/canonical project fact"
+    );
+    assert!(store
+        .append_continuity(journal_draft(
+            "alpha",
+            "reused-unrelated",
+            Some(&first.event.event_hash)
+        ))
+        .is_ok());
+    assert_eq!(
+        store
+            .search_blueprint_sections("alpha", "telephony", HEAD)
+            .unwrap()
+            .len(),
+        1,
+        "non-blueprint notes must not duplicate indexed decisions"
+    );
+}
+
+#[test]
+fn feature_index_stores_structured_milestones_without_claiming_completion() {
+    let mut store = MemoryStore::open_in_memory().unwrap();
+    store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+    let mut milestone = journal_draft("alpha", "checkpoint:planet-textures", None);
+    milestone.kind = "checkpoint".into();
+    milestone.payload_json = serde_json::json!({
+        "projectId":"alpha","featureKey":"3d-roofs",
+        "title":"Photorealistic roofs","summary":"Roof geometry visual review pending",
+        "rationale":"Need geometry verified on Hannover reference area",
+        "status":"completed","evidence":["unverified screenshot"]
+    })
+    .to_string();
+    store.append_continuity(milestone).unwrap();
+    let hits = store
+        .search_blueprint_sections("alpha", "roofs", HEAD)
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].event_kind, "milestone");
+    assert_eq!(hits[0].truth_status, "imported_unverified");
+    assert!(hits[0].excerpt.contains("Claimed status: completed"));
+    assert!(store
+        .search_blueprint_sections("beta", "roofs", HEAD)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn feature_index_v3_migration_backfills_existing_blueprints_transactionally() {
+    let dir = temp_dir("blueprint-backfill");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store.ingest(batch("alpha", Some(HEAD), vec![])).unwrap();
+        let mut proposal = journal_draft("alpha", "blueprint:from-v3", None);
+        proposal.payload_json = feature_blueprint("alpha");
+        store.append_continuity(proposal).unwrap();
+        store
+            .conn
+            .execute_batch(
+                "DROP TRIGGER IF EXISTS bp_section_ai;
+             DROP TRIGGER IF EXISTS bp_section_ad;
+             DROP TRIGGER IF EXISTS bp_section_au;
+             DROP TABLE blueprint_sections_fts;
+             DROP TABLE blueprint_sections;
+             PRAGMA user_version=3;",
+            )
+            .unwrap();
+    }
+    assert!(MemoryStore::open_read_only(&path).unwrap().is_some());
+    {
+        let store = MemoryStore::open(&path).unwrap();
+        assert_eq!(
+            store
+                .search_blueprint_sections("alpha", "telephony", HEAD)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(store.continuity_events("alpha", 0, 10).unwrap().len(), 1);
+        assert_eq!(store.snapshot("alpha").unwrap().project_id, "alpha");
+        let schema: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(schema, 4);
     }
     fs::remove_dir_all(dir).unwrap();
 }

@@ -9,6 +9,7 @@
 // - Jeder Lese-/Schreibzugriff ist an eine Projekt-ID gebunden (keine projektuebergreifenden Treffer).
 // Kein zweites Context-System: Context Pack bleibt der Handoff-Vertrag; die Fabric ist Retrieval darunter.
 mod assemble;
+mod blueprint_index;
 pub(crate) mod continuity_bridge;
 mod continuity_chat;
 mod continuity_context;

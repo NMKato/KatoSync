@@ -311,6 +311,7 @@ pub fn run() {
             memory_fabric::continuity_bridge::continuity_local_answer,
             memory_fabric::continuity_bridge::continuity_chat_history,
             memory_fabric::continuity_bridge::continuity_chat_send,
+            memory_fabric::continuity_bridge::continuity_search_blueprint,
             memory_fabric::continuity_bridge::continuity_save_blueprint,
             load_config,
             save_config,

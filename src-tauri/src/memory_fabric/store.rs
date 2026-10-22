@@ -13,7 +13,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBeha
 use serde::Serialize;
 use std::{collections::BTreeSet, path::Path, time::Duration};
 
-pub(super) const SCHEMA_USER_VERSION: i64 = 3;
+pub(super) const SCHEMA_USER_VERSION: i64 = 4;
 
 // Private per-project dialogue; untrusted conversation DATA, never indexed/canonical RAG.
 const CONTINUITY_CHAT_SCHEMA_V3: &str = r#"
@@ -242,10 +242,11 @@ impl MemoryStore {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(db_error)?;
+        let blueprint_index_sql = super::blueprint_index::SCHEMA_V4;
         match version {
             0 => {
                 conn.execute_batch(&format!(
-                    "BEGIN;{SCHEMA}{CONTINUITY_SCHEMA_V2}{CONTINUITY_CHAT_SCHEMA_V3}PRAGMA user_version = {SCHEMA_USER_VERSION};COMMIT;"
+                    "BEGIN;{SCHEMA}{CONTINUITY_SCHEMA_V2}{CONTINUITY_CHAT_SCHEMA_V3}{blueprint_index_sql}PRAGMA user_version = {SCHEMA_USER_VERSION};COMMIT;"
                 ))
                 .map_err(|error| {
                     format!("Memory-Fabric-Schema konnte nicht angelegt werden (FTS5 erforderlich): {error}")
@@ -253,14 +254,32 @@ impl MemoryStore {
             }
             1 => {
                 conn.execute_batch(&format!(
-                    "BEGIN IMMEDIATE;{CONTINUITY_SCHEMA_V2}{CONTINUITY_CHAT_SCHEMA_V3}PRAGMA user_version = {SCHEMA_USER_VERSION};COMMIT;"
+                    "BEGIN IMMEDIATE;{CONTINUITY_SCHEMA_V2}{CONTINUITY_CHAT_SCHEMA_V3}{blueprint_index_sql}PRAGMA user_version = {SCHEMA_USER_VERSION};COMMIT;"
                 ))
                 .map_err(|_| "Memory-Fabric-Journal-Migration fehlgeschlagen; Daten unverändert.".to_string())?;
             }
             2 => {
                 conn.execute_batch(&format!(
-                    "BEGIN IMMEDIATE;{CONTINUITY_CHAT_SCHEMA_V3}PRAGMA user_version = {SCHEMA_USER_VERSION};COMMIT;"
+                    "BEGIN IMMEDIATE;{CONTINUITY_CHAT_SCHEMA_V3}{blueprint_index_sql}PRAGMA user_version = {SCHEMA_USER_VERSION};COMMIT;"
                 )).map_err(|_| "Memory-Fabric-Chat-Migration fehlgeschlagen; Daten unverändert.".to_string())?;
+            }
+            3 => {
+                conn.execute_batch(&format!(
+                    "BEGIN IMMEDIATE;{}",
+                    super::blueprint_index::SCHEMA_V4
+                ))
+                .map_err(|_| {
+                    "Blueprint-Index-Migration fehlgeschlagen; Daten unverändert.".to_string()
+                })?;
+                let migrated = super::blueprint_index::backfill(&conn);
+                if migrated.is_err() {
+                    let _ = conn.execute_batch("ROLLBACK;");
+                    return Err(
+                        "Blueprint-Index-Backfill fehlgeschlagen; Daten unverändert.".into(),
+                    );
+                }
+                conn.execute_batch("PRAGMA user_version=4;COMMIT;")
+                    .map_err(|_| "Blueprint-Index-Commit fehlgeschlagen.".to_string())?;
             }
             SCHEMA_USER_VERSION => {}
             _ => {

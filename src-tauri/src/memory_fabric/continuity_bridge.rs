@@ -304,6 +304,33 @@ pub(crate) async fn continuity_timeline(project_id: String) -> Result<Continuity
     .await
 }
 
+/// Local-only feature lookup over UNVERIFIED imported Blueprint/milestone sections.
+/// The live HEAD comparison is not evidence of feature completion.
+#[tauri::command]
+pub(crate) async fn continuity_search_blueprint(
+    project_id: String,
+    query: String,
+) -> Result<Vec<super::blueprint_index::BlueprintSectionMatch>, String> {
+    blocking(move || {
+        let path = crate::app_support_dir()
+            .map_err(crate::error_to_string)?
+            .join(STORE_DIR)
+            .join(STORE_FILE);
+        let store = MemoryStore::open_read_only(&path)?
+            .ok_or_else(|| "Memory Fabric ist noch nicht indexiert.".to_string())?;
+        let current_head = registered_head(&store, &project_id)?;
+        let schema: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| "Memory-Fabric-Schema konnte nicht gelesen werden.".to_string())?;
+        if schema < 4 {
+            return Err("Blueprint-Index ist noch nicht migriert; eine Suchanfrage verändert die Datenbank nicht.".to_string());
+        }
+        store.search_blueprint_sections(&project_id, &query, &current_head)
+    })
+    .await
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ContinuityPreflight {

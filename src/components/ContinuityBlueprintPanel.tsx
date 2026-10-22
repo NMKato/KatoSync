@@ -11,6 +11,7 @@ import {
 import type { RegistryProject } from "../types";
 import { ContinuityTimelinePanel } from "./ContinuityTimelinePanel";
 import { ContinuityLocalChatPanel } from "./ContinuityLocalChatPanel";
+import { ContinuityBlueprintSearchPanel } from "./ContinuityBlueprintSearchPanel";
 
 const FILE_LIMIT = 32_768;
 const JOURNAL_LIMIT = 8192;
@@ -206,6 +207,7 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
         <p className="tone-danger" role="alert"><AlertTriangle size={14} /> {error}</p>
       ) : null}
 
+      <ContinuityBlueprintSearchPanel projectId={project?.id ?? ""} refreshSequence={saved?.event.sequence ?? 0} />
       <ContinuityTimelinePanel projectId={project?.id ?? ""} refreshSequence={saved?.event.sequence ?? 0} />
       <ContinuityLocalChatPanel key={project?.id ?? ""} projectId={project?.id ?? ""} projectName={project?.name ?? ""} />
 

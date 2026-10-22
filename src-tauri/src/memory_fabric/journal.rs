@@ -280,6 +280,17 @@ impl MemoryStore {
             ],
         )
         .map_err(safe_error)?;
+        // The search projection is committed atomically with the immutable journal event.
+        // A failed index write aborts the entire append (no half-indexed Blueprint).
+        super::blueprint_index::index_journal_event(
+            &tx,
+            &draft.project_id,
+            sequence,
+            &draft.event_id,
+            &draft.kind,
+            &draft.payload_json,
+            draft.base_git_head.as_deref(),
+        )?;
         tx.commit().map_err(safe_error)?;
         Ok(JournalAppendResult {
             event: JournalEvent {
