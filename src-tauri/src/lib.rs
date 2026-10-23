@@ -26,6 +26,7 @@ use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
 mod context_pack;
+mod github_app_auth;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
@@ -316,6 +317,11 @@ pub fn run() {
             memory_fabric::continuity_bridge::continuity_mvp_progress,
             memory_fabric::continuity_bridge::continuity_github_ci,
             memory_fabric::continuity_bridge::continuity_github_kickoff_discover,
+            github_app_auth::github_app_connection_status,
+            github_app_auth::github_app_device_begin,
+            github_app_auth::github_app_device_poll,
+            github_app_auth::github_app_device_cancel,
+            github_app_auth::github_app_disconnect,
             memory_fabric::continuity_bridge::continuity_save_blueprint,
             load_config,
             save_config,
@@ -1155,6 +1161,7 @@ async fn cloud_profile_unlock_and_push_inner(base_url: &str, password: &str) -> 
 // Tenant-Isolierung: alle konto-/tenant-bezogenen lokalen Daten loeschen. Geraete-Identitaet
 // (device_id/name), Server-URL und reine App-Praeferenzen (Scan-Regeln/Codex) bleiben erhalten.
 fn wipe_local_account_data() -> Result<()> {
+    github_app_auth::purge_local_credentials();
     // 1) Zugangsdaten aus der Keychain.
     if let Ok(entry) = keychain_entry() {
         let _ = entry.delete_credential();

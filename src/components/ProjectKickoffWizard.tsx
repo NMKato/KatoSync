@@ -4,6 +4,7 @@ import {useMemo,useState} from "react";
 import {ClipboardCopy,GitBranch,ShieldCheck} from "lucide-react";
 import {useT} from "../i18n";
 import {ProjectGithubDiscoveryPanel} from "./ProjectGithubDiscoveryPanel";
+import {GithubAppConnectionPanel} from "./GithubAppConnectionPanel";
 import {normalizeRemote} from "../lib/projectExclusions.ts";
 import {buildProjectKickoff,type KickoffScope} from "../lib/projectKickoff.ts";
 import type {ContinuityBlueprintPreview} from "../lib/continuityBlueprint.ts";
@@ -69,6 +70,7 @@ export function ProjectKickoffWizard({project,blueprint}:{
             placeholder="owner/repository"/>
         </label>
         <small>{t("kickoff.privateFirst")}</small>
+        <GithubAppConnectionPanel />
         <small>{t("kickoff.connectionPending")}</small>
       </div>:<p className="project-kickoff-local"><ShieldCheck size={14}/>{t("kickoff.localFirst")}</p>}
       {!proposal?<p className="tone-warn" role="alert">{t("kickoff.invalid")}</p>:<>
