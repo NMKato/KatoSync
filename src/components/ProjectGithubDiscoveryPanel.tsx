@@ -14,6 +14,11 @@ interface BoardCandidate {
 }
 interface Discovery {
   projectId:string;
+  repoBoardLinks:{
+    status:"verified"|"partial"|"unavailable";
+    linkedBoards:Array<{number:number;providerId:string;title:string;url:string;owner:string;ownershipType:string;repositoryLinkVerified:boolean}>;
+    providerTotal:number|null;pagesScanned:number;providerSource:string;remoteWritesPerformed:false;
+  };
   repository:{fullName:string;visibility:"public"|"private";archived:boolean;hasIssues:boolean};
   observedGitHead:string;authSource:"existing_local_gh_cli";
   projectsStatus:"read"|"unavailable";projectsScanComplete:boolean;projectsTotal:number|null;
@@ -50,6 +55,7 @@ export function ProjectGithubDiscoveryPanel({enabled,projectId,registeredRepo,se
       if(generation!==revision.current)return;
       if(result.projectId!==projectId||result.remoteWritesPerformed!==false ||
          result.automaticCreationAllowed!==false||
+         result.repoBoardLinks?.remoteWritesPerformed!==false||
          result.authSource!=="existing_local_gh_cli"||
          result.repository.fullName.toLowerCase()!==registeredRepo.toLowerCase()||
          result.checkedFeatureIds.join("|")!==tickets.slice(0,12).map(x=>x.featureId).join("|")){
@@ -87,6 +93,17 @@ export function ProjectGithubDiscoveryPanel({enabled,projectId,registeredRepo,se
       {data.repository.visibility==="public"?<p className="tone-warn">{t("kickoff.discoverPublicWarning")}</p>:null}
       {data.repository.archived?<small className="tone-warn">{t("kickoff.discoverArchived")}</small>:null}
       <div>
+        <strong>{t("kickoff.linkedBoards")}: {data.repoBoardLinks.linkedBoards.length}</strong>
+        {data.repoBoardLinks.status==="unavailable"?<p className="tone-warn">{t("kickoff.linkedUnavailable")}</p>:
+          data.repoBoardLinks.status==="partial"?<p className="tone-warn">{t("kickoff.linkedPartial")}</p>:null}
+        {data.repoBoardLinks.linkedBoards.length?<ul className="kickoff-discovery-list">
+          {data.repoBoardLinks.linkedBoards.map(board=><li key={board.providerId}>
+            <a href={board.url} target="_blank" rel="noopener noreferrer">{board.title}</a>
+            <small>{t("kickoff.linkedVerified")} · #{board.number}</small>
+          </li>)}
+        </ul>:data.repoBoardLinks.status==="verified"?<small>{t("kickoff.linkedNone")}</small>:null}
+      </div>
+      <div>
         <strong>{t("kickoff.discoverBoards")}: {data.boards.length}</strong>
         {data.projectsStatus!=="read"?<p className="tone-warn">{t("kickoff.discoverBoardsUnavailable")}</p>:
           !data.projectsScanComplete?<p className="tone-warn">{t("kickoff.discoverPartial")}</p>:null}
@@ -120,7 +137,8 @@ export function ProjectGithubDiscoveryPanel({enabled,projectId,registeredRepo,se
       </div>
       {review?<details className="kickoff-review-details">
         <summary>{t("kickoff.reviewPlan")}</summary>
-        <p>{t("kickoff.reviewBoard")}: {review.proposedBoardAction==="review_existing_board"
+        <p>{t("kickoff.reviewBoard")}: {review.proposedBoardAction==="reuse_verified_linked_board"
+          ? t("kickoff.linkedReuse") : review.proposedBoardAction==="review_existing_board"
           ? t("kickoff.reviewReuseBoard") : review.proposedBoardAction==="inventory_incomplete"
             ? t("kickoff.reviewIncomplete"):t("kickoff.reviewNewBoard")}</p>
         <small>{t("kickoff.reviewIssuesScanned",{count:review.issuesScanned})}</small>

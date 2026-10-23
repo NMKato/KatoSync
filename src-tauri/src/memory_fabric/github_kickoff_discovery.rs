@@ -125,6 +125,7 @@ pub(crate) struct GithubKickoffDiscovery {
     pub projects_status: &'static str,
     pub projects_scan_complete: bool,
     pub projects_total: Option<u64>,
+    pub repo_board_links: super::github_repo_board_links::RepoBoardLinkReport,
     pub boards: Vec<BoardCandidate>,
     pub issues_scan_complete: bool,
     pub issues_scanned: usize,
@@ -354,6 +355,9 @@ pub(crate) async fn discover_registered_repo(
         },
         Err(_) => (Vec::new(), "unavailable", false, None),
     };
+    // GraphQL repository.projectsV2 is the provider's authoritative
+    // repository-link connection, distinct from weak owner-board hints.
+    let repo_board_links = super::github_repo_board_links::check_repo_links(&repo).await;
     if git(&canonical, &["rev-parse", "HEAD"]).await?.trim() != head
         || git(&canonical, &["remote", "get-url", "origin"])
             .await?
@@ -370,6 +374,7 @@ pub(crate) async fn discover_registered_repo(
         projects_status,
         projects_scan_complete: projects_complete,
         projects_total,
+        repo_board_links,
         boards,
         issues_scan_complete: issues_complete,
         issues_scanned,

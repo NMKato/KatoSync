@@ -16,6 +16,7 @@ mod continuity_context;
 mod feature_trace;
 mod github_ci;
 mod github_kickoff_discovery;
+mod github_repo_board_links;
 mod identity;
 mod ingest;
 mod journal;

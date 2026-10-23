@@ -7,6 +7,8 @@ function fixture():ReadonlyGithubInventory{
  return {
   projectId:"alpha",repository:{fullName:"NMKato/KatoSync",visibility:"private",archived:false,hasIssues:true},
   observedGitHead:"a".repeat(40),projectsStatus:"read",projectsScanComplete:true,
+  repoBoardLinks:{status:"verified",linkedBoards:[],providerTotal:0,pagesScanned:1,
+    providerSource:"github_repository_projects_v2_graphql",remoteWritesPerformed:false},
   issuesScanComplete:true,issuesScanned:125,
   boards:[{number:7,title:"Existing product",closed:false,public:false,
    possibleRepoMatch:true,url:"https://github.com/users/NMKato/projects/7",providerId:"PVT_7"}],
@@ -65,4 +67,53 @@ test("false provider write flags are mandatory and no ticket exceeds reviewed li
  }),/github_snapshot_not_readonly/);
  const many=Array.from({length:24},(_,i)=>({featureId:"F-"+i,title:"Task "+i}));
  assert.equal(buildGithubKickoffReview(many,input).issueReview.length,12);
+});
+
+test("provider-linked board overrides title-only candidates without authorizing writes",()=>{
+ const s=fixture();
+ s.boards=[];
+ s.repoBoardLinks={
+  status:"verified",providerTotal:1,pagesScanned:1,
+  providerSource:"github_repository_projects_v2_graphql",
+  remoteWritesPerformed:false,
+  linkedBoards:[{
+    number:12,providerId:"PVT_kwHODDE5ds4BldNp",
+    title:"KatoSync Agent Mode",url:"https://github.com/users/NMKato/projects/12",
+    repositoryLinkVerified:true
+  }]
+ };
+ const report=buildGithubKickoffReview(tickets,s);
+ assert.equal(report.proposedBoardAction,"reuse_verified_linked_board");
+ assert.equal(report.repoLinkageStatus,"verified");
+ assert.deepEqual(report.verifiedLinkedBoards,[12]);
+ assert.equal(report.writesAuthorized,false);
+ assert.equal(report.requiresHumanApproval,true);
+});
+test("unavailable GraphQL linkage cannot certify board absence",()=>{
+ const s=fixture();
+ s.repoBoardLinks={
+   status:"unavailable",linkedBoards:[],providerTotal:null,
+   pagesScanned:0,providerSource:"github_repository_projects_v2_graphql",
+   remoteWritesPerformed:false
+ };
+ const report=buildGithubKickoffReview(tickets,s);
+ assert.equal(report.repoLinkageStatus,"unavailable");
+ assert.ok(report.blockers.includes("repository_board_linkage_unavailable"));
+ assert.equal(report.proposedBoardAction,"review_existing_board");
+});
+
+test("partially paged GraphQL retains already attested links while blocking completeness",()=>{
+ const s=fixture();
+ s.repoBoardLinks={
+  status:"partial",providerTotal:60,pagesScanned:1,
+  providerSource:"github_repository_projects_v2_graphql",
+  remoteWritesPerformed:false,
+  linkedBoards:[{number:12,providerId:"PVT_12",title:"Confirmed",
+    url:"https://github.com/users/NMKato/projects/12",repositoryLinkVerified:true}]
+ };
+ const review=buildGithubKickoffReview(tickets,s);
+ assert.equal(review.proposedBoardAction,"reuse_verified_linked_board");
+ assert.deepEqual(review.verifiedLinkedBoards,[12]);
+ assert.ok(review.blockers.includes("repository_board_linkage_unavailable"));
+ assert.equal(review.writesAuthorized,false);
 });
