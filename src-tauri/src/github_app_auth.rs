@@ -12,14 +12,62 @@ use std::{
 };
 use zeroize::Zeroize;
 
-const CLIENT_ID: Option<&str> = option_env!("KATOSYNC_GITHUB_APP_CLIENT_ID");
+// Public GitHub App identifier, shared by all KatoSync customers; no secret.
+const CLIENT_ID: Option<&str> = match option_env!("KATOSYNC_GITHUB_APP_CLIENT_ID") {
+    Some(x) => Some(x),
+    None => Some("Iv23liALq4EnjOcfPVOD"),
+};
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
-const KEYCHAIN_ACCOUNT: &str = "github-app-user-device-v1";
+const ACCOUNT_PREFIX: &str = "github-app-user-device-v2:";
+static ACTIVE_USER: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+fn active_user() -> &'static Mutex<Option<String>> {
+    ACTIVE_USER.get_or_init(|| Mutex::new(None))
+}
+fn clear_active_user() {
+    if let Ok(mut s) = active_user().lock() {
+        *s = None;
+    }
+}
+fn cached_uid() -> Option<String> {
+    active_user().lock().ok().and_then(|g| g.clone())
+}
+#[derive(Deserialize)]
+struct SupabaseUserIdentity {
+    id: String,
+}
+async fn verified_katosync_user() -> Result<String, String> {
+    let mut token = crate::ensure_supabase_access_token()
+        .await
+        .map_err(|_| "Bitte zuerst bei KatoSync anmelden.".to_string())?;
+    let response = network()?
+        .get(format!("{}/auth/v1/user", crate::KATOSYNC_AUTH_URL))
+        .header("apikey", crate::KATOSYNC_AUTH_ANON_KEY)
+        .bearer_auth(&token)
+        .send()
+        .await;
+    token.zeroize();
+    let response = response.map_err(|_| "KatoSync-Sitzung nicht überprüfbar.".to_string())?;
+    if !response.status().is_success() {
+        return Err("Bitte KatoSync-Sitzung erneuern.".into());
+    }
+    let identity: SupabaseUserIdentity = response
+        .json()
+        .await
+        .map_err(|_| "Ungültige KatoSync-Benutzeridentität.".to_string())?;
+    let uid = uuid::Uuid::parse_str(&identity.id)
+        .map_err(|_| "KatoSync-Benutzerkennung ungültig.".to_string())?
+        .to_string();
+    if let Ok(mut x) = active_user().lock() {
+        *x = Some(uid.clone());
+    }
+    Ok(uid)
+}
 const VERIFY_URL: &str = "https://github.com/login/device";
 const MAX_POLL_INTERVAL: u64 = 120;
 
 struct Pending {
     nonce: String,
+    katosync_uid: String,
     device_code: String,
     expires: Instant,
     poll_after: Instant,
@@ -39,20 +87,28 @@ fn valid_client_id(s: &str) -> bool {
     // GitHub App client IDs use a dotted prefix, for example Iv1.abc123.
     // Unlike the numeric App ID, this is a public build-time identifier.
     // Never accept URL components, whitespace or a runtime-supplied ID.
-    (10..=120).contains(&s.len())
-        && s.starts_with("Iv")
-        && s.split_once('.').is_some_and(|(prefix, suffix)| {
-            prefix.len() >= 3
-                && prefix[2..].bytes().all(|b| b.is_ascii_digit())
-                && suffix.len() >= 6
-                && suffix.bytes().all(|b| b.is_ascii_alphanumeric())
-        })
+    // GitHub has issued both legacy Iv1.<suffix> and newer Iv23<suffix>
+    // client IDs. Neither is a numeric App ID.
+    if !(10..=120).contains(&s.len()) || !s.starts_with("Iv") {
+        return false;
+    }
+    let tail = &s[2..];
+    if let Some((numeric, suffix)) = tail.split_once('.') {
+        !numeric.is_empty()
+            && numeric.bytes().all(|b| b.is_ascii_digit())
+            && suffix.len() >= 6
+            && suffix.bytes().all(|b| b.is_ascii_alphanumeric())
+    } else {
+        tail.len() >= 8 && tail.bytes().all(|b| b.is_ascii_alphanumeric())
+    }
 }
 fn client_id() -> Option<&'static str> {
     CLIENT_ID.filter(|s| valid_client_id(s))
 }
-fn entry() -> Result<Entry, String> {
-    Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+fn entry(uid: &str) -> Result<Entry, String> {
+    let uid =
+        uuid::Uuid::parse_str(uid).map_err(|_| "KatoSync-Benutzerkennung ungültig.".to_string())?;
+    Entry::new(KEYCHAIN_SERVICE, &format!("{ACCOUNT_PREFIX}{uid}"))
         .map_err(|_| "Betriebssystem-Schlüsselbund nicht verfügbar.".into())
 }
 fn now_secs() -> u64 {
@@ -125,6 +181,7 @@ struct GhUser {
 #[derive(Serialize, Deserialize)]
 struct Credential {
     client_id: String,
+    katosync_uid: String,
     user_id: u64,
     login: String,
     access_token: String,
@@ -138,10 +195,11 @@ impl Drop for Credential {
         self.refresh_token.zeroize();
     }
 }
-fn status_from(credential: Option<Credential>) -> GithubAppAuthStatus {
+fn status_from(credential: Option<Credential>, uid: Option<&str>) -> GithubAppAuthStatus {
     let configured = client_id().is_some();
     let valid = credential.filter(|c| {
         Some(c.client_id.as_str()) == client_id()
+            && uid == Some(c.katosync_uid.as_str())
             && c.expires_at > now_secs() + 10
             && c.user_id != 0
             && !c.login.is_empty()
@@ -156,8 +214,8 @@ fn status_from(credential: Option<Credential>) -> GithubAppAuthStatus {
         auth_source: "github_app_device_flow",
     }
 }
-fn credentials() -> Result<Option<Credential>, String> {
-    let storage = entry()?;
+fn credentials(uid: &str) -> Result<Option<Credential>, String> {
+    let storage = entry(uid)?;
     match storage.get_password() {
         Ok(mut raw) => {
             let parsed = serde_json::from_str::<Credential>(&raw)
@@ -177,7 +235,7 @@ fn network() -> Result<reqwest::Client, String> {
         .build()
         .map_err(|_| "Sicherer GitHub-HTTP-Client nicht verfügbar.".into())
 }
-fn start_session(resp: DeviceResponse) -> Result<(GithubDeviceBegin, Pending), String> {
+fn start_session(resp: DeviceResponse, uid: &str) -> Result<(GithubDeviceBegin, Pending), String> {
     if resp.error.is_some() {
         return Err("GitHub Device Flow nicht verfügbar. GitHub-App-Konfiguration prüfen.".into());
     }
@@ -204,6 +262,7 @@ fn start_session(resp: DeviceResponse) -> Result<(GithubDeviceBegin, Pending), S
     let nonce = uuid::Uuid::new_v4().to_string();
     let pending = Pending {
         nonce: nonce.clone(),
+        katosync_uid: uid.to_owned(),
         device_code: device,
         expires: Instant::now() + Duration::from_secs(expires),
         poll_after: Instant::now() + Duration::from_secs(interval),
@@ -232,24 +291,29 @@ fn retry(state: &'static str, seconds: u64) -> GithubDevicePoll {
     }
 }
 #[tauri::command]
-pub(crate) fn github_app_connection_status() -> Result<GithubAppAuthStatus, String> {
+pub(crate) async fn github_app_connection_status() -> Result<GithubAppAuthStatus, String> {
     if client_id().is_none() {
-        return Ok(status_from(None));
+        return Ok(status_from(None, None));
     }
-    Ok(status_from(credentials()?))
+    let uid = verified_katosync_user().await?;
+    Ok(status_from(credentials(&uid)?, Some(&uid)))
 }
 #[tauri::command]
 pub(crate) async fn github_app_device_begin() -> Result<GithubDeviceBegin, String> {
     let id = client_id()
         .ok_or_else(|| "GitHub App ist noch nicht registriert/konfiguriert.".to_string())?;
-    if status_from(credentials()?).connected {
+    let uid = verified_katosync_user().await?;
+    if status_from(credentials(&uid)?, Some(&uid)).connected {
         return Err("GitHub ist bereits verbunden. Erst trennen, dann erneut anmelden.".into());
     }
     {
         let mut state = pending()
             .lock()
             .map_err(|_| "Anmeldestatus gesperrt.".to_string())?;
-        if state.as_ref().is_some_and(|s| s.expires > Instant::now()) {
+        if state
+            .as_ref()
+            .is_some_and(|s| s.expires > Instant::now() && s.katosync_uid == uid)
+        {
             return Err(
                 "Es läuft bereits eine GitHub-Anmeldung. Bitte fortsetzen oder abbrechen.".into(),
             );
@@ -270,7 +334,7 @@ pub(crate) async fn github_app_device_begin() -> Result<GithubDeviceBegin, Strin
         .json()
         .await
         .map_err(|_| "GitHub Device-Antwort ungültig.".to_string())?;
-    let (public, session) = start_session(parsed)?;
+    let (public, session) = start_session(parsed, &uid)?;
     let mut state = pending()
         .lock()
         .map_err(|_| "Anmeldestatus gesperrt.".to_string())?;
@@ -278,12 +342,21 @@ pub(crate) async fn github_app_device_begin() -> Result<GithubDeviceBegin, Strin
     Ok(public)
 }
 #[tauri::command]
-pub(crate) fn github_app_device_cancel() -> Result<(), String> {
-    let mut state = pending()
+pub(crate) async fn github_app_device_cancel() -> Result<(), String> {
+    let uid = verified_katosync_user().await?;
+    let mut s = pending()
         .lock()
         .map_err(|_| "Anmeldestatus gesperrt.".to_string())?;
-    *state = None;
+    if s.as_ref().is_some_and(|p| p.katosync_uid != uid) {
+        return Err("Diese Anmeldung gehört einem anderen KatoSync-Konto.".into());
+    }
+    *s = None;
     Ok(())
+}
+pub(crate) fn clear_pending() {
+    if let Ok(mut s) = pending().lock() {
+        *s = None;
+    }
 }
 #[tauri::command]
 pub(crate) async fn github_app_device_poll(session_id: String) -> Result<GithubDevicePoll, String> {
@@ -295,12 +368,13 @@ pub(crate) async fn github_app_device_poll(session_id: String) -> Result<GithubD
         return Err("Ungültige Anmeldesitzung.".into());
     }
     let id = client_id().ok_or("GitHub App nicht eingerichtet.")?;
+    let uid = verified_katosync_user().await?;
     let code = {
         let mut state = pending()
             .lock()
             .map_err(|_| "Anmeldestatus gesperrt.".to_string())?;
         let session = state.as_mut().ok_or("Keine aktive GitHub-Anmeldung.")?;
-        if session.nonce != session_id {
+        if session.nonce != session_id || session.katosync_uid != uid {
             return Err("Anmeldesitzung wurde ersetzt.".into());
         }
         if Instant::now() >= session.expires {
@@ -353,7 +427,7 @@ pub(crate) async fn github_app_device_poll(session_id: String) -> Result<GithubD
             .lock()
             .map_err(|_| "Anmeldestatus gesperrt.".to_string())?;
         let session = state.as_mut().ok_or("GitHub-Anmeldung abgebrochen.")?;
-        if session.nonce != session_id {
+        if session.nonce != session_id || session.katosync_uid != uid {
             return Err("GitHub-Anmeldung wurde ersetzt.".into());
         }
         session.polling = false;
@@ -379,7 +453,7 @@ pub(crate) async fn github_app_device_poll(session_id: String) -> Result<GithubD
         Some("authorization_pending") => return Ok(retry("pending", next_check)),
         Some("slow_down") => return Ok(retry("slow_down", next_check)),
         Some("expired_token") | Some("access_denied") => {
-            github_app_device_cancel()?;
+            clear_pending();
             return Ok(retry("expired_or_denied", 0));
         }
         Some(_) => return Err("GitHub-Autorisierung nicht abgeschlossen.".into()),
@@ -422,16 +496,23 @@ pub(crate) async fn github_app_device_poll(session_id: String) -> Result<GithubD
     if user.id == 0 || !safe_login(&user.login) {
         return Err("GitHub-Kontoidentität ungültig.".into());
     }
-    // Token is NEVER exposed via IPC. Save only in per-user OS keychain.
-    // Check cancellation/replaced session just before writing.
+    // User may switch KatoSync accounts during GitHub's network roundtrip.
+    if verified_katosync_user().await? != uid {
+        return Err("KatoSync-Konto während der Anmeldung gewechselt.".into());
+    }
+    // Store only under the verified tenant's keychain account.
     let mut state = pending()
         .lock()
         .map_err(|_| "Anmeldestatus gesperrt.".to_string())?;
-    if !state.as_ref().is_some_and(|s| s.nonce == session_id) {
+    if !state
+        .as_ref()
+        .is_some_and(|s| s.nonce == session_id && s.katosync_uid == uid)
+    {
         return Err("GitHub-Anmeldung wurde zwischenzeitlich abgebrochen.".into());
     }
     let cred = Credential {
         client_id: id.into(),
+        katosync_uid: uid.clone(),
         user_id: user.id,
         login: user.login.clone(),
         access_token: token.to_string(),
@@ -441,7 +522,7 @@ pub(crate) async fn github_app_device_poll(session_id: String) -> Result<GithubD
     };
     let mut payload = serde_json::to_string(&cred)
         .map_err(|_| "GitHub-Schlüsselbunddaten konnten nicht erstellt werden.".to_string())?;
-    let storage = entry()?;
+    let storage = entry(&uid)?;
     let saved = storage.set_password(&payload).map_err(|_| {
         "GitHub konnte nicht sicher im Betriebssystem-Schlüsselbund gespeichert werden.".to_string()
     });
@@ -455,23 +536,31 @@ pub(crate) async fn github_app_device_poll(session_id: String) -> Result<GithubD
     })
 }
 #[tauri::command]
-pub(crate) fn github_app_disconnect() -> Result<GithubAppAuthStatus, String> {
-    github_app_device_cancel()?;
-    let item = entry()?;
+pub(crate) async fn github_app_disconnect() -> Result<GithubAppAuthStatus, String> {
+    let uid = verified_katosync_user().await?;
+    clear_pending();
+    let item = entry(&uid)?;
     match item.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => {}
         Err(_) => {
             return Err("GitHub-Konto konnte nicht aus dem Schlüsselbund entfernt werden.".into())
         }
     }
-    Ok(status_from(None))
+    Ok(status_from(None, Some(&uid)))
 }
 /// Called by account-data purge; best-effort local credential removal.
 pub(crate) fn purge_local_credentials() {
-    let _ = github_app_device_cancel();
-    if let Ok(storage) = entry() {
-        let _ = storage.delete_credential();
+    clear_pending();
+    if let Some(uid) = cached_uid() {
+        if let Ok(storage) = entry(&uid) {
+            let _ = storage.delete_credential();
+        }
     }
+    clear_active_user();
+}
+pub(crate) fn on_katosync_account_switch() {
+    clear_pending();
+    clear_active_user();
 }
 
 #[cfg(test)]
@@ -491,6 +580,7 @@ mod tests {
     fn accepts_real_github_app_client_id_shape_not_numeric_app_id() {
         assert!(valid_client_id("Iv1.ab1112223334445c"));
         assert!(valid_client_id("Iv23.0123456789abcdef"));
+        assert!(valid_client_id("Iv23liALq4EnjOcfPVOD"));
         for bad in [
             "12345678",
             "Iv1",
@@ -511,23 +601,24 @@ mod tests {
 
     #[test]
     fn rejects_forged_verification_site_or_bad_codes() {
-        let (public, _session) = start_session(device()).unwrap();
+        let (public, _session) =
+            start_session(device(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
         assert_eq!(public.verification_uri, VERIFY_URL);
         assert_eq!(public.interval, 5);
         let mut bad = device();
         bad.verification_uri = Some("https://evil.example/verify".into());
-        assert!(start_session(bad).is_err());
+        assert!(start_session(bad, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").is_err());
         let mut bad = device();
         bad.user_code = Some("BAD<script>".into());
-        assert!(start_session(bad).is_err());
+        assert!(start_session(bad, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").is_err());
         let mut bad = device();
         bad.expires_in = Some(999999);
-        assert!(start_session(bad).is_err());
+        assert!(start_session(bad, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").is_err());
     }
     #[test]
     fn device_login_never_becomes_enabled_without_registered_client_id() {
         if client_id().is_none() {
-            let state = github_app_connection_status().unwrap();
+            let state = status_from(None, None);
             assert!(!state.configured);
             assert!(!state.connected);
             assert!(!state.write_access_granted);
@@ -535,9 +626,29 @@ mod tests {
         }
     }
     #[test]
+    fn github_credentials_cannot_cross_katosync_tenants() {
+        let a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        assert!(entry(a).is_ok());
+        assert!(entry(b).is_ok());
+        assert!(entry("owner@example.com").is_err());
+        let record = Credential {
+            client_id: client_id().unwrap().into(),
+            katosync_uid: a.into(),
+            user_id: 123,
+            login: "test-owner".into(),
+            access_token: "fake-test-token".into(),
+            refresh_token: "fake-test-refresh".into(),
+            expires_at: now_secs() + 300,
+            refresh_expires_at: now_secs() + 3600,
+        };
+        assert!(status_from(Some(record), Some(b)).login.is_none());
+    }
+    #[test]
     fn only_valid_short_lived_credentials_count_as_connected() {
         let record = Credential {
             client_id: "dummy".into(),
+            katosync_uid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
             user_id: 1,
             login: "Example-user".into(),
             access_token: "fake-key-not-for-api".into(),
@@ -546,7 +657,7 @@ mod tests {
             refresh_expires_at: now_secs() + 300,
         };
         assert!(
-            !status_from(Some(record)).connected,
+            !status_from(Some(record), Some("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).connected,
             "unknown client ID cannot elevate credentials"
         );
         assert!(!safe_login("fake/owner"));

@@ -739,6 +739,7 @@ async fn login_supabase(email: String, password: String) -> Result<SupabaseSessi
     if email_trim.is_empty() || password.trim().is_empty() {
         return Err("E-Mail und Passwort dürfen nicht leer sein.".to_string());
     }
+    github_app_auth::on_katosync_account_switch();
     let session = supabase_password_login(email_trim, &password)
         .await
         .map_err(error_to_string)?;
@@ -770,6 +771,7 @@ async fn signup_supabase(email: String, password: String) -> Result<SupabaseSess
     if email_trim.is_empty() || password.trim().len() < 6 {
         return Err("Bitte E-Mail und ein Passwort mit mindestens 6 Zeichen angeben.".to_string());
     }
+    github_app_auth::on_katosync_account_switch();
     let result = supabase_signup(email_trim, &password)
         .await
         .map_err(error_to_string)?;
@@ -808,6 +810,7 @@ fn supabase_session_status() -> Result<SupabaseSessionStatus, String> {
 
 #[tauri::command]
 fn logout_supabase() -> Result<SupabaseSessionStatus, String> {
+    github_app_auth::purge_local_credentials();
     if let Ok(entry) = supabase_session_keychain_entry() {
         let _ = entry.delete_credential();
     }
