@@ -304,6 +304,46 @@ pub(crate) async fn continuity_timeline(project_id: String) -> Result<Continuity
     .await
 }
 
+/// On-demand, read-only GitHub kickoff discovery; never logs in or creates
+/// any repo, Project v2 board or issue. Project ID resolves only through the
+/// local registry; user-supplied remote URLs are never accepted here.
+#[tauri::command]
+pub(crate) async fn continuity_github_kickoff_discover(
+    project_id: String,
+    feature_ids: Vec<String>,
+) -> Result<super::github_kickoff_discovery::GithubKickoffDiscovery, String> {
+    super::validate_project_id(&project_id)?;
+    let read_registered = |project_id: String| {
+        blocking(move || {
+            let registry = project_registry::project_registry_load()?
+                .ok_or_else(|| "Projekt-Registry fehlt.".to_string())?;
+            let root = registry
+                .get("projects")
+                .and_then(|v| v.as_array())
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .find(|p| p.get("id").and_then(|id| id.as_str()) == Some(&project_id))
+                })
+                .and_then(|p| p.get("rootPath").and_then(|v| v.as_str()))
+                .ok_or_else(|| "Projekt muss zuerst lokal registriert werden.".to_string())?;
+            Ok(root.to_string())
+        })
+    };
+    let root = read_registered(project_id.clone()).await?;
+    let report = super::github_kickoff_discovery::discover_registered_repo(
+        &project_id,
+        Path::new(&root),
+        feature_ids,
+    )
+    .await?;
+    let final_root = read_registered(project_id.clone()).await?;
+    if final_root != root {
+        return Err("Registrierter Projektordner änderte sich während der Abfrage.".into());
+    }
+    Ok(report)
+}
+
 /// Explicit operator-requested, authenticated, READ-ONLY GitHub CI provenance.
 /// GitHub-issued workflow/job success is NOT the same as accepted MVP feature work.
 #[tauri::command]

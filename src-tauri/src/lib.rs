@@ -315,6 +315,7 @@ pub fn run() {
             memory_fabric::continuity_bridge::continuity_feature_trace,
             memory_fabric::continuity_bridge::continuity_mvp_progress,
             memory_fabric::continuity_bridge::continuity_github_ci,
+            memory_fabric::continuity_bridge::continuity_github_kickoff_discover,
             memory_fabric::continuity_bridge::continuity_save_blueprint,
             load_config,
             save_config,

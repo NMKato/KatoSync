@@ -578,7 +578,7 @@ function ProjectCard({ project, vm }: { project: RegistryProject; vm: ViewModel 
           ))}
         </ul>
       ) : null}
-      {details ? <Capsule project={project} t={t} /> : null}
+      {details ? <><ProjectKickoffWizard key={project.id} project={project} /><Capsule project={project} t={t} /></> : null}
     </article>
   );
 }

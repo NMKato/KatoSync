@@ -9807,3 +9807,18 @@ button.agent-tile:hover {
 .project-kickoff-checklist>summary {cursor:pointer;font-weight:600;font-size:12px;}
 .project-kickoff-checklist ol {display:grid;gap:5px;margin:9px 0 2px;padding-left:20px;font-size:12px;}
 @media(max-width:650px){.project-kickoff-fields{grid-template-columns:1fr;}}
+
+/* Optional GitHub discovery: bounded details, no default dashboard footprint. */
+.kickoff-discovery {display:grid;gap:8px;border:1px solid var(--line);border-radius:var(--r-md);padding:10px;min-width:0;}
+.kickoff-discovery-head {display:flex;justify-content:space-between;align-items:center;gap:9px;flex-wrap:wrap;}
+.kickoff-discovery-head strong {display:flex;align-items:center;gap:6px;font-size:12px;}
+.kickoff-discovery>small {font-size:11px;color:var(--text-muted);}
+.kickoff-discovery-result {display:grid;gap:10px;min-width:0;}
+.kickoff-discovery-result>small {font-size:11px;color:var(--text-muted);}
+.kickoff-discovery-result>div {display:grid;gap:6px;min-width:0;}
+.kickoff-discovery-result>div>strong {font-size:12px;}
+.kickoff-discovery-result p {margin:2px 0;font-size:11px;}
+.kickoff-discovery-list {display:grid;gap:7px;margin:0;padding-left:20px;max-height:190px;overflow-y:auto;overscroll-behavior:contain;}
+.kickoff-discovery-list li {font-size:12px;overflow-wrap:anywhere;}
+.kickoff-discovery-list small {display:block;color:var(--text-muted);font-size:11px;}
+.kickoff-discovery-list a {color:var(--text);}

@@ -3,6 +3,7 @@
 import {useMemo,useState} from "react";
 import {ClipboardCopy,GitBranch,ShieldCheck} from "lucide-react";
 import {useT} from "../i18n";
+import {ProjectGithubDiscoveryPanel} from "./ProjectGithubDiscoveryPanel";
 import {normalizeRemote} from "../lib/projectExclusions.ts";
 import {buildProjectKickoff,type KickoffScope} from "../lib/projectKickoff.ts";
 import type {ContinuityBlueprintPreview} from "../lib/continuityBlueprint.ts";
@@ -82,6 +83,9 @@ export function ProjectKickoffWizard({project,blueprint}:{
             :proposal.board==="after_repository_selection"?t("kickoff.boardAfterRepo")
               :t("kickoff.oneBoard")}</small>
         </div>
+        {useGithub?<ProjectGithubDiscoveryPanel key={project?.id??"none"} enabled={useGithub}
+          projectId={project?.id??null} registeredRepo={initialRepo}
+          selectedRepo={repository} tickets={proposal.tickets}/>:null}
         <p className="agent-empty">{t("kickoff.columns")}: {proposal.statuses.join(" → ")}</p>
         <div className="project-kickoff-ticket-summary">
           <strong>{t("kickoff.proposedIssues")} ({proposal.tickets.length})</strong>
