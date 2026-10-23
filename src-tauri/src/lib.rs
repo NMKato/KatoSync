@@ -26,6 +26,7 @@ use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
 mod context_pack;
+mod github_app_auth;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
@@ -37,12 +38,18 @@ mod provider_warmup;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+#[cfg(not(feature = "github-login-qa"))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
+#[cfg(feature = "github-login-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";
 const SUPABASE_SESSION_ACCOUNT: &str = "supabase-refresh-token";
 const USER_AGENT: &str = "KatoSync/1.0.1";
+#[cfg(not(feature = "github-login-qa"))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
+#[cfg(feature = "github-login-qa")]
+const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.github.login.qa.sync";
 // KatoSync-eigenes Supabase-Projekt (oeffentlicher Anon-Key, bewusst client-seitig). Getrennt von KatoOS.
 const KATOSYNC_AUTH_URL: &str = "https://wspcuiylctlrvvpnwufk.supabase.co";
 const KATOSYNC_AUTH_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndzcGN1aXlsY3RscnZ2cG53dWZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzNzMwODMsImV4cCI6MjA5Nzk0OTA4M30.HJu_FxIFWoFDooVLE9TVOD10dgxJwLcpFZrUKK2_bv4";
@@ -306,6 +313,22 @@ pub fn run() {
             memory_fabric::memory_fabric_answer,
             memory_fabric::memory_fabric_promote,
             memory_fabric::memory_fabric_export,
+            memory_fabric::continuity_bridge::continuity_preflight,
+            memory_fabric::continuity_bridge::continuity_timeline,
+            memory_fabric::continuity_bridge::continuity_local_answer,
+            memory_fabric::continuity_bridge::continuity_chat_history,
+            memory_fabric::continuity_bridge::continuity_chat_send,
+            memory_fabric::continuity_bridge::continuity_search_blueprint,
+            memory_fabric::continuity_bridge::continuity_feature_trace,
+            memory_fabric::continuity_bridge::continuity_mvp_progress,
+            memory_fabric::continuity_bridge::continuity_github_ci,
+            memory_fabric::continuity_bridge::continuity_github_kickoff_discover,
+            github_app_auth::github_app_connection_status,
+            github_app_auth::github_app_device_begin,
+            github_app_auth::github_app_device_poll,
+            github_app_auth::github_app_device_cancel,
+            github_app_auth::github_app_disconnect,
+            memory_fabric::continuity_bridge::continuity_save_blueprint,
             load_config,
             save_config,
             save_api_key,
@@ -722,6 +745,7 @@ async fn login_supabase(email: String, password: String) -> Result<SupabaseSessi
     if email_trim.is_empty() || password.trim().is_empty() {
         return Err("E-Mail und Passwort dürfen nicht leer sein.".to_string());
     }
+    github_app_auth::on_katosync_account_switch();
     let session = supabase_password_login(email_trim, &password)
         .await
         .map_err(error_to_string)?;
@@ -753,6 +777,7 @@ async fn signup_supabase(email: String, password: String) -> Result<SupabaseSess
     if email_trim.is_empty() || password.trim().len() < 6 {
         return Err("Bitte E-Mail und ein Passwort mit mindestens 6 Zeichen angeben.".to_string());
     }
+    github_app_auth::on_katosync_account_switch();
     let result = supabase_signup(email_trim, &password)
         .await
         .map_err(error_to_string)?;
@@ -791,6 +816,7 @@ fn supabase_session_status() -> Result<SupabaseSessionStatus, String> {
 
 #[tauri::command]
 fn logout_supabase() -> Result<SupabaseSessionStatus, String> {
+    github_app_auth::purge_local_credentials();
     if let Ok(entry) = supabase_session_keychain_entry() {
         let _ = entry.delete_credential();
     }
@@ -1144,6 +1170,7 @@ async fn cloud_profile_unlock_and_push_inner(base_url: &str, password: &str) -> 
 // Tenant-Isolierung: alle konto-/tenant-bezogenen lokalen Daten loeschen. Geraete-Identitaet
 // (device_id/name), Server-URL und reine App-Praeferenzen (Scan-Regeln/Codex) bleiben erhalten.
 fn wipe_local_account_data() -> Result<()> {
+    github_app_auth::purge_local_credentials();
     // 1) Zugangsdaten aus der Keychain.
     if let Ok(entry) = keychain_entry() {
         let _ = entry.delete_credential();
@@ -3360,6 +3387,9 @@ async fn run_sync(
     app: tauri::AppHandle,
 ) -> Result<SyncReport, String> {
     let effective_dry_run = dry_run.unwrap_or(config.safety.dry_run_default);
+    if cfg!(feature = "github-login-qa") {
+        return Err("GitHub Login QA: Synchronisation deaktiviert.".into());
+    }
     if config
         .source_roots
         .iter()
@@ -3378,6 +3408,9 @@ async fn run_sync(
 
 #[tauri::command]
 fn install_launch_agent(config: AppConfig) -> Result<LaunchAgentStatus, String> {
+    if cfg!(feature = "github-login-qa") {
+        return Err("GitHub Login QA: LaunchAgents deaktiviert.".into());
+    }
     save_config_inner(&config).map_err(error_to_string)?;
     let plist_path = launch_agent_path().map_err(error_to_string)?;
     let app_binary = current_exe_for_launch_agent().map_err(error_to_string)?;
@@ -4848,7 +4881,11 @@ fn app_support_dir() -> Result<PathBuf> {
     let dir = dirs::data_dir()
         .or_else(dirs::home_dir)
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
-        .join("KatoSync");
+        .join(if cfg!(feature = "github-login-qa") {
+            "KatoSync GitHub Login QA"
+        } else {
+            "KatoSync"
+        });
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -4862,7 +4899,11 @@ fn logs_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
         .join("Library")
         .join("Logs")
-        .join("KatoSync");
+        .join(if cfg!(feature = "github-login-qa") {
+            "KatoSync GitHub Login QA"
+        } else {
+            "KatoSync"
+        });
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }

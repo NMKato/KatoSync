@@ -41,5 +41,6 @@ zeroize = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 
 [features]
+github-login-qa = [] # Isolated local test app; never include in production builds
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
