@@ -101,3 +101,33 @@ https://docs.github.com/en/apps/using-github-apps/installing-your-own-github-app
 https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/best-practices-for-creating-a-github-app
 
 Created by NMKato Solutions.
+
+## Operator follow-up: Device Flow now enabled and independently confirmed (2026-10-23)
+
+The App owner subsequently enabled **Enable Device Flow** and saved the
+GitHub App settings. An explicit provider GET-less POST preflight to
+`https://github.com/login/device/code` with the PUBLIC app client ID
+returned `verification_uri=https://github.com/login/device`, a device
+and user code, `expires_in=899` and `interval=5`. The prior
+`device_flow_disabled` error is resolved.
+
+The new ignored-by-default NATIVE Rust live test
+`manual_live_github_app_device_flow_preflight` was run explicitly:
+**PASS**. It used KatoSync's own reqwest client, hard-coded GitHub
+endpoint, compiled public App Client ID, JSON deserialization and
+device-session validation. It does not expose either code, exchange
+an access token, persist any GitHub credential or require owner consent.
+
+After adding this live regression, all **154 Rust lib tests passed;
+7 deliberately ignored** (including this manually successful smoke).
+Previous Node, TypeScript and Vite checks remain green; the code
+addition only touches native test logic.
+
+Remaining: a user-confirmed full OAuth login in a separately isolated,
+properly resourced native KatoSync QA app, with a valid KatoSync/Supabase
+session and keychain; verification of per-user account binding on two
+distinct identities; expired token handling, offline behavior and logout.
+A successful device CODE REQUEST does not constitute a completed login.
+
+Never substitute the GitHub CLI token or ChatGPT connector for this
+App-specific user authorization.

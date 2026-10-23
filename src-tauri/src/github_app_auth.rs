@@ -625,6 +625,33 @@ mod tests {
             assert!(!state.permissions_checked);
         }
     }
+    /// Network smoke for the REAL configured public GitHub App.
+    /// Explicitly ignored by default: requires internet; NEVER prints user
+    /// or device codes and NEVER exchanges a token or writes to OS keychain.
+    #[tokio::test]
+    #[ignore = "Manual live GitHub App device-code request; no credentials or user approval"]
+    async fn manual_live_github_app_device_flow_preflight() {
+        let id = client_id().expect("public GitHub App client ID configured");
+        let response = network()
+            .unwrap()
+            .post("https://github.com/login/device/code")
+            .header("Accept", "application/json")
+            .form(&[("client_id", id), ("scope", "offline_access")])
+            .send()
+            .await
+            .expect("GitHub device endpoint reachable");
+        assert!(
+            response.status().is_success(),
+            "GitHub App Device Flow must be enabled"
+        );
+        let raw: DeviceResponse = response.json().await.expect("valid JSON");
+        let (start, _secret_session) = start_session(raw, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+            .expect("provider response must match native parser");
+        assert_eq!(start.verification_uri, "https://github.com/login/device");
+        assert!((60..=1800).contains(&start.expires_in));
+        assert!(start.interval >= 5);
+    }
+
     #[test]
     fn github_credentials_cannot_cross_katosync_tenants() {
         let a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
