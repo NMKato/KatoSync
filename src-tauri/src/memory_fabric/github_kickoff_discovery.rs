@@ -8,8 +8,10 @@ use tokio::{
     time::{timeout, Duration},
 };
 
-const MAX_ISSUES: usize = 50;
-const MAX_PROJECTS: usize = 30;
+const ISSUES_PER_PAGE: usize = 100;
+const MAX_ISSUE_PAGES: usize = 4;
+const MAX_ISSUES: usize = ISSUES_PER_PAGE * MAX_ISSUE_PAGES;
+const MAX_PROJECTS: usize = 100;
 const MAX_FEATURES: usize = 12;
 const MAX_RESPONSE: usize = 3 * 1024 * 1024;
 fn safe_feature(s: &str) -> bool {
@@ -125,6 +127,7 @@ pub(crate) struct GithubKickoffDiscovery {
     pub projects_total: Option<u64>,
     pub boards: Vec<BoardCandidate>,
     pub issues_scan_complete: bool,
+    pub issues_scanned: usize,
     pub issue_candidates: Vec<IssueCandidate>,
     pub checked_feature_ids: Vec<String>,
     pub remote_writes_performed: bool,
@@ -228,7 +231,7 @@ fn parse_issues(
         .ok_or_else(|| "GitHub-Issue-Liste fehlt.".to_string())?;
     let mut found = BTreeSet::new();
     let mut candidates = Vec::new();
-    for issue in list.iter().take(MAX_ISSUES) {
+    for issue in list.iter().take(ISSUES_PER_PAGE) {
         if issue.get("pull_request").is_some() {
             continue;
         }
@@ -264,7 +267,7 @@ fn parse_issues(
             }
         }
     }
-    Ok((candidates, list.len() < MAX_ISSUES))
+    Ok((candidates, list.len() < ISSUES_PER_PAGE))
 }
 pub(crate) async fn discover_registered_repo(
     project_id: &str,
@@ -300,15 +303,39 @@ pub(crate) async fn discover_registered_repo(
     let endpoint = format!("repos/{repo}");
     let answer = run_readonly("gh", &["api", "-X", "GET", &endpoint], 15, MAX_RESPONSE).await?;
     let facts = repo_facts(&answer, &repo)?;
-    let issues_endpoint = format!("repos/{repo}/issues?state=all&per_page={MAX_ISSUES}");
-    let data = run_readonly(
-        "gh",
-        &["api", "-X", "GET", &issues_endpoint],
-        15,
-        MAX_RESPONSE,
-    )
-    .await?;
-    let (issues, issues_complete) = parse_issues(&data, &repo, &feature_ids)?;
+    // Explicit bounded pagination. GitHub's issue endpoint includes pull
+    // requests; exclude them and don't claim absence until the final page.
+    // A full page at the last configured limit is ALWAYS incomplete.
+    let mut issues = Vec::new();
+    let mut seen_candidates = BTreeSet::new();
+    let mut issues_scanned = 0usize;
+    let mut issues_complete = false;
+    for page in 1..=MAX_ISSUE_PAGES {
+        let endpoint =
+            format!("repos/{repo}/issues?state=all&per_page={ISSUES_PER_PAGE}&page={page}");
+        let body = run_readonly("gh", &["api", "-X", "GET", &endpoint], 15, MAX_RESPONSE).await?;
+        let values = json(&body)?;
+        let page_items = values
+            .as_array()
+            .ok_or_else(|| "GitHub-Issue-Seite ist ungültig.".to_string())?;
+        if page_items.len() > ISSUES_PER_PAGE {
+            return Err("GitHub-Issue-Seite überschreitet das Limit.".into());
+        }
+        issues_scanned += page_items.len();
+        if issues_scanned > MAX_ISSUES {
+            return Err("Die GitHub-Issue-Prüfung überschritt ihre Obergrenze.".into());
+        }
+        let (found, _) = parse_issues(&body, &repo, &feature_ids)?;
+        for candidate in found {
+            if seen_candidates.insert((candidate.feature_id.clone(), candidate.number)) {
+                issues.push(candidate);
+            }
+        }
+        if page_items.len() < ISSUES_PER_PAGE {
+            issues_complete = true;
+            break;
+        }
+    }
     let owner = repo.split('/').next().unwrap_or("");
     let max = MAX_PROJECTS.to_string();
     let board_response = run_readonly(
@@ -345,6 +372,7 @@ pub(crate) async fn discover_registered_repo(
         projects_total,
         boards,
         issues_scan_complete: issues_complete,
+        issues_scanned,
         issue_candidates: issues,
         checked_feature_ids: feature_ids,
         remote_writes_performed: false,
@@ -401,6 +429,35 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].number, 12);
     }
+    #[test]
+    fn exact_100_issue_page_is_not_full_repo_inventory() {
+        let all: Vec<serde_json::Value> = (1..=100)
+            .map(|n| {
+                serde_json::json!({
+                    "number":n,"title":format!("Issue {n}"),"state":"open",
+                    "html_url":format!("https://github.com/NMKato/KatoSync/issues/{n}"),
+                    "body":"Feature ID: TRACK-1"
+                })
+            })
+            .collect();
+        let (found, complete) = parse_issues(
+            &serde_json::to_string(&all).unwrap(),
+            "NMKato/KatoSync",
+            &["TRACK-1".into()],
+        )
+        .unwrap();
+        assert_eq!(found.len(), 100);
+        assert!(!complete, "a full page must request the next page");
+        assert_eq!(MAX_ISSUES, 400);
+        let (_, short_complete) = parse_issues(
+            &serde_json::to_string(&all[..9]).unwrap(),
+            "NMKato/KatoSync",
+            &["TRACK-1".into()],
+        )
+        .unwrap();
+        assert!(short_complete);
+    }
+
     #[tokio::test]
     #[ignore = "Manual live GitHub CLI check: existing login and internet required; read-only"]
     async fn manual_registered_github_inventory_read_only_smoke() {

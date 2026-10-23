@@ -5,6 +5,7 @@ import {invoke} from "@tauri-apps/api/core";
 import {RefreshCcw,ShieldCheck} from "lucide-react";
 import {useT} from "../i18n";
 import type {KickoffTicket} from "../lib/projectKickoff.ts";
+import {buildGithubKickoffReview} from "../lib/githubKickoffReview.ts";
 
 interface IssueCandidate {featureId:string;number:number;title:string;url:string;state:string}
 interface BoardCandidate {
@@ -16,7 +17,7 @@ interface Discovery {
   repository:{fullName:string;visibility:"public"|"private";archived:boolean;hasIssues:boolean};
   observedGitHead:string;authSource:"existing_local_gh_cli";
   projectsStatus:"read"|"unavailable";projectsScanComplete:boolean;projectsTotal:number|null;
-  boards:BoardCandidate[];issuesScanComplete:boolean;issueCandidates:IssueCandidate[];
+  boards:BoardCandidate[];issuesScanComplete:boolean;issuesScanned:number;issueCandidates:IssueCandidate[];
   checkedFeatureIds:string[];remoteWritesPerformed:false;automaticCreationAllowed:false;
 }
 export function ProjectGithubDiscoveryPanel({enabled,projectId,registeredRepo,selectedRepo,tickets}:{
@@ -28,10 +29,11 @@ export function ProjectGithubDiscoveryPanel({enabled,projectId,registeredRepo,se
   const [busy,setBusy]=useState(false);
   const [failed,setFailed]=useState(false);
   const [moreBoards,setMoreBoards]=useState(false);
+  const [copied,setCopied]=useState(false);
   const revision=useRef(0);
   const fingerprint=enabled+"|"+projectId+"|"+selectedRepo+"|"+tickets.map(x=>x.featureId).join(",");
   useEffect(()=>{
-    revision.current++;setData(null);setBusy(false);setFailed(false);setMoreBoards(false);
+    revision.current++;setData(null);setBusy(false);setFailed(false);setMoreBoards(false);setCopied(false);
     return ()=>{revision.current++;};
   },[fingerprint]);
   const repoMatches=Boolean(registeredRepo) &&
@@ -40,7 +42,7 @@ export function ProjectGithubDiscoveryPanel({enabled,projectId,registeredRepo,se
   async function discover(){
     if(!allowed||!projectId)return;
     const generation=++revision.current;
-    setBusy(true);setFailed(false);setData(null);
+    setBusy(true);setFailed(false);setData(null);setCopied(false);
     try{
       const result=await invoke<Discovery>("continuity_github_kickoff_discover",{
         projectId,featureIds:tickets.slice(0,12).map(x=>x.featureId)
@@ -49,7 +51,8 @@ export function ProjectGithubDiscoveryPanel({enabled,projectId,registeredRepo,se
       if(result.projectId!==projectId||result.remoteWritesPerformed!==false ||
          result.automaticCreationAllowed!==false||
          result.authSource!=="existing_local_gh_cli"||
-         result.repository.fullName.toLowerCase()!==registeredRepo.toLowerCase()){
+         result.repository.fullName.toLowerCase()!==registeredRepo.toLowerCase()||
+         result.checkedFeatureIds.join("|")!==tickets.slice(0,12).map(x=>x.featureId).join("|")){
         setFailed(true);return;
       }
       setData(result);
@@ -58,6 +61,13 @@ export function ProjectGithubDiscoveryPanel({enabled,projectId,registeredRepo,se
   }
   const suggested=data?.boards.filter(x=>x.possibleRepoMatch)||[];
   const unrelated=data?.boards.filter(x=>!x.possibleRepoMatch)||[];
+  const review=data?buildGithubKickoffReview(tickets,data):null;
+  async function copyReview(){
+    if(!review)return;
+    setCopied(false);
+    try{await navigator.clipboard.writeText(JSON.stringify(review,null,2));setCopied(true);}
+    catch{setCopied(false);}
+  }
   return <div className="kickoff-discovery">
     <div className="kickoff-discovery-head">
       <strong><ShieldCheck size={14}/>{t("kickoff.discoverTitle")}</strong>
@@ -108,6 +118,27 @@ export function ProjectGithubDiscoveryPanel({enabled,projectId,registeredRepo,se
           </li>)}
         </ul>:<small>{t("kickoff.discoverNoIssues")}</small>}
       </div>
+      {review?<details className="kickoff-review-details">
+        <summary>{t("kickoff.reviewPlan")}</summary>
+        <p>{t("kickoff.reviewBoard")}: {review.proposedBoardAction==="review_existing_board"
+          ? t("kickoff.reviewReuseBoard") : review.proposedBoardAction==="inventory_incomplete"
+            ? t("kickoff.reviewIncomplete"):t("kickoff.reviewNewBoard")}</p>
+        <small>{t("kickoff.reviewIssuesScanned",{count:review.issuesScanned})}</small>
+        <ul className="kickoff-discovery-list">
+          {review.issueReview.map(row=><li key={row.featureId}>
+            <strong>{row.featureId} · {row.title}</strong>
+            <small>{row.decision==="reuse_candidate"?t("kickoff.reviewReuseIssue"):
+              row.decision==="ambiguous_candidates"?t("kickoff.reviewAmbiguous"):
+                row.decision==="incomplete_scan"?t("kickoff.reviewIncomplete"):
+                  t("kickoff.reviewProposeIssue")}</small>
+          </li>)}
+        </ul>
+        <p className="continuity-notice">{t("kickoff.reviewApproval")}</p>
+        <button type="button" className="secondary compact-button" onClick={()=>void copyReview()}>
+          {t("kickoff.reviewCopy")}
+        </button>
+        {copied?<small role="status">{t("kickoff.copied")}</small>:null}
+      </details>:null}
       <p className="continuity-notice">{t("kickoff.discoverGuard")}</p>
     </div>:null}
   </div>;
