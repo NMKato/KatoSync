@@ -35,9 +35,21 @@ static PENDING: OnceLock<Mutex<Option<Pending>>> = OnceLock::new();
 fn pending() -> &'static Mutex<Option<Pending>> {
     PENDING.get_or_init(|| Mutex::new(None))
 }
+fn valid_client_id(s: &str) -> bool {
+    // GitHub App client IDs use a dotted prefix, for example Iv1.abc123.
+    // Unlike the numeric App ID, this is a public build-time identifier.
+    // Never accept URL components, whitespace or a runtime-supplied ID.
+    (10..=120).contains(&s.len())
+        && s.starts_with("Iv")
+        && s.split_once('.').is_some_and(|(prefix, suffix)| {
+            prefix.len() >= 3
+                && prefix[2..].bytes().all(|b| b.is_ascii_digit())
+                && suffix.len() >= 6
+                && suffix.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
+}
 fn client_id() -> Option<&'static str> {
-    CLIENT_ID
-        .filter(|s| s.len() >= 10 && s.len() <= 120 && s.bytes().all(|b| b.is_ascii_alphanumeric()))
+    CLIENT_ID.filter(|s| valid_client_id(s))
 }
 fn entry() -> Result<Entry, String> {
     Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
@@ -475,6 +487,28 @@ mod tests {
             error: None,
         }
     }
+    #[test]
+    fn accepts_real_github_app_client_id_shape_not_numeric_app_id() {
+        assert!(valid_client_id("Iv1.ab1112223334445c"));
+        assert!(valid_client_id("Iv23.0123456789abcdef"));
+        for bad in [
+            "12345678",
+            "Iv1",
+            "Iv1.",
+            "Iv1.abc",
+            "Iv1.bad/secret",
+            "Iv1.bad secret",
+            "https://github.com",
+            "OAuthClientID",
+            "Iv1.abc123.extra",
+        ] {
+            assert!(
+                !valid_client_id(bad),
+                "should reject unexpected client id: {bad}"
+            );
+        }
+    }
+
     #[test]
     fn rejects_forged_verification_site_or_bad_codes() {
         let (public, _session) = start_session(device()).unwrap();
