@@ -12,6 +12,7 @@ import type { RegistryProject } from "../types";
 import { ContinuityTimelinePanel } from "./ContinuityTimelinePanel";
 import { ContinuityLocalChatPanel } from "./ContinuityLocalChatPanel";
 import { ContinuityBlueprintSearchPanel } from "./ContinuityBlueprintSearchPanel";
+import { ProjectKickoffWizard } from "./ProjectKickoffWizard";
 
 const FILE_LIMIT = 32_768;
 const JOURNAL_LIMIT = 8192;
@@ -247,6 +248,8 @@ export function ContinuityBlueprintPanel({ projects }: { projects: RegistryProje
           ) : <p className="agent-empty">{t("continuity.noDecisions")}</p>}
           <h4>{t("continuity.nextSteps")}</h4>
           <ul>{validPreview.nextSteps.map((step, i) => <li key={i}>{step}</li>)}</ul>
+          <ProjectKickoffWizard key={validPreview.blueprintId+":"+validPreview.projectId+":"+validPreview.revision}
+            project={project} blueprint={validPreview} />
           <p className="continuity-notice">
             <ShieldCheck size={15} />
             <span>{t("continuity.readOnly")}</span>

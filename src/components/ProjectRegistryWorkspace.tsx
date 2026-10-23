@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
 import { ContinuityBlueprintPanel } from "./ContinuityBlueprintPanel";
+import { ProjectKickoffWizard } from "./ProjectKickoffWizard";
 import { ProjectMvpIndicator } from "./ProjectMvpIndicator";
 import { AUTO_MODES, FOCUS_PRIORITIES, FOCUS_STATUSES } from "../lib/projectFocus";
 import { normalizeRemote } from "../lib/projectExclusions";
@@ -172,6 +173,7 @@ export function ProjectRegistryWorkspace({ vm }: { vm: ViewModel }) {
         <p className="agent-empty projects-legacy-done">{t("projects.legacy.done")}</p>
       ) : null}
 
+      <section className="glass agent-card"><ProjectKickoffWizard /></section>
       <ContinuityBlueprintPanel projects={projects.registry.projects} />
 
       <section className="glass agent-card projects-portfolio" aria-label={t("projects.focus.title")}>
