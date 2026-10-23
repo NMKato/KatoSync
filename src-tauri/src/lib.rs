@@ -805,12 +805,28 @@ async fn signup_supabase(email: String, password: String) -> Result<SupabaseSess
     }
 }
 
+// A persisted email is a display marker, not an authenticated session.
+// This is only the OFFLINE/local resume preflight; GitHub credentials and
+// account binding still require a fresh issuer-pinned /auth/v1/user proof.
+fn locally_resumable_session(email: Option<&str>, refresh_token: Option<&str>) -> bool {
+    email.is_some_and(|value| !value.trim().is_empty())
+        && refresh_token.is_some_and(|value| !value.trim().is_empty())
+}
+
 #[tauri::command]
 fn supabase_session_status() -> Result<SupabaseSessionStatus, String> {
     let email = read_supabase_session_email();
+    // Keep an existing offline-capable cached login usable, but never accept
+    // a stale email marker when the corresponding keychain token is absent.
+    // Never log or return the credential to the frontend.
+    let mut refresh = load_supabase_refresh_token().ok();
+    let logged_in = locally_resumable_session(email.as_deref(), refresh.as_deref());
+    if let Some(ref mut token) = refresh {
+        zeroize::Zeroize::zeroize(token);
+    }
     Ok(SupabaseSessionStatus {
-        logged_in: email.is_some(),
-        email,
+        logged_in,
+        email: if logged_in { email } else { None },
     })
 }
 
@@ -854,7 +870,7 @@ async fn mint_connector_token(base_url: String) -> Result<serde_json::Value, Str
 }
 
 // ============================================================================
-// Cloud-Profil (Zero-Knowledge): Zugangsdaten folgen dem KatoOS-Konto.
+// Cloud-Profil (Zero-Knowledge): derzeit an die separate KatoSync-Auth-Sitzung gebunden.
 //
 // Beim Login wird aus Passwort + kdf_salt via Argon2id ein 32-Byte-Schluessel abgeleitet
 // (nur im RAM, siehe CLOUD_PROFILE_KEY). Damit wird EIN Blob {apiKey, connectorToken} per
@@ -1106,7 +1122,7 @@ fn profile_salt_usable(salt_b64: &str) -> bool {
     b64_decode(salt_b64).map(|s| s.len() >= 8).unwrap_or(false)
 }
 
-// Passwort gegen das KatoOS-Konto verifizieren (GoTrue-Re-Login). Genutzt, wenn KEIN entschluesselbares
+// Passwort im bisherigen KatoSync-Auth-Projekt verifizieren (GoTrue-Re-Login). Genutzt, wenn KEIN entschluesselbares
 // Profil zum Gegenpruefen existiert -> verhindert, dass ein falsch getipptes Passwort ein Cloud-Profil
 // unter falschem Schluessel anlegt (sonst waere der spaetere Login mit dem RICHTIGEN Passwort dauerhaft
 // "unreadable" und die Zugangsdaten verloren).
@@ -5130,7 +5146,7 @@ fn save_supabase_refresh_token(token: &str) -> Result<()> {
 fn load_supabase_refresh_token() -> Result<String> {
     supabase_session_keychain_entry()?
         .get_password()
-        .context("Keine aktive KatoOS-Sitzung gefunden")
+        .context("Keine lokal gespeicherte KatoSync-Sitzung gefunden")
 }
 
 fn supabase_session_email_path() -> Result<PathBuf> {
@@ -5426,6 +5442,32 @@ fn xml_escape(value: &str) -> String {
 
 fn error_to_string(error: impl std::fmt::Display) -> String {
     sanitize_log(&error.to_string())
+}
+
+#[cfg(test)]
+mod local_katosync_session_tests {
+    use super::*;
+
+    #[test]
+    fn email_marker_is_not_authentication_without_local_keychain_credential() {
+        assert!(!locally_resumable_session(
+            Some("stale@example.invalid"),
+            None
+        ));
+        assert!(!locally_resumable_session(
+            Some("stale@example.invalid"),
+            Some("")
+        ));
+        assert!(!locally_resumable_session(None, Some("opaque-refresh")));
+        assert!(!locally_resumable_session(
+            Some("  "),
+            Some("opaque-refresh")
+        ));
+        assert!(locally_resumable_session(
+            Some("user@example.invalid"),
+            Some("opaque-refresh")
+        ));
+    }
 }
 
 #[cfg(test)]

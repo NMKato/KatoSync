@@ -180,7 +180,7 @@ export async function logoutSupabase(): Promise<SupabaseSessionStatus> {
   return { loggedIn: false, email: null };
 }
 
-// ── Cloud-Profil (Zero-Knowledge): Zugangsdaten folgen dem KatoOS-Konto ──────────────
+// ── Cloud-Profil (Zero-Knowledge): derzeit separate KatoSync-Auth-Identitaet ────────────
 
 export interface CloudProfileSyncResult {
   status: "restored" | "created" | "empty" | "unreadable";

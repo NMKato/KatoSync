@@ -26,3 +26,29 @@ test("OAuth uses GitHub consent, does not ask for a second KatoSync password",()
  assert.match(provider,/https:\/\/github\.com\/login\/device/);
  assert.doesNotMatch(provider,/login_supabase|signup_supabase|supabase_password_login|type="password"/);
 });
+
+
+test("KatoSync login copy must not claim cross-project KATOOS SSO before federation",()=>{
+  const fs = requireLocaleFiles();
+  const texts = Object.values(fs);
+  for(const locale of texts) {
+    assert.doesNotMatch(locale,/"login\.hint":\s*"[^"]*SSO (mit|with|con|с)/i);
+    assert.match(locale,/"login\.subtitle":\s*"[^"]*KatoSync/);
+    assert.match(locale,/"github\.integration\.existingSession":\s*"[^"]*KatoSync/);
+  }
+});
+function requireLocaleFiles(){
+  return Object.fromEntries(["de","en","es","ru"].map(lang=>[
+    lang,readFileSync(new URL("../src/i18n/locales/"+lang+".ts",import.meta.url),"utf8")
+  ]));
+}
+test("Local boot status requires a credential, not an old email file alone",()=>{
+  const source=readFileSync(new URL("../src-tauri/src/lib.rs",import.meta.url),"utf8");
+  const start=source.indexOf("fn supabase_session_status()");
+  const end=source.indexOf("#[tauri::command]",start+1);
+  const functionText=source.slice(start,end);
+  assert.match(functionText,/load_supabase_refresh_token\(\)/);
+  assert.match(functionText,/locally_resumable_session\(email\.as_deref\(\), refresh\.as_deref\(\)\)/);
+  assert.doesNotMatch(functionText,/logged_in:\s*email\.is_some\(\)/);
+  assert.match(source,/fn locally_resumable_session\(/);
+});
