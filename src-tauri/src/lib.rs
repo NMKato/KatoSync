@@ -38,12 +38,18 @@ mod provider_warmup;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+#[cfg(not(feature = "github-login-qa"))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
+#[cfg(feature = "github-login-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";
 const SUPABASE_SESSION_ACCOUNT: &str = "supabase-refresh-token";
 const USER_AGENT: &str = "KatoSync/1.0.1";
+#[cfg(not(feature = "github-login-qa"))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
+#[cfg(feature = "github-login-qa")]
+const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.github.login.qa.sync";
 // KatoSync-eigenes Supabase-Projekt (oeffentlicher Anon-Key, bewusst client-seitig). Getrennt von KatoOS.
 const KATOSYNC_AUTH_URL: &str = "https://wspcuiylctlrvvpnwufk.supabase.co";
 const KATOSYNC_AUTH_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndzcGN1aXlsY3RscnZ2cG53dWZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzNzMwODMsImV4cCI6MjA5Nzk0OTA4M30.HJu_FxIFWoFDooVLE9TVOD10dgxJwLcpFZrUKK2_bv4";
@@ -3381,6 +3387,9 @@ async fn run_sync(
     app: tauri::AppHandle,
 ) -> Result<SyncReport, String> {
     let effective_dry_run = dry_run.unwrap_or(config.safety.dry_run_default);
+    if cfg!(feature = "github-login-qa") {
+        return Err("GitHub Login QA: Synchronisation deaktiviert.".into());
+    }
     if config
         .source_roots
         .iter()
@@ -3399,6 +3408,9 @@ async fn run_sync(
 
 #[tauri::command]
 fn install_launch_agent(config: AppConfig) -> Result<LaunchAgentStatus, String> {
+    if cfg!(feature = "github-login-qa") {
+        return Err("GitHub Login QA: LaunchAgents deaktiviert.".into());
+    }
     save_config_inner(&config).map_err(error_to_string)?;
     let plist_path = launch_agent_path().map_err(error_to_string)?;
     let app_binary = current_exe_for_launch_agent().map_err(error_to_string)?;
@@ -4869,7 +4881,11 @@ fn app_support_dir() -> Result<PathBuf> {
     let dir = dirs::data_dir()
         .or_else(dirs::home_dir)
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
-        .join("KatoSync");
+        .join(if cfg!(feature = "github-login-qa") {
+            "KatoSync GitHub Login QA"
+        } else {
+            "KatoSync"
+        });
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -4883,7 +4899,11 @@ fn logs_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
         .join("Library")
         .join("Logs")
-        .join("KatoSync");
+        .join(if cfg!(feature = "github-login-qa") {
+            "KatoSync GitHub Login QA"
+        } else {
+            "KatoSync"
+        });
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
