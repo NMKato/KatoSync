@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { GithubAppConnectionPanel } from "./GithubAppConnectionPanel";
+import { ProviderBrandMark } from "./ProviderBrandMark";
 import { copyText } from "../lib/clipboard";
 import {
   buildSanitizedProviderDiagnostics,
@@ -138,13 +139,12 @@ export function ProviderManager({ vm }: { vm: ViewModel }) {
         <ol className="provider-route" aria-label={t("providers.routeAria")}>
           {priority.map((provider, index) => {
             const status = vm.providerStatuses.find((entry) => entry.provider === provider);
-            const Icon = providerIcons[provider];
             const tone = displayTone(providerDisplayState(status, provider));
             return (
               <li className={`provider-route-item ${owner === provider ? "active" : ""}`} key={provider}>
                 <span className="provider-route-rank">{index + 1}</span>
                 <span className={`provider-dot ${tone}`} aria-hidden="true" />
-                <Icon size={16} />
+                <ProviderBrandMark provider={provider} size="route" />
                 <span className="provider-route-name">{status?.label ?? fallbackLabels[provider]}</span>
                 {owner === provider ? <strong>{t("providers.currentOwner")}</strong> : null}
               </li>
@@ -241,7 +241,6 @@ function ProviderCard({
   const [browserState, setBrowserState] = useState<"idle" | "opening" | "opened" | "error">("idle");
   const [linkCopied, setLinkCopied] = useState(false);
   const lastAutoOpenedUrl = useRef<string | null>(null);
-  const Icon = providerIcons[provider];
   const action = vm.providerBusy[provider];
   const connecting = action === "connect" && provider !== "local";
   const display = providerDisplayState(status, provider, connecting);
@@ -276,7 +275,7 @@ function ProviderCard({
   return (
     <article className={`provider-card provider-card-${provider} ${tone}`} aria-busy={Boolean(action)}>
       <header>
-        <div className="provider-mark"><Icon size={24} /></div>
+        <ProviderBrandMark provider={provider} size="card" />
         <div className="provider-card-title">
           <h3>{status?.label ?? fallbackLabels[provider]}</h3>
           <span className={`provider-state ${tone}`} role="status">
