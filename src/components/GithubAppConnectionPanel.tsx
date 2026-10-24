@@ -5,6 +5,7 @@ import {invoke} from "@tauri-apps/api/core";
 import {openUrl} from "@tauri-apps/plugin-opener";
 import {CheckCircle2,Copy,ExternalLink,Github,Info,ShieldCheck,Unplug} from "lucide-react";
 import {useT} from "../i18n";
+import {ProviderBrandMark} from "./ProviderBrandMark";
 
 type Status = {
  configured:boolean;connected:boolean;login:string|null;expiresAt:number|null;
@@ -109,7 +110,7 @@ export function GithubAppConnectionPanel({variant="nested"}:{variant?:"nested"|"
  if(variant==="provider"){
   return <article className="github-provider-card" aria-label={t("github.integration.section")} aria-busy={busy}>
    <header className="github-provider-card-head">
-    <span className="github-provider-card-logo" aria-hidden="true"><Github size={21}/></span>
+    <ProviderBrandMark provider="github" size="card" />
     <div className="github-provider-card-title">
      <h3>GitHub App</h3>
      <p>{t("github.integration.shortDescription")}</p>
