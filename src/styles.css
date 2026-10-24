@@ -9849,6 +9849,11 @@ button.agent-tile:hover {
   align-self:start;
   box-sizing:border-box;
 }
+/* An inventory is a workspace, not a narrow provider button panel.
+   Expand ONLY when the operator has loaded the GitHub inventory. */
+.provider-cards > .github-provider-card:has(.github-app-inventory-result) {
+  grid-column:1 / -1;
+}
 .github-provider-card {
   display:grid;
   gap:12px;
@@ -10012,6 +10017,16 @@ button.agent-tile:hover {
   display:grid;
   gap:8px;
   min-width:0;
+  max-width:100%;
+}
+.github-app-inventory,
+.github-app-inventory-result,
+.github-app-inventory-list,
+.github-app-issues,
+.github-app-handoff {
+  box-sizing:border-box;
+  min-width:0;
+  max-width:100%;
 }
 .github-app-inventory-list,
 .github-app-issue-list {
@@ -10085,24 +10100,40 @@ button.agent-tile:hover {
 }
 .github-app-repo-search:focus-within {box-shadow:var(--focus-ring);}
 .github-app-inventory-list {
-  grid-template-columns:repeat(2,minmax(0,1fr));
+  width:100%;
+  box-sizing:border-box;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));
   align-items:stretch;
   gap:9px;
-  max-height:370px;
+  max-height:430px;
+  overflow-x:hidden;
+  overflow-y:auto;
 }
 .github-app-inventory-list .github-app-repo-card {
-  display:flex;
-  flex-direction:column;
-  align-items:stretch;
-  justify-content:space-between;
+  /* The older shared li rule uses flex-wrap:wrap, which pushed issue buttons
+     into a second column and over adjacent tiles at narrow widths. */
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  grid-template-rows:auto auto auto;
+  align-items:start;
+  align-content:space-between;
   gap:10px;
   min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
   min-height:119px;
   padding:12px;
   border-radius:var(--r-md);
   background:var(--surface-raised);
+  overflow:hidden;
 }
-.github-app-repo-heading {display:flex;align-items:flex-start;gap:8px;min-width:0;}
+.github-app-repo-heading {
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  min-width:0;
+  max-width:100%;
+}
 .github-app-repo-heading > svg {color:var(--brand);flex:none;margin-top:2px;}
 .github-app-repo-heading > a {
   color:var(--text);
@@ -10126,6 +10157,11 @@ button.agent-tile:hover {
 .github-app-inventory-list .github-app-repo-card > button {
   justify-self:start;
   align-self:flex-start;
+  box-sizing:border-box;
+  max-width:100%;
+  min-width:0;
+  white-space:normal;
+  overflow-wrap:anywhere;
 }
 .github-app-issues-heading {
   display:flex;
