@@ -178,6 +178,7 @@ export type StepId =
   // Vision: visueller Systemgraph (nicht die spaetere multimodale Sight-Runtime)
   | "agentVision"
   | "agentJobs"
+  | "agentMasterChat"
   | "agentProviders"
   | "agentMonitor"
   | "agentProjects"

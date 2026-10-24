@@ -27,6 +27,7 @@ import {
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { GithubAppConnectionPanel } from "./GithubAppConnectionPanel";
 import { ProviderBrandMark } from "./ProviderBrandMark";
+import type {GithubIssueHandoff} from "../lib/githubChatHandoff";
 import { copyText } from "../lib/clipboard";
 import {
   buildSanitizedProviderDiagnostics,
@@ -88,7 +89,7 @@ function formatTime(value: string | null | undefined, withDate = true): string {
   return withDate ? date.toLocaleString() : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function ProviderManager({ vm }: { vm: ViewModel }) {
+export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void }) {
   const { t } = useT();
   const config = vm.config;
   if (!config) return null;
@@ -157,7 +158,7 @@ export function ProviderManager({ vm }: { vm: ViewModel }) {
         {cardProviders.map((provider) => (
           <Fragment key={provider}>
             {provider === "local" && vm.sessionStatus.loggedIn ? (
-              <GithubAppConnectionPanel key={vm.sessionStatus.email ?? "signed-in-account"} variant="provider" />
+              <GithubAppConnectionPanel key={vm.sessionStatus.email ?? "signed-in-account"} variant="provider" onChatHandoff={onChatHandoff} />
             ) : null}
             <ProviderCard
               provider={provider}
