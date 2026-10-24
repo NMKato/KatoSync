@@ -30,9 +30,17 @@ function citationsFor(turn: ChatTurn): Citation[] {
   }
 }
 
-export function ContinuityLocalChatPanel({ projectId, projectName }: { projectId: string; projectName: string }) {
+export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft = "", draftRevision = 0 }: { projectId: string; projectName: string; initialDraft?: string; draftRevision?: number }) {
   const { t } = useT();
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(initialDraft.slice(0, MAX_QUESTION));
+  const lastDraftRevision = useRef(draftRevision);
+  // Issue handoff is only a composer prefill. Clearing the handoff clears its text
+  // instead of silently leaving stale GitHub instructions in a later chat turn.
+  useEffect(() => {
+    if (lastDraftRevision.current === draftRevision) return;
+    lastDraftRevision.current = draftRevision;
+    setQuestion(draftRevision > 0 ? initialDraft.slice(0, MAX_QUESTION) : "");
+  }, [draftRevision, initialDraft]);
   const [session, setSession] = useState<{ projectId: string; turns: ChatTurn[] }>({ projectId: "", turns: [] });
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);

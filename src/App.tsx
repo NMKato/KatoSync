@@ -19,6 +19,7 @@ import {
   FileText,
   History,
   FolderOpen,
+  MessageSquareText,
   Gauge,
   ChevronDown,
   ChevronUp,
@@ -66,6 +67,8 @@ import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
 import { AgentLiveMonitor } from "./components/AgentJobViews";
 import { ProviderManager } from "./components/ProviderManager";
 import { ProjectRegistryWorkspace } from "./components/ProjectRegistryWorkspace";
+import { MasterChatWorkspace } from "./components/MasterChatWorkspace";
+import type { GithubIssueHandoff } from "./lib/githubChatHandoff";
 import { ModeGateway, ModeSwitch } from "./components/ModeGateway";
 import { VisionWorkspace } from "./components/VisionWorkspace";
 import {
@@ -127,6 +130,7 @@ const agentSyncSteps: Array<{ id: StepId; icon: typeof Activity }> = [
   { id: "agentDashboard", icon: Gauge },
   { id: "agentVision", icon: Orbit },
   { id: "agentJobs", icon: Workflow },
+  { id: "agentMasterChat", icon: MessageSquareText },
   { id: "agentProviders", icon: Bot },
   { id: "agentMonitor", icon: Activity },
   { id: "agentProjects", icon: FolderOpen },
@@ -156,6 +160,7 @@ const sectionByStep: Record<StepId, string> = {
   agentDashboard: "section-agent-dashboard",
   agentVision: "section-agent-vision",
   agentJobs: "section-agent-jobs",
+  agentMasterChat: "section-agent-master-chat",
   agentProviders: "section-agent-sync",
   agentMonitor: "section-agent-monitor",
   agentProjects: "section-agent-projects",
@@ -268,6 +273,8 @@ export default function App() {
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [onboardingPosition, setOnboardingPosition] = useState<OnboardingPosition | null>(null);
   const [quitConfirmOpen, setQuitConfirmOpen] = useState(false);
+  const [chatHandoff, setChatHandoff] = useState<GithubIssueHandoff|null>(null);
+  const handoffSequence = useRef(0);
   // Root-Modus: pro Sitzung erst ueber das Gateway gewaehlt; der zuletzt genutzte Modus ist lokal
   // gemerkt und im Gateway vorausgewaehlt.
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | null>(null);
@@ -330,8 +337,19 @@ export default function App() {
   // loadRunHistory() wiederhergestellte Verlauf bei jedem Start verloren. localStorage raeumt
   // clearLocalTenantCaches separat.
   const wasLoggedInRef = useRef(false);
+  const previousSessionEmailRef = useRef<string|null>(null);
   useEffect(() => {
-    if (wasLoggedInRef.current && !vm.sessionStatus.loggedIn) setRunHistory([]);
+    const current = vm.sessionStatus.loggedIn ? (vm.sessionStatus.email ?? null) : null;
+    if (current && previousSessionEmailRef.current && current !== previousSessionEmailRef.current) {
+      setChatHandoff(null); // session account changed without a visible logout transition
+    }
+    if (current) previousSessionEmailRef.current = current;
+  }, [vm.sessionStatus.loggedIn,vm.sessionStatus.email]);
+  useEffect(() => {
+    if (wasLoggedInRef.current && !vm.sessionStatus.loggedIn) {
+      setRunHistory([]);
+      setChatHandoff(null); // never replay previous user's GitHub issue into a new session
+    }
     wasLoggedInRef.current = vm.sessionStatus.loggedIn;
   }, [vm.sessionStatus.loggedIn]);
 
@@ -401,6 +419,12 @@ export default function App() {
     localStorage.setItem(acceptedLicenseKey, licenseAgreement.version);
     setLicenseChecked(false);
     setLicenseOpen(false);
+  };
+
+  const handleGithubChatHandoff = (draft:Omit<GithubIssueHandoff,"revision">) => {
+    if (!vm.sessionStatus.loggedIn) return;
+    setChatHandoff({...draft,revision:++handoffSequence.current});
+    vm.setActiveStep("agentMasterChat");
   };
 
   const handleStepSelect = (step: StepId) => {
@@ -820,8 +844,14 @@ export default function App() {
             <AgentSyncJobs vm={vm} onOpenMistralTasks={() => enterModeAt("mistral", "projectBoard")} />
           ) : null}
           {visibleStep === "agentProviders" ? <>
-            <ProviderManager vm={vm} />
+            <ProviderManager vm={vm} onChatHandoff={handleGithubChatHandoff} />
           </> : null}
+          {visibleStep === "agentMasterChat" ? <MasterChatWorkspace
+            projects={vm.projects.registry.projects}
+            handoff={chatHandoff}
+            onProjects={() => handleStepSelect("agentProjects")}
+            onClearHandoff={() => setChatHandoff(null)}
+          /> : null}
           {visibleStep === "agentMonitor" ? (
             <section className="agent-monitor-page" id="section-agent-monitor">
               <AgentLiveMonitor state={vm.agentSync} />

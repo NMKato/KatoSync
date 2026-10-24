@@ -6,6 +6,7 @@ import {invoke} from "@tauri-apps/api/core";
 import {Check,ClipboardCopy,FolderGit2,MessageSquareText,RefreshCcw,Search,ShieldCheck,X} from "lucide-react";
 import {useT} from "../i18n";
 import {githubIssueChatDraft,githubRepoOwner,githubRepoTitle} from "../lib/githubInventoryPresentation";
+import type {GithubIssueHandoff} from "../lib/githubChatHandoff";
 
 type GithubRepo = {
   fullName:string;url:string;private:boolean;archived:boolean;installationId:number;
@@ -20,7 +21,7 @@ type OpenIssues = {
 };
 type Draft = {issue:Issue;note:string};
 
-export function GithubAppReadOnlyInventory(){
+export function GithubAppReadOnlyInventory({onChatHandoff}:{onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void}){
  const {t}=useT();
  const [inventory,setInventory]=useState<Inventory|null>(null);
  const [issues,setIssues]=useState<OpenIssues|null>(null);
@@ -188,6 +189,11 @@ export function GithubAppReadOnlyInventory(){
         onClick={()=>void copyDraft()}>{copied?<Check size={14}/>:<ClipboardCopy size={14}/>}
         {copied?t("github.inventory.copied"):t("github.inventory.copyDraft")}
        </button>
+       {onChatHandoff&&selected?<button type="button" className="secondary compact-button"
+        onClick={()=>onChatHandoff({fullName:selected,number:draft.issue.number,
+         title:draft.issue.title,note:draft.note})}>
+        <MessageSquareText size={14}/>{t("masterChat.openWithDraft")}
+       </button>:null}
        <button type="button" className="ghost compact-button" disabled title={t("github.inventory.noAutostart")}>
         {t("github.inventory.autostart")}
        </button>

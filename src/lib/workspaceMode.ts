@@ -14,6 +14,7 @@ export const AGENT_SYNC_STEPS: StepId[] = [
   "agentDashboard",
   "agentVision",
   "agentJobs",
+  "agentMasterChat",
   "agentProviders",
   "agentMonitor",
   "agentProjects",

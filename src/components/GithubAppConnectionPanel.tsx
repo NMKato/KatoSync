@@ -7,6 +7,7 @@ import {CheckCircle2,Copy,ExternalLink,Github,Info,ShieldCheck,Unplug} from "luc
 import {useT} from "../i18n";
 import {ProviderBrandMark} from "./ProviderBrandMark";
 import {GithubAppReadOnlyInventory} from "./GithubAppReadOnlyInventory";
+import type {GithubIssueHandoff} from "../lib/githubChatHandoff";
 
 type Status = {
  configured:boolean;connected:boolean;login:string|null;expiresAt:number|null;
@@ -16,7 +17,7 @@ type Device = {
  sessionId:string;userCode:string;verificationUri:string;expiresIn:number;interval:number;
 };
 type Poll = {state:string;retryAfterSeconds:number;login:string|null};
-export function GithubAppConnectionPanel({variant="nested"}:{variant?:"nested"|"provider"}){
+export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{variant?:"nested"|"provider";onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void}){
  const {t}=useT();
  const [status,setStatus]=useState<Status|null>(null);
  const [device,setDevice]=useState<Device|null>(null);
@@ -121,7 +122,7 @@ export function GithubAppConnectionPanel({variant="nested"}:{variant?:"nested"|"
     </span>
    </header>
    <div className="github-provider-card-controls">{controls}</div>
-   {status?.connected?<GithubAppReadOnlyInventory key={status.login ?? "github-user"} />:null}
+   {status?.connected?<GithubAppReadOnlyInventory key={status.login ?? "github-user"} onChatHandoff={onChatHandoff} />:null}
    <details className="github-provider-card-info">
     <summary><Info size={15}/>{t("github.integration.infoLabel")}</summary>
     <div className="github-provider-card-info-body">

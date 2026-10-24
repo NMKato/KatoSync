@@ -10215,3 +10215,30 @@ button.agent-tile:hover {
 @media (max-width:700px) {
   .github-app-inventory-list {grid-template-columns:1fr;}
 }
+
+/* Agent Sync Master Chat: one local, project-scoped chat surface, no new runner UI. */
+.page-agentMasterChat .agent-master-chat {
+  grid-column:1 / -1;
+  width:100%;
+  min-width:0;
+  display:grid;
+  gap:12px;
+}
+.master-chat-head,.master-chat-handoff,.master-chat-project {
+  min-width:0;
+  padding:18px 20px;
+  border-radius:var(--r-lg);
+}
+.master-chat-head h2 {font-size:clamp(19px,2.4vw,27px);margin:0;}
+.master-chat-head .continuity-notice {margin:8px 0 0;}
+.master-chat-handoff {display:grid;gap:9px;justify-items:start;}
+.master-chat-handoff > strong {display:flex;align-items:center;gap:8px;}
+.master-chat-handoff > p {overflow-wrap:anywhere;margin:0;font-size:13px;}
+.master-chat-handoff > small {color:var(--text-muted);}
+.master-chat-project {display:grid;gap:12px;}
+.master-chat-project > label {max-width:600px;}
+.master-chat-project .continuity-local-chat {min-width:0;width:100%;}
+.master-chat-project .continuity-chat-transcript {max-height:480px;overflow-y:auto;}
+@media(max-width:650px){
+  .master-chat-head,.master-chat-handoff,.master-chat-project {padding:13px;}
+}
