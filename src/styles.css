@@ -10060,3 +10060,122 @@ button.agent-tile:hover {
 .github-app-issues strong {font-size:12px;overflow-wrap:anywhere;}
 .github-app-issue-list li {padding:5px 0;border-bottom:1px solid var(--line);}
 .github-app-issue-list li:last-child {border-bottom:0;}
+
+
+/* GitHub MVP: readable repository tiles and safe issue-to-chat drafts. */
+.github-app-repo-search {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:7px 10px;
+  border:1px solid var(--line);
+  border-radius:var(--r-md);
+  color:var(--text-muted);
+  min-width:0;
+}
+.github-app-repo-search input {
+  background:transparent;
+  color:var(--text);
+  border:0;
+  outline:0;
+  flex:1;
+  min-width:0;
+  font:inherit;
+  font-size:12px;
+}
+.github-app-repo-search:focus-within {box-shadow:var(--focus-ring);}
+.github-app-inventory-list {
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  align-items:stretch;
+  gap:9px;
+  max-height:370px;
+}
+.github-app-inventory-list .github-app-repo-card {
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  justify-content:space-between;
+  gap:10px;
+  min-width:0;
+  min-height:119px;
+  padding:12px;
+  border-radius:var(--r-md);
+  background:var(--surface-raised);
+}
+.github-app-repo-heading {display:flex;align-items:flex-start;gap:8px;min-width:0;}
+.github-app-repo-heading > svg {color:var(--brand);flex:none;margin-top:2px;}
+.github-app-repo-heading > a {
+  color:var(--text);
+  text-decoration:none;
+  font-size:14px;
+  line-height:1.28;
+  font-weight:700;
+  overflow-wrap:anywhere;
+  min-width:0;
+}
+.github-app-repo-heading > a:hover {text-decoration:underline;}
+.github-app-repo-meta {display:flex;align-items:center;flex-wrap:wrap;gap:6px;}
+.github-app-repo-meta small {font-size:11px;color:var(--text-muted);}
+.github-app-repo-meta .github-app-visibility {
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:2px 7px;
+  color:var(--text-label);
+  font-size:10px;
+}
+.github-app-inventory-list .github-app-repo-card > button {
+  justify-self:start;
+  align-self:flex-start;
+}
+.github-app-issues-heading {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  gap:4px 8px;
+}
+.github-app-issues-heading small {color:var(--text-muted);}
+.github-app-issue-list {max-height:390px;}
+.github-app-issue-list li {
+  display:grid;
+  gap:7px;
+  padding:9px 0;
+}
+.github-app-issue-main {display:flex;gap:7px;align-items:flex-start;min-width:0;}
+.github-app-issue-number {flex:none;color:var(--text-muted);font-size:11px;margin-top:1px;}
+.github-app-issue-list li > button {justify-self:start;}
+.github-app-handoff {
+  display:grid;
+  gap:9px;
+  padding:12px;
+  border:1px solid color-mix(in srgb,var(--brand) 35%,var(--line));
+  background:color-mix(in srgb,var(--brand) 5%,var(--surface));
+  border-radius:var(--r-md);
+}
+.github-app-handoff-heading {display:flex;align-items:center;justify-content:space-between;gap:9px;}
+.github-app-handoff-heading strong {font-size:12px;}
+.github-app-handoff p {
+  font-size:12px;
+  line-height:1.35;
+  margin:0;
+  overflow-wrap:anywhere;
+}
+.github-app-handoff label {display:grid;gap:6px;font-size:11px;color:var(--text-muted);}
+.github-app-handoff textarea {
+  min-width:0;
+  width:100%;
+  box-sizing:border-box;
+  border:1px solid var(--line);
+  border-radius:var(--r-sm);
+  background:var(--surface-raised);
+  color:var(--text);
+  padding:8px 10px;
+  resize:vertical;
+  font:inherit;
+  font-size:12px;
+}
+.github-app-handoff-actions {display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+.github-app-handoff small {font-size:11px;color:var(--text-muted);line-height:1.45;}
+@media (max-width:700px) {
+  .github-app-inventory-list {grid-template-columns:1fr;}
+}

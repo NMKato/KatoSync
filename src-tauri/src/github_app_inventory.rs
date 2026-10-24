@@ -8,6 +8,10 @@ use serde::de::DeserializeOwned;
 const MAX_INSTALLATIONS: usize = 4;
 const MAX_REPOS_PER_INSTALLATION: usize = 50;
 const MAX_ISSUES: usize = 30;
+const MAX_ISSUE_PAGES: u32 = 10; // explicit bounded paging, never an unbounded background crawl
+fn valid_issue_page(page: u32) -> bool {
+    (1..=MAX_ISSUE_PAGES).contains(&page)
+}
 
 #[derive(Deserialize)]
 struct InstallationsResponse {
@@ -210,9 +214,10 @@ pub(crate) async fn github_app_repository_inventory() -> Result<GithubInventory,
 pub(crate) async fn github_app_repo_issues(
     full_name: String,
     installation_id: u64,
+    page: u32,
 ) -> Result<GithubOpenIssues, String> {
-    if !valid_full_name(&full_name) || installation_id == 0 {
-        return Err("Ungültiger Repository-Name oder Installations-ID.".into());
+    if !valid_full_name(&full_name) || installation_id == 0 || !valid_issue_page(page) {
+        return Err("Ungültiger Repository-Name, Installation oder Seitenbereich.".into());
     }
     let uid = verified_katosync_user().await?;
     let credential = read_credential(&uid)?;
@@ -236,7 +241,7 @@ pub(crate) async fn github_app_repo_issues(
     let api_issues: Vec<ApiIssue> = github_read(
         &http,
         &credential.access_token,
-        &format!("/repos/{full_name}/issues?state=open&per_page={MAX_ISSUES}&page=1"),
+        &format!("/repos/{full_name}/issues?state=open&per_page={MAX_ISSUES}&page={page}"),
     )
     .await?;
     let truncated = api_issues.len() == MAX_ISSUES;
@@ -262,6 +267,14 @@ pub(crate) async fn github_app_repo_issues(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_bounded_issue_pages_allowed() {
+        assert!(valid_issue_page(1));
+        assert!(valid_issue_page(10));
+        assert!(!valid_issue_page(0));
+        assert!(!valid_issue_page(11));
+        assert!(!valid_issue_page(u32::MAX));
+    }
     #[test]
     fn only_owner_repo_slugs_allowed() {
         assert!(valid_full_name("NMKato/KatoSync"));
