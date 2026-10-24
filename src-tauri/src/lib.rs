@@ -35,6 +35,7 @@ mod orchestration;
 mod project_registry;
 mod provider_manager;
 mod provider_warmup;
+mod read_only_dispatch;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -358,6 +359,8 @@ pub fn run() {
             cloud_profile_key_present,
             cloud_profile_logout,
             run_codex_task,
+            read_only_dispatch::readonly_dispatch_probe,
+            read_only_dispatch::readonly_probe_history,
             dir_exists,
             check_codex_task,
             test_mistral_connection,

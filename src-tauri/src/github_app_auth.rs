@@ -50,7 +50,7 @@ async fn fetch_katosync_identity(token: &str) -> Result<reqwest::Response, Strin
         .await
         .map_err(|_| "KatoSync-Sitzung nicht überprüfbar.".to_string())
 }
-async fn verified_katosync_user() -> Result<String, String> {
+pub(crate) async fn verified_katosync_user() -> Result<String, String> {
     let mut token = crate::ensure_supabase_access_token()
         .await
         .map_err(|_| "Bitte zuerst bei KatoSync anmelden.".to_string())?;

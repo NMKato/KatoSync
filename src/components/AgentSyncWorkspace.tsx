@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
 import { ProjectMvpPortfolio } from "./ProjectMvpPortfolio";
+import { ReadOnlyDispatchPanel } from "./ReadOnlyDispatchPanel";
 import { partitionMvpDashboard } from "../lib/mvpDashboardLayout.ts";
 import { providerDisplayState } from "../lib/providerPolicy";
 import { isInActiveFocus } from "../lib/projectFocus";
@@ -522,6 +523,7 @@ export function AgentSyncJobs({ vm, onOpenMistralTasks }: { vm: ViewModel; onOpe
 
   return (
     <section className="agent-jobs" id="section-agent-jobs">
+      <ReadOnlyDispatchPanel projects={vm.projects.registry.projects}/>
       <div className="agent-dashboard-row">
         <CurrentJobCard state={state} compact />
         <div className="glass agent-card agent-card-flow">
