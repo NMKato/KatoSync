@@ -6,19 +6,38 @@ import {test} from "node:test";
 
 const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
 const provider=readFileSync(new URL("../src/components/GithubAppConnectionPanel.tsx",import.meta.url),"utf8");
-test("GitHub is integrated in the authenticated provider area, not the login gate",()=>{
+const providerManager=readFileSync(new URL("../src/components/ProviderManager.tsx",import.meta.url),"utf8");
+test("GitHub is integrated directly with authenticated provider cards, not the login gate",()=>{
  const providerStart=app.indexOf('visibleStep === "agentProviders"');
  const providerEnd=app.indexOf('visibleStep === "agentMonitor"',providerStart);
  assert.ok(providerStart>0 && providerEnd>providerStart);
  const section=app.slice(providerStart,providerEnd);
  assert.match(section,/ProviderManager vm=\{vm\}/);
- assert.match(section,/vm\.sessionStatus\.loggedIn\s*\?\s*<section/);
- assert.match(section,/<GithubAppConnectionPanel/);
+ assert.match(providerManager,/className="provider-cards"/);
+ assert.match(providerManager,/vm\.sessionStatus\.loggedIn\s*\?/);
+ assert.match(providerManager,/<GithubAppConnectionPanel[^>]*variant="provider"/);
  const loginGuard=app.indexOf("if (!vm.sessionStatus.loggedIn)");
  assert.ok(loginGuard>0&&loginGuard<providerStart,
    "GitHub provider control must remain behind the app-wide login gate");
  assert.doesNotMatch(section,/login_supabase|signup_supabase|type="password"/);
 });
+test("Compact GitHub provider card has an immediately visible action and optional help",()=>{
+ const css=readFileSync(new URL("../src/styles.css",import.meta.url),"utf8");
+ assert.match(providerManager,/<GithubAppConnectionPanel[^>]*variant="provider"/);
+ assert.match(provider,/if\(variant==="provider"\)/);
+ assert.match(provider,/className="github-provider-card"/);
+ assert.match(provider,/className="github-connect-action"|className="secondary compact-button github-connect-action"/);
+ assert.match(provider,/className="github-provider-card-info"/);
+ assert.match(provider,/onClick=\{start\}/);
+ assert.match(provider,/onClick=\{disconnect\}/);
+ assert.match(provider,/status\?\.connected/);
+ assert.match(css,/\.provider-cards > \.github-provider-card\s*\{[^}]*width:100%/s);
+ assert.match(css,/\.github-provider-card \.compact-button\s*\{[^}]*width:auto/s);
+ // Old kickoff and isolated QA can still use the original nested view.
+ assert.match(provider,/variant\?:"nested"\|"provider"/);
+ assert.match(provider,/return <details className="kickoff-github-app">/);
+});
+
 test("OAuth uses GitHub consent, does not ask for a second KatoSync password",()=>{
  assert.match(provider,/github_app_device_begin/);
  assert.match(provider,/github_app_connection_status/);

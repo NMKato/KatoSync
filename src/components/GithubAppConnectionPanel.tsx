@@ -3,7 +3,7 @@
 import {useEffect,useRef,useState} from "react";
 import {invoke} from "@tauri-apps/api/core";
 import {openUrl} from "@tauri-apps/plugin-opener";
-import {CheckCircle2,Copy,ExternalLink,ShieldCheck,Unplug} from "lucide-react";
+import {CheckCircle2,Copy,ExternalLink,Github,Info,ShieldCheck,Unplug} from "lucide-react";
 import {useT} from "../i18n";
 
 type Status = {
@@ -14,7 +14,7 @@ type Device = {
  sessionId:string;userCode:string;verificationUri:string;expiresIn:number;interval:number;
 };
 type Poll = {state:string;retryAfterSeconds:number;login:string|null};
-export function GithubAppConnectionPanel(){
+export function GithubAppConnectionPanel({variant="nested"}:{variant?:"nested"|"provider"}){
  const {t}=useT();
  const [status,setStatus]=useState<Status|null>(null);
  const [device,setDevice]=useState<Device|null>(null);
@@ -76,19 +76,16 @@ export function GithubAppConnectionPanel(){
    if(mounted.current){setStatus(next);setDevice(null);setResult(t("kickoff.authDisconnected"));}
   });
  }
- return <details className="kickoff-github-app">
-   <summary><ShieldCheck size={15}/>{t("kickoff.authTitle")}</summary>
-   <div className="kickoff-github-app-body">
-    <small>{t("kickoff.authOptional")}</small>
+ const controls = <>
     {status?.connected?<div className="kickoff-github-app-connected">
-     <strong><CheckCircle2 size={15}/>{t("kickoff.authAccount")}: {status.login}</strong>
-     <small>{t("kickoff.authNoWrites")}</small>
-     <button type="button" className="secondary compact-button" disabled={busy}
-      onClick={disconnect}><Unplug size={13}/>{t("kickoff.authDisconnect")}</button>
+      <strong><CheckCircle2 size={15}/>{t("kickoff.authAccount")}: {status.login}</strong>
+      {variant==="nested"?<small>{t("kickoff.authNoWrites")}</small>:null}
+      <button type="button" className="secondary compact-button" disabled={busy}
+        onClick={disconnect}><Unplug size={13}/>{t("kickoff.authDisconnect")}</button>
     </div>:status?.configured===false?<p className="agent-empty">{t("kickoff.authNotConfigured")}</p>
       :!status?<p className="agent-empty">{t("kickoff.authUnavailable")}</p>
-      :!device?<button className="secondary compact-button" type="button"
-       disabled={busy} onClick={start}>{t("kickoff.authStart")}</button>
+      :!device?<button className="secondary compact-button github-connect-action" type="button"
+       disabled={busy} onClick={start}><Github size={15}/>{t("kickoff.authStart")}</button>
       :<div className="kickoff-github-app-device">
         <p>{t("kickoff.authInstructions")}</p>
         <strong className="kickoff-github-code">{device.userCode}</strong>
@@ -108,6 +105,36 @@ export function GithubAppConnectionPanel(){
        </div>}
     {error?<p className="tone-warn" role="alert">{t("kickoff.authError")}</p>:null}
     {result?<p role="status" className="agent-empty">{result}</p>:null}
+  </>;
+ if(variant==="provider"){
+  return <article className="github-provider-card" aria-label={t("github.integration.section")} aria-busy={busy}>
+   <header className="github-provider-card-head">
+    <span className="github-provider-card-logo" aria-hidden="true"><Github size={21}/></span>
+    <div className="github-provider-card-title">
+     <h3>GitHub App</h3>
+     <p>{t("github.integration.shortDescription")}</p>
+    </div>
+    <span className="github-provider-card-status">
+     {status?.connected?<><CheckCircle2 size={14}/>{t("github.integration.connectedLabel")}</>:t("github.integration.optionalLabel")}
+    </span>
+   </header>
+   <div className="github-provider-card-controls">{controls}</div>
+   <details className="github-provider-card-info">
+    <summary><Info size={15}/>{t("github.integration.infoLabel")}</summary>
+    <div className="github-provider-card-info-body">
+     <p>{t("github.integration.existingSession")}</p>
+     <p>{t("github.integration.consentHint")}</p>
+     <p>{t("kickoff.authNoWrites")}</p>
+     <p>{t("kickoff.authFuture")}</p>
+    </div>
+   </details>
+  </article>;
+ }
+ return <details className="kickoff-github-app">
+   <summary><ShieldCheck size={15}/>{t("kickoff.authTitle")}</summary>
+   <div className="kickoff-github-app-body">
+    <small>{t("kickoff.authOptional")}</small>
+    {controls}
     <small>{t("kickoff.authReadOnly")}</small>
     <small>{t("kickoff.authFuture")}</small>
    </div>
