@@ -746,3 +746,7 @@ mod tests {
         assert!(safe_login("safe-user"));
     }
 }
+
+// Read-only App inventory; credentials never leave this backend module.
+#[path = "github_app_inventory.rs"]
+pub(crate) mod inventory;

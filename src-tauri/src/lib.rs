@@ -328,6 +328,8 @@ pub fn run() {
             github_app_auth::github_app_device_poll,
             github_app_auth::github_app_device_cancel,
             github_app_auth::github_app_disconnect,
+            github_app_auth::inventory::github_app_repository_inventory,
+            github_app_auth::inventory::github_app_repo_issues,
             memory_fabric::continuity_bridge::continuity_save_blueprint,
             load_config,
             save_config,
