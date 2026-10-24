@@ -24,7 +24,8 @@ import {
   Unplug,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { GithubAppConnectionPanel } from "./GithubAppConnectionPanel";
 import { copyText } from "../lib/clipboard";
 import {
   buildSanitizedProviderDiagnostics,
@@ -154,14 +155,18 @@ export function ProviderManager({ vm }: { vm: ViewModel }) {
 
       <div className="provider-cards">
         {cardProviders.map((provider) => (
-          <ProviderCard
-            key={provider}
-            provider={provider}
-            rank={priority.indexOf(provider)}
-            lastMovable={priority.length - 2}
-            status={vm.providerStatuses.find((entry) => entry.provider === provider)}
-            vm={vm}
-          />
+          <Fragment key={provider}>
+            {provider === "local" && vm.sessionStatus.loggedIn ? (
+              <GithubAppConnectionPanel key={vm.sessionStatus.email ?? "signed-in-account"} variant="provider" />
+            ) : null}
+            <ProviderCard
+              provider={provider}
+              rank={priority.indexOf(provider)}
+              lastMovable={priority.length - 2}
+              status={vm.providerStatuses.find((entry) => entry.provider === provider)}
+              vm={vm}
+            />
+          </Fragment>
         ))}
       </div>
 

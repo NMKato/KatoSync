@@ -65,7 +65,6 @@ import { RichMarkdown } from "./components/RichMarkdown";
 import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
 import { AgentLiveMonitor } from "./components/AgentJobViews";
 import { ProviderManager } from "./components/ProviderManager";
-import { GithubAppConnectionPanel } from "./components/GithubAppConnectionPanel";
 import { ProjectRegistryWorkspace } from "./components/ProjectRegistryWorkspace";
 import { ModeGateway, ModeSwitch } from "./components/ModeGateway";
 import { VisionWorkspace } from "./components/VisionWorkspace";
@@ -822,14 +821,6 @@ export default function App() {
           ) : null}
           {visibleStep === "agentProviders" ? <>
             <ProviderManager vm={vm} />
-            {vm.sessionStatus.loggedIn ? <section className="github-provider-connection" aria-label={t("github.integration.section")}>
-              <header className="github-provider-connection-header">
-                <h3>{t("github.integration.heading")}</h3>
-                <p>{t("github.integration.existingSession")}</p>
-              </header>
-              <GithubAppConnectionPanel key={vm.sessionStatus.email ?? "signed-in-account"} />
-              <p className="field-hint">{t("github.integration.consentHint")}</p>
-            </section> : null}
           </> : null}
           {visibleStep === "agentMonitor" ? (
             <section className="agent-monitor-page" id="section-agent-monitor">
