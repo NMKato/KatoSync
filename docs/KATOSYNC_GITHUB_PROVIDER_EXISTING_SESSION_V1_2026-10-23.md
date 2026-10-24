@@ -68,6 +68,19 @@ QA login.
 - Security Issue #76, account isolation, future token expiry,
   Windows GUI, and standalone KATOOS SSO #114 remain release gates.
 
+## Session refresh reliability — 2026-10-24 follow-up
+GitHub identity validation still uses the pinned KatoSync issuer and verified
+`/auth/v1/user` UUID, never a display email or unverified KATOOS identity.
+A 401 from this endpoint now invalidates only the exact rejected in-memory
+access token, refreshes using the existing OS-keychain refresh credential,
+and checks `/auth/v1/user` exactly once again. Concurrent logout/account
+switch does not authorize clearing another user's cached token. Other HTTP
+failures do not trigger a refresh loop. No credentials enter UI, logs or GitHub.
+
+This is not KATOOS SSO or real native account authorization acceptance.
+Live account consent, logout/revocation and issue #114 remain blocked pending
+an authenticated normal-app QA session. No production Auth project switched.
+
 ## Next
 Confirm KATOOS SSO mechanism and canonical identity with the owner,
 implement explicit trusted federation if required (not password reuse),
