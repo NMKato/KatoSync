@@ -32,7 +32,7 @@ test("GitHub inventory UI contains title grid, explicit note preview, bounded pa
  const native=source("../src-tauri/src/github_app_inventory.rs");
  assert.match(ui,/githubRepoTitle\(repo.fullName\)/);
  assert.match(ui,/githubRepoOwner\(repo.fullName\)/);
- assert.match(css,/\.github-app-inventory-list\s*\{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/s);
+ assert.match(css,/grid-template-columns:repeat\(auto-fit,minmax\(min\(100%,220px\),1fr\)\);/);
  assert.match(ui,/onClick=\{\(\)=>\{setDraft\(/);
  assert.match(ui,/navigator\.clipboard\.writeText\(githubIssueChatDraft/);
  assert.match(ui,/disabled title=\{t\("github.inventory.noAutostart"\)\}/);
