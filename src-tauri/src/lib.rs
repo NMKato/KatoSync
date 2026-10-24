@@ -37,6 +37,7 @@ mod project_registry;
 mod project_work_resume;
 mod provider_manager;
 mod provider_warmup;
+mod secure_project_work;
 mod system_resources;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
@@ -299,6 +300,7 @@ pub fn run() {
             project_registry::project_registry_scan,
             project_registry::project_registry_load,
             project_work_resume::project_work_resume,
+            secure_project_work::secure_project_preflight,
             project_create::project_create,
             project_registry::project_registry_save,
             project_registry::project_registry_open,

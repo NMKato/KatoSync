@@ -13,7 +13,10 @@ pub(crate) struct ProjectWorkResumeProbe {
     probe: crate::project_registry::ProjectProbe,
 }
 
-fn registered_root(registry: &Value, id: &str) -> Result<(String, Option<String>), &'static str> {
+pub(crate) fn registered_root(
+    registry: &Value,
+    id: &str,
+) -> Result<(String, Option<String>), &'static str> {
     if id.trim().is_empty() || id.len() > 160 {
         return Err("Unbekannte oder ungueltige Projekt-ID.");
     }
