@@ -6,6 +6,7 @@ import {openUrl} from "@tauri-apps/plugin-opener";
 import {CheckCircle2,Copy,ExternalLink,Github,Info,ShieldCheck,Unplug} from "lucide-react";
 import {useT} from "../i18n";
 import {ProviderBrandMark} from "./ProviderBrandMark";
+import {GithubAppReadOnlyInventory} from "./GithubAppReadOnlyInventory";
 
 type Status = {
  configured:boolean;connected:boolean;login:string|null;expiresAt:number|null;
@@ -120,6 +121,7 @@ export function GithubAppConnectionPanel({variant="nested"}:{variant?:"nested"|"
     </span>
    </header>
    <div className="github-provider-card-controls">{controls}</div>
+   {status?.connected?<GithubAppReadOnlyInventory key={status.login ?? "github-user"} />:null}
    <details className="github-provider-card-info">
     <summary><Info size={15}/>{t("github.integration.infoLabel")}</summary>
     <div className="github-provider-card-info-body">

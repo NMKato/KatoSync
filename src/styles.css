@@ -9979,3 +9979,84 @@ button.agent-tile:hover {
 }
 .provider-brand-mark-route.provider-brand-mark-local,
 .provider-brand-mark-route.provider-brand-mark-local_control { background:transparent; }
+
+/* GitHub App: on-demand, bounded, read-only project inventory inside provider card. */
+.github-app-inventory {
+  display:grid;
+  gap:8px;
+  min-width:0;
+  padding-top:10px;
+  border-top:1px solid var(--line);
+}
+.github-app-inventory-head {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.github-app-inventory-head strong,
+.github-app-inventory-result > small {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:12px;
+}
+.github-app-inventory .compact-button {
+  width:auto;
+  max-width:100%;
+  min-width:0;
+  padding:7px 11px;
+}
+.github-app-inventory-result {
+  display:grid;
+  gap:8px;
+  min-width:0;
+}
+.github-app-inventory-list,
+.github-app-issue-list {
+  display:grid;
+  gap:6px;
+  margin:0;
+  padding:0;
+  list-style:none;
+  max-height:270px;
+  overflow:auto;
+  overscroll-behavior:contain;
+}
+.github-app-inventory-list li {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:6px;
+  padding:7px 8px;
+  border:1px solid var(--line);
+  border-radius:var(--r-md);
+}
+.github-app-repo-label {
+  display:grid;
+  gap:2px;
+  min-width:0;
+}
+.github-app-inventory-list a,
+.github-app-issue-list a {
+  color:var(--text);
+  font-size:12px;
+  overflow-wrap:anywhere;
+}
+.github-app-repo-label small,
+.github-app-inventory-note {
+  font-size:11px;
+  color:var(--text-muted);
+}
+.github-app-issues {
+  display:grid;
+  gap:7px;
+  padding:9px;
+  border:1px solid var(--line);
+  border-radius:var(--r-md);
+}
+.github-app-issues strong {font-size:12px;overflow-wrap:anywhere;}
+.github-app-issue-list li {padding:5px 0;border-bottom:1px solid var(--line);}
+.github-app-issue-list li:last-child {border-bottom:0;}
