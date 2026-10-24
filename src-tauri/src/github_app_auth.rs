@@ -38,18 +38,41 @@ fn cached_uid() -> Option<String> {
 struct SupabaseUserIdentity {
     id: String,
 }
+fn should_refresh_katosync_session(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::UNAUTHORIZED
+}
+async fn fetch_katosync_identity(token: &str) -> Result<reqwest::Response, String> {
+    network()?
+        .get(format!("{}/auth/v1/user", crate::KATOSYNC_AUTH_URL))
+        .header("apikey", crate::KATOSYNC_AUTH_ANON_KEY)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|_| "KatoSync-Sitzung nicht überprüfbar.".to_string())
+}
 async fn verified_katosync_user() -> Result<String, String> {
     let mut token = crate::ensure_supabase_access_token()
         .await
         .map_err(|_| "Bitte zuerst bei KatoSync anmelden.".to_string())?;
-    let response = network()?
-        .get(format!("{}/auth/v1/user", crate::KATOSYNC_AUTH_URL))
-        .header("apikey", crate::KATOSYNC_AUTH_ANON_KEY)
-        .bearer_auth(&token)
-        .send()
-        .await;
+    let mut response = fetch_katosync_identity(&token).await;
+    // Access tokens expire during long-running desktop sessions. Retry exactly
+    // once after a 401, only if the rejected token still belongs to this session.
+    if response
+        .as_ref()
+        .is_ok_and(|r| should_refresh_katosync_session(r.status()))
+    {
+        if !crate::invalidate_rejected_supabase_access_token(&token) {
+            token.zeroize();
+            return Err("KatoSync-Konto während der Prüfung gewechselt.".into());
+        }
+        token.zeroize();
+        token = crate::ensure_supabase_access_token()
+            .await
+            .map_err(|_| "Bitte KatoSync-Sitzung erneuern.".to_string())?;
+        response = fetch_katosync_identity(&token).await;
+    }
     token.zeroize();
-    let response = response.map_err(|_| "KatoSync-Sitzung nicht überprüfbar.".to_string())?;
+    let response = response?;
     if !response.status().is_success() {
         return Err("Bitte KatoSync-Sitzung erneuern.".into());
     }
@@ -579,6 +602,21 @@ mod tests {
             error: None,
         }
     }
+    #[test]
+    fn only_expired_access_token_401_triggers_one_session_refresh() {
+        assert!(should_refresh_katosync_session(
+            reqwest::StatusCode::UNAUTHORIZED
+        ));
+        for status in [
+            reqwest::StatusCode::FORBIDDEN,
+            reqwest::StatusCode::BAD_REQUEST,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            reqwest::StatusCode::OK,
+        ] {
+            assert!(!should_refresh_katosync_session(status));
+        }
+    }
+
     #[test]
     fn accepts_real_github_app_client_id_shape_not_numeric_app_id() {
         assert!(valid_client_id("Iv1.ab1112223334445c"));

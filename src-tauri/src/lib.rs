@@ -5138,6 +5138,24 @@ fn cache_supabase_access_token(value: Option<String>) {
     }
 }
 
+// Invalidate ONLY the access token that the authenticated request just rejected.
+// A concurrent logout or account switch must not clear a different user's token.
+fn clear_rejected_access_token(slot: &mut Option<String>, rejected: &str) -> bool {
+    if slot.as_deref() != Some(rejected) {
+        return false;
+    }
+    if let Some(mut stale) = slot.take() {
+        zeroize::Zeroize::zeroize(&mut stale);
+    }
+    true
+}
+fn invalidate_rejected_supabase_access_token(rejected: &str) -> bool {
+    let Ok(mut guard) = supabase_access_token_cache().lock() else {
+        return false;
+    };
+    clear_rejected_access_token(&mut guard, rejected)
+}
+
 fn save_supabase_refresh_token(token: &str) -> Result<()> {
     supabase_session_keychain_entry()?.set_password(token)?;
     Ok(())
@@ -5467,6 +5485,16 @@ mod local_katosync_session_tests {
             Some("user@example.invalid"),
             Some("opaque-refresh")
         ));
+    }
+
+    #[test]
+    fn rejected_token_cleanup_never_removes_another_accounts_session() {
+        let mut slot = Some("new-account-token".to_string());
+        assert!(!clear_rejected_access_token(&mut slot, "old-account-token"));
+        assert_eq!(slot.as_deref(), Some("new-account-token"));
+        assert!(clear_rejected_access_token(&mut slot, "new-account-token"));
+        assert!(slot.is_none());
+        assert!(!clear_rejected_access_token(&mut slot, "new-account-token"));
     }
 }
 
