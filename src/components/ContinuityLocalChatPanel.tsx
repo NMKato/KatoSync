@@ -7,6 +7,7 @@ import { BrainCircuit, RefreshCcw, Send, ShieldCheck, ImagePlus, XCircle, Eye, E
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { presentChatAnswer } from "../lib/chatAnswerPresentation";
+import { parseHumanView } from "../lib/chatAdaptiveViews";
 import { useT } from "../i18n";
 
 type ChatDiagnostics = {code:string;canRepair:boolean};
@@ -74,16 +75,41 @@ async function readImageLocally(file:File):Promise<ImageDraft>{
 }
 
 function SafeChatAnswer({answer,sourceIndices=[]}:{answer:string;sourceIndices?:number[]}){
+  const {t}=useT();
   const [open,setOpen]=useState(false);
   const fence=String.fromCharCode(96).repeat(3);
   const html=answer.split(fence+"html\n")[1]?.split(fence)[0];
   const presented=presentChatAnswer(answer,sourceIndices);
+  const view=parseHumanView(answer,sourceIndices);
+  const verifiedMax=view?.kind==="bars"?Math.max(...view.points.map(x=>x.value)):0;
   return <div className="continuity-rich-answer">
-    <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
+    {view?.kind==="table"?<section className="continuity-adaptive-view" aria-label={view.title||"Vergleichstabelle"}>
+      {view.title?<h3>{view.title}</h3>:null}
+      <div className="continuity-table-scroll"><table>
+        <thead><tr>{view.columns.map((head,index)=><th key={index} scope="col">{head}</th>)}</tr></thead>
+        <tbody>{view.rows.map((row,index)=><tr key={index}>
+          {row.map((cell,j)=><td key={j}>{cell}</td>)}
+        </tr>)}</tbody>
+      </table></div>
+    </section>:null}
+    {view?.kind==="bars"?<section className="continuity-adaptive-view" aria-label={view.title||"Wertevergleich aus der KI-Antwort"}>
+      <h3>{view.title||"Wertevergleich"}</h3>
+      <div className="continuity-verified-bars">
+        {view.points.map((point,index)=><div className="continuity-bar-row" key={index}>
+          <span className="continuity-bar-label">{point.label}</span>
+          <div className="continuity-bar-track" role="img" aria-label={point.label+": "+point.value+" "+view.unit}>
+            <div className="continuity-bar-fill" style={{width:((point.value/verifiedMax)*100)+"%"}}/>
+          </div>
+          <span className="continuity-bar-value">{new Intl.NumberFormat("de-DE").format(point.value)} {view.unit}</span>
+        </div>)}
+      </div>
+      <small>{t("continuity.chat.chartUnverified")} · {t("continuity.chat.sources")}: {view.sources.map(x=>"["+x+"]").join(", ")}</small>
+    </section>:null}
+    {(!view || presented.startsWith("###"))?<ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
       img:()=>null,
       a:({children})=><span>{children}</span>,
       table:({children})=><div className="continuity-table-scroll"><table>{children}</table></div>,
-    }}>{presented}</ReactMarkdown>
+    }}>{presented}</ReactMarkdown>:null}
     {html&&html.length<20000?<div className="continuity-html-preview">
       <button type="button" className="ghost compact-button" onClick={()=>setOpen(v=>!v)}>
         {open?<EyeOff size={14}/>:<Eye size={14}/>}

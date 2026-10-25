@@ -1171,6 +1171,7 @@ const en: Record<TKey, string> = {
   "continuity.chat.imageTransient": "Image preview for this session · not saved",
   "continuity.chat.visualNotVerified": "Visual observations are not verified project facts.",
   "continuity.chat.technicalDetails": "Technical details",
+  "continuity.chat.chartUnverified": "Chart from model output · numerical values not independently verified",
   "continuity.chat.imageAnalyzed": "Image analyzed locally · file not saved",
   "continuity.chat.offlineShort": "Offline",
   "continuity.chat.visionShort": "Vision ready",

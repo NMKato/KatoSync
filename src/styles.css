@@ -10681,3 +10681,58 @@ button.agent-tile:hover {
   .master-chat-project .continuity-rich-answer {max-width:100%;}
   .master-chat-project .continuity-rich-answer h3 {font-size:14px;}
 }
+
+/* Human-facing adaptive presentation: normal body text, no accidental bold headings */
+.master-chat-project .continuity-rich-answer {
+  font-weight:400;
+  font-synthesis:none;
+}
+.master-chat-project .continuity-rich-answer p,
+.master-chat-project .continuity-rich-answer li,
+.master-chat-project .continuity-rich-answer td {
+  font-weight:400!important;
+}
+.master-chat-project .continuity-rich-answer strong,
+.master-chat-project .continuity-rich-answer b {
+  font-weight:650;
+}
+.master-chat-project .continuity-rich-answer h3,
+.master-chat-project .continuity-rich-answer h2 {
+  font-weight:660;
+}
+.continuity-adaptive-view {
+  width:100%;display:grid;gap:10px;margin:6px 0 9px;
+  padding:13px;border:1px solid color-mix(in srgb,var(--line) 78%,#64c7c8 22%);
+  border-radius:15px;background:rgba(91,158,168,.055);
+}
+.continuity-adaptive-view h3 {
+  font-size:14px!important;margin:0 0 4px!important;
+}
+.continuity-adaptive-view .continuity-table-scroll {
+  overflow-x:auto;border-radius:11px;border:1px solid var(--line);
+}
+.continuity-adaptive-view table {width:100%;border-collapse:collapse;font-size:12px;}
+.continuity-adaptive-view th,.continuity-adaptive-view td {
+  padding:11px 13px;line-height:1.55;border-bottom:1px solid var(--line);
+  text-align:left;vertical-align:top;
+}
+.continuity-adaptive-view th {
+  color:var(--text);font-weight:630;
+  background:rgba(95,168,182,.13);
+}
+.continuity-adaptive-view tr:last-child td {border-bottom:0;}
+.continuity-verified-bars {display:grid;gap:15px;}
+.continuity-bar-row {
+  display:grid;grid-template-columns:minmax(90px,1fr) minmax(100px,3fr) minmax(75px,auto);
+  align-items:center;gap:12px;font-size:12px;
+}
+.continuity-bar-label {color:var(--text);overflow-wrap:anywhere;}
+.continuity-bar-track {height:11px;background:rgba(111,147,169,.18);border-radius:999px;overflow:hidden;}
+.continuity-bar-fill {height:100%;background:linear-gradient(90deg,#309b9e,#79d8cd);border-radius:999px;}
+.continuity-bar-value {font-variant-numeric:tabular-nums;color:var(--text);text-align:right;}
+.continuity-adaptive-view small {color:var(--text-muted);font-size:10px;}
+@media(max-width:620px) {
+  .continuity-bar-row {grid-template-columns:1fr auto;gap:6px;}
+  .continuity-bar-track {grid-column:1 / -1;grid-row:2;}
+  .continuity-bar-value {grid-column:2;grid-row:1;}
+}

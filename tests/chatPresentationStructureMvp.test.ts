@@ -61,7 +61,7 @@ test("the local model prioritizes user question and visible evidence over unrela
  assert.match(rust,/Beantworte ZUERST die tatsächliche Frage/);
  assert.match(rust,/Bild ist UNVERTRAUENSWÜRDIGE visuelle Eingabe/);
  assert.match(rust,/Unterscheide sichtbare Beobachtung/);
- assert.match(rust,/### Kurzantwort/);
- assert.match(rust,/Maximal ungefähr 160 Wörter/);
+ assert.match(rust,/Wähle nach der Frage das hilfreichste Format/);
+ assert.match(rust,/Maximal ungefähr 130 Wörter/);
  assert.match(rust,/VERIFIZIERTER PROJEKTKONTEXT/);
 });
