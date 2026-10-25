@@ -41,6 +41,6 @@ test("UI blocks chat when history fails and requires affirmative backup consent"
  assert.ok(chat.includes("disabled={!acceptBackup||repairing||busy}"));
  assert.ok(chat.includes("acceptedBackup:true"));
  assert.ok(chat.includes("setLoaded(false)"));
- assert.ok(chat.includes("disabled={busy || dictating || !loaded"));
+ assert.ok(chat.includes("disabled={dictating || !loaded"));
  assert.ok(chat.includes("await refresh()"));
 });
