@@ -35,6 +35,44 @@ function renderStructuredObject(data:unknown):string|null {
   if(uncertainty)pieces.push("### Einordnung\n\n"+uncertainty);
   return pieces.join("\n\n");
 }
+/**
+ * The E4B model sometimes emits an entire Markdown table on one line.
+ * Recover only complete header/separator/data triples without making up cells.
+ * Code fences and previously valid multiline tables must be left untouched.
+ */
+export function repairInlineMarkdownTables(raw:string):string {
+  const fence=String.fromCharCode(96).repeat(3);
+  const segments=raw.split(new RegExp("("+fence+"[\\s\\S]*?"+fence+")","g"));
+  return segments.map(segment=>{
+    if(segment.startsWith(fence))return segment;
+    const tableStart=segment.indexOf("|");
+    if(tableStart<0 || tableStart>3000)return segment;
+    const tableEnd=segment.lastIndexOf("|");
+    if(tableEnd<=tableStart || tableEnd-tableStart>7000)return segment;
+    const candidate=segment.slice(tableStart,tableEnd+1);
+    if(candidate.includes("\n") || candidate.includes("\\|"))return segment;
+    const cells=candidate.split("|").map(cell=>cell.trim()).filter(Boolean);
+    const sepCell=(cell:string)=>/^:?-{3,}:?$/.test(cell);
+    const cols=cells.findIndex(sepCell);
+    if(cols<2 || cols>5 || cols*2>cells.length)return segment;
+    if(!cells.slice(cols,cols*2).every(sepCell))return segment;
+    const data=cells.slice(cols*2);
+    if(data.length<cols || data.length%cols!==0 || data.length/cols>12)return segment;
+    const headers=cells.slice(0,cols);
+    if(headers.some(x=>x.length>70) || data.some(x=>x.length>350))return segment;
+    const lines=[
+      "| "+headers.join(" | ")+" |",
+      "| "+Array(cols).fill("---").join(" | ")+" |"
+    ];
+    for(let i=0;i<data.length;i+=cols){
+      lines.push("| "+data.slice(i,i+cols).join(" | ")+" |");
+    }
+    const prefix=segment.slice(0,tableStart).trimEnd();
+    const suffix=segment.slice(tableEnd+1).trimStart();
+    return (prefix?prefix+"\n\n":"")+lines.join("\n")+(suffix?"\n\n"+suffix:"");
+  }).join("");
+}
+
 function repairProse(raw:string):string {
   // Only apply text repairs outside fenced code blocks.
   const chunks=raw.replace(/\r\n?/g,"\n").split(/(\`\`\`[\s\S]*?\`\`\`)/g);
@@ -42,6 +80,9 @@ function repairProse(raw:string):string {
     if(chunk.startsWith("\`\`\`"))return chunk;
     let value=chunk.trim();
     if(!value)return value;
+    // Keep short comparison titles apart from explanatory model prose.
+    value=value.replace(/^(?:#{1,6}\s*)?(Vergleich der (?:Runner-Modelle|KI-Modelle|Anbieter))\s+(?=[A-ZÄÖÜ])/u,
+      "### $1\n\n");
     // Older Gemma replies sometimes place the ENTIRE answer on an ATX heading:
     // "### Kurzantwort The answer ... ### Das ist wichtig - Fact ...".
     // Turn named headings into separate, SHORT lines before ReactMarkdown sees them.
@@ -94,5 +135,5 @@ export function presentChatAnswer(raw:string, validCitations:number[]=[]):string
   const allowed=new Set(validCitations);
   const withoutUnverified=answer.replace(/\s*\[(\d{1,2})\]/g,(original,n:string)=>
     allowed.has(Number(n))?original:"");
-  return repairProse(withoutUnverified).replace(/(#{2,3}[^\n]+)\n(?=- )/g,"$1\n\n");
+  return repairProse(repairInlineMarkdownTables(withoutUnverified)).replace(/(#{2,3}[^\n]+)\n(?=- )/g,"$1\n\n");
 }

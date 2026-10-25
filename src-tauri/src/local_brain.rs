@@ -707,7 +707,24 @@ VERIFIZIERTE QUELLEN:
 {context}"#
         )
     };
+    // A small local model often merges Markdown table rows onto one line.
+    // A request-specific grammar hint makes the response reliable without
+    // making JSON mandatory or asserting nonexistent source facts.
+    let lower_question = question.to_lowercase();
+    let format_hint = if lower_question.contains("tabelle")
+        || lower_question.contains("tabellar")
+        || lower_question.contains("gegenüberstell")
+    {
+        Some(
+            "Die Nutzerfrage verlangt eine Tabelle. Antworte mit gültigem Markdown und ECHTEN Zeilenumbrüchen. Verwende nur belegte Eigenschaften. Schreibe jede Tabellenzeile auf eine eigene Zeile, wie in diesem FORMATBEISPIEL (keine erfundenen Werte):\n| Merkmal | Variante A | Variante B |\n| --- | --- | --- |\n| Eigenschaft | Nur belegte Angabe oder Nicht belegt | Nur belegte Angabe oder Nicht belegt |\nFalls der Nutzer drei Anbieter nennt, nenne alle drei, markiere fehlende Daten als „Nicht belegt“. Schreibe keine langen Überschriften und keine zusammengeklebte Tabelle. Das Beispiel enthält KEINE Projektfakten.",
+        )
+    } else {
+        None
+    };
     let mut messages = vec![serde_json::json!({"role":"system","content":instructions})];
+    if let Some(hint) = format_hint {
+        messages.push(serde_json::json!({"role":"system","content":hint}));
+    }
     for (previous_question, previous_answer) in history.iter().rev().take(3).rev() {
         messages.push(serde_json::json!({"role":"user","content":
             crate::context_pack::bounded_text(previous_question, 400)}));
