@@ -260,56 +260,81 @@ pub async fn readonly_probe_history(app: tauri::AppHandle) -> Result<Vec<ReadOnl
     Ok(results)
 }
 
+/// Safe release-gate diagnostics. No session token, path, CLI output or UID
+/// is ever returned to the view. Every response is a fixed public code.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadOnlyPreflight {
+    ok: bool,
+    code: &'static str,
+}
+
+async fn validated_probe(
+    req: &ReadOnlyProbeRequest,
+) -> Result<(String, PathBuf, String, GitProof), &'static str> {
+    if req.repo_path.is_empty()
+        || req.repo_path.len() > 1024
+        || req.project_id.is_empty()
+        || req.project_id.len() > 140
+        || !matches!(req.provider.as_str(), "codex" | "claude")
+    {
+        return Err("RO_INPUT");
+    }
+    let uid = crate::github_app_auth::verified_katosync_user()
+        .await
+        .map_err(|_| "RO_AUTH")?;
+    let repo = PathBuf::from(&req.repo_path);
+    if !repo.is_absolute() || !repo.is_dir() {
+        return Err("RO_PROJECT");
+    }
+    let registry = crate::project_registry::project_registry_load()
+        .map_err(|_| "RO_REGISTRY")?
+        .ok_or("RO_REGISTRY")?;
+    let entries = registry
+        .get("projects")
+        .and_then(|v| v.as_array())
+        .ok_or("RO_REGISTRY")?;
+    let selected: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.get("id").and_then(|v| v.as_str()) == Some(req.project_id.as_str()))
+        .collect();
+    if selected.len() != 1 {
+        return Err("RO_PROJECT");
+    }
+    let root = selected[0]
+        .get("rootPath")
+        .and_then(|v| v.as_str())
+        .ok_or("RO_PROJECT")?;
+    if fs::canonicalize(root).ok() != fs::canonicalize(&repo).ok() {
+        return Err("RO_PROJECT");
+    }
+    let name = selected[0]
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Registriertes Projekt")
+        .to_string();
+    let before = git_proof(&repo).map_err(|_| "RO_GIT")?;
+    Ok((uid, repo, name, before))
+}
+
+#[tauri::command]
+pub async fn readonly_probe_preflight(req: ReadOnlyProbeRequest) -> ReadOnlyPreflight {
+    match validated_probe(&req).await {
+        Ok(_) => ReadOnlyPreflight {
+            ok: true,
+            code: "RO_OK",
+        },
+        Err(code) => ReadOnlyPreflight { ok: false, code },
+    }
+}
+
 #[tauri::command]
 pub async fn readonly_dispatch_probe(
     req: ReadOnlyProbeRequest,
     app: tauri::AppHandle,
 ) -> Result<ReadOnlyProbe, String> {
     let _guard = OneProbe::acquire()?;
-    if req.repo_path.len() > 1024
-        || req.project_id.len() > 140
-        || req.repo_path.is_empty()
-        || req.project_id.trim().is_empty()
-    {
-        return Err("Projektangaben ungültig.".into());
-    }
-    if !matches!(req.provider.as_str(), "codex" | "claude") {
-        return Err("Nur Codex/Claude Read-only erlaubt.".into());
-    }
-    // Verified issuer, not an email-based or frontend-selected account binding.
-    let uid = crate::github_app_auth::verified_katosync_user().await?;
-    let repo = Path::new(&req.repo_path);
-    if !repo.is_absolute() || !repo.is_dir() {
-        return Err("Lokales Git-Projekt ungültig.".into());
-    }
-    // Fail closed unless this exact canonical path belongs to ONE registered local project.
-    // Never trust a caller-supplied project display name or arbitrary unregistered folder.
-    let registry = crate::project_registry::project_registry_load()?
-        .ok_or_else(|| "Keine lokale Projekt-Registry vorhanden.".to_string())?;
-    let entries = registry
-        .get("projects")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| "Projekt-Registry ungültig.".to_string())?;
-    let selected: Vec<_> = entries
-        .iter()
-        .filter(|entry| entry.get("id").and_then(|v| v.as_str()) == Some(req.project_id.as_str()))
-        .collect();
-    if selected.len() != 1 {
-        return Err("Projekt nicht eindeutig registriert.".into());
-    }
-    let root = selected[0]
-        .get("rootPath")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "Projektpfad fehlt in der Registry.".to_string())?;
-    if fs::canonicalize(root).ok() != fs::canonicalize(repo).ok() {
-        return Err("Projektpfad stimmt nicht mit der Registry überein.".into());
-    }
-    let trusted_name = selected[0]
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Registriertes Projekt")
-        .to_string();
-    let before = git_proof(repo)?;
+    let (uid, repo, trusted_name, before) = validated_probe(&req).await.map_err(str::to_string)?;
     let job_id = format!("ro-{}", Uuid::new_v4());
     let started_at = Utc::now().to_rfc3339();
     let start = Instant::now();
@@ -335,12 +360,14 @@ pub async fn readonly_dispatch_probe(
         Ok(Err(_)) => (None, String::new(), "failed"),
         Err(_) => (None, String::new(), "timeout"),
     };
-    let after = git_proof(repo)?;
+    let after = git_proof(&repo).map_err(|_| "RO_GIT".to_string())?;
     if before != after {
         status = "changed";
     }
     // On session switch fail closed, and do not show prior user's job in the new session.
-    let verified_after = crate::github_app_auth::verified_katosync_user().await?;
+    let verified_after = crate::github_app_auth::verified_katosync_user()
+        .await
+        .map_err(|_| "RO_AUTH".to_string())?;
     if verified_after != uid {
         return Err("Benutzerkonto hat sich während des Jobs geändert.".into());
     }
@@ -359,7 +386,7 @@ pub async fn readonly_dispatch_probe(
         after,
         reply,
     };
-    persist_record(&app, &uid, &record)?;
+    persist_record(&app, &uid, &record).map_err(|_| "RO_HISTORY".to_string())?;
     Ok(record)
 }
 
@@ -392,6 +419,18 @@ mod tests {
         assert!(!recognized_result("BRANCH=main", &g));
         assert!(!recognized_result(&expected.replace("clean", "dirty"), &g));
     }
+    #[tokio::test]
+    async fn invalid_preflight_fails_before_auth_without_starting_an_agent() {
+        let result = readonly_probe_preflight(ReadOnlyProbeRequest {
+            provider: "unsafe-runner".into(),
+            project_id: String::new(),
+            repo_path: String::new(),
+        })
+        .await;
+        assert!(!result.ok);
+        assert_eq!(result.code, "RO_INPUT");
+    }
+
     #[test]
     fn only_two_cloud_providers_supported() {
         let temp = std::env::temp_dir();
