@@ -1,93 +1,238 @@
 // Created by NMKato Solutions
-//! Explicit, local-only one-shot macOS Speech transcription. No uploads or audio storage.
-use serde::Deserialize;
-use std::{
-    process::Stdio,
-    sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
+//! Session-based, on-device macOS speech transcription. No recordings saved or uploaded.
+use serde::{Deserialize, Serialize};
+use std::{process::Stdio, time::Duration};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::{ChildStdin, Command},
+    sync::Mutex,
+    time::timeout,
 };
-use tauri::Manager;
-use tokio::{process::Command, time::timeout};
+use uuid::Uuid;
 
-static DICTATING: AtomicBool = AtomicBool::new(false);
-struct Exclusive;
-impl Exclusive {
-    fn acquire() -> Result<Self, String> {
-        DICTATING
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
-            .map_err(|_| "Eine Diktataufnahme läuft bereits.".to_string())?;
-        Ok(Self)
-    }
+const STT_EVENT: &str = "katosync-stt-event";
+static SESSION: Mutex<Option<ActiveSession>> = Mutex::const_new(None);
+struct ActiveSession {
+    id: Uuid,
+    input: ChildStdin,
 }
-impl Drop for Exclusive {
-    fn drop(&mut self) {
-        DICTATING.store(false, Ordering::Release);
-    }
-}
-#[derive(Deserialize)]
-struct DictationReply {
-    ok: bool,
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct UiEvent {
+    id: String,
+    kind: String,
+    code: String,
     text: String,
 }
+#[derive(Deserialize)]
+struct HelperEvent {
+    kind: String,
+    code: String,
+    text: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SttReadiness {
+    code: String,
+}
 
-#[tauri::command]
-pub(crate) fn local_stt_available(app: tauri::AppHandle) -> bool {
+fn helper_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     #[cfg(target_os = "macos")]
     {
-        app.path()
+        let bundle = app
+            .path()
             .resource_dir()
-            .ok()
-            .is_some_and(|dir| dir.join("resources/stt/katosync-stt").is_file())
+            .map_err(|_| "helper_missing".to_string())?
+            .join("resources/stt/KatoSyncSpeechHelper.app");
+        let bin = bundle.join("Contents/MacOS/katosync-stt");
+        if !bundle.join("Contents/Info.plist").is_file() || !bin.is_file() {
+            return Err("helper_missing".into());
+        }
+        Ok(bin)
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
-        false
+        Err("platform_unavailable".into())
     }
+}
+fn emit(app: &AppHandle, id: &Uuid, kind: &str, code: &str, text: &str) {
+    let _ = app.emit(
+        STT_EVENT,
+        UiEvent {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            code: code.to_string(),
+            text: text.to_string(),
+        },
+    );
 }
 
 #[tauri::command]
-pub(crate) async fn local_stt_dictate(app: tauri::AppHandle) -> Result<String, String> {
-    let _guard = Exclusive::acquire()?;
-    if !local_stt_available(app.clone()) {
-        return Err("Keine verifizierte lokale Diktat-Engine für diese Plattform.".into());
-    }
-    let bin = app
-        .path()
-        .resource_dir()
-        .map_err(|_| "Diktat-Ressource fehlt.".to_string())?
-        .join("resources/stt/katosync-stt");
-    let output = timeout(
-        Duration::from_secs(35),
+pub(crate) fn local_stt_available(app: AppHandle) -> bool {
+    helper_path(&app).is_ok()
+}
+
+#[tauri::command]
+pub(crate) async fn local_stt_preflight(app: AppHandle) -> SttReadiness {
+    let bin = match helper_path(&app) {
+        Ok(p) => p,
+        Err(code) => return SttReadiness { code },
+    };
+    let result = timeout(
+        Duration::from_secs(6),
         Command::new(bin)
+            .arg("--preflight")
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .kill_on_drop(true)
             .output(),
     )
-    .await
-    .map_err(|_| "Lokale Diktierzeit überschritten.".to_string())?
-    .map_err(|_| "Lokaler Sprachdienst konnte nicht gestartet werden.".to_string())?;
-    if output.stdout.len() > 4096 {
-        return Err("Diktierantwort überschreitet Größenlimit.".into());
+    .await;
+    let code = match result {
+        Ok(Ok(output)) if output.stdout.len() < 2048 => {
+            let line = output
+                .stdout
+                .split(|b| *b == b'\n')
+                .next()
+                .unwrap_or_default();
+            serde_json::from_slice::<HelperEvent>(line)
+                .map(|item| item.code)
+                .unwrap_or_else(|_| "helper_failed".to_string())
+        }
+        Ok(_) => "helper_failed".into(),
+        Err(_) => "timeout".into(),
+    };
+    SttReadiness { code }
+}
+
+#[tauri::command]
+pub(crate) async fn local_stt_start(app: AppHandle, id: String) -> Result<(), String> {
+    let id = Uuid::parse_str(&id).map_err(|_| "invalid_session".to_string())?;
+    let bin = helper_path(&app)?;
+    let mut session = SESSION.lock().await;
+    if session.is_some() {
+        return Err("already_recording".into());
     }
-    let result: DictationReply = serde_json::from_slice(&output.stdout)
-        .map_err(|_| "Lokale Diktierantwort ist ungültig.".to_string())?;
-    if !output.status.success() || !result.ok {
-        return Err("Mikrofon/Offline-Spracherkennung nicht bereit oder nichts erkannt.".into());
+    let mut child = Command::new(bin)
+        .arg("--record")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|_| "helper_failed".to_string())?;
+    let input = child.stdin.take().ok_or("helper_failed")?;
+    let stdout = child.stdout.take().ok_or("helper_failed")?;
+    *session = Some(ActiveSession { id, input });
+    drop(session);
+    tokio::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        let mut terminal = false;
+        let result = timeout(Duration::from_secs(52), async {
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) if line.len() < 4096 => {
+                        if let Ok(item) = serde_json::from_str::<HelperEvent>(&line) {
+                            if matches!(
+                                item.kind.as_str(),
+                                "recording" | "permission" | "processing" | "complete" | "error"
+                            ) {
+                                terminal = matches!(item.kind.as_str(), "complete" | "error");
+                                emit(&app, &id, &item.kind, &item.code, &item.text);
+                                if terminal {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Ok(Some(_)) => break,
+                    _ => break,
+                }
+            }
+        })
+        .await;
+        if !terminal {
+            emit(
+                &app,
+                &id,
+                "error",
+                if result.is_err() {
+                    "timeout"
+                } else {
+                    "helper_failed"
+                },
+                "",
+            );
+        }
+        let _ = child.kill().await; // no orphan recording or permission process
+        let _ = child.wait().await;
+        let mut locked = SESSION.lock().await;
+        if locked.as_ref().is_some_and(|active| active.id == id) {
+            *locked = None;
+        }
+    });
+    Ok(())
+}
+#[tauri::command]
+pub(crate) async fn local_stt_stop(id: String) -> Result<(), String> {
+    let id = Uuid::parse_str(&id).map_err(|_| "invalid_session".to_string())?;
+    let mut locked = SESSION.lock().await;
+    let active = locked.as_mut().ok_or("not_recording")?;
+    if active.id != id {
+        return Err("wrong_session".into());
     }
-    let text = result.text.trim();
-    if text.is_empty() || text.chars().count() > 1200 {
-        return Err("Diktiertext leer oder zu lang.".into());
+    active
+        .input
+        .write_all(b"STOP\n")
+        .await
+        .map_err(|_| "helper_failed".to_string())?;
+    active
+        .input
+        .flush()
+        .await
+        .map_err(|_| "helper_failed".to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn local_stt_open_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("/usr/bin/open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            .status()
+            .await
+            .map_err(|_| "settings_unavailable".to_string())?;
+        if !status.success() {
+            return Err("settings_unavailable".into());
+        }
+        Ok(())
     }
-    Ok(text.to_string())
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("platform_unavailable".into())
+    }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn dictation_is_not_marked_in_progress_by_default() {
-        assert!(!DICTATING.load(Ordering::Relaxed));
+    fn expected_event_has_no_raw_audio() {
+        let event = UiEvent {
+            id: "demo".into(),
+            kind: "recording".into(),
+            code: "".into(),
+            text: "".into(),
+        };
+        let encoded = serde_json::to_string(&event).unwrap();
+        assert!(!encoded.contains("audio"));
+        assert!(encoded.contains("recording"));
+    }
+    #[test]
+    fn parse_untrusted_helper_result() {
+        let item: HelperEvent =
+            serde_json::from_str(r#"{"kind":"error","code":"mic_denied","text":""}"#).unwrap();
+        assert_eq!(item.code, "mic_denied");
     }
 }

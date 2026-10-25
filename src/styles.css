@@ -10307,3 +10307,121 @@ button.agent-tile:hover {
 .continuity-local-image img {max-height:148px;max-width:220px;object-fit:contain;border-radius:8px;border:1px solid var(--line);}
 .continuity-chat-turn>ul {background:var(--surface);padding:12px 15px 12px 29px;border-radius:8px;}
 @media(prefers-reduced-motion:reduce){.continuity-chat-turn *{transition:none!important;animation:none!important;}}
+
+/* KatoSync 2.0 Calm Glass Chat – quiet translucent workspace, no hard black boxes. */
+.master-chat-project {
+  border:1px solid color-mix(in srgb,var(--line) 68%,#79cfd1 32%);
+  border-radius:24px;
+  background:
+    radial-gradient(ellipse at 90% -15%,rgba(66,183,183,.11),transparent 46%),
+    radial-gradient(ellipse at -20% 110%,rgba(250,116,60,.08),transparent 48%),
+    color-mix(in srgb,var(--surface) 75%,transparent);
+  box-shadow:0 16px 45px rgba(0,0,0,.13),inset 0 1px rgba(255,255,255,.06);
+  -webkit-backdrop-filter:blur(18px);
+  backdrop-filter:blur(18px);
+}
+.master-chat-project .continuity-local-chat {display:grid;gap:16px;}
+.master-chat-project .continuity-result-head {
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+}
+.master-chat-project .continuity-project-tag {
+  border:1px solid color-mix(in srgb,var(--line) 78%,#52c9cf 22%);
+  background:color-mix(in srgb,var(--surface-raised) 65%,transparent);
+  border-radius:14px;padding:11px 14px;line-height:1.4;
+}
+.master-chat-project .continuity-chat-transcript {
+  display:grid;gap:14px;max-height:min(53vh,650px);overflow-y:auto;
+  border:0;background:transparent;padding:3px 5px;
+  scrollbar-width:thin;
+}
+.master-chat-project .continuity-chat-turn {
+  border:1px solid color-mix(in srgb,var(--line) 68%,#60b6b9 32%);
+  border-radius:18px;padding:19px 22px;
+  background:linear-gradient(145deg,
+   color-mix(in srgb,var(--surface-raised) 81%,transparent),
+   color-mix(in srgb,var(--surface) 89%,transparent));
+  box-shadow:0 12px 30px rgba(0,0,0,.09),inset 0 1px rgba(255,255,255,.035);
+}
+.master-chat-project .continuity-rich-answer {
+  font:inherit;font-size:14px;line-height:1.68;
+}
+.master-chat-project .continuity-rich-answer p,
+.master-chat-project .continuity-rich-answer li {font-size:14px;line-height:1.65;}
+.master-chat-project .continuity-chat-turn>ul {
+  border:1px solid var(--line);background:color-mix(in srgb,var(--surface) 78%,transparent);
+  border-radius:12px;margin-top:10px;line-height:1.55;
+}
+.master-chat-project .continuity-paste {
+  display:grid;gap:9px;min-width:0;
+  border:1px solid color-mix(in srgb,var(--line) 65%,#6cc2c7 35%);
+  background:linear-gradient(155deg,
+   color-mix(in srgb,var(--surface-raised) 76%,transparent),
+   color-mix(in srgb,var(--surface) 75%,transparent));
+  border-radius:20px;padding:17px 17px 8px;
+  box-shadow:0 8px 28px rgba(0,0,0,.13),inset 0 1px rgba(255,255,255,.055);
+}
+.master-chat-project .continuity-paste textarea {
+  font-family:inherit!important;font-size:14px;line-height:1.55;
+  color:var(--text);background:transparent!important;
+  border:0!important;border-radius:12px!important;box-shadow:none!important;
+  resize:vertical;min-height:96px;padding:11px 6px;outline-offset:2px;
+}
+.master-chat-project .continuity-paste textarea:focus-visible {
+  outline:2px solid color-mix(in srgb,#6bcbd0 68%,var(--line));
+}
+.master-chat-project .continuity-attachment {
+  display:flex;gap:10px;align-items:center;min-width:0;flex-wrap:wrap;
+}
+.continuity-voice-tools {display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.master-chat-project .continuity-voice-button {
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  width:auto;min-height:40px;max-width:100%;border:1px solid
+  color-mix(in srgb,var(--line) 66%,#6bc9cb 34%);
+  border-radius:13px;background:color-mix(in srgb,var(--surface-raised) 82%,transparent);
+  color:var(--text);font:inherit;font-size:13px;font-weight:650;
+  padding:9px 15px;transition:background .16s,border-color .16s,transform .16s;
+}
+.master-chat-project .continuity-voice-button:hover:not(:disabled) {
+  transform:translateY(-1px);border-color:#69c3c6;
+}
+.master-chat-project .continuity-voice-button.is-recording {
+  background:linear-gradient(140deg,#a32b35,#d44442);
+  border-color:#ef797d;color:#fff;
+  box-shadow:0 0 0 3px rgba(239,85,86,.1),0 8px 20px rgba(225,50,50,.16);
+}
+.continuity-recording-status,
+.continuity-stt-status,.continuity-stt-success {
+  display:inline-flex;align-items:center;gap:8px;font-size:12px;line-height:1.4;
+  min-height:33px;padding:5px 11px;border-radius:999px;
+  background:color-mix(in srgb,var(--surface-raised) 75%,transparent);
+  border:1px solid var(--line);
+}
+.continuity-recording-status {color:#ffaaa5;border-color:rgba(239,101,101,.3);}
+.continuity-record-dot {width:8px;height:8px;border-radius:50%;background:#f05e60;
+  box-shadow:0 0 0 4px rgba(240,94,96,.16);animation:katosync-record-pulse 1.3s ease-in-out infinite;}
+.continuity-stt-success {color:var(--ok);}
+.continuity-stt-error {
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;
+  border:1px solid color-mix(in srgb,#eca24f 45%,var(--line));
+  background:color-mix(in srgb,#e39a40 8%,var(--surface-raised));
+  border-radius:12px;padding:10px 13px;font-size:12px;line-height:1.5;
+}
+.master-chat-project .continuity-stt-check {opacity:.82;}
+.master-chat-project .continuity-attachment > button,
+.master-chat-project .continuity-actions > button,
+.master-chat-project .continuity-stt-check {
+  width:auto!important;max-width:100%;border-radius:12px;
+}
+.master-chat-project .continuity-actions {display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+.continuity-spin {animation:katosync-icon-spin 1s linear infinite;}
+@keyframes katosync-record-pulse {50%{opacity:.5;transform:scale(.8);}}
+@keyframes katosync-icon-spin {to{transform:rotate(360deg);}}
+@media(max-width:730px){
+  .master-chat-project .continuity-chat-turn {padding:14px;}
+  .master-chat-project .continuity-paste {padding:13px;}
+  .continuity-voice-tools {width:100%;}
+}
+@media(prefers-reduced-motion:reduce){
+  .continuity-record-dot,.continuity-spin {animation:none;}
+  .master-chat-project .continuity-voice-button {transition:none;}
+}

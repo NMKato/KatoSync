@@ -43,3 +43,5 @@ docs/KATOSYNC_3_0_ARCHITECTURE.md
 
 # macOS Swift on-device dictation executable generated at build time
 /src-tauri/resources/stt/katosync-stt
+
+/src-tauri/resources/stt/KatoSyncSpeechHelper.app/
