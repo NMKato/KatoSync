@@ -6,6 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { BrainCircuit, RefreshCcw, Send, ShieldCheck, ImagePlus, XCircle, Eye, EyeOff, Mic, Square, Settings2, CheckCircle2, Loader2, Sparkles, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { presentChatAnswer } from "../lib/chatAnswerPresentation";
 import { useT } from "../i18n";
 
 type ChatDiagnostics = {code:string;canRepair:boolean};
@@ -21,7 +22,7 @@ type ChatTurn = {
   createdAt: string;
 };
 const MAX_QUESTION = 1200;
-type ImageDraft={mimeType:string;dataBase64:string;preview:string};
+type ImageDraft={mimeType:string;dataBase64:string;preview:string;thumbnail:string};
 type BrainCapabilities={visionReady:boolean;running:boolean};
 type SttStage="idle"|"permission"|"recording"|"processing"|"success"|"error";
 type SttEvent={id:string;kind:string;code:string;text:string};
@@ -59,19 +60,30 @@ async function readImageLocally(file:File):Promise<ImageDraft>{
   if(preview.length>5_500_000)throw new Error("image_too_large");
   const [prefix,dataBase64]=preview.split(",",2);
   const mimeType=prefix.includes("image/png")?"image/png":"image/jpeg";
-  return {preview,dataBase64,mimeType};
+  // A small in-memory thumbnail is the only image retained in chat presentation.
+  // Neither full image nor thumbnail is stored in SQLite/project-memory files.
+  const thumb=document.createElement("canvas");
+  const thumbScale=Math.min(1,360/Math.max(canvas.width,canvas.height));
+  thumb.width=Math.max(1,Math.round(canvas.width*thumbScale));
+  thumb.height=Math.max(1,Math.round(canvas.height*thumbScale));
+  const thumbContext=thumb.getContext("2d");
+  if(!thumbContext)throw new Error("thumbnail_unavailable");
+  thumbContext.drawImage(canvas,0,0,thumb.width,thumb.height);
+  const thumbnail=thumb.toDataURL("image/jpeg",0.68);
+  return {preview,dataBase64,mimeType,thumbnail};
 }
 
-function SafeChatAnswer({answer}:{answer:string}){
+function SafeChatAnswer({answer,sourceIndices=[]}:{answer:string;sourceIndices?:number[]}){
   const [open,setOpen]=useState(false);
   const fence=String.fromCharCode(96).repeat(3);
   const html=answer.split(fence+"html\n")[1]?.split(fence)[0];
+  const presented=presentChatAnswer(answer,sourceIndices);
   return <div className="continuity-rich-answer">
     <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
       img:()=>null,
       a:({children})=><span>{children}</span>,
       table:({children})=><div className="continuity-table-scroll"><table>{children}</table></div>,
-    }}>{answer}</ReactMarkdown>
+    }}>{presented}</ReactMarkdown>
     {html&&html.length<20000?<div className="continuity-html-preview">
       <button type="button" className="ghost compact-button" onClick={()=>setOpen(v=>!v)}>
         {open?<EyeOff size={14}/>:<Eye size={14}/>}
@@ -113,6 +125,10 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [imageDraft,setImageDraft]=useState<ImageDraft|null>(null);
+  const [transientThumbnails,setTransientThumbnails]=useState<Record<string,string>>({});
+  useEffect(()=>{
+    setTransientThumbnails({}); // must never carry screenshot previews to a foreign project
+  },[projectId]);
   const [pendingImage,setPendingImage]=useState(false);
   const [sttStage,setSttStage]=useState<SttStage>("idle");
   const [sttErrorCode,setSttErrorCode]=useState("");
@@ -358,6 +374,12 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
         projectId: current,
         turns: [...(prev.projectId === current ? prev.turns : []), result].slice(-20)
       }));
+      if(outgoingImage){
+        setTransientThumbnails(previous=>{
+          const entries=Object.entries(previous).slice(-5);
+          return Object.fromEntries([...entries,[current+":"+result.sequence,outgoingImage.thumbnail]]);
+        });
+      }
     } catch {
       if (requestRef.current === request) {
         // Restore only if the next draft is still empty. No invisible lost input.
@@ -419,14 +441,23 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
             <div className="continuity-chat-user">
               <span className="continuity-message-label">{t("continuity.chat.question")}</span>
               <p>{turn.question.replace(" [Bild lokal analysiert; Datei nicht gespeichert]","")}</p>
-              {turn.question.includes("[Bild lokal analysiert; Datei nicht gespeichert]")?
-                <span className="continuity-visual-receipt"><CheckCircle2 size={13}/>{t("continuity.chat.imageAnalyzed")}</span>:null}
+              {turn.question.includes("[Bild lokal analysiert; Datei nicht gespeichert]")?<>
+                {transientThumbnails[projectId+":"+turn.sequence]?
+                  <figure className="continuity-history-thumbnail">
+                    <img src={transientThumbnails[projectId+":"+turn.sequence]}
+                      alt={t("continuity.chat.imagePreview")} loading="lazy" />
+                    <figcaption>{t("continuity.chat.imageTransient")}</figcaption>
+                  </figure>:null}
+                <span className="continuity-visual-receipt"><CheckCircle2 size={13}/>{t("continuity.chat.imageAnalyzed")}</span>
+              </>:null}
             </div>
             <div className="continuity-chat-assistant">
               <span className="continuity-message-label"><Sparkles size={14}/>{t("continuity.chat.answer")}</span>
+              {turn.question.includes("[Bild lokal analysiert; Datei nicht gespeichert]")?
+                <p className="continuity-vision-disclaimer">{t("continuity.chat.visualNotVerified")}</p>:null}
               {turn.answer==="NOT_IN_MEMORY"
                 ? <p>{t("continuity.chat.noEvidence")}</p>
-                : <SafeChatAnswer answer={turn.answer}/>}
+                : <SafeChatAnswer answer={turn.answer} sourceIndices={citationsFor(turn).map(c=>c.index)}/>}
             </div>
             {citationsFor(turn).length ? (
               <details className="continuity-sources">
@@ -438,7 +469,10 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
                 </ul>
               </details>
             ) : null}
-            <small>#{turn.sequence} · {turn.createdAt} · Git {turn.gitHead.slice(0,12)}</small>
+            <details className="continuity-turn-meta">
+              <summary>{t("continuity.chat.technicalDetails")}</summary>
+              <small>#{turn.sequence} · {turn.createdAt} · Git {turn.gitHead.slice(0,12)}</small>
+            </details>
           </div>
         )) : <p className="agent-empty">{t("continuity.chat.empty")}</p>}
       </div>
