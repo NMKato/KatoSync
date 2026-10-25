@@ -41,19 +41,36 @@ test("Safe markdown and HTML rendering disable remote images, links, scripts and
   assert.match(chat,/connect-src 'none'/);
 });
 
-test("macOS dictation stays on-device and only fills the composer",()=>{
+test("macOS dictation is native, on-device, stoppable and composer-only",()=>{
  const native=source("../src-tauri/src/offline_stt.rs");
  const swift=source("../src-tauri/resources/stt/katosync-stt.swift");
  const app=source("../src-tauri/src/lib.rs");
+ const pack=source("../scripts/build-stt-macos.mjs");
  assert.match(swift,/requiresOnDeviceRecognition=true/);
  assert.match(swift,/supportsOnDeviceRecognition/);
  assert.match(swift,/SFSpeechRecognizer\.requestAuthorization/);
+ assert.match(swift,/readLine\(\)/);
+ assert.match(swift,/"STOP"/);
+ assert.match(swift,/emit\("recording"\)/);
+ assert.match(swift,/emit\("processing"\)/);
  assert.match(native,/Command::new\(bin\)/);
  assert.match(native,/kill_on_drop\(true\)/);
- assert.match(native,/Duration::from_secs\(35\)/);
- assert.match(app,/offline_stt::local_stt_dictate/);
- assert.match(chat,/invoke<string>\("local_stt_dictate"\)/);
+ assert.match(native,/local_stt_start/);
+ assert.match(native,/local_stt_stop/);
+ assert.match(native,/local_stt_preflight/);
+ assert.match(native,/STT_EVENT/);
+ assert.match(native,/write_all\s*\(\s*b"STOP\\n"/);
+ assert.match(app,/offline_stt::local_stt_start/);
+ assert.match(app,/offline_stt::local_stt_stop/);
+ assert.match(chat,/invoke\("local_stt_start"/);
+ assert.match(chat,/invoke\("local_stt_stop"/);
+ assert.match(chat,/listen<SttEvent>/);
  assert.match(chat,/setQuestion\(old=>/);
+ assert.match(chat,/is-recording/);
+ assert.match(chat,/continuity-record-dot/);
+ assert.match(pack,/KatoSyncSpeechHelper\.app/);
+ assert.match(pack,/NSSpeechRecognitionUsageDescription/);
+ assert.match(pack,/NSMicrophoneUsageDescription/);
  assert.doesNotMatch(native,/https:\/\//);
 });
 

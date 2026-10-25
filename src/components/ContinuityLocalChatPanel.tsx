@@ -2,7 +2,8 @@
 // Project-scoped, durable, local-only Q&A. Model-generated text never becomes canonical truth.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BrainCircuit, RefreshCcw, Send, ShieldCheck, ImagePlus, XCircle, Eye, EyeOff, Mic } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { BrainCircuit, RefreshCcw, Send, ShieldCheck, ImagePlus, XCircle, Eye, EyeOff, Mic, Square, Settings2, CheckCircle2, Radio, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useT } from "../i18n";
@@ -22,6 +23,11 @@ type ChatTurn = {
 const MAX_QUESTION = 1200;
 type ImageDraft={mimeType:string;dataBase64:string;preview:string};
 type BrainCapabilities={visionReady:boolean;running:boolean};
+type SttStage="idle"|"permission"|"recording"|"processing"|"success"|"error";
+type SttEvent={id:string;kind:string;code:string;text:string};
+type SttReadiness={code:string};
+const STT_EVENT="katosync-stt-event";
+
 const HTML_PREVIEW_POLICY = "<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'\">";
 
 /** Offline conversion: no upload, no network. 1600px max; 4 MB encoded payload. */
@@ -107,16 +113,84 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [imageDraft,setImageDraft]=useState<ImageDraft|null>(null);
-  const [dictating,setDictating]=useState(false);
+  const [sttStage,setSttStage]=useState<SttStage>("idle");
+  const [sttErrorCode,setSttErrorCode]=useState("");
+  const [sttPermissionStatus,setSttPermissionStatus]=useState("");
   const [sttSupported,setSttSupported]=useState(false);
+  const [sttElapsed,setSttElapsed]=useState(0);
+  const startedAt=useRef(0);
+  const sttSessionRef=useRef<string|null>(null);
+  const sttProjectRef=useRef("");
   useEffect(()=>{
     let active=true;
     if(window.__TAURI_INTERNALS__){
-      invoke<boolean>("local_stt_available").then(ok=>{if(active)setSttSupported(ok);})
-        .catch(()=>{if(active)setSttSupported(false);});
+      invoke<boolean>("local_stt_available").then(ok=>{
+        if(active)setSttSupported(ok);
+      }).catch(()=>{if(active)setSttSupported(false);});
     }
     return()=>{active=false;};
   },[]);
+  useEffect(()=>{
+    if(!window.__TAURI_INTERNALS__)return;
+    let disposed=false;
+    let unsubscribe:(()=>void)|undefined;
+    void listen<SttEvent>(STT_EVENT,event=>{
+      if(disposed || !sttSessionRef.current || event.payload.id!==sttSessionRef.current)return;
+      const payload=event.payload;
+      if(payload.kind==="permission"){setSttStage("permission");}
+      else if(payload.kind==="recording"){
+        startedAt.current=Date.now();
+        setSttElapsed(0);
+        setSttStage("recording");
+      } else if(payload.kind==="processing"){setSttStage("processing");}
+      else if(payload.kind==="complete"){
+        sttSessionRef.current=null;
+        setSttErrorCode("");
+        setSttStage("success");
+        if(sttProjectRef.current===projectRef.current && payload.text.trim()){
+          setQuestion(old=>[old.trim(),payload.text.trim()].filter(Boolean).join(" ").slice(0,MAX_QUESTION));
+        }
+      }else if(payload.kind==="error"){
+        sttSessionRef.current=null;
+        setSttErrorCode(payload.code||"helper_failed");
+        setSttStage("error");
+      }
+    }).then(fn=>{if(disposed)fn();else unsubscribe=fn;}).catch(()=>{
+      setSttErrorCode("helper_failed");setSttStage("error");
+    });
+    return()=>{
+      disposed=true;
+      unsubscribe?.();
+      if(sttSessionRef.current){
+        void invoke("local_stt_stop",{id:sttSessionRef.current}).catch(()=>{});
+      }
+    };
+  },[]);
+  useEffect(()=>{
+    if(sttStage!=="recording")return;
+    const interval=window.setInterval(()=>{
+      setSttElapsed(Math.min(12,Math.floor((Date.now()-startedAt.current)/1000)));
+    },250);
+    return()=>window.clearInterval(interval);
+  },[sttStage]);
+  const dictating=sttStage==="recording"||sttStage==="processing"||sttStage==="permission";
+  const recording=sttStage==="recording";
+  const sttNeedsSettings=["mic_denied","speech_denied"].includes(sttErrorCode);
+  const sttMessage=(()=>{
+    switch(sttErrorCode) {
+      case "mic_denied":return t("continuity.chat.sttFailure.mic_denied");
+      case "speech_denied":return t("continuity.chat.sttFailure.speech_denied");
+      case "permission_timeout":return t("continuity.chat.sttFailure.permission_timeout");
+      case "audio_engine":return t("continuity.chat.sttFailure.audio_engine");
+      case "ondevice_unavailable":return t("continuity.chat.sttFailure.ondevice_unavailable");
+      case "no_speech":return t("continuity.chat.sttFailure.no_speech");
+      case "helper_failed":return t("continuity.chat.sttFailure.helper_failed");
+      case "timeout":return t("continuity.chat.sttFailure.timeout");
+      case "platform_unavailable":return t("continuity.chat.sttFailure.platform_unavailable");
+      case "helper_missing":return t("continuity.chat.sttFailure.helper_missing");
+      default:return t("continuity.chat.sttError");
+    }
+  })();
   const [visionReady,setVisionReady]=useState(false);
   const [visionChecked,setVisionChecked]=useState(false);
   const uploadRef=useRef<HTMLInputElement>(null);
@@ -197,16 +271,42 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   }
 
   async function dictateLocally(){
-    if(dictating||!sttSupported||busy||!loaded)return;
-    setDictating(true);
+    if(dictating||!sttSupported||busy||!loaded||sttSessionRef.current)return;
+    const id=crypto.randomUUID();
+    sttSessionRef.current=id;
+    sttProjectRef.current=projectId;
+    setSttStage("permission");
+    setSttElapsed(0);
+    setSttErrorCode("");
     setError("");
+    try{await invoke("local_stt_start",{id});}
+    catch(error){
+      sttSessionRef.current=null;
+      const code=String(error);
+      setSttErrorCode(["already_recording","helper_missing","helper_failed"].includes(code)?code:"helper_failed");
+      setSttStage("error");
+    }
+  }
+  async function stopDictation(){
+    if(!sttSessionRef.current || !["recording","permission"].includes(sttStage))return;
+    setSttStage("processing");
+    try{await invoke("local_stt_stop",{id:sttSessionRef.current});}
+    catch{
+      setSttErrorCode("helper_failed");setSttStage("error");
+    }
+  }
+  async function checkMicrophone(){
     try{
-      const transcript=await invoke<string>("local_stt_dictate");
-      if(projectRef.current===projectId){
-        setQuestion(old=>[old.trim(),transcript].filter(Boolean).join(" ").slice(0,MAX_QUESTION));
+      const result=await invoke<SttReadiness>("local_stt_preflight");
+      setSttPermissionStatus(result.code);
+      if(["speech_denied","mic_denied"].includes(result.code)){
+        setSttErrorCode(result.code);setSttStage("error");
       }
-    }catch{setError(t("continuity.chat.sttError"));}
-    finally{setDictating(false);}
+    }catch{setSttPermissionStatus("helper_failed");}
+  }
+  async function openMicrophoneSettings(){
+    try{await invoke("local_stt_open_settings");}
+    catch{setSttPermissionStatus("settings_unavailable");}
   }
 
   async function pickImage(file:File|undefined){
@@ -331,12 +431,49 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
         />
       </label>
       <div className="continuity-attachment">
-        <button type="button" className="ghost compact-button"
-          disabled={!sttSupported||!loaded||busy||dictating}
-          onClick={()=>void dictateLocally()}>
-          <Mic size={15}/>{dictating?t("continuity.chat.sttListening"):t("continuity.chat.sttButton")}
-        </button>
+        <div className="continuity-voice-tools">
+          <button type="button"
+            className={"compact-button continuity-voice-button"+(recording?" is-recording":"")}
+            disabled={!sttSupported||!loaded||busy||sttStage==="processing"}
+            onClick={()=>void (recording||sttStage==="permission"?stopDictation():dictateLocally())}
+            aria-label={recording?t("continuity.chat.sttStop"):t("continuity.chat.sttButton")}>
+            {recording?<Square size={15} fill="currentColor"/>:
+              sttStage==="processing"?<Loader2 size={16} className="continuity-spin"/>:<Mic size={15}/>}
+            {recording?t("continuity.chat.sttStop"):
+              sttStage==="processing"?t("continuity.chat.sttProcessing"):
+              sttStage==="permission"?t("continuity.chat.sttPermission"):
+              t("continuity.chat.sttButton")}
+          </button>
+          {recording?<span className="continuity-recording-status" role="status">
+            <span className="continuity-record-dot"/>
+            {t("continuity.chat.sttListening")} · 00:{String(sttElapsed).padStart(2,"0")} / 00:12
+          </span>:null}
+          {sttStage==="permission"?<span className="continuity-stt-status" role="status">
+            {t("continuity.chat.sttPermission")}
+          </span>:null}
+          {sttStage==="processing"?<span className="continuity-stt-status" role="status">
+            <Loader2 size={14} className="continuity-spin"/> {t("continuity.chat.sttProcessing")}
+          </span>:null}
+          {sttStage==="success"?<span className="continuity-stt-success" role="status">
+            <CheckCircle2 size={15}/> {t("continuity.chat.sttSuccess")}
+          </span>:null}
+          <button type="button" className="ghost compact-button continuity-stt-check"
+            onClick={()=>void checkMicrophone()} disabled={dictating||!sttSupported}>
+            <Settings2 size={14}/>{t("continuity.chat.sttCheck")}
+          </button>
+        </div>
         {!sttSupported?<small>{t("continuity.chat.sttUnavailable")}</small>:null}
+        {sttPermissionStatus==="needs_permission"?<small role="status">
+          {t("continuity.chat.sttNeedsPermission")}
+        </small>:null}
+        {sttPermissionStatus==="ready"?<small role="status">{t("continuity.chat.sttReady")}</small>:null}
+        {sttStage==="error"?<div className="continuity-stt-error" role="alert">
+          <span>{sttMessage}</span>
+          {sttNeedsSettings?<button type="button" className="ghost compact-button"
+            onClick={()=>void openMicrophoneSettings()}>
+            <Settings2 size={14}/>{t("continuity.chat.sttOpenSettings")}
+          </button>:null}
+        </div>:null}
         <input type="file" ref={uploadRef} accept="image/png,image/jpeg"
           aria-label={t("continuity.chat.attachImage")} hidden
           onChange={event=>void pickImage(event.target.files?.[0])}/>
@@ -355,7 +492,7 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
       </div>
       <div className="continuity-actions">
         <button type="button" className="secondary compact-button" onClick={() => void send()}
-          disabled={!question.trim() || !loaded || busy || !window.__TAURI_INTERNALS__ || (imageDraft!==null&&!visionReady)}>
+          disabled={!question.trim() || !loaded || busy || dictating || !window.__TAURI_INTERNALS__ || (imageDraft!==null&&!visionReady)}>
           <Send size={14}/> {busy ? t("continuity.chat.thinking") : t("continuity.chat.send")}
         </button>
         <small>{t("continuity.chat.durableLabel")}</small>
