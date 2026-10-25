@@ -40,3 +40,6 @@ docs/KATOSYNC_3_0_ARCHITECTURE.md
 # Modellgewichte werden nie eingecheckt (Verteilung ueber den R2-Modellkanal)
 *.gguf
 *.gguf.part
+
+# macOS Swift on-device dictation executable generated at build time
+/src-tauri/resources/stt/katosync-stt

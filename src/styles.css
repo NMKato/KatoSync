@@ -10281,3 +10281,29 @@ button.agent-tile:hover {
 }
 .continuity-repair-consent input {flex:0 0 auto;margin-top:3px;}
 .continuity-chat-recovery > button {max-width:100%;white-space:normal;}
+
+/* Chat 2.0: readable safe Markdown, local image composer, isolated HTML preview. */
+.continuity-chat-turn {padding:14px 17px;}
+.continuity-chat-turn>p {font-size:13px;white-space:pre-wrap;}
+.continuity-chat-assistant {display:grid;gap:8px;font-size:13px;line-height:1.6;}
+.continuity-rich-answer {display:block;max-width:100%;min-width:0;overflow-wrap:anywhere;}
+.continuity-rich-answer h1,.continuity-rich-answer h2,.continuity-rich-answer h3{
+ font-size:clamp(14px,1.4vw,18px);margin:13px 0 6px;line-height:1.35;
+}
+.continuity-rich-answer p {white-space:normal;font-size:13px;margin:7px 0;}
+.continuity-rich-answer li {font-size:13px;margin:4px 0;line-height:1.5;}
+.continuity-rich-answer ul,.continuity-rich-answer ol {margin:7px 0;padding-left:22px;}
+.continuity-rich-answer pre {overflow-x:auto;padding:10px;background:var(--surface);border-radius:8px;}
+.continuity-rich-answer code {font-size:12px;overflow-wrap:anywhere;}
+.continuity-rich-answer blockquote {border-left:3px solid var(--line);margin:10px 0;padding-left:12px;}
+.continuity-table-scroll {width:100%;overflow-x:auto;border-radius:8px;}
+.continuity-table-scroll table {border-collapse:collapse;min-width:280px;width:100%;}
+.continuity-table-scroll th,.continuity-table-scroll td {padding:8px;border:1px solid var(--line);font-size:12px;text-align:left;}
+.continuity-html-preview {display:grid;gap:9px;margin:12px 0;}
+.continuity-html-preview iframe {min-height:220px;width:100%;border:1px solid var(--line);border-radius:8px;background:white;}
+.continuity-attachment {display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.continuity-attachment>small {color:var(--text-muted);}
+.continuity-local-image {display:flex;align-items:center;gap:10px;width:100%;min-width:0;}
+.continuity-local-image img {max-height:148px;max-width:220px;object-fit:contain;border-radius:8px;border:1px solid var(--line);}
+.continuity-chat-turn>ul {background:var(--surface);padding:12px 15px 12px 29px;border-radius:8px;}
+@media(prefers-reduced-motion:reduce){.continuity-chat-turn *{transition:none!important;animation:none!important;}}

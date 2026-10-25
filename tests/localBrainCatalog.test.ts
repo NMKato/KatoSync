@@ -31,9 +31,14 @@ test("16 GB class machines are the preferred target", () => {
   assert.equal(localBrainFit(GEMMA_4_E4B_IT_Q4, 16), "recommended");
 });
 
-test("text package is not falsely advertised as complete multimodal install", () => {
+test("vision requires separately pinned mmproj and live readiness (not manifest alone)", () => {
   assert.equal(GEMMA_4_E4B_IT_Q4.visionProjectionRequired, true);
-  assert.equal(GEMMA_4_E4B_IT_Q4.capabilities.image, false);
+  assert.equal(GEMMA_4_E4B_IT_Q4.capabilities.image, true);
+  const projector=manifest.models[0].mmproj;
+  assert.equal(projector.sha256, "197f49a93027f9843772bd24a6a9e0be2a32a788de5a3def330e9c585d86edd1");
+  assert.equal(projector.sizeBytes, 559874816);
+  assert.equal(projector.fileName, "mmproj-gemma-4-E4B-it-Q8_0.gguf");
+  assert.equal(brain({visionReady:false}).visionReady,false);
 });
 
 test("model package metadata is versioned, separate from the runtime and layout-pinned", () => {

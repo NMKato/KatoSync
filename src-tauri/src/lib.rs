@@ -31,6 +31,7 @@ mod local_brain;
 mod local_control;
 mod memory_fabric;
 mod model_distribution;
+mod offline_stt;
 mod orchestration;
 mod project_registry;
 mod provider_manager;
@@ -388,6 +389,8 @@ pub fn run() {
             save_local_provider_key,
             discover_local_providers,
             local_brain_status,
+            offline_stt::local_stt_available,
+            offline_stt::local_stt_dictate,
             install_local_brain,
             start_local_brain,
             stop_local_brain,
