@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { BrainCircuit, RefreshCcw, Send, ShieldCheck, ImagePlus, XCircle, Eye, EyeOff, Mic, Square, Settings2, CheckCircle2, Radio, Loader2 } from "lucide-react";
+import { BrainCircuit, RefreshCcw, Send, ShieldCheck, ImagePlus, XCircle, Eye, EyeOff, Mic, Square, Settings2, CheckCircle2, Loader2, Sparkles, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useT } from "../i18n";
@@ -113,11 +113,13 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [imageDraft,setImageDraft]=useState<ImageDraft|null>(null);
+  const [pendingImage,setPendingImage]=useState(false);
   const [sttStage,setSttStage]=useState<SttStage>("idle");
   const [sttErrorCode,setSttErrorCode]=useState("");
   const [sttPermissionStatus,setSttPermissionStatus]=useState("");
   const [sttSupported,setSttSupported]=useState(false);
   const [sttElapsed,setSttElapsed]=useState(0);
+  const [sttPartial,setSttPartial]=useState("");
   const startedAt=useRef(0);
   const sttSessionRef=useRef<string|null>(null);
   const sttProjectRef=useRef("");
@@ -141,7 +143,10 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
       else if(payload.kind==="recording"){
         startedAt.current=Date.now();
         setSttElapsed(0);
+        setSttPartial("");
         setSttStage("recording");
+      } else if(payload.kind==="partial"){
+        setSttPartial(payload.text.slice(-280));
       } else if(payload.kind==="processing"){setSttStage("processing");}
       else if(payload.kind==="complete"){
         sttSessionRef.current=null;
@@ -184,6 +189,7 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
       case "audio_engine":return t("continuity.chat.sttFailure.audio_engine");
       case "ondevice_unavailable":return t("continuity.chat.sttFailure.ondevice_unavailable");
       case "no_speech":return t("continuity.chat.sttFailure.no_speech");
+      case "recognizer_error":return t("continuity.chat.sttFailure.recognizer_error");
       case "helper_failed":return t("continuity.chat.sttFailure.helper_failed");
       case "timeout":return t("continuity.chat.sttFailure.timeout");
       case "platform_unavailable":return t("continuity.chat.sttFailure.platform_unavailable");
@@ -194,6 +200,8 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   const [visionReady,setVisionReady]=useState(false);
   const [visionChecked,setVisionChecked]=useState(false);
   const uploadRef=useRef<HTMLInputElement>(null);
+  const transcriptRef=useRef<HTMLDivElement>(null);
+  const previousTurnCount=useRef(0);
   useEffect(()=>{
     let valid=true;
     if(window.__TAURI_INTERNALS__){
@@ -212,6 +220,12 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   projectRef.current = projectId;
   const turns = session.projectId === projectId ? session.turns : [];
   const latestSequence = turns.length ? turns[turns.length - 1].sequence : 0;
+  useEffect(()=>{
+    if(turns.length>previousTurnCount.current){
+      transcriptRef.current?.scrollTo({top:transcriptRef.current.scrollHeight,behavior:"smooth"});
+    }
+    previousTurnCount.current=turns.length;
+  },[turns.length]);
 
   async function refresh() {
     const current = projectId;
@@ -271,12 +285,13 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   }
 
   async function dictateLocally(){
-    if(dictating||!sttSupported||busy||!loaded||sttSessionRef.current)return;
+    if(dictating||!sttSupported||!loaded||sttSessionRef.current)return;
     const id=crypto.randomUUID();
     sttSessionRef.current=id;
     sttProjectRef.current=projectId;
     setSttStage("permission");
     setSttElapsed(0);
+    setSttPartial("");
     setSttErrorCode("");
     setError("");
     try{await invoke("local_stt_start",{id});}
@@ -310,7 +325,7 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   }
 
   async function pickImage(file:File|undefined){
-    if(!file||busy)return;
+    if(!file)return;
     setError("");
     try{setImageDraft(await readImageLocally(file));}
     catch{setError(t("continuity.chat.badImage"));}
@@ -324,12 +339,16 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
         !text || Array.from(text).length > MAX_QUESTION || (imageDraft!==null&&!visionReady)) return;
     const request = ++requestRef.current;
     const expected = latestSequence;
+    const outgoingImage=imageDraft;
     setBusy(true);
     setError("");
+    setQuestion("");
+    setImageDraft(null);
+    setPendingImage(Boolean(outgoingImage));
     try {
       const result = await invoke<ChatTurn>("continuity_chat_send", {
         projectId: current, question: text, expectedSequence: expected,
-        image:imageDraft?{mimeType:imageDraft.mimeType,dataBase64:imageDraft.dataBase64}:null
+        image:outgoingImage?{mimeType:outgoingImage.mimeType,dataBase64:outgoingImage.dataBase64}:null
       });
       if (requestRef.current !== request || projectRef.current !== current) return;
       if (result.projectId !== current || result.sequence !== expected + 1) {
@@ -339,15 +358,19 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
         projectId: current,
         turns: [...(prev.projectId === current ? prev.turns : []), result].slice(-20)
       }));
-      setQuestion("");
-      setImageDraft(null);
     } catch {
       if (requestRef.current === request) {
+        // Restore only if the next draft is still empty. No invisible lost input.
+        setQuestion(existing=>existing||text);
+        setImageDraft(existing=>existing||outgoingImage);
         setError(t("continuity.chat.saveError"));
         setLoaded(false); // recheck native sequence rather than blindly retrying writes
       }
     } finally {
-      if (requestRef.current === request) setBusy(false);
+      if (requestRef.current === request) {
+        setBusy(false);
+        setPendingImage(false);
+      }
     }
   }
 
@@ -364,7 +387,7 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
           <RefreshCcw size={13}/> {t("continuity.chat.reload")}
         </button>
       </div>
-      <p className="agent-empty">{t("continuity.chat.persistentSubtitle")}</p>
+      <p className="agent-empty continuity-chat-description">{t("continuity.chat.persistentSubtitle")}</p>
       <div className="continuity-project-tag"><span>{t("continuity.chat.projectTag")}:</span> <strong>{projectName} · {projectId}</strong></div>
       {!window.__TAURI_INTERNALS__ ? <p className="tone-warn">{t("continuity.chat.desktopOnly")}</p> : null}
       {!loaded && diagnostics ? <div className="continuity-chat-recovery" role="region"
@@ -389,32 +412,41 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
       {repairReceipt && loaded ? <p className="continuity-notice">
         <ShieldCheck size={14}/>{t("continuity.chat.repairComplete")}
       </p>:null}
-      <div className="continuity-chat-transcript" role="log" aria-live="polite"
+      <div ref={transcriptRef} className="continuity-chat-transcript" role="log" aria-live="polite"
         aria-label={t("continuity.chat.history")}>
         {turns.length ? turns.map((turn) => (
           <div key={turn.sequence} className="continuity-chat-turn">
-            <p><strong>{t("continuity.chat.question")}</strong> {turn.question}</p>
+            <div className="continuity-chat-user">
+              <span className="continuity-message-label">{t("continuity.chat.question")}</span>
+              <p>{turn.question.replace(" [Bild lokal analysiert; Datei nicht gespeichert]","")}</p>
+              {turn.question.includes("[Bild lokal analysiert; Datei nicht gespeichert]")?
+                <span className="continuity-visual-receipt"><CheckCircle2 size={13}/>{t("continuity.chat.imageAnalyzed")}</span>:null}
+            </div>
             <div className="continuity-chat-assistant">
-              <strong>{t("continuity.chat.answer")}</strong>
+              <span className="continuity-message-label"><Sparkles size={14}/>{t("continuity.chat.answer")}</span>
               {turn.answer==="NOT_IN_MEMORY"
                 ? <p>{t("continuity.chat.noEvidence")}</p>
                 : <SafeChatAnswer answer={turn.answer}/>}
             </div>
             {citationsFor(turn).length ? (
-              <ul aria-label={t("continuity.chat.sources")}>
-                {citationsFor(turn).map((cite) => <li key={cite.index}>
-                  [{cite.index}] {cite.sourceRef} · {cite.truthLevel} · {cite.freshness}
-                </li>)}
-              </ul>
+              <details className="continuity-sources">
+                <summary>{t("continuity.chat.sources")} · {citationsFor(turn).length}</summary>
+                <ul>
+                  {citationsFor(turn).map(cite=><li key={cite.index}>
+                    [{cite.index}] {cite.sourceRef} · {cite.truthLevel} · {cite.freshness}
+                  </li>)}
+                </ul>
+              </details>
             ) : null}
             <small>#{turn.sequence} · {turn.createdAt} · Git {turn.gitHead.slice(0,12)}</small>
           </div>
         )) : <p className="agent-empty">{t("continuity.chat.empty")}</p>}
       </div>
+      <div className="continuity-composer-shell">
       <label className="continuity-paste">
         <span>{t("continuity.chat.ask")}</span>
         <textarea rows={3} maxLength={MAX_QUESTION} value={question}
-          disabled={busy || dictating || !loaded || !window.__TAURI_INTERNALS__}
+          disabled={dictating || !loaded || !window.__TAURI_INTERNALS__}
           placeholder={t("continuity.chat.placeholder")}
           onChange={(event) => { setQuestion(event.target.value); setError(""); }}
           onPaste={(event)=>{
@@ -434,7 +466,7 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
         <div className="continuity-voice-tools">
           <button type="button"
             className={"compact-button continuity-voice-button"+(recording?" is-recording":"")}
-            disabled={!sttSupported||!loaded||busy||sttStage==="processing"}
+            disabled={!sttSupported||!loaded||sttStage==="processing"}
             onClick={()=>void (recording||sttStage==="permission"?stopDictation():dictateLocally())}
             aria-label={recording?t("continuity.chat.sttStop"):t("continuity.chat.sttButton")}>
             {recording?<Square size={15} fill="currentColor"/>:
@@ -442,8 +474,12 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
             {recording?t("continuity.chat.sttStop"):
               sttStage==="processing"?t("continuity.chat.sttProcessing"):
               sttStage==="permission"?t("continuity.chat.sttPermission"):
-              t("continuity.chat.sttButton")}
+              t("continuity.chat.sttShort")}
           </button>
+          {recording&&sttPartial?<span className="continuity-partial" role="status" aria-live="off">
+            <span className="continuity-partial-label">{t("continuity.chat.sttRecognizing")}</span>
+            {sttPartial}
+          </span>:null}
           {recording?<span className="continuity-recording-status" role="status">
             <span className="continuity-record-dot"/>
             {t("continuity.chat.sttListening")} · 00:{String(sttElapsed).padStart(2,"0")} / 00:12
@@ -457,10 +493,7 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
           {sttStage==="success"?<span className="continuity-stt-success" role="status">
             <CheckCircle2 size={15}/> {t("continuity.chat.sttSuccess")}
           </span>:null}
-          <button type="button" className="ghost compact-button continuity-stt-check"
-            onClick={()=>void checkMicrophone()} disabled={dictating||!sttSupported}>
-            <Settings2 size={14}/>{t("continuity.chat.sttCheck")}
-          </button>
+
         </div>
         {!sttSupported?<small>{t("continuity.chat.sttUnavailable")}</small>:null}
         {sttPermissionStatus==="needs_permission"?<small role="status">
@@ -478,29 +511,49 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
           aria-label={t("continuity.chat.attachImage")} hidden
           onChange={event=>void pickImage(event.target.files?.[0])}/>
         <button type="button" className="ghost compact-button"
-          disabled={busy||!loaded||!visionReady}
+          disabled={!loaded||!visionReady}
           onClick={()=>uploadRef.current?.click()}>
-          <ImagePlus size={15}/>{t("continuity.chat.attachImage")}
+          <ImagePlus size={16}/>{t("continuity.chat.imageShort")}
         </button>
-        <small role="status">{visionReady?t("continuity.chat.visionReady"):
-          visionChecked?t("continuity.chat.visionUnavailable"):t("continuity.chat.visionChecking")}</small>
+        {!visionReady?<small role="status">{visionChecked?
+          t("continuity.chat.visionUnavailable"):t("continuity.chat.visionChecking")}</small>:null}
         {imageDraft?<div className="continuity-local-image">
           <img src={imageDraft.preview} alt={t("continuity.chat.imagePreview")} />
           <button type="button" className="ghost compact-button" onClick={()=>setImageDraft(null)}
             disabled={busy}><XCircle size={14}/>{t("continuity.chat.removeImage")}</button>
         </div>:null}
       </div>
+      {pendingImage?<div className="continuity-image-pending" role="status">
+        <Loader2 size={14} className="continuity-spin"/>
+        {t("continuity.chat.imagePending")}
+      </div>:null}
       <div className="continuity-actions">
-        <button type="button" className="secondary compact-button" onClick={() => void send()}
+        <div className="continuity-runtime-chips">
+          <span className="continuity-runtime-chip"><span className="continuity-chip-dot"/>{t("continuity.chat.offlineShort")}</span>
+          <span className="continuity-runtime-chip"><CheckCircle2 size={12}/>{visionReady?t("continuity.chat.visionShort"):t("continuity.chat.textShort")}</span>
+          <details className="continuity-tools-details">
+            <summary><Settings2 size={14}/>{t("continuity.chat.sttTools")}<ChevronDown size={12}/></summary>
+            <div className="continuity-tools-popup">
+              <button type="button" className="ghost compact-button continuity-stt-check"
+                onClick={()=>void checkMicrophone()} disabled={dictating||!sttSupported}>
+                <Settings2 size={14}/>{t("continuity.chat.sttCheck")}
+              </button>
+              <small>{t("continuity.chat.durableLabel")}</small>
+            </div>
+          </details>
+        </div>
+        <button type="button" className="continuity-send-button" onClick={() => void send()}
           disabled={!question.trim() || !loaded || busy || dictating || !window.__TAURI_INTERNALS__ || (imageDraft!==null&&!visionReady)}>
-          <Send size={14}/> {busy ? t("continuity.chat.thinking") : t("continuity.chat.send")}
+          {busy?<Loader2 size={17} className="continuity-spin"/>:<Send size={16}/>}
+          <span>{busy?t("continuity.chat.thinking"):t("continuity.chat.sendShort")}</span>
         </button>
-        <small>{t("continuity.chat.durableLabel")}</small>
+      </div>
       </div>
       {error ? <p className="tone-warn" role="alert">{error}</p> : null}
-      <p className="continuity-notice"><ShieldCheck size={14}/>
-        <span>{t("continuity.chat.persistNotice")}</span>
-      </p>
+      <details className="continuity-privacy-details">
+        <summary><ShieldCheck size={14}/>{t("continuity.chat.privacyShort")}</summary>
+        <p>{t("continuity.chat.persistNotice")}</p>
+      </details>
     </section>
   );
 }

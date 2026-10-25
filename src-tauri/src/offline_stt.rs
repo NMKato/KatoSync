@@ -128,21 +128,20 @@ pub(crate) async fn local_stt_start(app: AppHandle, id: String) -> Result<(), St
     drop(session);
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
-        let mut terminal = false;
-        let result = timeout(Duration::from_secs(52), async {
+        let mut terminal: Option<HelperEvent> = None;
+        let result = timeout(Duration::from_secs(58), async {
             loop {
                 match lines.next_line().await {
                     Ok(Some(line)) if line.len() < 4096 => {
                         if let Ok(item) = serde_json::from_str::<HelperEvent>(&line) {
                             if matches!(
                                 item.kind.as_str(),
-                                "recording" | "permission" | "processing" | "complete" | "error"
+                                "permission" | "recording" | "processing" | "partial"
                             ) {
-                                terminal = matches!(item.kind.as_str(), "complete" | "error");
                                 emit(&app, &id, &item.kind, &item.code, &item.text);
-                                if terminal {
-                                    break;
-                                }
+                            } else if matches!(item.kind.as_str(), "complete" | "error") {
+                                terminal = Some(item);
+                                break;
                             }
                         }
                     }
@@ -152,7 +151,18 @@ pub(crate) async fn local_stt_start(app: AppHandle, id: String) -> Result<(), St
             }
         })
         .await;
-        if !terminal {
+        // Clear the global session before the terminal UI event. Immediate second
+        // recordings no longer race against native cleanup ("already_recording").
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+        let mut locked = SESSION.lock().await;
+        if locked.as_ref().is_some_and(|active| active.id == id) {
+            *locked = None;
+        }
+        drop(locked);
+        if let Some(item) = terminal {
+            emit(&app, &id, &item.kind, &item.code, &item.text);
+        } else {
             emit(
                 &app,
                 &id,
@@ -164,12 +174,6 @@ pub(crate) async fn local_stt_start(app: AppHandle, id: String) -> Result<(), St
                 },
                 "",
             );
-        }
-        let _ = child.kill().await; // no orphan recording or permission process
-        let _ = child.wait().await;
-        let mut locked = SESSION.lock().await;
-        if locked.as_ref().is_some_and(|active| active.id == id) {
-            *locked = None;
         }
     });
     Ok(())

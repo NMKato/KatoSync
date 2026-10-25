@@ -67,6 +67,7 @@ let format=input.outputFormat(forBus:0)
 var text=""
 var completed=false
 var failed=false
+var lastPartial=""
 var stopRequested=false
 DispatchQueue.global(qos:.userInitiated).async {
     while let command=readLine() {
@@ -79,7 +80,14 @@ DispatchQueue.global(qos:.userInitiated).async {
 let task=recognizer.recognitionTask(with:request){result,error in
     DispatchQueue.main.async {
         if let result=result {
-            text=result.bestTranscription.formattedString
+            let recognized=result.bestTranscription.formattedString
+            if !recognized.isEmpty {
+                text=recognized
+                if recognized != lastPartial && !result.isFinal {
+                    lastPartial=recognized
+                    emit("partial","",String(recognized.suffix(280)))
+                }
+            }
             if result.isFinal {completed=true}
         }
         if error != nil && !completed { failed=true }
@@ -100,8 +108,11 @@ engine.stop()
 input.removeTap(onBus:0)
 request.endAudio()
 emit("processing")
-pump(Date(timeIntervalSinceNow:3),until:{completed})
-task.cancel()
+// Allow the offline recognizer to deliver a final utterance after manual STOP.
+task.finish()
+pump(Date(timeIntervalSinceNow:6),until:{completed || failed})
 let transcript=text.trimmingCharacters(in:.whitespacesAndNewlines)
+task.cancel()
+if transcript.isEmpty && failed { fail("recognizer_error",8) }
 guard !transcript.isEmpty else { fail("no_speech",7) }
 emit("complete","",String(transcript.prefix(1200)))

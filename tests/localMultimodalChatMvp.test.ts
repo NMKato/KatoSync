@@ -29,7 +29,7 @@ test("Photo attach is explicitly gated by running native vision and never auto s
   assert.match(chat,/status\.running&&status\.visionReady/);
   assert.match(chat,/FileReader\(\)/);
   assert.match(chat,/canvas\.toDataURL/);
-  assert.match(chat,/disabled=\{busy\|\|!loaded\|\|!visionReady\}/);
+  assert.match(chat,/disabled=\{!loaded\|\|!visionReady\}/);
   assert.match(chat,/onClick=\{\(\)=>uploadRef\.current\?\.click\(\)\}/);
 });
 test("Safe markdown and HTML rendering disable remote images, links, scripts and network access",()=>{
