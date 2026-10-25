@@ -360,6 +360,7 @@ pub fn run() {
             cloud_profile_logout,
             run_codex_task,
             read_only_dispatch::readonly_dispatch_probe,
+            read_only_dispatch::readonly_probe_preflight,
             read_only_dispatch::readonly_probe_history,
             dir_exists,
             check_codex_task,

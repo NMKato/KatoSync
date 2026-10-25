@@ -6,6 +6,7 @@ import {CheckCircle2,Clock3,PlayCircle,ShieldCheck,AlertTriangle} from "lucide-r
 import {useT} from "../i18n";
 import type {RegistryProject} from "../types";
 
+type Preflight={ok:boolean;code:string};
 type Proof={branch:string;head:string;clean:boolean;changedCount:number};
 type Probe={
  id:string;provider:string;machine:string;project:string;startedAt:string;
@@ -20,14 +21,39 @@ export function ReadOnlyDispatchPanel({projects}: {projects:RegistryProject[]}){
  const [jobs,setJobs]=useState<Probe[]>([]);
  const [error,setError]=useState("");
  const [historyLoaded,setHistoryLoaded]=useState(false);
+ const [historyError,setHistoryError]=useState(false);
+ const [preflight,setPreflight]=useState<Preflight|null>(null);
  useEffect(()=>{
   let alive=true;
   invoke<Probe[]>("readonly_probe_history").then(rows=>{
    if(alive){setJobs(rows);setHistoryLoaded(true);}
-  }).catch(()=>{if(alive)setHistoryLoaded(true);});
+  }).catch(()=>{if(alive){setHistoryError(true);setHistoryLoaded(true);}});
   return()=>{alive=false;};
  },[]);
  const selected=projects.find(p=>p.id===projectId);
+ const safeError=(code:string)=>{
+  switch(code){
+   case "RO_AUTH": return t("readonly.errorAuth");
+   case "RO_PROJECT": return t("readonly.errorProject");
+   case "RO_REGISTRY": return t("readonly.errorRegistry");
+   case "RO_GIT": return t("readonly.errorGit");
+   case "RO_HISTORY": return t("readonly.errorHistory");
+   case "RO_INPUT": return t("readonly.errorInput");
+   case "RO_OK": return t("readonly.preflightOk");
+   default: return t("readonly.error");
+  }
+ };
+ async function check(){
+  if(busy||!selected)return;
+  setBusy(true);setError("");setPreflight(null);
+  try{
+   const result=await invoke<Preflight>("readonly_probe_preflight",{
+    req:{provider,projectId:selected.id,repoPath:selected.rootPath}
+   });
+   setPreflight(result);
+  }catch{setError(t("readonly.error"));}
+  finally{setBusy(false);}
+ }
  async function run(){
   if(busy||!selected)return;
   setBusy(true);setError("");
@@ -36,8 +62,8 @@ export function ReadOnlyDispatchPanel({projects}: {projects:RegistryProject[]}){
     req:{provider,projectId:selected.id,repoPath:selected.rootPath}
    });
    setJobs(prev=>[job,...prev.filter(x=>x.id!==job.id)].slice(0,12));
-  }catch{
-   setError(t("readonly.error"));
+  }catch(cause){
+   setError(safeError(String(cause)));
   }finally{setBusy(false);}
  }
  return <section className="glass agent-card readonly-dispatch" aria-label={t("readonly.title")}>
@@ -47,23 +73,32 @@ export function ReadOnlyDispatchPanel({projects}: {projects:RegistryProject[]}){
   </header>
   <div className="readonly-dispatch-controls">
    <label>{t("readonly.project")}
-    <select value={projectId} onChange={e=>setProjectId(e.target.value)} disabled={busy}>
+    <select value={projectId} onChange={e=>{setProjectId(e.target.value);setPreflight(null);setError("");}} disabled={busy}>
      <option value="">{t("readonly.choose")}</option>
      {projects.map(project=><option value={project.id} key={project.id}>{project.name}</option>)}
     </select>
    </label>
    <label>{t("readonly.provider")}
-    <select value={provider} onChange={e=>setProvider(e.target.value as "codex"|"claude")} disabled={busy}>
+    <select value={provider} onChange={e=>{setProvider(e.target.value as "codex"|"claude");setPreflight(null);setError("");}} disabled={busy}>
      <option value="codex">OpenAI Codex</option>
      <option value="claude">Anthropic Claude Code</option>
     </select>
    </label>
+   <button type="button" className="ghost compact-button"
+    disabled={busy||!selected} onClick={()=>void check()}>
+    <ShieldCheck size={15}/>{t("readonly.preflight")}
+   </button>
    <button type="button" className="secondary compact-button"
     disabled={busy||!selected} onClick={()=>void run()}>
     <PlayCircle size={15}/>{busy?t("readonly.running"):t("readonly.run")}
    </button>
   </div>
+  {preflight?<p role="status" className={preflight.ok?"tone-success":"tone-warn"}>
+   {preflight.ok?<CheckCircle2 size={14}/>:<AlertTriangle size={14}/>}
+   {safeError(preflight.code)}
+  </p>:null}
   {error?<p role="alert" className="tone-warn"><AlertTriangle size={14}/>{error}</p>:null}
+  {historyError?<p role="status" className="tone-warn">{t("readonly.historyUnavailable")}</p>:null}
   <p className="agent-empty"><ShieldCheck size={13}/>{t("readonly.safety")}</p>
   <div className="readonly-dispatch-jobs">
    <strong><Clock3 size={15}/>{t("readonly.history")}</strong>
