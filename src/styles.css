@@ -10266,3 +10266,18 @@ button.agent-tile:hover {
 .readonly-dispatch-output {max-height:135px;overflow:auto;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;
  color:var(--text);font-size:11px;border-radius:var(--r-sm);padding:9px;background:var(--surface);}
 @media(max-width:650px) {.agent-jobs > .readonly-dispatch {padding:12px;}}
+
+/* Local project-memory recovery: explicit consent, no silent schema upgrade. */
+.continuity-chat-recovery {
+  display:grid;justify-items:start;gap:10px;min-width:0;
+  padding:13px 15px;border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--surface-raised);
+}
+.continuity-chat-recovery > strong {font-size:14px;}
+.continuity-chat-recovery > p {margin:0;line-height:1.5;font-size:13px;color:var(--text-muted);}
+.continuity-repair-consent {
+  display:flex;align-items:flex-start;gap:10px;font-size:12px;
+  line-height:1.5;max-width:690px;
+}
+.continuity-repair-consent input {flex:0 0 auto;margin-top:3px;}
+.continuity-chat-recovery > button {max-width:100%;white-space:normal;}

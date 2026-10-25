@@ -317,6 +317,8 @@ pub fn run() {
             memory_fabric::continuity_bridge::continuity_preflight,
             memory_fabric::continuity_bridge::continuity_timeline,
             memory_fabric::continuity_bridge::continuity_local_answer,
+            memory_fabric::continuity_bridge::continuity_chat_diagnostics,
+            memory_fabric::continuity_bridge::continuity_chat_repair_project,
             memory_fabric::continuity_bridge::continuity_chat_history,
             memory_fabric::continuity_bridge::continuity_chat_send,
             memory_fabric::continuity_bridge::continuity_search_blueprint,

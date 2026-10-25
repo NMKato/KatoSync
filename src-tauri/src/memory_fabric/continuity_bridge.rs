@@ -8,8 +8,13 @@ use super::{
     STORE_FILE, WRITE_LOCK,
 };
 use crate::project_registry;
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+use uuid::Uuid;
 
 const MAX_IMPORT_BYTES: usize = 8192;
 
@@ -112,6 +117,212 @@ pub(crate) async fn continuity_local_answer(
         verified_memory_only: true,
         session_only: true,
     })
+}
+
+/// Diagnostics reveal a safe status code, never a local path, prior index root or repository URL.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalChatReadiness {
+    pub code: &'static str,
+    pub can_repair: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatRepairReceipt {
+    pub project_id: String,
+    pub backup_created: bool,
+    pub indexed_sources: usize,
+}
+
+fn registered_local_root(project_id: &str) -> Result<(PathBuf, String), String> {
+    validate_project_id(project_id)?;
+    let registry = project_registry::project_registry_load()?
+        .ok_or_else(|| "Keine lokale Projekt-Registry.".to_string())?;
+    let candidates: Vec<_> = registry
+        .get("projects")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "Projekt-Registry ungültig.".to_string())?
+        .iter()
+        .filter(|v| v.get("id").and_then(|s| s.as_str()) == Some(project_id))
+        .collect();
+    if candidates.len() != 1 {
+        return Err("Projekt-Registry nicht eindeutig.".into());
+    }
+    let root = candidates[0]
+        .get("rootPath")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Registrierter Projektordner fehlt.".to_string())?;
+    let repo = project_registry::probe_repo(Path::new(root), false)
+        .ok_or_else(|| "Git-Projekt nicht erreichbar.".to_string())?;
+    let real = project_registry::real_path(Path::new(root));
+    if real != repo.path {
+        return Err("Registrierter Pfad ist nicht die Git-Wurzel.".into());
+    }
+    let name = candidates[0]
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Registriertes Projekt")
+        .to_string();
+    Ok((PathBuf::from(real), name))
+}
+
+/// Caller must not silently attach older material indexed from another repository.
+/// Even when the root moved, the NORMALIZED remote repository identity must match.
+fn project_repair_state(project_id: &str, root: &Path) -> Result<LocalChatReadiness, String> {
+    let repo = project_registry::probe_repo(root, false)
+        .ok_or_else(|| "Git-Projekt nicht erreichbar.".to_string())?;
+    let current_remote = repo
+        .remote
+        .as_deref()
+        .and_then(super::ingest::normalize_remote);
+    let database = crate::app_support_dir()
+        .map_err(crate::error_to_string)?
+        .join(STORE_DIR)
+        .join(STORE_FILE);
+    let Some(store) = MemoryStore::open_read_only(&database)? else {
+        return Ok(LocalChatReadiness {
+            code: "missing_index",
+            can_repair: true,
+        });
+    };
+    let version: i64 = store
+        .conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .map_err(|_| "Schema nicht lesbar.".to_string())?;
+    let indexed: Option<(String, Option<String>)> = store
+        .conn
+        .query_row(
+            "SELECT root_fingerprint, repo_identity FROM projects WHERE project_id=?1",
+            params![project_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| "Indexidentität nicht lesbar.".to_string())?;
+    match indexed {
+        Some((old_fingerprint, old_remote)) => {
+            if old_fingerprint != super::ingest::root_fingerprint(&repo.path)
+                && (old_remote.is_none() || old_remote != current_remote)
+            {
+                return Ok(LocalChatReadiness {
+                    code: "foreign_repository",
+                    can_repair: false,
+                });
+            }
+            if old_fingerprint != super::ingest::root_fingerprint(&repo.path) || version < 3 {
+                Ok(LocalChatReadiness {
+                    code: "needs_refresh",
+                    can_repair: true,
+                })
+            } else {
+                Ok(LocalChatReadiness {
+                    code: "ready",
+                    can_repair: false,
+                })
+            }
+        }
+        None => Ok(LocalChatReadiness {
+            code: "missing_index",
+            can_repair: true,
+        }),
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn continuity_chat_diagnostics(project_id: String) -> LocalChatReadiness {
+    blocking(move || {
+        let (root, _name) = registered_local_root(&project_id)?;
+        project_repair_state(&project_id, &root)
+    })
+    .await
+    .unwrap_or(LocalChatReadiness {
+        code: "unavailable",
+        can_repair: false,
+    })
+}
+
+/// Explicit operator action: consistent SQLite snapshot BEFORE any migration or
+/// re-index. Repository source root is derived from Registry, not frontend input.
+#[tauri::command]
+pub(crate) async fn continuity_chat_repair_project(
+    project_id: String,
+    accepted_backup: bool,
+) -> Result<ChatRepairReceipt, String> {
+    if !accepted_backup {
+        return Err("Sicherung muss ausdrücklich bestätigt werden.".into());
+    }
+    blocking(move || {
+        let (root, name) = registered_local_root(&project_id)?;
+        let _lock = WRITE_LOCK
+            .lock()
+            .map_err(|_| "Memory Fabric gesperrt.".to_string())?;
+        let state = project_repair_state(&project_id, &root)?;
+        if !state.can_repair {
+            return Err("Projektindex darf nicht automatisch neu zugeordnet werden.".into());
+        }
+        let collected = super::ingest::collect_project_sources(&root)?;
+        if collected.root_fingerprint
+            != super::ingest::root_fingerprint(&project_registry::real_path(&root))
+        {
+            return Err("Projektwurzel hat sich geändert.".into());
+        }
+        let path = crate::app_support_dir()
+            .map_err(crate::error_to_string)?
+            .join(STORE_DIR)
+            .join(STORE_FILE);
+        let mut backup_created = false;
+        if path.is_file() {
+            let backup_dir = path
+                .parent()
+                .ok_or_else(|| "Memory-Ordner fehlt.".to_string())?
+                .join("backups");
+            fs::create_dir_all(&backup_dir)
+                .map_err(|_| "Sicherungsordner nicht verfügbar.".to_string())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&backup_dir, fs::Permissions::from_mode(0o700))
+                    .map_err(|_| "Sicherungsrechte nicht gesetzt.".to_string())?;
+            }
+            let backup = backup_dir.join(format!("pre-chat-refresh-{}.sqlite3", Uuid::new_v4()));
+            let source = Connection::open_with_flags(
+                &path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+            .map_err(|_| "Quellindex nicht lesbar.".to_string())?;
+            // VACUUM INTO includes committed WAL content; no unsafe file copy.
+            source
+                .execute(
+                    "VACUUM main INTO ?1",
+                    params![backup.to_string_lossy().as_ref()],
+                )
+                .map_err(|_| "Konsistente Datenbanksicherung fehlgeschlagen.".to_string())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&backup, fs::Permissions::from_mode(0o600))
+                    .map_err(|_| "Sicherungsrechte nicht gesetzt.".to_string())?;
+            }
+            let verify = Connection::open_with_flags(&backup, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|_| "Sicherung nicht lesbar.".to_string())?;
+            let integrity: String = verify
+                .query_row("PRAGMA quick_check", [], |r| r.get(0))
+                .map_err(|_| "Sicherungsprüfung fehlgeschlagen.".to_string())?;
+            if integrity != "ok" {
+                return Err("Sicherung nicht intakt.".into());
+            }
+            backup_created = true;
+        }
+        let mut store = open_store()?; // performs atomic v1->v4 migration after valid backup
+        let report = store.ingest(collected.into_batch(&project_id, &name, &super::now_iso()))?;
+        registered_head(&store, &project_id)?;
+        Ok(ChatRepairReceipt {
+            project_id,
+            backup_created,
+            indexed_sources: report.indexed_sources,
+        })
+    })
+    .await
 }
 
 /// Native history read: no migration/write, no caller-controlled root or endpoint.

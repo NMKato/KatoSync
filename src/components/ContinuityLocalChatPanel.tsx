@@ -5,6 +5,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { BrainCircuit, RefreshCcw, Send, ShieldCheck } from "lucide-react";
 import { useT } from "../i18n";
 
+type ChatDiagnostics = {code:string;canRepair:boolean};
+type ChatRepairReceipt = {projectId:string;backupCreated:boolean;indexedSources:number};
 type Citation = { index: number; sourceRef: string; truthLevel: string; freshness: string };
 type ChatTurn = {
   projectId: string;
@@ -45,6 +47,10 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
+  const [diagnostics, setDiagnostics] = useState<ChatDiagnostics|null>(null);
+  const [acceptBackup, setAcceptBackup] = useState(false);
+  const [repairing, setRepairing] = useState(false);
+  const [repairReceipt, setRepairReceipt] = useState<ChatRepairReceipt|null>(null);
   const requestRef = useRef(0);
   const projectRef = useRef(projectId);
   projectRef.current = projectId;
@@ -55,6 +61,7 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
     const current = projectId;
     const request = ++requestRef.current;
     setError("");
+    setDiagnostics(null);
     setLoaded(false);
     if (!current || !window.__TAURI_INTERNALS__) return;
     setBusy(true);
@@ -65,9 +72,16 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
         throw new Error("foreign_project");
       }
       setSession({ projectId: current, turns: result });
+      setDiagnostics(null);
       setLoaded(true);
     } catch {
-      if (requestRef.current === request) setError(t("continuity.chat.historyUnavailable"));
+      if (requestRef.current === request && projectRef.current === current) {
+        setError(t("continuity.chat.historyUnavailable"));
+        try {
+          const state = await invoke<ChatDiagnostics>("continuity_chat_diagnostics", {projectId: current});
+          if (requestRef.current === request && projectRef.current === current) setDiagnostics(state);
+        } catch { /* Keep fail-closed error; no native diagnostic details leaked. */ }
+      }
     } finally {
       if (requestRef.current === request) setBusy(false);
     }
@@ -79,6 +93,26 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
     // Refresh only on selected project change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  async function repairIndex() {
+    if (!diagnostics?.canRepair || !acceptBackup || repairing || busy) return;
+    const current=projectId;
+    const request=++requestRef.current;
+    setRepairing(true);setError("");
+    try {
+      const receipt=await invoke<ChatRepairReceipt>("continuity_chat_repair_project", {
+        projectId:current,acceptedBackup:true
+      });
+      if (projectRef.current!==current || requestRef.current!==request) return;
+      if (receipt.projectId!==current) throw new Error("invalid_repair_result");
+      setRepairReceipt(receipt);
+      setAcceptBackup(false);
+      await refresh();
+    } catch {
+      if (projectRef.current===current && requestRef.current===request)
+        setError(t("continuity.chat.repairFailed"));
+    } finally {if (projectRef.current===current) setRepairing(false);}
+  }
 
   async function send() {
     const current = projectId;
@@ -128,6 +162,28 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
       <p className="agent-empty">{t("continuity.chat.persistentSubtitle")}</p>
       <div className="continuity-project-tag"><span>{t("continuity.chat.projectTag")}:</span> <strong>{projectName} · {projectId}</strong></div>
       {!window.__TAURI_INTERNALS__ ? <p className="tone-warn">{t("continuity.chat.desktopOnly")}</p> : null}
+      {!loaded && diagnostics ? <div className="continuity-chat-recovery" role="region"
+        aria-label={t("continuity.chat.recoveryTitle")}>
+        <strong>{t("continuity.chat.recoveryTitle")}</strong>
+        <p>{diagnostics.code==="needs_refresh"?t("continuity.chat.needsRefresh"):
+          diagnostics.code==="missing_index"?t("continuity.chat.needsIndex"):
+          t("continuity.chat.recoveryBlocked")}</p>
+        {diagnostics.canRepair ? <>
+          <label className="continuity-repair-consent">
+            <input type="checkbox" checked={acceptBackup}
+              disabled={repairing} onChange={e=>setAcceptBackup(e.target.checked)}/>
+            <span>{t("continuity.chat.backupConsent")}</span>
+          </label>
+          <button type="button" className="secondary compact-button"
+            disabled={!acceptBackup||repairing||busy} onClick={()=>void repairIndex()}>
+            <ShieldCheck size={14}/>{repairing?t("continuity.chat.repairing"):
+              t("continuity.chat.repairButton")}
+          </button>
+        </>:null}
+      </div>:null}
+      {repairReceipt && loaded ? <p className="continuity-notice">
+        <ShieldCheck size={14}/>{t("continuity.chat.repairComplete")}
+      </p>:null}
       <div className="continuity-chat-transcript" role="log" aria-live="polite"
         aria-label={t("continuity.chat.history")}>
         {turns.length ? turns.map((turn) => (
