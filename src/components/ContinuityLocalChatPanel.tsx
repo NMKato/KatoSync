@@ -2,7 +2,9 @@
 // Project-scoped, durable, local-only Q&A. Model-generated text never becomes canonical truth.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BrainCircuit, RefreshCcw, Send, ShieldCheck } from "lucide-react";
+import { BrainCircuit, RefreshCcw, Send, ShieldCheck, ImagePlus, XCircle, Eye, EyeOff, Mic } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useT } from "../i18n";
 
 type ChatDiagnostics = {code:string;canRepair:boolean};
@@ -18,6 +20,63 @@ type ChatTurn = {
   createdAt: string;
 };
 const MAX_QUESTION = 1200;
+type ImageDraft={mimeType:string;dataBase64:string;preview:string};
+type BrainCapabilities={visionReady:boolean;running:boolean};
+const HTML_PREVIEW_POLICY = "<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'\">";
+
+/** Offline conversion: no upload, no network. 1600px max; 4 MB encoded payload. */
+async function readImageLocally(file:File):Promise<ImageDraft>{
+  if(!["image/png","image/jpeg"].includes(file.type)||file.size>8*1024*1024){
+    throw new Error("invalid_file");
+  }
+  const original=await new Promise<string>((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error("read_failed"));
+    reader.onload=()=>resolve(String(reader.result||""));
+    reader.readAsDataURL(file);
+  });
+  const image=new Image();
+  await new Promise<void>((resolve,reject)=>{
+    image.onload=()=>resolve();image.onerror=()=>reject(new Error("not_image"));
+    image.src=original;
+  });
+  if(!image.naturalWidth||!image.naturalHeight)throw new Error("empty_image");
+  const scale=Math.min(1,1600/Math.max(image.naturalWidth,image.naturalHeight));
+  const canvas=document.createElement("canvas");
+  canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));
+  canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
+  const context=canvas.getContext("2d");
+  if(!context)throw new Error("canvas_unavailable");
+  context.drawImage(image,0,0,canvas.width,canvas.height);
+  let preview=canvas.toDataURL(file.type,0.85);
+  if(preview.length>5_500_000)preview=canvas.toDataURL("image/jpeg",0.72);
+  if(preview.length>5_500_000)throw new Error("image_too_large");
+  const [prefix,dataBase64]=preview.split(",",2);
+  const mimeType=prefix.includes("image/png")?"image/png":"image/jpeg";
+  return {preview,dataBase64,mimeType};
+}
+
+function SafeChatAnswer({answer}:{answer:string}){
+  const [open,setOpen]=useState(false);
+  const fence=String.fromCharCode(96).repeat(3);
+  const html=answer.split(fence+"html\n")[1]?.split(fence)[0];
+  return <div className="continuity-rich-answer">
+    <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{
+      img:()=>null,
+      a:({children})=><span>{children}</span>,
+      table:({children})=><div className="continuity-table-scroll"><table>{children}</table></div>,
+    }}>{answer}</ReactMarkdown>
+    {html&&html.length<20000?<div className="continuity-html-preview">
+      <button type="button" className="ghost compact-button" onClick={()=>setOpen(v=>!v)}>
+        {open?<EyeOff size={14}/>:<Eye size={14}/>}
+        {open?"Vorschau schließen":"HTML-Vorschau (isoliert)"}
+      </button>
+      {open?<iframe title="Isolierte HTML-Vorschau" sandbox="" referrerPolicy="no-referrer"
+        srcDoc={HTML_PREVIEW_POLICY+html} />:null}
+    </div>:null}
+  </div>;
+}
+
 
 function citationsFor(turn: ChatTurn): Citation[] {
   try {
@@ -47,6 +106,29 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
+  const [imageDraft,setImageDraft]=useState<ImageDraft|null>(null);
+  const [dictating,setDictating]=useState(false);
+  const [sttSupported,setSttSupported]=useState(false);
+  useEffect(()=>{
+    let active=true;
+    if(window.__TAURI_INTERNALS__){
+      invoke<boolean>("local_stt_available").then(ok=>{if(active)setSttSupported(ok);})
+        .catch(()=>{if(active)setSttSupported(false);});
+    }
+    return()=>{active=false;};
+  },[]);
+  const [visionReady,setVisionReady]=useState(false);
+  const [visionChecked,setVisionChecked]=useState(false);
+  const uploadRef=useRef<HTMLInputElement>(null);
+  useEffect(()=>{
+    let valid=true;
+    if(window.__TAURI_INTERNALS__){
+      invoke<BrainCapabilities>("local_brain_status").then(status=>{
+        if(valid){setVisionReady(status.running&&status.visionReady);setVisionChecked(true);}
+      }).catch(()=>{if(valid){setVisionReady(false);setVisionChecked(true);}});
+    }
+    return()=>{valid=false;};
+  },[projectId]);
   const [diagnostics, setDiagnostics] = useState<ChatDiagnostics|null>(null);
   const [acceptBackup, setAcceptBackup] = useState(false);
   const [repairing, setRepairing] = useState(false);
@@ -114,18 +196,40 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
     } finally {if (projectRef.current===current) setRepairing(false);}
   }
 
+  async function dictateLocally(){
+    if(dictating||!sttSupported||busy||!loaded)return;
+    setDictating(true);
+    setError("");
+    try{
+      const transcript=await invoke<string>("local_stt_dictate");
+      if(projectRef.current===projectId){
+        setQuestion(old=>[old.trim(),transcript].filter(Boolean).join(" ").slice(0,MAX_QUESTION));
+      }
+    }catch{setError(t("continuity.chat.sttError"));}
+    finally{setDictating(false);}
+  }
+
+  async function pickImage(file:File|undefined){
+    if(!file||busy)return;
+    setError("");
+    try{setImageDraft(await readImageLocally(file));}
+    catch{setError(t("continuity.chat.badImage"));}
+    if(uploadRef.current)uploadRef.current.value="";
+  }
+
   async function send() {
     const current = projectId;
     const text = question.trim();
     if (!window.__TAURI_INTERNALS__ || !loaded || !current || busy ||
-        !text || Array.from(text).length > MAX_QUESTION) return;
+        !text || Array.from(text).length > MAX_QUESTION || (imageDraft!==null&&!visionReady)) return;
     const request = ++requestRef.current;
     const expected = latestSequence;
     setBusy(true);
     setError("");
     try {
       const result = await invoke<ChatTurn>("continuity_chat_send", {
-        projectId: current, question: text, expectedSequence: expected
+        projectId: current, question: text, expectedSequence: expected,
+        image:imageDraft?{mimeType:imageDraft.mimeType,dataBase64:imageDraft.dataBase64}:null
       });
       if (requestRef.current !== request || projectRef.current !== current) return;
       if (result.projectId !== current || result.sequence !== expected + 1) {
@@ -136,6 +240,7 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
         turns: [...(prev.projectId === current ? prev.turns : []), result].slice(-20)
       }));
       setQuestion("");
+      setImageDraft(null);
     } catch {
       if (requestRef.current === request) {
         setError(t("continuity.chat.saveError"));
@@ -189,9 +294,12 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
         {turns.length ? turns.map((turn) => (
           <div key={turn.sequence} className="continuity-chat-turn">
             <p><strong>{t("continuity.chat.question")}</strong> {turn.question}</p>
-            <p><strong>{t("continuity.chat.answer")}</strong> {
-              turn.answer === "NOT_IN_MEMORY" ? t("continuity.chat.noEvidence") : turn.answer
-            }</p>
+            <div className="continuity-chat-assistant">
+              <strong>{t("continuity.chat.answer")}</strong>
+              {turn.answer==="NOT_IN_MEMORY"
+                ? <p>{t("continuity.chat.noEvidence")}</p>
+                : <SafeChatAnswer answer={turn.answer}/>}
+            </div>
             {citationsFor(turn).length ? (
               <ul aria-label={t("continuity.chat.sources")}>
                 {citationsFor(turn).map((cite) => <li key={cite.index}>
@@ -206,14 +314,48 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
       <label className="continuity-paste">
         <span>{t("continuity.chat.ask")}</span>
         <textarea rows={3} maxLength={MAX_QUESTION} value={question}
-          disabled={busy || !loaded || !window.__TAURI_INTERNALS__}
+          disabled={busy || dictating || !loaded || !window.__TAURI_INTERNALS__}
           placeholder={t("continuity.chat.placeholder")}
           onChange={(event) => { setQuestion(event.target.value); setError(""); }}
+          onPaste={(event)=>{
+            const image=Array.from(event.clipboardData.files).find(file=>
+              file.type==="image/png"||file.type==="image/jpeg");
+            if(image){event.preventDefault();void pickImage(image);}
+          }}
+          onDragOver={event=>{if(event.dataTransfer.types.includes("Files"))event.preventDefault();}}
+          onDrop={event=>{
+            const image=Array.from(event.dataTransfer.files).find(file=>
+              file.type==="image/png"||file.type==="image/jpeg");
+            if(image){event.preventDefault();void pickImage(image);}
+          }}
         />
       </label>
+      <div className="continuity-attachment">
+        <button type="button" className="ghost compact-button"
+          disabled={!sttSupported||!loaded||busy||dictating}
+          onClick={()=>void dictateLocally()}>
+          <Mic size={15}/>{dictating?t("continuity.chat.sttListening"):t("continuity.chat.sttButton")}
+        </button>
+        {!sttSupported?<small>{t("continuity.chat.sttUnavailable")}</small>:null}
+        <input type="file" ref={uploadRef} accept="image/png,image/jpeg"
+          aria-label={t("continuity.chat.attachImage")} hidden
+          onChange={event=>void pickImage(event.target.files?.[0])}/>
+        <button type="button" className="ghost compact-button"
+          disabled={busy||!loaded||!visionReady}
+          onClick={()=>uploadRef.current?.click()}>
+          <ImagePlus size={15}/>{t("continuity.chat.attachImage")}
+        </button>
+        <small role="status">{visionReady?t("continuity.chat.visionReady"):
+          visionChecked?t("continuity.chat.visionUnavailable"):t("continuity.chat.visionChecking")}</small>
+        {imageDraft?<div className="continuity-local-image">
+          <img src={imageDraft.preview} alt={t("continuity.chat.imagePreview")} />
+          <button type="button" className="ghost compact-button" onClick={()=>setImageDraft(null)}
+            disabled={busy}><XCircle size={14}/>{t("continuity.chat.removeImage")}</button>
+        </div>:null}
+      </div>
       <div className="continuity-actions">
         <button type="button" className="secondary compact-button" onClick={() => void send()}
-          disabled={!question.trim() || !loaded || busy || !window.__TAURI_INTERNALS__}>
+          disabled={!question.trim() || !loaded || busy || !window.__TAURI_INTERNALS__ || (imageDraft!==null&&!visionReady)}>
           <Send size={14}/> {busy ? t("continuity.chat.thinking") : t("continuity.chat.send")}
         </button>
         <small>{t("continuity.chat.durableLabel")}</small>

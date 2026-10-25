@@ -8,6 +8,7 @@ use super::{
     STORE_FILE, WRITE_LOCK,
 };
 use crate::project_registry;
+use base64::Engine;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -350,6 +351,41 @@ pub(crate) async fn continuity_chat_history(
     .await
 }
 
+/// Binary image is bounded, validated and NEVER persisted in project chat history.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalImageAttachment {
+    mime_type: String,
+    data_base64: String,
+}
+fn validated_image_data_url(input: LocalImageAttachment) -> Result<String, String> {
+    if input.data_base64.is_empty() || input.data_base64.len() > 6_000_000 {
+        return Err("Bild zu groß oder leer (maximal 4 MB).".into());
+    }
+    let (mime, signature): (&str, &[u8]) = match input.mime_type.as_str() {
+        "image/png" => (
+            "image/png",
+            &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+        ),
+        "image/jpeg" => ("image/jpeg", &[0xff, 0xd8, 0xff]),
+        _ => return Err("Nur PNG/JPEG erlaubt.".into()),
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&input.data_base64)
+        .map_err(|_| "Ungültige Bilddaten.".to_string())?;
+    if bytes.len() < 32 || bytes.len() > 4 * 1024 * 1024 || !bytes.starts_with(signature) {
+        return Err("Bildsignatur ungültig oder zu groß.".into());
+    }
+    if mime == "image/png" {
+        let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        if width == 0 || height == 0 || width > 4096 || height > 4096 {
+            return Err("Bildauflösung zu hoch.".into());
+        }
+    }
+    Ok(format!("data:{mime};base64,{}", input.data_base64))
+}
+
 /// A follow-up is grounded afresh. Previous turns help resolve references but NEVER
 /// become canonical truth, model system policy, tool access or another project's data.
 #[tauri::command]
@@ -357,8 +393,13 @@ pub(crate) async fn continuity_chat_send(
     project_id: String,
     question: String,
     expected_sequence: i64,
+    image: Option<LocalImageAttachment>,
 ) -> Result<super::ChatTurn, String> {
     let question = validated_local_question(&question)?;
+    let image_url = image.map(validated_image_data_url).transpose()?;
+    if image_url.is_some() && !crate::local_brain::vision_service_ready().await {
+        return Err("Lokale Gemma-Bildanalyse ist nicht bereit; kein Bild gesendet.".into());
+    }
     if expected_sequence < 0 || expected_sequence >= 1000 {
         return Err("Ungültiger lokaler Chat-Zustand.".to_string());
     }
@@ -434,7 +475,19 @@ pub(crate) async fn continuity_chat_send(
         }
     })
     .await?;
-    let answer = if rag.citations.is_empty() {
+    let answer = if let Some(image_data) = image_url.as_deref() {
+        crate::local_brain::grounded_chat_with_project_image(
+            &rag.text,
+            &question,
+            &orientation,
+            image_data,
+        )
+        .await
+        .map_err(|_| {
+            "Gemma konnte das Bild lokal nicht auswerten; keine Textantwort vorgetäuscht."
+                .to_string()
+        })?
+    } else if rag.citations.is_empty() {
         "NOT_IN_MEMORY".to_string()
     } else {
         crate::local_brain::grounded_chat_with_project_orientation(
@@ -459,7 +512,11 @@ pub(crate) async fn continuity_chat_send(
         store.append_local_chat_turn(super::ChatTurnDraft {
             project_id,
             expected_sequence,
-            question,
+            question: if image_url.is_some() {
+                format!("{question} [Bild lokal analysiert; Datei nicht gespeichert]")
+            } else {
+                question
+            },
             answer,
             git_head: current,
             citations_json,
