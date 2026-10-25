@@ -1171,6 +1171,7 @@ const ru: Record<TKey, string> = {
   "continuity.chat.imageTransient": "Превью только этой сессии · не сохраняется",
   "continuity.chat.visualNotVerified": "Наблюдения на изображении не являются проверенными фактами проекта.",
   "continuity.chat.technicalDetails": "Технические сведения",
+  "continuity.chat.chartUnverified": "График по ответу модели · значения отдельно не проверены",
   "continuity.chat.imageAnalyzed": "Изображение обработано локально · файл не сохранён",
   "continuity.chat.offlineShort": "Офлайн",
   "continuity.chat.visionShort": "Зрение активно",

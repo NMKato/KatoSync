@@ -1171,6 +1171,7 @@ const es: Record<TKey, string> = {
   "continuity.chat.imageTransient": "Vista previa de esta sesión · no guardada",
   "continuity.chat.visualNotVerified": "Las observaciones visuales no son hechos verificados del proyecto.",
   "continuity.chat.technicalDetails": "Detalles técnicos",
+  "continuity.chat.chartUnverified": "Gráfico de la respuesta del modelo · valores sin verificación independiente",
   "continuity.chat.imageAnalyzed": "Imagen analizada sin conexión · archivo no guardado",
   "continuity.chat.offlineShort": "Sin conexión",
   "continuity.chat.visionShort": "Visión activa",

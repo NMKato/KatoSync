@@ -1192,6 +1192,7 @@ const de = {
   "continuity.chat.imageTransient": "Bildvorschau dieser Sitzung · wird nicht gespeichert",
   "continuity.chat.visualNotVerified": "Bildbeobachtungen sind keine verifizierten Projektfakten.",
   "continuity.chat.technicalDetails": "Technische Details",
+  "continuity.chat.chartUnverified": "Grafik aus der Modellantwort · Einzelwerte nicht unabhängig verifiziert",
   "continuity.chat.imageAnalyzed": "Bild von Gemma analysiert · Datei nicht gespeichert",
   "continuity.chat.offlineShort": "Offline",
   "continuity.chat.visionShort": "Vision bereit",
