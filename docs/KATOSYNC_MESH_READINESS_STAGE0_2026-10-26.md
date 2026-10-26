@@ -12,6 +12,15 @@ Die unabhängige RDC-Erreichbarkeit ist kein Nachweis von KatoSync-Mesh-Pairing 
 - Vision-Oberfläche zeigt eine kompakte Mesh-Bereitschaft, Stufe 0 mit echtem lokalem Status, fehlender Kopplung und deaktiviertem Fernauftrag. Neu-Prüfen liest nur lokal. Vier Sprachen.
 - Der bestehende Vision-Graph und die aktuellen Local-Control-/Orchestrator-Daten werden weiterverwendet, statt einen zweiten Mesh-/Job-Scheduler anzulegen.
 
+## Separater LAN-Reachability-Test am 26.10.2026 (ohne Mesh-Pairing)
+- M2 → M3: zwei von zwei ICMP-Proben beantwortet.
+- M3 → M2: zwei von zwei ICMP-Proben beantwortet.
+- Windows → M2: zwei von zwei ICMP-Proben beantwortet.
+- M2 → Windows: null von zwei ICMP-Proben beantwortet; Ursache nicht festgestellt (möglicherweise Firewall/ICMP-Regel). Keine Windows-Einstellung geändert.
+- Geräte befanden sich im gleichen privaten LAN-Adressbereich. Die Adressen wurden bewusst nicht in Issue, Commit oder Dokumentation geschrieben.
+- ICMP beweist weder TCP-Port-Erreichbarkeit noch Benutzer-Authentizität, TLS-Vertrauen, Tauri-Zugriff, sichere Dateifreigabe oder KatoSync-Mesh-Funktion. Kein Listener und kein Fernjob gestartet.
+- Nächster gezielter Test: M2↔M3 als zuerst manuell gekoppelte Kandidaten, vor echtem Transport jedoch verifizierte Geräteidentität, Opt-in und eine verschlüsselte Session nachweisen. Windows erst danach mit Firewall-/Installer-QA.
+
 ## Strikte nächste Stufen aus Issue #127
 1. Geräteidentität pro KatoSync-Installation mit kryptografisch nachweisbarer Bindung an das authentifizierte Konto. Manuelles Zwei-Geräte-Pairing und separater Widerruf, niemals allein nach Gerätename, Hostname, IP oder RDC-Präsenz.
 2. Beidseitig authentisierter und verschlüsselter LAN-Transport; keine automatische Weitergabe von Repos, Tokens, Memory oder Privatreferenzen. Heartbeat mit Ablaufzeit, Fähigkeiten nur nach ausdrücklichem Pairing und Zustimmung.
