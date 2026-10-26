@@ -20,3 +20,11 @@ Die Stage-1A-Einladung (Ed25519, 5 Minuten, KatoSync-Issuer/UUID-Scope, Schlüss
 4. Nutzerabnahme, native macOS-/Windows-Buildprüfung, PR-Draft, kein Main-Merge vor grünen Gates.
 
 Öffentliches Repo: ausschließlich Quellcode, synthetische Tests und öffentliche Statusinformationen, keine persönlichen oder geheimen Pairing-Materialien.
+
+
+## Verifizierter Zwischenstand nach M2-Beta-Build
+- 240/240 Frontend-Tests und 178/178 Rust-Library-Tests bestanden (7 absichtlich ignoriert); TypeScript, Vite und nativer macOS-Release-Build grün.
+- Separater KatoSync-QA-Build auf dem Mac M2 ad-hoc signiert aktualisiert und gestartet. Zuvor aktive Sprach-/Inferenzaufträge ausgeschlossen; Vorgängerversion als Backup, reguläre KatoSync-Installation unverändert, lokales Gemma Vision weiterhin aktiv.
+- Testmöglichkeit unter Vision → Mesh-Bereitschaft → gegenseitiger Schlüsselnachweis. Die aktuelle UI nutzt bewusst ein aufklappbares Expertenfeld, keine automatische Peer-Registrierung.
+- Zweiter physischer Knoten M3: Installation und authentifizierte App-Sitzung **noch nicht verifiziert**, direkter App-Pakettransfer nicht abgeschlossen. Wegen der vorhandenen Ressourcen keine umfangreiche native Release-Kompilierung auf dem M3 gestartet. Keine vorhandenen M3-Repositories verändert, kein dauerhafter SSH-Zugang geöffnet. Ein kurzlebiger, auf Dateiübertragung beschränkter temporärer Dienst auf M2 wurde vollständig beendet.
+- Eine echte M2↔M3-Sitzung mit übereinstimmenden SAS-Codes sowie Tests nach Neustart/Logout sind **NICHT** nachgewiesen. Erst danach dürfen weitere Freigabe- oder Transportarbeiten beginnen.
