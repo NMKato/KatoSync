@@ -202,6 +202,22 @@ type MeshLocalReadiness = {
   crossDeviceWrites: boolean;
 };
 
+type MeshIdentityStatus = {
+  fingerprint: string;
+  algorithm: string;
+  paired: false;
+  peerCount: 0;
+  transportReady: false;
+};
+type MeshSignedOffer = {
+  protocol: string;
+  publicKey: string;
+  nonce: string;
+  expiresAt: number;
+  accountScope: string;
+  signature: string;
+};
+
 // No peer registration or network request: only a Tauri read of local daemon
 // state. RDC connectivity is intentionally NOT counted as trusted Mesh peers.
 function MeshReadinessStrip() {
@@ -209,6 +225,37 @@ function MeshReadinessStrip() {
   const [snapshot,setSnapshot]=useState<MeshLocalReadiness|null>(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(false);
+  const [identity,setIdentity]=useState<MeshIdentityStatus|null>(null);
+  const [offer,setOffer]=useState("");
+  const [incoming,setIncoming]=useState("");
+  const [inspected,setInspected]=useState<MeshIdentityStatus|null>(null);
+  const [identityError,setIdentityError]=useState(false);
+  const [pairingBusy,setPairingBusy]=useState(false);
+  const prepareIdentity=async()=>{
+    setPairingBusy(true);setIdentityError(false);
+    try {
+      const actual=await invoke<MeshIdentityStatus>("mesh_device_identity_prepare");
+      if(actual.paired||actual.peerCount||actual.transportReady)throw new Error("unexpected_trust_claim");
+      setIdentity(actual);
+    } catch {setIdentityError(true);}
+    finally {setPairingBusy(false);}
+  };
+  const createOffer=async()=>{
+    setPairingBusy(true);setIdentityError(false);setOffer("");
+    try{
+      const invite=await invoke<MeshSignedOffer>("mesh_pairing_offer_create");
+      if(invite.protocol!=="katosync-mesh-pairing-v1")throw new Error("bad_version");
+      setOffer(JSON.stringify(invite));
+    }catch{setIdentityError(true);}finally{setPairingBusy(false);}
+  };
+  const inspectOffer=async()=>{
+    setPairingBusy(true);setIdentityError(false);setInspected(null);
+    try{
+      const actual=await invoke<MeshIdentityStatus>("mesh_pairing_offer_inspect",{offerJson:incoming});
+      if(actual.paired||actual.peerCount||actual.transportReady)throw new Error("unexpected_trust_claim");
+      setInspected(actual);
+    }catch{setIdentityError(true);}finally{setPairingBusy(false);}
+  };
   const refresh=useCallback(async()=>{
     setLoading(true);
     try {
@@ -253,6 +300,28 @@ function MeshReadinessStrip() {
         <RefreshCcw size={14} className={loading?"spin":""}/>{t("mesh.v0.check")}
       </button>
     </div>
+    <details className="vision-mesh-pairing">
+      <summary>{t("mesh.v1.heading")}</summary>
+      <p>{t("mesh.v1.description")}</p>
+      <div className="vision-mesh-actions">
+        <button type="button" className="ghost compact-button" onClick={()=>void prepareIdentity()}
+          disabled={pairingBusy||!snapshot}>{t("mesh.v1.prepare")}</button>
+        <button type="button" className="ghost compact-button" onClick={()=>void createOffer()}
+          disabled={pairingBusy||!identity}>{t("mesh.v1.invite")}</button>
+      </div>
+      {identity?<p className="vision-mesh-fingerprint">{t("mesh.v1.ownKey")}: <code>{identity.fingerprint}</code></p>:null}
+      {offer?<label className="vision-mesh-field">{t("mesh.v1.offer")}
+        <textarea readOnly value={offer} rows={3} onFocus={e=>e.currentTarget.select()}/>
+      </label>:null}
+      <label className="vision-mesh-field">{t("mesh.v1.inspect")}
+        <textarea value={incoming} maxLength={2048} rows={3} onChange={e=>setIncoming(e.target.value)}
+          placeholder={t("mesh.v1.paste")}/>
+      </label>
+      <button type="button" className="ghost compact-button" onClick={()=>void inspectOffer()}
+        disabled={pairingBusy||!incoming.trim()||!snapshot}>{t("mesh.v1.verify")}</button>
+      {inspected?<p className="vision-mesh-fingerprint">{t("mesh.v1.verifiedNotPaired")}: <code>{inspected.fingerprint}</code></p>:null}
+      {identityError?<p role="alert" className="vision-mesh-error">{t("mesh.v1.failed")}</p>:null}
+    </details>
   </section>;
 }
 
