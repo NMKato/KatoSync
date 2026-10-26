@@ -10781,3 +10781,17 @@ button.agent-tile:hover {
 .vision-mesh-advanced {margin:10px 0;padding:11px 12px;
  border-radius:12px;border:1px solid var(--line);background:rgba(51,66,76,.13);}
 .vision-mesh-advanced>summary {font-size:12px;font-weight:600;cursor:pointer;}
+
+/* Local public-key approval is not peer transport authorization. */
+.vision-mesh-approval,.vision-mesh-approved{margin-top:13px;padding:12px;
+ border:1px solid var(--line);border-radius:12px;}
+.vision-mesh-approved>summary{cursor:pointer;font-size:12px;font-weight:600;}
+.vision-mesh-approval strong{font-size:12px;}
+.vision-mesh-field input{width:100%;box-sizing:border-box;padding:10px;
+ border:1px solid var(--line);border-radius:10px;color:var(--text);
+ background:rgba(34,45,55,.3);letter-spacing:.05em;}
+.vision-mesh-peer{display:flex;justify-content:space-between;align-items:center;gap:9px;
+ padding:11px 0;border-top:1px solid var(--line);flex-wrap:wrap;}
+.vision-mesh-peer>div{display:grid;gap:5px;}
+.vision-mesh-peer code{font-size:10px;word-break:break-all;}
+.vision-mesh-peer small{font-size:11px;color:var(--text-muted);}

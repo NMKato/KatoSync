@@ -292,7 +292,14 @@ pub async fn mesh_pairing_response_create(
     let public_response = serde_json::to_string(&response).map_err(|_| "Antwort ungültig.")?;
     same_account_still_verified(&uid).await?;
     pending_consume(&uid, STATE_OFFER, &issued_digest, Utc::now().timestamp())?;
-    Ok((public_response, proof(responder, &challenge)))
+    let proven = proof(responder, &challenge);
+    crate::mesh_trust::stage_after_mutual_proof(
+        &uid,
+        &responder,
+        &proven.comparison_code,
+        challenge.expires_at,
+    )?;
+    Ok((public_response, proven))
 }
 
 /// On B: verifies A's fresh possession proof against B's OWN pending challenge.
@@ -326,7 +333,14 @@ pub async fn mesh_pairing_response_verify(response_json: String) -> Result<Pairi
         &challenge_digest,
         Utc::now().timestamp(),
     )?;
-    Ok(proof(initiator, &response.challenge))
+    let proven = proof(initiator, &response.challenge);
+    crate::mesh_trust::stage_after_mutual_proof(
+        &uid,
+        &initiator,
+        &proven.comparison_code,
+        response.challenge.expires_at,
+    )?;
+    Ok(proven)
 }
 
 #[cfg(test)]

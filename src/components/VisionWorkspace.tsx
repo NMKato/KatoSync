@@ -224,6 +224,18 @@ type MeshPairingProof = {
   peerCount: 0;
   transportReady: false;
 };
+type MeshApprovedPeer = {
+  fingerprint: string;
+  publicKey: string;
+  approvedAt: number;
+  status: "locally_approved";
+};
+type MeshPeerInventory = {
+  approvalOnly: true;
+  transportReady: false;
+  remoteJobsEnabled: false;
+  peers: MeshApprovedPeer[];
+};
 
 // No peer registration or network request: only a Tauri read of local daemon
 // state. RDC connectivity is intentionally NOT counted as trusted Mesh peers.
@@ -244,6 +256,39 @@ function MeshReadinessStrip() {
   const [responseOutgoing,setResponseOutgoing]=useState("");
   const [pairingProof,setPairingProof]=useState<MeshPairingProof|null>(null);
   const [pairingVerified,setPairingVerified]=useState<MeshPairingProof|null>(null);
+  const [confirmedCode,setConfirmedCode]=useState("");
+  const [approvedPeers,setApprovedPeers]=useState<MeshApprovedPeer[]|null>(null);
+  const [approvalError,setApprovalError]=useState(false);
+  const checkInventory=(value:MeshPeerInventory)=>{
+    if(!value.approvalOnly||value.transportReady||value.remoteJobsEnabled||
+      !Array.isArray(value.peers)||value.peers.length>10||
+      value.peers.some(p=>p.status!=="locally_approved")) {
+      throw new Error("unexpected_peer_permission");
+    }
+    setApprovedPeers(value.peers);
+  };
+  const loadApproved=async()=>{
+    setPairingBusy(true);setApprovalError(false);
+    try {checkInventory(await invoke<MeshPeerInventory>("mesh_local_approved_peers"));}
+    catch{setApprovedPeers(null);setApprovalError(true);}
+    finally{setPairingBusy(false);}
+  };
+  const approvePeer=async()=>{
+    setPairingBusy(true);setApprovalError(false);
+    try{
+      checkInventory(await invoke<MeshPeerInventory>("mesh_local_approve_peer",
+        {confirmedCode:confirmedCode.toUpperCase().trim()}));
+      setConfirmedCode("");
+      setPairingProof(null);setPairingVerified(null);
+    }catch{setApprovalError(true);}
+    finally{setPairingBusy(false);}
+  };
+  const revokePeer=async(fingerprint:string)=>{
+    setPairingBusy(true);setApprovalError(false);
+    try{checkInventory(await invoke<MeshPeerInventory>("mesh_local_revoke_peer",{fingerprint}));}
+    catch{setApprovalError(true);}
+    finally{setPairingBusy(false);}
+  };
   const checkProof=(value:MeshPairingProof)=>{
     if(value.paired||value.peerCount!==0||value.transportReady||
       !/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(value.comparisonCode)) {
@@ -393,7 +438,34 @@ function MeshReadinessStrip() {
         onClick={()=>void verifyResponse()}>{t("mesh.v2.verifyButton")}</button>
       {pairingVerified?<p className="vision-mesh-sas"><strong>{t("mesh.v2.code")}:</strong> <code>{pairingVerified.comparisonCode}</code></p>:null}
       {(pairingProof||pairingVerified)?<p className="vision-mesh-warning">{t("mesh.v2.noTrust")}</p>:null}
+      {(pairingProof||pairingVerified)?<div className="vision-mesh-approval">
+        <strong>{t("mesh.v3.confirmTitle")}</strong>
+        <p>{t("mesh.v3.confirmDescription")}</p>
+        <label className="vision-mesh-field">{t("mesh.v3.confirmCode")}
+          <input value={confirmedCode} maxLength={14}
+            placeholder="AB12-34CD-EF09"
+            autoComplete="off" onChange={e=>setConfirmedCode(e.target.value.toUpperCase())}/>
+        </label>
+        <button type="button" className="ghost compact-button"
+          disabled={pairingBusy||!/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(confirmedCode)}
+          onClick={()=>void approvePeer()}>{t("mesh.v3.confirmButton")}</button>
+      </div>:null}
       </details>
+      <details className="vision-mesh-approved">
+        <summary>{t("mesh.v3.listTitle")}</summary>
+        <p>{t("mesh.v3.listDisclaimer")}</p>
+        <button type="button" className="ghost compact-button" disabled={pairingBusy||!snapshot}
+          onClick={()=>void loadApproved()}>{t("mesh.v3.refresh")}</button>
+        {approvedPeers && approvedPeers.length===0?<p>{t("mesh.v3.empty")}</p>:null}
+        {approvedPeers?.map(peer=><div className="vision-mesh-peer" key={peer.fingerprint}>
+          <div><small>{t("mesh.v3.locallyApproved")}</small>
+            <code>{peer.fingerprint}</code></div>
+          <button type="button" className="ghost compact-button"
+            disabled={pairingBusy}
+            onClick={()=>void revokePeer(peer.fingerprint)}>{t("mesh.v3.revoke")}</button>
+        </div>)}
+      </details>
+      {approvalError?<p role="alert" className="vision-mesh-error">{t("mesh.v3.error")}</p>:null}
       {identityError?<p role="alert" className="vision-mesh-error">{t("mesh.v1.failed")}</p>:null}
     </details>
   </section>;
