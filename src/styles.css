@@ -10756,3 +10756,15 @@ button.agent-tile:hover {
 .vision-mesh-chip.mesh-unpaired {border-color:rgba(215,169,85,.26);color:var(--text-muted);}
 .vision-mesh-last {display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
 .vision-mesh-last .compact-button {font-size:11px;}
+
+/* Manually initiated signed pairing invite preparation: not a trusted peer session. */
+.vision-mesh-pairing {margin-top:7px;border-top:1px solid var(--line);padding-top:10px;}
+.vision-mesh-pairing summary {cursor:pointer;font-size:12px;font-weight:600;}
+.vision-mesh-pairing p {font-size:12px;line-height:1.5;color:var(--text-muted);margin:10px 0;}
+.vision-mesh-actions {display:flex;gap:9px;flex-wrap:wrap;margin:12px 0;}
+.vision-mesh-fingerprint code {font-size:11px;overflow-wrap:anywhere;}
+.vision-mesh-field {display:grid;gap:6px;font-size:11px;color:var(--text-muted);margin:11px 0;}
+.vision-mesh-field textarea {width:100%;box-sizing:border-box;background:rgba(24,34,42,.55);
+ border:1px solid var(--line);border-radius:11px;color:var(--text);padding:10px;
+ font-size:11px;resize:vertical;overflow-wrap:anywhere;}
+.vision-mesh-pairing .vision-mesh-error {color:#e7aa82;}

@@ -30,6 +30,7 @@ mod github_app_auth;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
+mod mesh_identity;
 mod mesh_readiness;
 mod model_distribution;
 mod offline_stt;
@@ -378,6 +379,9 @@ pub fn run() {
             read_logs,
             local_control_snapshot,
             mesh_readiness::mesh_local_readiness,
+            mesh_identity::mesh_device_identity_prepare,
+            mesh_identity::mesh_pairing_offer_create,
+            mesh_identity::mesh_pairing_offer_inspect,
             open_output_dir,
             resume_runner_session,
             provider_statuses,
