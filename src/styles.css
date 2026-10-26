@@ -10768,3 +10768,16 @@ button.agent-tile:hover {
  border:1px solid var(--line);border-radius:11px;color:var(--text);padding:10px;
  font-size:11px;resize:vertical;overflow-wrap:anywhere;}
 .vision-mesh-pairing .vision-mesh-error {color:#e7aa82;}
+
+/* Explicit challenge / reply proof, separated from trust or remote dispatch. */
+.vision-mesh-stage-title {font-size:12px;font-weight:650;margin-top:17px;padding-top:12px;
+ border-top:1px solid var(--line);}
+.vision-mesh-sas {padding:10px 14px;border:1px solid rgba(75,192,166,.35);
+ border-radius:12px;background:rgba(60,181,156,.07);font-size:13px!important;}
+.vision-mesh-sas code {font-size:17px;font-weight:700;letter-spacing:.09em;margin-left:8px;}
+.vision-mesh-warning {border-left:2px solid #c78c52;padding:8px 11px;
+ color:var(--text-muted);font-size:11px!important;}
+
+.vision-mesh-advanced {margin:10px 0;padding:11px 12px;
+ border-radius:12px;border:1px solid var(--line);background:rgba(51,66,76,.13);}
+.vision-mesh-advanced>summary {font-size:12px;font-weight:600;cursor:pointer;}

@@ -30,6 +30,7 @@ mod github_app_auth;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
+mod mesh_handshake;
 mod mesh_identity;
 mod mesh_readiness;
 mod model_distribution;
@@ -382,6 +383,9 @@ pub fn run() {
             mesh_identity::mesh_device_identity_prepare,
             mesh_identity::mesh_pairing_offer_create,
             mesh_identity::mesh_pairing_offer_inspect,
+            mesh_handshake::mesh_pairing_challenge_create,
+            mesh_handshake::mesh_pairing_response_create,
+            mesh_handshake::mesh_pairing_response_verify,
             open_output_dir,
             resume_runner_session,
             provider_statuses,
