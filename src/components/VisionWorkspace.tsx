@@ -217,6 +217,13 @@ type MeshSignedOffer = {
   accountScope: string;
   signature: string;
 };
+type MeshPairingProof = {
+  fingerprint: string;
+  comparisonCode: string;
+  paired: false;
+  peerCount: 0;
+  transportReady: false;
+};
 
 // No peer registration or network request: only a Tauri read of local daemon
 // state. RDC connectivity is intentionally NOT counted as trusted Mesh peers.
@@ -231,6 +238,43 @@ function MeshReadinessStrip() {
   const [inspected,setInspected]=useState<MeshIdentityStatus|null>(null);
   const [identityError,setIdentityError]=useState(false);
   const [pairingBusy,setPairingBusy]=useState(false);
+  const [challengeIncoming,setChallengeIncoming]=useState("");
+  const [challengeOutgoing,setChallengeOutgoing]=useState("");
+  const [responseIncoming,setResponseIncoming]=useState("");
+  const [responseOutgoing,setResponseOutgoing]=useState("");
+  const [pairingProof,setPairingProof]=useState<MeshPairingProof|null>(null);
+  const [pairingVerified,setPairingVerified]=useState<MeshPairingProof|null>(null);
+  const checkProof=(value:MeshPairingProof)=>{
+    if(value.paired||value.peerCount!==0||value.transportReady||
+      !/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(value.comparisonCode)) {
+      throw new Error("invalid_pairing_proof");
+    }
+  };
+  const createChallenge=async()=>{
+    setPairingBusy(true);setIdentityError(false);setChallengeOutgoing("");setPairingVerified(null);
+    try {
+      const raw=await invoke<string>("mesh_pairing_challenge_create",{offerJson:incoming});
+      if(JSON.parse(raw)?.protocol!=="katosync-mesh-challenge-v1")throw new Error("invalid_challenge");
+      setChallengeOutgoing(raw);
+    }catch{setIdentityError(true);}finally{setPairingBusy(false);}
+  };
+  const createResponse=async()=>{
+    setPairingBusy(true);setIdentityError(false);setResponseOutgoing("");setPairingProof(null);
+    try {
+      const [raw,value]=await invoke<[string,MeshPairingProof]>("mesh_pairing_response_create",
+        {challengeJson:challengeIncoming});
+      if(JSON.parse(raw)?.protocol!=="katosync-mesh-response-v1")throw new Error("invalid_response");
+      checkProof(value);setResponseOutgoing(raw);setPairingProof(value);
+    }catch{setIdentityError(true);}finally{setPairingBusy(false);}
+  };
+  const verifyResponse=async()=>{
+    setPairingBusy(true);setIdentityError(false);setPairingVerified(null);
+    try{
+      const result=await invoke<MeshPairingProof>("mesh_pairing_response_verify",
+        {responseJson:responseIncoming});
+      checkProof(result);setPairingVerified(result);
+    }catch{setIdentityError(true);}finally{setPairingBusy(false);}
+  };
   const prepareIdentity=async()=>{
     setPairingBusy(true);setIdentityError(false);
     try {
@@ -320,6 +364,36 @@ function MeshReadinessStrip() {
       <button type="button" className="ghost compact-button" onClick={()=>void inspectOffer()}
         disabled={pairingBusy||!incoming.trim()||!snapshot}>{t("mesh.v1.verify")}</button>
       {inspected?<p className="vision-mesh-fingerprint">{t("mesh.v1.verifiedNotPaired")}: <code>{inspected.fingerprint}</code></p>:null}
+      <details className="vision-mesh-advanced">
+        <summary>{t("mesh.v2.title")}</summary>
+      <p>{t("mesh.v2.notice")}</p>
+      <div className="vision-mesh-stage-title">{t("mesh.v2.stepB")}</div>
+      <button type="button" className="ghost compact-button" disabled={!incoming.trim()||pairingBusy||!snapshot}
+        onClick={()=>void createChallenge()}>{t("mesh.v2.challengeButton")}</button>
+      {challengeOutgoing?<label className="vision-mesh-field">{t("mesh.v2.challengeOutbound")}
+        <textarea readOnly value={challengeOutgoing} rows={3} onFocus={e=>e.currentTarget.select()}/>
+      </label>:null}
+      <div className="vision-mesh-stage-title">{t("mesh.v2.stepA")}</div>
+      <label className="vision-mesh-field">{t("mesh.v2.challengeInbound")}
+        <textarea rows={3} maxLength={8192} value={challengeIncoming}
+          onChange={e=>setChallengeIncoming(e.target.value)} placeholder={t("mesh.v2.pasteChallenge")}/>
+      </label>
+      <button type="button" className="ghost compact-button" disabled={!challengeIncoming.trim()||pairingBusy||!snapshot}
+        onClick={()=>void createResponse()}>{t("mesh.v2.answerButton")}</button>
+      {responseOutgoing?<label className="vision-mesh-field">{t("mesh.v2.responseOutbound")}
+        <textarea readOnly rows={4} value={responseOutgoing} onFocus={e=>e.currentTarget.select()}/>
+      </label>:null}
+      {pairingProof?<p className="vision-mesh-sas"><strong>{t("mesh.v2.code")}:</strong> <code>{pairingProof.comparisonCode}</code></p>:null}
+      <div className="vision-mesh-stage-title">{t("mesh.v2.stepBVerify")}</div>
+      <label className="vision-mesh-field">{t("mesh.v2.responseInbound")}
+        <textarea rows={4} maxLength={8192} value={responseIncoming}
+          onChange={e=>setResponseIncoming(e.target.value)} placeholder={t("mesh.v2.pasteResponse")}/>
+      </label>
+      <button type="button" className="ghost compact-button" disabled={!responseIncoming.trim()||pairingBusy||!snapshot}
+        onClick={()=>void verifyResponse()}>{t("mesh.v2.verifyButton")}</button>
+      {pairingVerified?<p className="vision-mesh-sas"><strong>{t("mesh.v2.code")}:</strong> <code>{pairingVerified.comparisonCode}</code></p>:null}
+      {(pairingProof||pairingVerified)?<p className="vision-mesh-warning">{t("mesh.v2.noTrust")}</p>:null}
+      </details>
       {identityError?<p role="alert" className="vision-mesh-error">{t("mesh.v1.failed")}</p>:null}
     </details>
   </section>;

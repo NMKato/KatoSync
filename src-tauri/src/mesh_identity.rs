@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroize;
 
-const OFFER_LIFETIME_SECS: i64 = 300;
+pub(crate) const OFFER_LIFETIME_SECS: i64 = 300;
 const CLOCK_SKEW_SECS: i64 = 10;
 const ACCOUNT_PREFIX: &str = "mesh-ed25519-v1:";
 const PROTOCOL: &str = "katosync-mesh-pairing-v1";
@@ -36,7 +36,7 @@ pub struct MeshOffer {
     pub signature: String,
 }
 
-fn scope(uid: &str) -> String {
+pub(crate) fn scope(uid: &str) -> String {
     let mut h = Sha256::new();
     h.update(b"katosync-mesh-v1-account-scope:");
     h.update(crate::KATOSYNC_AUTH_URL.as_bytes());
@@ -76,7 +76,7 @@ fn open_identity(uid: &str) -> Result<Option<SigningKey>, String> {
     Ok(Some(signing))
 }
 
-fn ensure_identity(uid: &str) -> Result<SigningKey, String> {
+pub(crate) fn ensure_identity(uid: &str) -> Result<SigningKey, String> {
     if let Some(x) = open_identity(uid)? {
         return Ok(x);
     }
@@ -98,7 +98,7 @@ fn ensure_identity(uid: &str) -> Result<SigningKey, String> {
     Ok(restored)
 }
 
-fn fingerprint(key: &VerifyingKey) -> String {
+pub(crate) fn fingerprint(key: &VerifyingKey) -> String {
     let h = Sha256::digest(key.as_bytes());
     h[..16]
         .iter()
@@ -113,6 +113,10 @@ fn offer_message(offer: &MeshOffer) -> Vec<u8> {
         offer.protocol, offer.account_scope, offer.public_key, offer.nonce, offer.expires_at
     )
     .into_bytes()
+}
+#[cfg(test)]
+pub(crate) fn make_test_offer(signing: &SigningKey, uid: &str, now: i64) -> MeshOffer {
+    generate_offer(signing, uid, now)
 }
 fn generate_offer(signing: &SigningKey, uid: &str, now: i64) -> MeshOffer {
     let mut random = [0u8; 32];
@@ -135,7 +139,11 @@ fn decode_key(value: &str) -> Result<VerifyingKey, &'static str> {
     let arr: [u8; 32] = raw.try_into().map_err(|_| "bad_key")?;
     VerifyingKey::from_bytes(&arr).map_err(|_| "bad_key")
 }
-fn verify_offer(offer: &MeshOffer, uid: &str, now: i64) -> Result<VerifyingKey, &'static str> {
+pub(crate) fn verify_offer(
+    offer: &MeshOffer,
+    uid: &str,
+    now: i64,
+) -> Result<VerifyingKey, &'static str> {
     if offer.protocol != PROTOCOL || offer.account_scope != scope(uid) {
         return Err("wrong_scope");
     }
@@ -158,7 +166,7 @@ fn verify_offer(offer: &MeshOffer, uid: &str, now: i64) -> Result<VerifyingKey, 
     Ok(key)
 }
 
-async fn same_account_still_verified(uid: &str) -> Result<(), String> {
+pub(crate) async fn same_account_still_verified(uid: &str) -> Result<(), String> {
     let current = crate::github_app_auth::verified_katosync_user().await?;
     if current != uid {
         return Err("KatoSync-Konto während der Geräteprüfung gewechselt.".to_string());
@@ -186,7 +194,9 @@ pub async fn mesh_pairing_offer_create() -> Result<MeshOffer, String> {
     // User presses a button to produce an invitation, not auto-on-start.
     let identity = ensure_identity(&uid)?;
     same_account_still_verified(&uid).await?;
-    Ok(generate_offer(&identity, &uid, Utc::now().timestamp()))
+    let offer = generate_offer(&identity, &uid, Utc::now().timestamp());
+    crate::mesh_handshake::store_outbound_offer(&uid, &offer)?;
+    Ok(offer)
 }
 
 #[tauri::command]
