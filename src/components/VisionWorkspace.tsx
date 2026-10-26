@@ -10,6 +10,7 @@ import {
   Database,
   FolderGit2,
   Laptop,
+  ShieldCheck,
   Locate,
   Minus,
   Plus,
@@ -19,6 +20,7 @@ import {
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useT, type TFunc, type TKey } from "../i18n";
 import {
   HUB_NODE_ID,
@@ -167,6 +169,8 @@ export function VisionWorkspace({ vm }: { vm: ViewModel }) {
         </div>
       </div>
 
+      <MeshReadinessStrip />
+
       <VisionCanvas graph={graph} nodes={view.nodes} edges={view.edges} matches={view.matches} query={vision.query} />
 
       <footer className="vision-footer">
@@ -184,6 +188,72 @@ export function VisionWorkspace({ vm }: { vm: ViewModel }) {
       </footer>
     </section>
   );
+}
+
+type MeshLocalReadiness = {
+  protocol: string;
+  platform: string;
+  architecture: string;
+  localControl: "fresh" | "stale" | "unknown";
+  deviceIdentity: "not_paired";
+  peerTransport: "not_connected";
+  verifiedPeers: number;
+  remoteReadOnlyDispatch: boolean;
+  crossDeviceWrites: boolean;
+};
+
+// No peer registration or network request: only a Tauri read of local daemon
+// state. RDC connectivity is intentionally NOT counted as trusted Mesh peers.
+function MeshReadinessStrip() {
+  const {t}=useT();
+  const [snapshot,setSnapshot]=useState<MeshLocalReadiness|null>(null);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState(false);
+  const refresh=useCallback(async()=>{
+    setLoading(true);
+    try {
+      if(!window.__TAURI_INTERNALS__) {
+        setSnapshot(null);
+        setError(false);
+        return;
+      }
+      const actual=await invoke<MeshLocalReadiness>("mesh_local_readiness");
+      if(actual.protocol!=="mesh-readonly-v0" || actual.deviceIdentity!=="not_paired" ||
+        actual.peerTransport!=="not_connected" || actual.verifiedPeers!==0 ||
+        actual.remoteReadOnlyDispatch || actual.crossDeviceWrites) {
+        throw new Error("unexpected_mesh_security_contract");
+      }
+      setSnapshot(actual);
+      setError(false);
+    } catch {
+      setSnapshot(null);
+      setError(true);
+    } finally {setLoading(false);}
+  },[]);
+  useEffect(()=>{void refresh();},[refresh]);
+  const readiness=snapshot?.localControl??"unknown";
+  return <section className="vision-mesh-readiness glass" aria-label={t("mesh.v0.title")}>
+    <div className="vision-mesh-heading">
+      <ShieldCheck size={18} aria-hidden="true"/>
+      <div><strong>{t("mesh.v0.title")}</strong>
+        <small>{t("mesh.v0.subtitle")}</small>
+      </div>
+    </div>
+    <div className="vision-mesh-chips">
+      <span className="vision-mesh-chip">
+        {snapshot?(snapshot.platform+" · "+snapshot.architecture):t("mesh.v0.localUnknown")}
+      </span>
+      <span className="vision-mesh-chip">{t("mesh.v0.control")}: {t(("mesh.v0."+readiness) as TKey)}</span>
+      <span className="vision-mesh-chip mesh-unpaired">{t("mesh.v0.notPaired")}</span>
+      <span className="vision-mesh-chip mesh-unpaired">{t("mesh.v0.noDispatch")}</span>
+    </div>
+    <div className="vision-mesh-last">
+      <small>{error?t("mesh.v0.unavailable"):t("mesh.v0.trustBoundary")}</small>
+      <button type="button" className="ghost compact-button" onClick={()=>void refresh()} disabled={loading}>
+        <RefreshCcw size={14} className={loading?"spin":""}/>{t("mesh.v0.check")}
+      </button>
+    </div>
+  </section>;
 }
 
 function VisionCanvas({
