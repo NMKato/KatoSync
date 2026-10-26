@@ -33,6 +33,7 @@ mod memory_fabric;
 mod mesh_handshake;
 mod mesh_identity;
 mod mesh_readiness;
+mod mesh_trust;
 mod model_distribution;
 mod offline_stt;
 mod orchestration;
@@ -386,6 +387,9 @@ pub fn run() {
             mesh_handshake::mesh_pairing_challenge_create,
             mesh_handshake::mesh_pairing_response_create,
             mesh_handshake::mesh_pairing_response_verify,
+            mesh_trust::mesh_local_approved_peers,
+            mesh_trust::mesh_local_approve_peer,
+            mesh_trust::mesh_local_revoke_peer,
             open_output_dir,
             resume_runner_session,
             provider_statuses,
