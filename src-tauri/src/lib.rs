@@ -33,6 +33,7 @@ mod memory_fabric;
 mod mesh_handshake;
 mod mesh_identity;
 mod mesh_readiness;
+mod mesh_tls;
 mod mesh_trust;
 mod model_distribution;
 mod offline_stt;

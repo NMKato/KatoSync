@@ -19,11 +19,15 @@ argon2 = "0.5"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
-ed25519-dalek = "2.2"
+ed25519-dalek = { version = "2.2", features = ["pkcs8"] }
 keyring = { version = "3.6", features = ["apple-native"] }
 lopdf = "0.34"
 plist = "1.7"
 rand = "0.8"
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
+x509-parser = "0.18.1"
+rustls = { version = "0.23.41", default-features = false, features = ["ring", "std"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
 regex = "1.11"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -35,7 +39,7 @@ zip = { version = "2.2", default-features = false, features = ["deflate"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
-tokio = { version = "1.41", features = ["macros", "rt-multi-thread", "time", "process", "io-util", "sync"] }
+tokio = { version = "1.41", features = ["macros", "rt-multi-thread", "time", "process", "io-util", "sync", "net"] }
 uuid = { version = "1.12", features = ["v4"] }
 walkdir = "2.5"
 zeroize = "1"
