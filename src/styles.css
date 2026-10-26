@@ -10736,3 +10736,23 @@ button.agent-tile:hover {
   .continuity-bar-track {grid-column:1 / -1;grid-row:2;}
   .continuity-bar-value {grid-column:2;grid-row:1;}
 }
+
+/* Read-only Mesh stage 0 – truthful local state, not an RDC pseudo-network. */
+.vision-mesh-readiness {
+  display:grid;gap:10px;margin:12px 0 16px;padding:14px 18px;
+  border:1px solid rgba(78,177,178,.22);
+  border-radius:17px;background:linear-gradient(110deg,rgba(44,131,137,.08),rgba(80,122,159,.035));
+}
+.vision-mesh-heading {display:flex;align-items:center;gap:12px;}
+.vision-mesh-heading svg {color:#58c0ba;}
+.vision-mesh-heading div {display:grid;gap:2px;}
+.vision-mesh-heading strong {font-size:13px;font-weight:650;}
+.vision-mesh-heading small,.vision-mesh-last small {color:var(--text-muted);font-size:11px;}
+.vision-mesh-chips {display:flex;gap:7px;flex-wrap:wrap;}
+.vision-mesh-chip {
+  border:1px solid var(--line);border-radius:99px;background:rgba(104,138,151,.08);
+  font-size:11px;padding:6px 11px;color:var(--text);
+}
+.vision-mesh-chip.mesh-unpaired {border-color:rgba(215,169,85,.26);color:var(--text-muted);}
+.vision-mesh-last {display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+.vision-mesh-last .compact-button {font-size:11px;}
