@@ -51,6 +51,7 @@ import {
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -250,6 +251,23 @@ interface OnboardingPosition {
 
 export default function App() {
   const vm = useKatoSyncViewModel();
+  const [katoosBadgeVerified,setKatoosBadgeVerified]=useState(false);
+  useEffect(()=>{
+    let current=true;
+    if(!vm.sessionStatus.loggedIn){
+      setKatoosBadgeVerified(false);
+      return;
+    }
+    // Only issuer-verified KATOOS accounts get the Family badge.
+    // Never use this visual marker to authorize future KAI Desktop features.
+    void invoke<{issuerVerified:boolean;katoosAccount:boolean;grantsExtraCapabilities:false}>(
+      "verified_katoos_identity_badge"
+    ).then(status=>{
+      if(current)setKatoosBadgeVerified(status.issuerVerified&&status.katoosAccount&&
+        !status.grantsExtraCapabilities);
+    }).catch(()=>{if(current)setKatoosBadgeVerified(false);});
+    return ()=>{current=false;};
+  },[vm.sessionStatus.loggedIn,vm.sessionStatus.email]);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const stored = localStorage.getItem("katosync.theme");
     return stored === "light" ? "light" : "dark";
@@ -666,6 +684,9 @@ export default function App() {
                   ? maskEmail(vm.sessionStatus.email)
                   : vm.sessionStatus.email || t("settings.api.accountFallback")}
               </span>
+              {katoosBadgeVerified?<span className="sidebar-katoos-family-badge" title={t("auth.katoosFamilyHint")}>
+                <ShieldCheck size={12}/>{t("auth.katoosFamily")}
+              </span>:null}
               <HoverTip description={t("sidebar.logoutDesc")} title={t("sidebar.logout")}>
                 <button className="ghost license-link" onClick={vm.requestLogout} type="button">
                   <LogOut size={16} />
@@ -2945,7 +2966,8 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
           <img alt="" src="/katoos_icon_logo_trans.png" />
           <div>
             <strong>KatoSync</strong>
-            <span>{t("login.subtitle")}</span>
+            <span>{import.meta.env.VITE_KATOOS_AUTH_QA==="1"?
+              t("auth.katoosLoginSubtitle"):t("login.subtitle")}</span>
           </div>
         </div>
         <div className="login-tabs">
@@ -2956,13 +2978,13 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
           >
             {t("login.signIn")}
           </button>
-          <button
+          {import.meta.env.VITE_KATOOS_AUTH_QA!=="1"?<button
             className={mode === "register" ? "active" : ""}
             onClick={() => setMode("register")}
             type="button"
           >
             {t("login.signUp")}
-          </button>
+          </button>:null}
         </div>
         {vm.notice ? <NoticeBar notice={vm.notice} onClose={() => vm.setNotice(null)} /> : null}
         <label>
@@ -2997,7 +3019,7 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
           {busy ? <Loader2 className="spin" size={16} /> : null}
           {mode === "login" ? t("login.signIn") : t("login.signUp")}
         </button>
-        {mode === "login" ? (
+        {mode === "login" && import.meta.env.VITE_KATOOS_AUTH_QA!=="1" ? (
           <button
             className="ghost login-forgot"
             disabled={busy || !vm.loginEmail}
@@ -3007,7 +3029,8 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
             {t("login.forgot")}
           </button>
         ) : null}
-        <p className="login-hint">{t("login.hint")}</p>
+        <p className="login-hint">{import.meta.env.VITE_KATOOS_AUTH_QA==="1"?
+          t("auth.katoosQaHint"):t("login.hint")}</p>
       </div>
     </div>
   );

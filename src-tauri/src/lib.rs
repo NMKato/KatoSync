@@ -47,8 +47,10 @@ mod read_only_dispatch;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[cfg(not(feature = "github-login-qa"))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
-#[cfg(feature = "github-login-qa")]
+#[cfg(all(feature = "github-login-qa", not(feature = "katoos-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
+#[cfg(feature = "katoos-auth-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.auth.qa";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";
 const SUPABASE_SESSION_ACCOUNT: &str = "supabase-refresh-token";
@@ -57,8 +59,15 @@ const USER_AGENT: &str = "KatoSync/1.0.1";
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
 #[cfg(feature = "github-login-qa")]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.github.login.qa.sync";
-// KatoSync-eigenes Supabase-Projekt (oeffentlicher Anon-Key, bewusst client-seitig). Getrennt von KatoOS.
+// KATOOS canonical issuer on explicit, isolated QA feature only. Never silently
+// migrate or reinterpret existing KatoSync tenants/sessions on stable builds.
+#[cfg(feature = "katoos-auth-qa")]
+const KATOSYNC_AUTH_URL: &str = "https://xbnnlyyxiilklsygxcof.supabase.co";
+#[cfg(not(feature = "katoos-auth-qa"))]
 const KATOSYNC_AUTH_URL: &str = "https://wspcuiylctlrvvpnwufk.supabase.co";
+#[cfg(feature = "katoos-auth-qa")]
+const KATOSYNC_AUTH_ANON_KEY: &str = "sb_publishable_7hgIrdED0Pwg_Mb-Mh4ZCw_uTf00k0X";
+#[cfg(not(feature = "katoos-auth-qa"))]
 const KATOSYNC_AUTH_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndzcGN1aXlsY3RscnZ2cG53dWZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzNzMwODMsImV4cCI6MjA5Nzk0OTA4M30.HJu_FxIFWoFDooVLE9TVOD10dgxJwLcpFZrUKK2_bv4";
 static API_KEY_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static MCP_CONNECTOR_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -359,6 +368,7 @@ pub fn run() {
             signup_supabase,
             recover_supabase,
             supabase_session_status,
+            verified_katoos_identity_badge,
             logout_supabase,
             mint_connector_token,
             cloud_profile_sync_after_login,
@@ -793,6 +803,9 @@ async fn login_supabase(email: String, password: String) -> Result<SupabaseSessi
 
 #[tauri::command]
 async fn recover_supabase(email: String) -> Result<(), String> {
+    if cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS-Test: Passwort-Reset nur auf der offiziellen KATOOS-Seite.".into());
+    }
     let email_trim = email.trim();
     if email_trim.is_empty() {
         return Err("Bitte E-Mail-Adresse eingeben.".to_string());
@@ -802,6 +815,9 @@ async fn recover_supabase(email: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn signup_supabase(email: String, password: String) -> Result<SupabaseSessionStatus, String> {
+    if cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS-Test: neue Konten nur auf der offiziellen KATOOS-Seite.".into());
+    }
     let email_trim = email.trim();
     if email_trim.is_empty() || password.trim().len() < 6 {
         return Err("Bitte E-Mail und ein Passwort mit mindestens 6 Zeichen angeben.".to_string());
@@ -859,6 +875,37 @@ fn supabase_session_status() -> Result<SupabaseSessionStatus, String> {
     })
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KatoosIdentityBadge {
+    issuer_verified: bool,
+    katoos_account: bool,
+    /// Never an entitlement or product-permission claim.
+    grants_extra_capabilities: bool,
+}
+
+/// Online issuer verification; a persisted email marker alone does not earn a badge.
+/// An active KATOOS account is not proof of a paid tier or KAI Desktop permission.
+#[tauri::command]
+async fn verified_katoos_identity_badge() -> Result<KatoosIdentityBadge, String> {
+    if !cfg!(feature = "katoos-auth-qa") {
+        return Ok(KatoosIdentityBadge {
+            issuer_verified: false,
+            katoos_account: false,
+            grants_extra_capabilities: false,
+        });
+    }
+    let uid = github_app_auth::verified_katosync_user().await?;
+    if uuid::Uuid::parse_str(&uid).is_err() {
+        return Err("KATOOS-Konto nicht verifiziert.".into());
+    }
+    Ok(KatoosIdentityBadge {
+        issuer_verified: true,
+        katoos_account: true,
+        grants_extra_capabilities: false,
+    })
+}
+
 #[tauri::command]
 fn logout_supabase() -> Result<SupabaseSessionStatus, String> {
     github_app_auth::purge_local_credentials();
@@ -875,6 +922,9 @@ fn logout_supabase() -> Result<SupabaseSessionStatus, String> {
 
 #[tauri::command]
 async fn mint_connector_token(base_url: String) -> Result<serde_json::Value, String> {
+    if cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS-Test: Connector-Ausgabe deaktiviert.".into());
+    }
     let access_token = ensure_supabase_access_token()
         .await
         .map_err(error_to_string)?;
@@ -1265,6 +1315,13 @@ async fn cloud_profile_sync_after_login(
     base_url: String,
     password: String,
 ) -> Result<CloudProfileSyncResult, String> {
+    // Never create/update the real KATOOS cloud profile from the isolated QA app.
+    if cfg!(feature = "katoos-auth-qa") {
+        return Ok(CloudProfileSyncResult {
+            status: "empty".into(),
+            library_id: None,
+        });
+    }
     if password.trim().is_empty() {
         return Err("Passwort fehlt für die Cloud-Profil-Synchronisierung.".to_string());
     }
@@ -1341,6 +1398,10 @@ struct CloudProfilePushResult {
 // Sonst -> needs_password (die UI fragt einmalig nach). Ohne Sitzung: stillschweigend nichts tun.
 #[tauri::command]
 async fn cloud_profile_push(base_url: String) -> Result<CloudProfilePushResult, String> {
+    if cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS-Test: Cloud-Profil-Änderungen deaktiviert.".into());
+    }
+
     if load_supabase_refresh_token().is_err() {
         return Ok(CloudProfilePushResult {
             pushed: false,
@@ -1367,6 +1428,10 @@ async fn cloud_profile_push(base_url: String) -> Result<CloudProfilePushResult, 
 // Einmalige Passwort-Abfrage (still-wieder-eingeloggte Sitzung): Schluessel ableiten + pushen.
 #[tauri::command]
 async fn cloud_profile_unlock_and_push(base_url: String, password: String) -> Result<(), String> {
+    if cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS-Test: Cloud-Profil-Änderungen deaktiviert.".into());
+    }
+
     cloud_profile_unlock_and_push_inner(&base_url, &password)
         .await
         .map_err(error_to_string)
@@ -4926,7 +4991,9 @@ fn app_support_dir() -> Result<PathBuf> {
     let dir = dirs::data_dir()
         .or_else(dirs::home_dir)
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
-        .join(if cfg!(feature = "github-login-qa") {
+        .join(if cfg!(feature = "katoos-auth-qa") {
+            "KatoSync KATOOS Auth QA"
+        } else if cfg!(feature = "github-login-qa") {
             "KatoSync GitHub Login QA"
         } else {
             "KatoSync"
@@ -4944,7 +5011,9 @@ fn logs_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
         .join("Library")
         .join("Logs")
-        .join(if cfg!(feature = "github-login-qa") {
+        .join(if cfg!(feature = "katoos-auth-qa") {
+            "KatoSync KATOOS Auth QA"
+        } else if cfg!(feature = "github-login-qa") {
             "KatoSync GitHub Login QA"
         } else {
             "KatoSync"
