@@ -4,7 +4,8 @@ import {useEffect,useRef,useState} from "react";
 import {invoke} from "@tauri-apps/api/core";
 import {openUrl} from "@tauri-apps/plugin-opener";
 import {CheckCircle2,Copy,ExternalLink,Github,Info,ShieldCheck,Unplug} from "lucide-react";
-import {useT} from "../i18n";
+import {useT, type TKey} from "../i18n";
+import {classifyGithubAuthFailure,type GithubAuthFailure} from "../lib/githubAuthError";
 import {ProviderBrandMark} from "./ProviderBrandMark";
 import {GithubAppReadOnlyInventory} from "./GithubAppReadOnlyInventory";
 import type {GithubIssueHandoff} from "../lib/githubChatHandoff";
@@ -23,24 +24,39 @@ export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{varia
  const [device,setDevice]=useState<Device|null>(null);
  const [busy,setBusy]=useState(false);
  const [result,setResult]=useState("");
- const [error,setError]=useState(false);
+ const [error,setError]=useState<GithubAuthFailure|null>(null);
+ const diagnosis:Record<GithubAuthFailure,TKey>={
+  session:"kickoff.authDiagnosisSession",
+  keychain:"kickoff.authDiagnosisKeychain",
+  network:"kickoff.authDiagnosisNetwork",
+  configuration:"kickoff.authDiagnosisConfiguration",
+  unknown:"kickoff.authDiagnosisUnknown"
+ };
  const latest=useRef(0);
  const mounted=useRef(true);
  useEffect(()=>{
   mounted.current=true;const version=++latest.current;
   void invoke<Status>("github_app_connection_status").then(s=>{
    if(mounted.current&&version===latest.current)setStatus(s);
-  }).catch(()=>{
-   if(mounted.current&&version===latest.current)setError(true);
+  }).catch((e:unknown)=>{
+   if(mounted.current&&version===latest.current)setError(classifyGithubAuthFailure(e));
   });
   return ()=>{mounted.current=false;latest.current++;};
  },[]);
  async function perform(action:()=>Promise<void>){
   const version=++latest.current;
-  setBusy(true);setError(false);setResult("");
+  setBusy(true);setError(null);setResult("");
   try{await action();}
-  catch{if(mounted.current&&version===latest.current)setError(true);}
+  catch(e:unknown){
+    if(mounted.current&&version===latest.current)setError(classifyGithubAuthFailure(e));
+  }
   finally{if(mounted.current&&version===latest.current)setBusy(false);}
+ }
+ function refreshStatus(){
+  void perform(async()=>{
+   const actual=await invoke<Status>("github_app_connection_status");
+   if(mounted.current)setStatus(actual);
+  });
  }
  function start(){
   void perform(async()=>{
@@ -86,7 +102,11 @@ export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{varia
       <button type="button" className="secondary compact-button" disabled={busy}
         onClick={disconnect}><Unplug size={13}/>{t("kickoff.authDisconnect")}</button>
     </div>:status?.configured===false?<p className="agent-empty">{t("kickoff.authNotConfigured")}</p>
-      :!status?<p className="agent-empty">{t("kickoff.authUnavailable")}</p>
+      :!status?<div className="github-provider-status-retry">
+        <p className="agent-empty">{t("kickoff.authUnavailable")}</p>
+        <button className="secondary compact-button" type="button" disabled={busy}
+          onClick={refreshStatus}>{t("kickoff.authRetryStatus")}</button>
+      </div>
       :!device?<button className="secondary compact-button github-connect-action" type="button"
        disabled={busy} onClick={start}><Github size={15}/>{t("kickoff.authStart")}</button>
       :<div className="kickoff-github-app-device">
@@ -106,7 +126,9 @@ export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{varia
         </div>
         <small>{t("kickoff.authExpires",{count:Math.ceil(device.expiresIn/60)})}</small>
        </div>}
-    {error?<p className="tone-warn" role="alert">{t("kickoff.authError")}</p>:null}
+    {error?<p className="tone-warn" role="alert">
+      {t("kickoff.authError")} {t(diagnosis[error])}
+    </p>:null}
     {result?<p role="status" className="agent-empty">{result}</p>:null}
   </>;
  if(variant==="provider"){
