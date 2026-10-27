@@ -722,6 +722,11 @@ pub(crate) fn purge_local_credentials() {
     }
     clear_active_user();
 }
+/// Only an in-memory continuity guard. Does not authorize or transfer GitHub access.
+pub(crate) fn is_same_cached_katosync_user(new_uid: &str) -> bool {
+    cached_uid().is_none_or(|old_uid| old_uid == new_uid)
+}
+
 pub(crate) fn on_katosync_account_switch() {
     clear_pending();
     clear_active_user();

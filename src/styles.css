@@ -10760,6 +10760,10 @@ button.agent-tile:hover {
 /* Manually initiated signed pairing invite preparation: not a trusted peer session. */
 /* Einladungs-Assistent: schlanke Bedienung; signierte Rohdaten nur in technischen Details. */
 /* Owner-verified device inventory: read-only, NOT an active Mesh channel. */
+/* Credential entry is explicit and local to isolated KATOOS QA, never logged or persisted by React. */
+.vision-mesh-reauth{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:12px}
+.vision-mesh-reauth form{display:grid;gap:9px}
+.vision-mesh-reauth button{justify-self:start}
 .vision-mesh-account-directory{margin-top:13px;border:1px solid var(--line);border-radius:12px;padding:14px}
 .vision-mesh-directory-heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
 .vision-mesh-account-directory>p{font-size:12px;color:var(--text-muted);margin:8px 0}

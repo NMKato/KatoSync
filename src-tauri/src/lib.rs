@@ -30,10 +30,10 @@ mod github_app_auth;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
+mod mesh_directory;
 mod mesh_handshake;
 mod mesh_identity;
 mod mesh_readiness;
-mod mesh_directory;
 mod mesh_tls;
 mod mesh_trust;
 mod model_distribution;
@@ -366,6 +366,7 @@ pub fn run() {
             archive_remote_briefing,
             delete_remote_briefing,
             login_supabase,
+            renew_katoos_qa_session,
             signup_supabase,
             recover_supabase,
             supabase_session_status,
@@ -800,6 +801,109 @@ async fn login_supabase(email: String, password: String) -> Result<SupabaseSessi
     Ok(SupabaseSessionStatus {
         logged_in: true,
         email: Some(user_email),
+    })
+}
+
+/// Normalized continuity check only; verified issuer identity is a separate gate.
+fn qa_reauth_matches_account(stored: &str, presented: &str) -> bool {
+    !stored.trim().is_empty()
+        && !presented.trim().is_empty()
+        && stored.trim().eq_ignore_ascii_case(presented.trim())
+}
+
+#[cfg(test)]
+mod qa_reauth_account_tests {
+    use super::qa_reauth_matches_account;
+    #[test]
+    fn same_account_email_allows_case_changes_but_not_other_users() {
+        assert!(qa_reauth_matches_account(
+            "Owner@Example.com",
+            "owner@example.com"
+        ));
+        assert!(qa_reauth_matches_account(
+            " Owner@Example.com ",
+            "owner@example.com"
+        ));
+        assert!(!qa_reauth_matches_account(
+            "owner@example.com",
+            "attacker@example.com"
+        ));
+        assert!(!qa_reauth_matches_account("", "owner@example.com"));
+        assert!(!qa_reauth_matches_account("owner@example.com", " "));
+    }
+}
+
+/// Explicit password step-up for the isolated Mesh QA account, never logout.
+/// Preserve GitHub authorization and previous keychain material on failure.
+/// The old locally saved account email is only a continuity gate, not auth proof;
+/// the new token must be validated directly against the canonical issuer.
+#[tauri::command]
+async fn renew_katoos_qa_session(
+    email: String,
+    password: String,
+) -> Result<SupabaseSessionStatus, String> {
+    if !cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS_QA_REAUTH_DISABLED".into());
+    }
+    let remembered = read_supabase_session_email()
+        .filter(|x| !x.trim().is_empty())
+        .ok_or_else(|| "KATOOS_QA_REAUTH_NO_EXISTING_ACCOUNT".to_string())?;
+    let entered = email.trim();
+    if entered.is_empty() || !qa_reauth_matches_account(&remembered, entered) || password.is_empty()
+    {
+        return Err("KATOOS_QA_REAUTH_ACCOUNT_MISMATCH".into());
+    }
+    let pass = zeroize::Zeroizing::new(password);
+    let session = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        supabase_password_login(entered, &pass),
+    )
+    .await
+    .map_err(|_| "KATOOS_QA_REAUTH_UNAVAILABLE".to_string())?
+    .map_err(|_| "KATOOS_QA_REAUTH_REJECTED".to_string())?;
+    let new_access = zeroize::Zeroizing::new(session.access_token);
+    let new_refresh = zeroize::Zeroizing::new(session.refresh_token);
+    // An Auth server response is not enough: online identity MUST match the previous
+    // local account marker; never use a stale local marker as authorization.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|_| "KATOOS_QA_REAUTH_UNAVAILABLE".to_string())?;
+    let result = client
+        .get(format!("{KATOSYNC_AUTH_URL}/auth/v1/user"))
+        .header("apikey", KATOSYNC_AUTH_ANON_KEY)
+        .bearer_auth(new_access.as_str())
+        .send()
+        .await
+        .map_err(|_| "KATOOS_QA_REAUTH_UNAVAILABLE".to_string())?;
+    if !result.status().is_success() {
+        return Err("KATOOS_QA_REAUTH_REJECTED".into());
+    }
+    #[derive(serde::Deserialize)]
+    struct CurrentIssuerIdentity {
+        id: uuid::Uuid,
+        email: Option<String>,
+    }
+    let account: CurrentIssuerIdentity = result
+        .json()
+        .await
+        .map_err(|_| "KATOOS_QA_REAUTH_REJECTED".to_string())?;
+    if !account
+        .email
+        .as_deref()
+        .is_some_and(|v| v.eq_ignore_ascii_case(&remembered))
+        || !github_app_auth::is_same_cached_katosync_user(&account.id.to_string())
+    {
+        return Err("KATOOS_QA_REAUTH_ACCOUNT_MISMATCH".into());
+    }
+    // Store only AFTER live issuer verification. No GitHub logout/purge and no
+    // token sent back to the frontend. Failed logins preserve the existing session.
+    save_supabase_refresh_token(&new_refresh)
+        .map_err(|_| "KATOOS_QA_REAUTH_KEYCHAIN_FAILED".to_string())?;
+    cache_supabase_access_token(Some(new_access.to_string()));
+    Ok(SupabaseSessionStatus {
+        logged_in: true,
+        email: Some(remembered),
     })
 }
 
