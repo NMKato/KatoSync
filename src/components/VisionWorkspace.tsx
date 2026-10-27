@@ -279,6 +279,40 @@ function MeshReadinessStrip() {
   const [confirmedCode,setConfirmedCode]=useState("");
   const [approvedPeers,setApprovedPeers]=useState<MeshApprovedPeer[]|null>(null);
   const [approvalError,setApprovalError]=useState(false);
+  const [reauthEmail,setReauthEmail]=useState("");
+  const [reauthPassword,setReauthPassword]=useState("");
+  const [reauthBusy,setReauthBusy]=useState(false);
+  const [reauthResult,setReauthResult]=useState<"success"|"failed"|null>(null);
+  useEffect(()=>{
+    if(import.meta.env.VITE_KATOOS_AUTH_QA!=="1")return;
+    let alive=true;
+    void invoke<{loggedIn:boolean;email:string|null}>("supabase_session_status")
+      .then(status=>{if(alive&&status.email)setReauthEmail(status.email);})
+      .catch(()=>{});
+    return ()=>{alive=false;};
+  },[]);
+  const renewSession=async()=>{
+    if(!reauthEmail.trim()||!reauthPassword||reauthBusy)return;
+    setReauthBusy(true);setReauthResult(null);
+    try{
+      const result=await invoke<{loggedIn:boolean;email:string|null}>(
+        "renew_katoos_qa_session",{email:reauthEmail.trim(),password:reauthPassword}
+      );
+      if(result.loggedIn!==true)throw new Error("issuer_rejected");
+      setReauthResult("success");
+      setIdentityFailure(null);
+      setIdentityError(false);
+      // Only prepare local identity after the verified reauthentication.
+      const actual=await invoke<MeshIdentityStatus>("mesh_device_identity_prepare");
+      if(actual.paired||actual.peerCount||actual.transportReady)throw new Error("unexpected_trust_claim");
+      setIdentity(actual);
+    }catch{
+      setReauthResult("failed");
+    }finally{
+      setReauthPassword("");
+      setReauthBusy(false);
+    }
+  };
   const [directory,setDirectory]=useState<MeshAccountDirectory|null>(null);
   const [directoryBusy,setDirectoryBusy]=useState(false);
   const [directoryError,setDirectoryError]=useState(false);
@@ -474,6 +508,24 @@ function MeshReadinessStrip() {
         <RefreshCcw size={14} className={loading?"spin":""}/>{t("mesh.v0.check")}
       </button>
     </div>
+    {import.meta.env.VITE_KATOOS_AUTH_QA==="1"?<details className="vision-mesh-reauth">
+      <summary>{t("mesh.reauth.title")}</summary>
+      <p>{t("mesh.reauth.description")}</p>
+      <form onSubmit={e=>{e.preventDefault();void renewSession();}}>
+        <label className="vision-mesh-field">{t("mesh.reauth.email")}
+          <input type="email" autoComplete="username" value={reauthEmail} required
+            onChange={e=>setReauthEmail(e.target.value)}/>
+        </label>
+        <label className="vision-mesh-field">{t("mesh.reauth.password")}
+          <input type="password" autoComplete="current-password" value={reauthPassword} required
+            onChange={e=>setReauthPassword(e.target.value)}/>
+        </label>
+        <button type="submit" className="secondary" disabled={!reauthEmail.trim()||!reauthPassword||reauthBusy}>
+          {t(reauthBusy?"mesh.reauth.working":"mesh.reauth.submit")}
+        </button>
+      </form>
+      {reauthResult?<p role="status">{t(reauthResult==="success"?"mesh.reauth.success":"mesh.reauth.failed")}</p>:null}
+    </details>:null}
     <section className="vision-mesh-account-directory" aria-label={t("mesh.directory.heading")}>
       <div className="vision-mesh-directory-heading">
         <strong>{t("mesh.directory.heading")}</strong>
