@@ -38,6 +38,7 @@ import {
 } from "../lib/visionGraph";
 import { useVisionViewModel } from "../viewmodels/useVisionViewModel";
 import type { useKatoSyncViewModel } from "../viewmodels/useKatoSyncViewModel";
+import {classifyMeshIdentityFailure,type MeshIdentityFailure} from "../lib/meshIdentityDiagnosis";
 
 type ViewModel = ReturnType<typeof useKatoSyncViewModel>;
 type Selection = { type: "node" | "edge"; id: string } | null;
@@ -249,6 +250,7 @@ function MeshReadinessStrip() {
   const [incoming,setIncoming]=useState("");
   const [inspected,setInspected]=useState<MeshIdentityStatus|null>(null);
   const [identityError,setIdentityError]=useState(false);
+  const [identityFailure,setIdentityFailure]=useState<MeshIdentityFailure|null>(null);
   const [pairingBusy,setPairingBusy]=useState(false);
   const [challengeIncoming,setChallengeIncoming]=useState("");
   const [challengeOutgoing,setChallengeOutgoing]=useState("");
@@ -321,12 +323,15 @@ function MeshReadinessStrip() {
     }catch{setIdentityError(true);}finally{setPairingBusy(false);}
   };
   const prepareIdentity=async()=>{
-    setPairingBusy(true);setIdentityError(false);
+    setPairingBusy(true);setIdentityError(false);setIdentityFailure(null);
     try {
       const actual=await invoke<MeshIdentityStatus>("mesh_device_identity_prepare");
       if(actual.paired||actual.peerCount||actual.transportReady)throw new Error("unexpected_trust_claim");
       setIdentity(actual);
-    } catch {setIdentityError(true);}
+    } catch(e:unknown) {
+      setIdentityError(true);
+      setIdentityFailure(classifyMeshIdentityFailure(e));
+    }
     finally {setPairingBusy(false);}
   };
   const createOffer=async()=>{
@@ -466,7 +471,10 @@ function MeshReadinessStrip() {
         </div>)}
       </details>
       {approvalError?<p role="alert" className="vision-mesh-error">{t("mesh.v3.error")}</p>:null}
-      {identityError?<p role="alert" className="vision-mesh-error">{t("mesh.v1.failed")}</p>:null}
+      {identityError?<p role="alert" className="vision-mesh-error">
+        {t("mesh.v1.failed")}
+        {identityFailure? " "+t(("mesh.identity.diag."+identityFailure) as TKey):null}
+      </p>:null}
     </details>
   </section>;
 }
