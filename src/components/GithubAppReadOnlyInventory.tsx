@@ -7,6 +7,8 @@ import {Check,ClipboardCopy,FolderGit2,MessageSquareText,RefreshCcw,Search,Shiel
 import {useT} from "../i18n";
 import {githubIssueChatDraft,githubRepoOwner,githubRepoTitle} from "../lib/githubInventoryPresentation";
 import type {GithubIssueHandoff} from "../lib/githubChatHandoff";
+import {classifyGithubInventoryFailure,type InventoryFailure} from "../lib/githubInventoryFailure";
+import type {TKey} from "../i18n";
 
 type GithubRepo = {
   fullName:string;url:string;private:boolean;archived:boolean;installationId:number;
@@ -28,7 +30,7 @@ export function GithubAppReadOnlyInventory({onChatHandoff}:{onChatHandoff?:(hand
  const [selected,setSelected]=useState<string|null>(null);
  const [loading,setLoading]=useState(false);
  const [issueLoading,setIssueLoading]=useState(false);
- const [error,setError]=useState(false);
+ const [error,setError]=useState<InventoryFailure|null>(null);
  const [issueError,setIssueError]=useState(false);
  const [expanded,setExpanded]=useState(false);
  const [filter,setFilter]=useState("");
@@ -44,7 +46,7 @@ export function GithubAppReadOnlyInventory({onChatHandoff}:{onChatHandoff?:(hand
  },[]);
  async function load(){
   const rev=++request.current;
-  setLoading(true);setError(false);setIssues(null);setSelected(null);setDraft(null);
+  setLoading(true);setError(null);setIssues(null);setSelected(null);setDraft(null);
   setExpanded(false);setPage(1);setCopied(false);
   try{
    const next=await invoke<Inventory>("github_app_repository_inventory");
@@ -52,7 +54,9 @@ export function GithubAppReadOnlyInventory({onChatHandoff}:{onChatHandoff?:(hand
    if(next.authSource!=="github_app_user_access_token"||next.remoteWritesPerformed!==false||
       !Array.isArray(next.repositories))throw Error("Invalid native read contract");
    setInventory(next);
-  }catch{if(mounted.current&&rev===request.current)setError(true);}
+   }catch(e:unknown){
+    if(mounted.current&&rev===request.current)setError(classifyGithubInventoryFailure(e));
+   }
   finally{if(mounted.current&&rev===request.current)setLoading(false);}
  }
  async function showIssues(repo:GithubRepo){
@@ -117,7 +121,9 @@ export function GithubAppReadOnlyInventory({onChatHandoff}:{onChatHandoff?:(hand
     <RefreshCcw size={14}/>{loading?t("github.inventory.loading"):t("github.inventory.load")}
    </button>
   </div>
-  {error?<p className="tone-warn" role="alert">{t("github.inventory.failed")}</p>:null}
+  {error?<p className="tone-warn" role="alert">
+   {t("github.inventory.failed")} {t(("github.inventory.reason."+error) as TKey)}
+  </p>:null}
   {inventory?<div className="github-app-inventory-result">
    <small><ShieldCheck size={13}/>{t("github.inventory.source")} · {inventory.repositories.length} {t("github.inventory.repositories")}</small>
    {inventory.truncated?<small className="tone-warn">{t("github.inventory.partial")}</small>:null}
