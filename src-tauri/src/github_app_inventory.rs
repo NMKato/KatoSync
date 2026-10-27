@@ -132,6 +132,22 @@ async fn github_read<T: DeserializeOwned>(
         .await
         .map_err(|_| "GitHub API derzeit nicht erreichbar.".to_string())?;
     if !response.status().is_success() {
+        // Return only whitelisted endpoint category and HTTP code.
+        // Never expose bearer tokens, network response bodies or account IDs.
+        let category = if path.starts_with("/user/installations/") {
+            "repositories"
+        } else if path.starts_with("/user/installations") {
+            "installations"
+        } else {
+            "issues"
+        };
+        if matches!(response.status().as_u16(), 401 | 403 | 404 | 429) {
+            return Err(format!(
+                "GH_INV_{}_HTTP_{}",
+                category,
+                response.status().as_u16()
+            ));
+        }
         return Err(match response.status().as_u16() {
             401 => "GitHub-App-Sitzung ungültig oder abgelaufen. Bitte neu verbinden.",
             403 => "GitHub-App hat für diese Ressource keine Leseberechtigung oder das API-Limit ist erreicht.",
