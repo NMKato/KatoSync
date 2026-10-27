@@ -1403,6 +1403,7 @@ const en: Record<TKey, string> = {
   "kickoff.authDiagnosisUnknown": "The cause could not be narrowed down. Retry status; do not disconnect working accounts.",
   "kickoff.authUnavailable": "GitHub connection status unavailable.",
   "kickoff.authStart": "Connect GitHub",
+  "kickoff.authAutoCheck": "After you approve the device on GitHub, KatoSync completes the connection automatically. No second click needed.",
   "kickoff.authInstructions": "Open GitHub and enter this code:",
   "kickoff.authCopy": "Copy code",
   "kickoff.authOpenGithub": "Open GitHub",

@@ -1424,6 +1424,7 @@ const de = {
   "kickoff.authDiagnosisUnknown": "Die Ursache konnte nicht eindeutig eingegrenzt werden. Status erneut prüfen; vorhandene Verbindungen nicht trennen.",
   "kickoff.authUnavailable": "GitHub-Anmeldestatus derzeit nicht verfügbar.",
   "kickoff.authStart": "Mit GitHub verbinden",
+  "kickoff.authAutoCheck": "Nach deiner Freigabe auf GitHub schließt KatoSync die Verbindung automatisch ab. Du musst nicht erneut klicken.",
   "kickoff.authInstructions": "Öffne GitHub und gib dort den folgenden Code ein:",
   "kickoff.authCopy": "Code kopieren",
   "kickoff.authOpenGithub": "GitHub öffnen",

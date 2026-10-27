@@ -93,8 +93,9 @@ fn valid_full_name(full_name: &str) -> bool {
 fn repo_url(full_name: &str) -> Option<String> {
     valid_full_name(full_name).then(|| format!("https://github.com/{full_name}"))
 }
-fn read_credential(uid: &str) -> Result<Credential, String> {
-    let record = credentials(uid)?
+async fn read_credential(uid: &str) -> Result<Credential, String> {
+    let record = ensure_fresh_github_credentials(uid)
+        .await?
         .ok_or("GitHub-App noch nicht verbunden. Bitte über Provider verbinden.")?;
     if record.katosync_uid != uid
         || Some(record.client_id.as_str()) != client_id()
@@ -110,8 +111,8 @@ async fn same_account_and_credential(uid: &str, token: &str) -> Result<(), Strin
     if verified_katosync_user().await? != uid {
         return Err("KatoSync-Konto während des GitHub-Abrufs gewechselt.".into());
     }
-    let current = read_credential(uid)?;
-    if current.access_token != token {
+    let current = credentials(uid)?.ok_or("GitHub-App-Verbindung während Abruf entfernt.")?;
+    if !owned_credential(&current, uid) || current.access_token != token {
         return Err("GitHub-Autorisierung während des Abrufs gewechselt.".into());
     }
     Ok(())
@@ -173,7 +174,7 @@ async fn installation_repos(
 #[tauri::command]
 pub(crate) async fn github_app_repository_inventory() -> Result<GithubInventory, String> {
     let uid = verified_katosync_user().await?;
-    let mut credential = read_credential(&uid)?;
+    let mut credential = read_credential(&uid).await?;
     let http = network()?;
     let accessible = installations(&http, &credential.access_token).await?;
     let truncated_installations =
@@ -220,7 +221,7 @@ pub(crate) async fn github_app_repo_issues(
         return Err("Ungültiger Repository-Name, Installation oder Seitenbereich.".into());
     }
     let uid = verified_katosync_user().await?;
-    let credential = read_credential(&uid)?;
+    let credential = read_credential(&uid).await?;
     let http = network()?;
     let accessible = installations(&http, &credential.access_token).await?;
     if !accessible
