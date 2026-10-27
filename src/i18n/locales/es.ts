@@ -1403,6 +1403,7 @@ const es: Record<TKey, string> = {
   "kickoff.authDiagnosisUnknown": "No se pudo identificar la causa. Reintenta sin desconectar cuentas existentes.",
   "kickoff.authUnavailable": "Estado de conexión no disponible.",
   "kickoff.authStart": "Conectar GitHub",
+  "kickoff.authAutoCheck": "Después de autorizar el dispositivo en GitHub, KatoSync completa la conexión automáticamente. No necesitas pulsar otra vez.",
   "kickoff.authInstructions": "Abre GitHub e introduce este código:",
   "kickoff.authCopy": "Copiar código",
   "kickoff.authOpenGithub": "Abrir GitHub",

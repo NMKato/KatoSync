@@ -242,6 +242,139 @@ fn status_from(credential: Option<Credential>, uid: Option<&str>) -> GithubAppAu
         auth_source: "github_app_device_flow",
     }
 }
+// GitHub App user-to-server access tokens expire after 8 hours. A device-flow
+// refresh token can rotate them without a client secret. Never send a stored
+// token through the WebView or borrow tokens from the GitHub CLI.
+static REFRESH_MUTEX: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+fn refresh_mutex() -> &'static tokio::sync::Mutex<()> {
+    REFRESH_MUTEX.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+fn owned_credential(record: &Credential, uid: &str) -> bool {
+    record.katosync_uid == uid
+        && Some(record.client_id.as_str()) == client_id()
+        && record.user_id != 0
+        && safe_login(&record.login)
+}
+fn refresh_needed(record: &Credential, now: u64) -> bool {
+    record.expires_at <= now.saturating_add(120)
+}
+fn valid_rotated_token(resp: &AccessResponse) -> bool {
+    let access = resp.access_token.as_deref().unwrap_or("");
+    let refresh = resp.refresh_token.as_deref().unwrap_or("");
+    matches!(resp.token_type.as_deref(), Some("bearer"))
+        && (300..=28800).contains(&resp.expires_in.unwrap_or(0))
+        && (3600..=15897600).contains(&resp.refresh_token_expires_in.unwrap_or(0))
+        && (20..=1024).contains(&access.len())
+        && (20..=1024).contains(&refresh.len())
+}
+async fn ensure_fresh_github_credentials(uid: &str) -> Result<Option<Credential>, String> {
+    let initial = credentials(uid)?;
+    let Some(ref record) = initial else {
+        return Ok(None);
+    };
+    if !owned_credential(record, uid) || !refresh_needed(record, now_secs()) {
+        return Ok(initial);
+    }
+    let _serial = refresh_mutex().lock().await;
+    // Re-read under the lock: an earlier UI request may have rotated the pair.
+    let Some(record) = credentials(uid)? else {
+        return Ok(None);
+    };
+    if !owned_credential(&record, uid) || !refresh_needed(&record, now_secs()) {
+        return Ok(Some(record));
+    }
+    if record.refresh_expires_at <= now_secs().saturating_add(60) {
+        // Fail closed, but keep the UI retryable: an expired access token
+        // will yield connected=false and an explicit Device-Flow button.
+        return Ok(Some(record));
+    }
+    let id = client_id().ok_or("GitHub App nicht konfiguriert.")?;
+    let response = network()?
+        .post("https://github.com/login/oauth/access_token")
+        .header("Accept", "application/json")
+        .form(&[
+            ("client_id", id),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", record.refresh_token.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|_| "GitHub-Verlängerung vorübergehend nicht erreichbar.".to_string())?;
+    if !response.status().is_success() {
+        return Err("GitHub-Verlängerung wurde abgelehnt.".into());
+    }
+    let rotated: AccessResponse = response
+        .json()
+        .await
+        .map_err(|_| "GitHub-Verlängerung lieferte keine gültige Antwort.".to_string())?;
+    if matches!(
+        rotated.error.as_deref(),
+        Some("bad_refresh_token" | "expired_token" | "access_denied")
+    ) {
+        // GitHub has revoked/expired the refresh grant. Never pretend the
+        // expired access token is live; allow explicit fresh authorization.
+        return Ok(Some(record));
+    }
+    if rotated.error.is_some() || !valid_rotated_token(&rotated) {
+        return Err("GitHub-Verlängerung lieferte unerwartete Werte.".into());
+    }
+    let access = rotated.access_token.as_deref().unwrap_or_default();
+    // Confirm the GitHub identity has not silently changed during token rotation.
+    let response = network()?
+        .get("https://api.github.com/user")
+        .header("Accept", "application/vnd.github+json")
+        .bearer_auth(access)
+        .send()
+        .await
+        .map_err(|_| "GitHub-Konto nach Verlängerung nicht überprüfbar.".to_string())?;
+    if !response.status().is_success() {
+        return Err("GitHub-Konto nach Verlängerung ungültig.".into());
+    }
+    let returned: GhUser = response
+        .json()
+        .await
+        .map_err(|_| "GitHub-Kontoidentität ungültig.".to_string())?;
+    if returned.id != record.user_id || returned.login != record.login {
+        return Err("GitHub-Kontoidentität bei Verlängerung gewechselt.".into());
+    }
+    if verified_katosync_user().await? != uid {
+        return Err("KatoSync-Konto während GitHub-Verlängerung gewechselt.".into());
+    }
+    // Check that the credential has not been explicitly revoked/replaced while
+    // network I/O was running. Rotation is one-shot; never overwrite new login.
+    let current = credentials(uid)?.ok_or("GitHub-Verbindung während Verlängerung entfernt.")?;
+    if current.refresh_token != record.refresh_token || !owned_credential(&current, uid) {
+        return Err("GitHub-Verbindung während Verlängerung geändert.".into());
+    }
+    let next = Credential {
+        client_id: record.client_id.clone(),
+        katosync_uid: uid.to_owned(),
+        user_id: record.user_id,
+        login: record.login.clone(),
+        access_token: rotated
+            .access_token
+            .as_deref()
+            .unwrap_or_default()
+            .to_owned(),
+        refresh_token: rotated
+            .refresh_token
+            .as_deref()
+            .unwrap_or_default()
+            .to_owned(),
+        expires_at: now_secs().saturating_add(rotated.expires_in.unwrap_or(0)),
+        refresh_expires_at: now_secs()
+            .saturating_add(rotated.refresh_token_expires_in.unwrap_or(0)),
+    };
+    let mut secret_json =
+        serde_json::to_string(&next).map_err(|_| "GitHub-Schlüsselbundformat ungültig.")?;
+    let saved = entry(uid)?
+        .set_password(&secret_json)
+        .map_err(|_| "GitHub-Verlängerung konnte nicht sicher gespeichert werden.".to_string());
+    secret_json.zeroize();
+    saved?;
+    Ok(Some(next))
+}
+
 fn credentials(uid: &str) -> Result<Option<Credential>, String> {
     let storage = entry(uid)?;
     match storage.get_password() {
@@ -324,14 +457,17 @@ pub(crate) async fn github_app_connection_status() -> Result<GithubAppAuthStatus
         return Ok(status_from(None, None));
     }
     let uid = verified_katosync_user().await?;
-    Ok(status_from(credentials(&uid)?, Some(&uid)))
+    Ok(status_from(
+        ensure_fresh_github_credentials(&uid).await?,
+        Some(&uid),
+    ))
 }
 #[tauri::command]
 pub(crate) async fn github_app_device_begin() -> Result<GithubDeviceBegin, String> {
     let id = client_id()
         .ok_or_else(|| "GitHub App ist noch nicht registriert/konfiguriert.".to_string())?;
     let uid = verified_katosync_user().await?;
-    if status_from(credentials(&uid)?, Some(&uid)).connected {
+    if status_from(ensure_fresh_github_credentials(&uid).await?, Some(&uid)).connected {
         return Err("GitHub ist bereits verbunden. Erst trennen, dann erneut anmelden.".into());
     }
     {
@@ -739,6 +875,40 @@ mod tests {
         };
         assert!(status_from(Some(record), Some(b)).login.is_none());
     }
+    #[test]
+    fn automatic_refresh_preserves_identity_and_validates_rotating_expiry() {
+        let uid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let record = Credential {
+            client_id: client_id().unwrap().into(),
+            katosync_uid: uid.into(),
+            user_id: 1,
+            login: "test-user".into(),
+            access_token: "fake-access-test-only".into(),
+            refresh_token: "fake-refresh-test-only".into(),
+            expires_at: now_secs() + 40,
+            refresh_expires_at: now_secs() + 86400,
+        };
+        assert!(owned_credential(&record, uid));
+        assert!(refresh_needed(&record, now_secs()));
+        assert!(!owned_credential(
+            &record,
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        ));
+        let answer = AccessResponse {
+            access_token: Some("a".repeat(44)),
+            refresh_token: Some("b".repeat(44)),
+            expires_in: Some(28800),
+            refresh_token_expires_in: Some(15897600),
+            token_type: Some("bearer".into()),
+            error: None,
+            interval: None,
+        };
+        assert!(valid_rotated_token(&answer));
+        let mut bad = answer;
+        bad.error = Some("bad_refresh_token".into());
+        assert!(!bad.error.is_none());
+    }
+
     #[test]
     fn only_valid_short_lived_credentials_count_as_connected() {
         let record = Credential {

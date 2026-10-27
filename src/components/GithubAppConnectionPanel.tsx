@@ -43,6 +43,66 @@ export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{varia
   });
   return ()=>{mounted.current=false;latest.current++;};
  },[]);
+ // GitHub confirms user consent in the browser, but a device-code approval
+ // MUST be polled by the native app to finish token storage. Perform that
+ // follow-up automatically only after the user explicitly starts Device Flow.
+ // Respect GitHub/native retry intervals; prevent timer leaks and stale responses.
+ useEffect(()=>{
+  if(!device)return;
+  const sessionId=device.sessionId;
+  const expiresAt=Date.now()+device.expiresIn*1000;
+  let cancelled=false;
+  let timer:ReturnType<typeof setTimeout>|null=null;
+  const plan=(seconds:number)=>{
+   if(cancelled||!mounted.current)return;
+   if(Date.now()>=expiresAt){
+    setDevice(null);setResult(t("kickoff.authExpired"));return;
+   }
+   const safeSeconds=Math.min(120,Math.max(5,Math.ceil(seconds)));
+   timer=setTimeout(()=>{void step();},safeSeconds*1000);
+  };
+  const step=async()=>{
+   if(cancelled||!mounted.current)return;
+   try{
+    const reply=await invoke<Poll>("github_app_device_poll",{sessionId});
+    if(cancelled||!mounted.current)return;
+    if(reply.state==="connected"){
+     // The backend has securely saved the token. Re-fetch the read-only
+     // status; if Keychain permission fails, expose retry, not false success.
+     try{
+      const confirmed=await invoke<Status>("github_app_connection_status");
+      if(cancelled||!mounted.current)return;
+      if(!confirmed.connected)throw new Error("GitHub status not yet verified");
+      setStatus(confirmed);setError(null);setResult(t("kickoff.authConnected"));
+      // Clear only after status is consumed: changing device triggers effect
+      // cleanup, so clearing it before await would suppress this result.
+      setDevice(null);
+     }catch(e:unknown){
+      if(!cancelled&&mounted.current){
+       setError(classifyGithubAuthFailure(e));
+       setDevice(null); // User can explicitly retry read-only status now.
+      }
+     }
+    }else if(reply.state==="expired"||reply.state==="expired_or_denied"){
+     setDevice(null);setResult(t("kickoff.authExpired"));
+    }else{
+     setResult(t("kickoff.authPending",{count:reply.retryAfterSeconds}));
+     plan(reply.retryAfterSeconds);
+    }
+   }catch(e:unknown){
+    if(cancelled||!mounted.current)return;
+    setError(classifyGithubAuthFailure(e));
+    // If a transient network failure occurs, retry with a bounded interval
+    // until the original GitHub device-code expiry, without fresh login.
+    plan(12);
+   }
+  };
+  plan(device.interval);
+  return ()=>{
+   cancelled=true;
+   if(timer!==null)clearTimeout(timer);
+  };
+ },[device]);
  async function perform(action:()=>Promise<void>){
   const version=++latest.current;
   setBusy(true);setError(null);setResult("");
@@ -111,6 +171,7 @@ export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{varia
        disabled={busy} onClick={start}><Github size={15}/>{t("kickoff.authStart")}</button>
       :<div className="kickoff-github-app-device">
         <p>{t("kickoff.authInstructions")}</p>
+        <small>{t("kickoff.authAutoCheck")}</small>
         <strong className="kickoff-github-code">{device.userCode}</strong>
         <div className="kickoff-github-app-actions">
          <button type="button" className="secondary compact-button"

@@ -1403,6 +1403,7 @@ const ru: Record<TKey, string> = {
   "kickoff.authDiagnosisUnknown": "Причина не установлена. Повторите проверку без отключения работающих аккаунтов.",
   "kickoff.authUnavailable": "Состояние подключения недоступно.",
   "kickoff.authStart": "Подключить GitHub",
+  "kickoff.authAutoCheck": "После подтверждения устройства на GitHub KatoSync автоматически завершит подключение. Повторное нажатие не требуется.",
   "kickoff.authInstructions": "Откройте GitHub и введите код:",
   "kickoff.authCopy": "Копировать код",
   "kickoff.authOpenGithub": "Открыть GitHub",
