@@ -174,11 +174,53 @@ pub(crate) async fn same_account_still_verified(uid: &str) -> Result<(), String>
     Ok(())
 }
 
+// Nur explizit bekannte, konstante Fehlersignale; keine Raw-Fehler, Tokens oder IDs an die UI.
+fn classify_mesh_auth_failure(error: &str) -> &'static str {
+    match error {
+        "Bitte zuerst bei KatoSync anmelden." => "MESH_IDENTITY_ACCOUNT_SESSION",
+        "Bitte KatoSync-Sitzung erneuern." => "MESH_IDENTITY_ACCOUNT_REFRESH",
+        "KatoSync-Sitzung nicht überprüfbar." => "MESH_IDENTITY_ACCOUNT_NETWORK",
+        "Ungültige KatoSync-Benutzeridentität." | "KatoSync-Benutzerkennung ungültig." => {
+            "MESH_IDENTITY_ACCOUNT_INVALID"
+        }
+        "KatoSync-Konto während der Prüfung gewechselt." => "MESH_IDENTITY_ACCOUNT_CHANGED",
+        _ => "MESH_IDENTITY_ACCOUNT_UNVERIFIED",
+    }
+}
+
+#[cfg(test)]
+mod mesh_safe_auth_diagnostics_tests {
+    use super::classify_mesh_auth_failure;
+    #[test]
+    fn known_causes_are_categorized_without_exposing_untrusted_messages() {
+        assert_eq!(
+            classify_mesh_auth_failure("Bitte zuerst bei KatoSync anmelden."),
+            "MESH_IDENTITY_ACCOUNT_SESSION"
+        );
+        assert_eq!(
+            classify_mesh_auth_failure("Bitte KatoSync-Sitzung erneuern."),
+            "MESH_IDENTITY_ACCOUNT_REFRESH"
+        );
+        assert_eq!(
+            classify_mesh_auth_failure("KatoSync-Sitzung nicht überprüfbar."),
+            "MESH_IDENTITY_ACCOUNT_NETWORK"
+        );
+        assert_eq!(
+            classify_mesh_auth_failure("Ungültige KatoSync-Benutzeridentität."),
+            "MESH_IDENTITY_ACCOUNT_INVALID"
+        );
+        assert_eq!(
+            classify_mesh_auth_failure("token=never_display_this"),
+            "MESH_IDENTITY_ACCOUNT_UNVERIFIED"
+        );
+    }
+}
+
 #[tauri::command]
 pub async fn mesh_device_identity_prepare() -> Result<MeshIdentityStatus, String> {
     let uid = crate::github_app_auth::verified_katosync_user()
         .await
-        .map_err(|_| "MESH_IDENTITY_ACCOUNT_UNVERIFIED".to_string())?;
+        .map_err(|error| classify_mesh_auth_failure(&error).to_string())?;
     // Diagnostic only: stable categories, no account IDs, keychain attributes,
     // seed values or inner OS error messages cross Tauri IPC.
     let identity = ensure_identity(&uid).map_err(|error| {
