@@ -299,14 +299,18 @@ function MeshReadinessStrip() {
         "renew_katoos_qa_session",{email:reauthEmail.trim(),password:reauthPassword}
       );
       if(result.loggedIn!==true)throw new Error("issuer_rejected");
-      setReauthResult("success");
       setIdentityFailure(null);
       setIdentityError(false);
       // Only prepare local identity after the verified reauthentication.
       const actual=await invoke<MeshIdentityStatus>("mesh_device_identity_prepare");
       if(actual.paired||actual.peerCount||actual.transportReady)throw new Error("unexpected_trust_claim");
       setIdentity(actual);
+      // Success is a durable claim ONLY if a fresh issuer lookup and native
+      // device identity check both succeeded. Never show stale green success.
+      setReauthResult("success");
     }catch{
+      setIdentity(null);
+      setOffer("");
       setReauthResult("failed");
     }finally{
       setReauthPassword("");
@@ -355,7 +359,13 @@ function MeshReadinessStrip() {
       setOffer(JSON.stringify(invite));
     }catch(error:unknown){
       setIdentityError(true);
-      setIdentityFailure(classifyMeshIdentityFailure(error));
+      const failure=classifyMeshIdentityFailure(error);
+      setIdentityFailure(failure);
+      if(["account","session","refresh","changed","invalid","network"].includes(failure)){
+        setReauthResult(null);
+        setIdentity(null);
+        setOffer("");
+      }
     }finally{setPairingBusy(false);}
   };
   const checkAndPrepareReply=async()=>{
@@ -575,6 +585,10 @@ function MeshReadinessStrip() {
           <small>{t("mesh.quick.notPaired")}</small>
         </div>:null}
         {clipboardStatus?<p role="status">{t(clipboardStatus==="ok"?"mesh.quick.copied":"mesh.quick.copyFailed")}</p>:null}
+        {identityError?<p role="alert" className="vision-mesh-error">
+          {t("mesh.v1.failed")}
+          {identityFailure? " "+t(("mesh.identity.diag."+identityFailure) as TKey):null}
+        </p>:null}
         <p className="vision-mesh-warning">{t("mesh.quick.discoveryPending")}</p>
       </div>
       <details className="vision-mesh-advanced">
@@ -655,10 +669,6 @@ function MeshReadinessStrip() {
         </div>)}
       </details>
       {approvalError?<p role="alert" className="vision-mesh-error">{t("mesh.v3.error")}</p>:null}
-      {identityError?<p role="alert" className="vision-mesh-error">
-        {t("mesh.v1.failed")}
-        {identityFailure? " "+t(("mesh.identity.diag."+identityFailure) as TKey):null}
-      </p>:null}
     </details>
   </section>;
 }

@@ -73,6 +73,14 @@ const KATOSYNC_AUTH_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc
 static API_KEY_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static MCP_CONNECTOR_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static SUPABASE_ACCESS_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+// Serialize EVERY refresh-token rotation and explicit password reauthentication
+// inside this process. GoTrue refresh grants are single-use, so two concurrent
+// requests must never exchange or overwrite different rotated refresh tokens.
+static SUPABASE_SESSION_TRANSITION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+fn supabase_session_transition_lock() -> &'static tokio::sync::Mutex<()> {
+    SUPABASE_SESSION_TRANSITION_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 // Cloud-Profil (Zero-Knowledge): der aus dem Passwort abgeleitete 32-Byte-Schluessel + das zugehoerige
 // kdf_salt liegen NUR im RAM (nie auf Platte/Keychain) und nur fuer die laufende Sitzung. Wird beim Login
 // gesetzt und beim Logout geraeumt. Ohne ihn kann das Cloud-Profil weder ent- noch verschluesselt werden.
@@ -787,10 +795,23 @@ async fn login_supabase(email: String, password: String) -> Result<SupabaseSessi
     if email_trim.is_empty() || password.trim().is_empty() {
         return Err("E-Mail und Passwort dürfen nicht leer sein.".to_string());
     }
-    github_app_auth::on_katosync_account_switch();
+    // Preserve current GitHub and session data if credential validation fails.
+    // A QA user must never silently switch identities via the regular login.
+    let existing_email = read_supabase_session_email();
+    if cfg!(feature = "katoos-auth-qa")
+        && existing_email
+            .as_deref()
+            .is_some_and(|known| !qa_reauth_matches_account(known, email_trim))
+    {
+        return Err("KATOOS_QA_REAUTH_ACCOUNT_MISMATCH".into());
+    }
+    let _session_guard = supabase_session_transition_lock().lock().await;
     let session = supabase_password_login(email_trim, &password)
         .await
         .map_err(error_to_string)?;
+    if !cfg!(feature = "katoos-auth-qa") || existing_email.is_none() {
+        github_app_auth::on_katosync_account_switch();
+    }
     save_supabase_refresh_token(&session.refresh_token).map_err(error_to_string)?;
     cache_supabase_access_token(Some(session.access_token.clone()));
     let user_email = session
@@ -854,6 +875,9 @@ async fn renew_katoos_qa_session(
         return Err("KATOOS_QA_REAUTH_ACCOUNT_MISMATCH".into());
     }
     let pass = zeroize::Zeroizing::new(password);
+    // Reauthentication takes the same lock as refresh. Otherwise a refresh
+    // started earlier may overwrite the newly signed-in device session.
+    let _session_guard = supabase_session_transition_lock().lock().await;
     let session = tokio::time::timeout(
         std::time::Duration::from_secs(15),
         supabase_password_login(entered, &pass),
@@ -5477,15 +5501,107 @@ async fn supabase_refresh_session(refresh_token: &str) -> Result<SupabaseTokenRe
 }
 
 // Liefert ein gueltiges Access-Token: aus dem Cache, sonst per Refresh-Token erneuern.
+// Caller MUST hold SUPABASE_SESSION_TRANSITION_LOCK. Persist the new refresh
+// grant before exposing the access token. A failed Keychain write is NOT success.
+async fn refresh_supabase_session_under_lock() -> Result<String> {
+    let refresh = zeroize::Zeroizing::new(load_supabase_refresh_token()?);
+    let session = supabase_refresh_session(refresh.as_str()).await?;
+    let access = zeroize::Zeroizing::new(session.access_token);
+    let rotated = zeroize::Zeroizing::new(session.refresh_token);
+    save_supabase_refresh_token(rotated.as_str())
+        .context("Erneuerte KATOOS-Sitzung konnte nicht im Schlüsselbund gespeichert werden.")?;
+    cache_supabase_access_token(Some(access.to_string()));
+    Ok(access.to_string())
+}
+
+// Read-after-lock avoids repeated or concurrent refresh calls against a
+// single-use token, and ensures an explicit account login wins over old refreshes.
 async fn ensure_supabase_access_token() -> Result<String> {
     if let Some(token) = cached_supabase_access_token() {
         return Ok(token);
     }
-    let refresh = load_supabase_refresh_token()?;
-    let session = supabase_refresh_session(&refresh).await?;
-    let _ = save_supabase_refresh_token(&session.refresh_token);
-    cache_supabase_access_token(Some(session.access_token.clone()));
-    Ok(session.access_token)
+    let _session_guard = supabase_session_transition_lock().lock().await;
+    if let Some(token) = cached_supabase_access_token() {
+        return Ok(token);
+    }
+    refresh_supabase_session_under_lock().await
+}
+
+#[cfg(test)]
+mod mesh_session_rotation_tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[test]
+    fn a_rejected_old_access_token_does_not_clear_a_newer_session() {
+        let mut current = Some("newer-device-session-access".to_string());
+        assert!(!clear_rejected_access_token(
+            &mut current,
+            "obsolete-session"
+        ));
+        assert_eq!(current.as_deref(), Some("newer-device-session-access"));
+        assert!(clear_rejected_access_token(
+            &mut current,
+            "newer-device-session-access"
+        ));
+        assert!(current.is_none());
+    }
+
+    #[tokio::test]
+    async fn concurrent_rotation_gate_serializes_single_use_refresh() {
+        // No real tokens, Keychain or network access in this deterministic test.
+        let gate = Arc::new(tokio::sync::Mutex::new(None::<String>));
+        let refresh_count = Arc::new(AtomicUsize::new(0));
+        let tasks = (0..20).map(|_| {
+            let gate = Arc::clone(&gate);
+            let count = Arc::clone(&refresh_count);
+            tokio::spawn(async move {
+                let mut current = gate.lock().await;
+                if current.is_none() {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    *current = Some("fresh-verified-token".to_string());
+                }
+                current.clone().unwrap()
+            })
+        });
+        for task in tasks {
+            assert_eq!(task.await.unwrap(), "fresh-verified-token");
+        }
+        assert_eq!(refresh_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn account_login_guard_keeps_existing_user_bound_to_same_email() {
+        assert!(qa_reauth_matches_account(
+            "existing@example.invalid",
+            "EXISTING@example.invalid"
+        ));
+        assert!(!qa_reauth_matches_account(
+            "existing@example.invalid",
+            "other@example.invalid"
+        ));
+    }
+}
+
+// After issuer 401: only replace a rejected token if it is STILL the active
+// cache value. A second caller may already have refreshed it while we waited.
+// Never wipe a newer token; also never use a revoked grant twice concurrently.
+async fn replace_rejected_supabase_access_token(rejected: &str) -> Result<String> {
+    let _session_guard = supabase_session_transition_lock().lock().await;
+    if let Some(current) = cached_supabase_access_token() {
+        if current != rejected {
+            return Ok(current);
+        }
+        if !invalidate_rejected_supabase_access_token(rejected) {
+            return Err(anyhow!(
+                "KATOOS-Sitzung wurde während der Prüfung gewechselt."
+            ));
+        }
+    }
+    refresh_supabase_session_under_lock().await
 }
 
 const DEFAULT_BASE_URL: &str = "https://mcp.katoos.de";

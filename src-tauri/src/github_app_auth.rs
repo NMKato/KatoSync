@@ -63,14 +63,14 @@ pub(crate) async fn verified_katosync_user() -> Result<String, String> {
         .as_ref()
         .is_ok_and(|r| should_refresh_katosync_session(r.status()))
     {
-        if !crate::invalidate_rejected_supabase_access_token(&token) {
-            token.zeroize();
-            return Err("KatoSync-Konto während der Prüfung gewechselt.".into());
-        }
-        token.zeroize();
-        token = crate::ensure_supabase_access_token()
+        // Rotation and explicit QA login are synchronized by one Tokio mutex.
+        // If a parallel task already rotated the token, retry with that exact
+        // current access token instead of rotating its one-time grant again.
+        let replacement = crate::replace_rejected_supabase_access_token(&token)
             .await
             .map_err(|_| "Bitte KatoSync-Sitzung erneuern.".to_string())?;
+        token.zeroize();
+        token = replacement;
         response = fetch_katosync_identity(&token).await;
     }
     token.zeroize();
@@ -85,8 +85,15 @@ pub(crate) async fn verified_katosync_user() -> Result<String, String> {
     let uid = uuid::Uuid::parse_str(&identity.id)
         .map_err(|_| "KatoSync-Benutzerkennung ungültig.".to_string())?
         .to_string();
+    // Fail closed when the issuer changes under an already verified desktop
+    // session. A parallel reauth must not silently rebind GitHub/Mesh trust.
     if let Ok(mut x) = active_user().lock() {
+        if x.as_deref().is_some_and(|previous| previous != uid) {
+            return Err("KatoSync-Konto während der Prüfung gewechselt.".into());
+        }
         *x = Some(uid.clone());
+    } else {
+        return Err("KatoSync-Sitzung nicht überprüfbar.".into());
     }
     Ok(uid)
 }
