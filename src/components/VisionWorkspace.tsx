@@ -203,6 +203,24 @@ type MeshLocalReadiness = {
   crossDeviceWrites: boolean;
 };
 
+type MeshAccountDevice = {
+  deviceId:string;
+  ownerUserId:string;
+  displayName:string;
+  personaName:string|null;
+  platformOs:"macos"|"windows"|"linux";
+  membershipState:"discovered"|"pending"|"trusted"|"revoked";
+  fingerprint:string;
+  lastSeenAt:string|null;
+};
+type MeshAccountDirectory = {
+  devices:MeshAccountDevice[];
+  accountVerified:true;
+  discoveryOnly:true;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
+
 type MeshIdentityStatus = {
   fingerprint: string;
   algorithm: string;
@@ -241,7 +259,7 @@ type MeshPeerInventory = {
 // No peer registration or network request: only a Tauri read of local daemon
 // state. RDC connectivity is intentionally NOT counted as trusted Mesh peers.
 function MeshReadinessStrip() {
-  const {t}=useT();
+  const {t,lang}=useT();
   const [snapshot,setSnapshot]=useState<MeshLocalReadiness|null>(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(false);
@@ -261,6 +279,24 @@ function MeshReadinessStrip() {
   const [confirmedCode,setConfirmedCode]=useState("");
   const [approvedPeers,setApprovedPeers]=useState<MeshApprovedPeer[]|null>(null);
   const [approvalError,setApprovalError]=useState(false);
+  const [directory,setDirectory]=useState<MeshAccountDirectory|null>(null);
+  const [directoryBusy,setDirectoryBusy]=useState(false);
+  const [directoryError,setDirectoryError]=useState(false);
+  const loadAccountDirectory=async()=>{
+    setDirectoryBusy(true);setDirectoryError(false);setDirectory(null);
+    try{
+      const roster=await invoke<MeshAccountDirectory>("mesh_account_devices_list");
+      if(roster.accountVerified!==true || roster.discoveryOnly!==true ||
+         roster.transportReady!==false || roster.remoteJobsEnabled!==false ||
+         !Array.isArray(roster.devices) || roster.devices.length>10 ||
+         roster.devices.some(d=>!d.deviceId||!d.displayName||!d.fingerprint||
+           !["macos","windows","linux"].includes(d.platformOs)||
+           !["discovered","pending","trusted","revoked"].includes(d.membershipState)))
+        throw new Error("invalid_directory_contract");
+      setDirectory(roster);
+    }catch{setDirectoryError(true);}
+    finally{setDirectoryBusy(false);}
+  };
   const [clipboardStatus,setClipboardStatus]=useState<"ok"|"failed"|null>(null);
   const copyPublicMessage=async(payload:string)=>{
     // Es werden nur signierte, oeffentliche Pairing-Nachrichten kopiert.
@@ -438,6 +474,27 @@ function MeshReadinessStrip() {
         <RefreshCcw size={14} className={loading?"spin":""}/>{t("mesh.v0.check")}
       </button>
     </div>
+    <section className="vision-mesh-account-directory" aria-label={t("mesh.directory.heading")}>
+      <div className="vision-mesh-directory-heading">
+        <strong>{t("mesh.directory.heading")}</strong>
+        <button className="ghost compact-button" type="button" disabled={directoryBusy||!snapshot}
+          onClick={()=>void loadAccountDirectory()}>
+          <RefreshCcw size={14} className={directoryBusy?"spin":""}/>{t("mesh.directory.refresh")}
+        </button>
+      </div>
+      <p>{t("mesh.directory.notice")}</p>
+      {directory?.devices.length===0?<p role="status">{t("mesh.directory.empty")}</p>:null}
+      {directory?.devices.map(device=><div className="vision-mesh-directory-row" key={device.deviceId}>
+        <div><strong>{device.personaName||device.displayName}</strong>
+          {device.personaName?<small>{device.displayName}</small>:null}
+          <small>{device.platformOs} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>
+        </div>
+        <small>{device.lastSeenAt?
+          t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
+          t("mesh.directory.notSeen")}</small>
+      </div>)}
+      {directoryError?<p role="alert">{t("mesh.directory.unavailable")}</p>:null}
+    </section>
     <details className="vision-mesh-pairing">
       <summary>{t("mesh.v1.heading")}</summary>
       <p>{t("mesh.quick.description")}</p>

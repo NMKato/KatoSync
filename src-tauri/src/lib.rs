@@ -33,6 +33,7 @@ mod memory_fabric;
 mod mesh_handshake;
 mod mesh_identity;
 mod mesh_readiness;
+mod mesh_directory;
 mod mesh_tls;
 mod mesh_trust;
 mod model_distribution;
@@ -392,6 +393,7 @@ pub fn run() {
             read_logs,
             local_control_snapshot,
             mesh_readiness::mesh_local_readiness,
+            mesh_directory::mesh_account_devices_list,
             mesh_identity::mesh_device_identity_prepare,
             mesh_identity::mesh_pairing_offer_create,
             mesh_identity::mesh_pairing_offer_inspect,
