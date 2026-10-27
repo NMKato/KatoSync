@@ -19,8 +19,10 @@ const CLIENT_ID: Option<&str> = match option_env!("KATOSYNC_GITHUB_APP_CLIENT_ID
 };
 #[cfg(not(feature = "github-login-qa"))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
-#[cfg(feature = "github-login-qa")]
+#[cfg(all(feature = "github-login-qa", not(feature = "katoos-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
+#[cfg(feature = "katoos-auth-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.auth.qa";
 const ACCOUNT_PREFIX: &str = "github-app-user-device-v2:";
 static ACTIVE_USER: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 fn active_user() -> &'static Mutex<Option<String>> {
@@ -696,14 +698,25 @@ mod tests {
     #[cfg(feature = "github-login-qa")]
     #[test]
     fn github_qa_does_not_share_production_keychain_or_data_directory() {
-        assert_eq!(KEYCHAIN_SERVICE, "com.nmkato.katosync.github.login.qa");
+        assert_eq!(
+            KEYCHAIN_SERVICE,
+            if cfg!(feature = "katoos-auth-qa") {
+                "com.nmkato.katosync.katoos.auth.qa"
+            } else {
+                "com.nmkato.katosync.github.login.qa"
+            }
+        );
         assert_eq!(KEYCHAIN_SERVICE, crate::KEYCHAIN_SERVICE);
         assert_ne!(KEYCHAIN_SERVICE, "com.nmkato.katosync");
         assert_ne!(crate::LAUNCH_AGENT_ID, "com.nmkato.katosync.sync");
         let qa = crate::app_support_dir().expect("isolated QA data folder");
         assert_eq!(
             qa.file_name().unwrap().to_str(),
-            Some("KatoSync GitHub Login QA")
+            Some(if cfg!(feature = "katoos-auth-qa") {
+                "KatoSync KATOOS Auth QA"
+            } else {
+                "KatoSync GitHub Login QA"
+            })
         );
     }
 
