@@ -10802,3 +10802,7 @@ button.agent-tile:hover {
  border:1px solid rgba(228,157,74,.4);color:#e9ae68;
  background:rgba(195,124,33,.09);border-radius:999px;padding:4px 9px;
  margin:4px 0 8px;}
+
+/* Status retry is available even when initial GitHub read fails. */
+.github-provider-status-retry{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.github-provider-status-retry .agent-empty{margin:0;}
