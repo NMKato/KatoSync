@@ -11,7 +11,10 @@ test("quick connect prepares verified identity first, then signs a bounded invit
   assert.ok(block.indexOf("mesh_device_identity_prepare")>=0);
   assert.ok(block.indexOf("mesh_pairing_offer_create")>block.indexOf("mesh_device_identity_prepare"));
   assert.match(block,/actual\.paired\|\|actual\.peerCount\|\|actual\.transportReady/);
-  assert.match(block,/setIdentityFailure\(classifyMeshIdentityFailure\(error\)\)/);
+  assert.match(block,/const failure=classifyMeshIdentityFailure\(error\)/);
+  assert.match(block,/setIdentityFailure\(failure\)/);
+  assert.match(block,/setReauthResult\(null\)/);
+  assert.match(block,/setIdentity\(null\)/);
   assert.match(native,/OFFER_LIFETIME_SECS: i64 = 300/);
 });
 test("receiving an invitation prepares a cryptographic challenge, never trust",()=>{
