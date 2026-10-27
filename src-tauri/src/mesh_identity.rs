@@ -176,9 +176,30 @@ pub(crate) async fn same_account_still_verified(uid: &str) -> Result<(), String>
 
 #[tauri::command]
 pub async fn mesh_device_identity_prepare() -> Result<MeshIdentityStatus, String> {
-    let uid = crate::github_app_auth::verified_katosync_user().await?;
-    let identity = ensure_identity(&uid)?;
-    same_account_still_verified(&uid).await?;
+    let uid = crate::github_app_auth::verified_katosync_user()
+        .await
+        .map_err(|_| "MESH_IDENTITY_ACCOUNT_UNVERIFIED".to_string())?;
+    // Diagnostic only: stable categories, no account IDs, keychain attributes,
+    // seed values or inner OS error messages cross Tauri IPC.
+    let identity = ensure_identity(&uid).map_err(|error| {
+        match error.as_str() {
+            "Betriebssystem-Schlüsselbund nicht verfügbar." => "MESH_IDENTITY_STORE_INIT",
+            "Geräteschlüssel im Schlüsselbund nicht lesbar." => "MESH_IDENTITY_STORE_READ",
+            "Geräteidentität konnte nicht sicher gespeichert werden." => {
+                "MESH_IDENTITY_STORE_WRITE"
+            }
+            "Geräteidentität wurde nicht gespeichert." => "MESH_IDENTITY_STORE_READBACK",
+            "Geräteschlüssel stimmt nach Speicherung nicht überein." => {
+                "MESH_IDENTITY_STORE_MISMATCH"
+            }
+            "Gespeicherte Geräteidentität ungültig." => "MESH_IDENTITY_STORE_CORRUPT",
+            _ => "MESH_IDENTITY_UNKNOWN",
+        }
+        .to_string()
+    })?;
+    same_account_still_verified(&uid)
+        .await
+        .map_err(|_| "MESH_IDENTITY_ACCOUNT_CHANGED".to_string())?;
     Ok(MeshIdentityStatus {
         fingerprint: fingerprint(&identity.verifying_key()),
         algorithm: "Ed25519 · SHA-256",
