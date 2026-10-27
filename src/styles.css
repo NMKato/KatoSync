@@ -10759,6 +10759,13 @@ button.agent-tile:hover {
 
 /* Manually initiated signed pairing invite preparation: not a trusted peer session. */
 /* Einladungs-Assistent: schlanke Bedienung; signierte Rohdaten nur in technischen Details. */
+/* Owner-verified device inventory: read-only, NOT an active Mesh channel. */
+.vision-mesh-account-directory{margin-top:13px;border:1px solid var(--line);border-radius:12px;padding:14px}
+.vision-mesh-directory-heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.vision-mesh-account-directory>p{font-size:12px;color:var(--text-muted);margin:8px 0}
+.vision-mesh-directory-row{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:8px 0;border-top:1px solid var(--line)}
+.vision-mesh-directory-row>div{display:grid;gap:2px}
+.vision-mesh-directory-row small{font-size:11px;color:var(--text-muted)}
 .vision-mesh-quick-panel{margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:rgba(24,34,42,.32)}
 .vision-mesh-quick-panel>strong{display:block;font-size:14px}
 .vision-mesh-quick-panel>button{margin:5px 6px 7px 0}
