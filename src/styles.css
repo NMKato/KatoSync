@@ -10758,6 +10758,13 @@ button.agent-tile:hover {
 .vision-mesh-last .compact-button {font-size:11px;}
 
 /* Manually initiated signed pairing invite preparation: not a trusted peer session. */
+/* Einladungs-Assistent: schlanke Bedienung; signierte Rohdaten nur in technischen Details. */
+.vision-mesh-quick-panel{margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:rgba(24,34,42,.32)}
+.vision-mesh-quick-panel>strong{display:block;font-size:14px}
+.vision-mesh-quick-panel>button{margin:5px 6px 7px 0}
+.vision-mesh-quick-panel .vision-mesh-quick-result{margin-top:10px}
+.vision-mesh-quick-panel .vision-mesh-quick-result small{display:block;margin-top:5px;color:var(--text-muted)}
+.vision-mesh-quick-panel .vision-mesh-warning{margin-top:15px}
 .vision-mesh-pairing {margin-top:7px;border-top:1px solid var(--line);padding-top:10px;}
 .vision-mesh-pairing summary {cursor:pointer;font-size:12px;font-weight:600;}
 .vision-mesh-pairing p {font-size:12px;line-height:1.5;color:var(--text-muted);margin:10px 0;}

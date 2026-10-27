@@ -261,6 +261,50 @@ function MeshReadinessStrip() {
   const [confirmedCode,setConfirmedCode]=useState("");
   const [approvedPeers,setApprovedPeers]=useState<MeshApprovedPeer[]|null>(null);
   const [approvalError,setApprovalError]=useState(false);
+  const [clipboardStatus,setClipboardStatus]=useState<"ok"|"failed"|null>(null);
+  const copyPublicMessage=async(payload:string)=>{
+    // Es werden nur signierte, oeffentliche Pairing-Nachrichten kopiert.
+    // Niemals Konto-Tokens, Keychain-Seeds oder unverifizierte Geraete-Freigaben.
+    setClipboardStatus(null);
+    try{
+      if(!navigator.clipboard?.writeText)throw new Error("clipboard_unavailable");
+      await navigator.clipboard.writeText(payload);
+      setClipboardStatus("ok");
+    }catch{setClipboardStatus("failed");}
+  };
+  const prepareAndInvite=async()=>{
+    setPairingBusy(true);setIdentityError(false);setIdentityFailure(null);
+    setOffer("");setClipboardStatus(null);
+    try{
+      const actual=await invoke<MeshIdentityStatus>("mesh_device_identity_prepare");
+      if(actual.paired||actual.peerCount||actual.transportReady)throw new Error("unexpected_trust_claim");
+      setIdentity(actual);
+      const invite=await invoke<MeshSignedOffer>("mesh_pairing_offer_create");
+      if(invite.protocol!=="katosync-mesh-pairing-v1"||!invite.signature||!invite.publicKey)
+        throw new Error("invalid_public_invite");
+      setOffer(JSON.stringify(invite));
+    }catch(error:unknown){
+      setIdentityError(true);
+      setIdentityFailure(classifyMeshIdentityFailure(error));
+    }finally{setPairingBusy(false);}
+  };
+  const checkAndPrepareReply=async()=>{
+    if(!incoming.trim())return;
+    setPairingBusy(true);setIdentityError(false);setIdentityFailure(null);
+    setChallengeOutgoing("");setInspected(null);setClipboardStatus(null);
+    try{
+      const checked=await invoke<MeshIdentityStatus>("mesh_pairing_offer_inspect",{offerJson:incoming});
+      if(checked.paired||checked.peerCount||checked.transportReady)
+        throw new Error("unexpected_trust_claim");
+      setInspected(checked);
+      // Herausforderung ist nur ein signierter Besitznachweis, KEINE Peer-Freigabe.
+      const challenge=await invoke<string>("mesh_pairing_challenge_create",{offerJson:incoming});
+      if(JSON.parse(challenge)?.protocol!=="katosync-mesh-challenge-v1")
+        throw new Error("invalid_challenge");
+      setChallengeOutgoing(challenge);
+    }catch{setIdentityError(true);}
+    finally{setPairingBusy(false);}
+  };
   const checkInventory=(value:MeshPeerInventory)=>{
     if(!value.approvalOnly||value.transportReady||value.remoteJobsEnabled||
       !Array.isArray(value.peers)||value.peers.length>10||
@@ -396,6 +440,36 @@ function MeshReadinessStrip() {
     </div>
     <details className="vision-mesh-pairing">
       <summary>{t("mesh.v1.heading")}</summary>
+      <p>{t("mesh.quick.description")}</p>
+      <div className="vision-mesh-quick-panel" aria-label={t("mesh.quick.heading")}>
+        <strong>{t("mesh.quick.heading")}</strong>
+        <p>{t("mesh.quick.accountSafety")}</p>
+        <button type="button" className="primary" disabled={pairingBusy||!snapshot}
+          onClick={()=>void prepareAndInvite()}>{t("mesh.quick.connect")}</button>
+        {offer?<div className="vision-mesh-quick-result">
+          <p role="status">{t("mesh.quick.publicInviteReady")}</p>
+          <button type="button" className="ghost compact-button"
+            onClick={()=>void copyPublicMessage(offer)}>{t("mesh.quick.copyPublicInvite")}</button>
+          <small>{t("mesh.quick.transferNotice")}</small>
+        </div>:null}
+        <label className="vision-mesh-field">{t("mesh.quick.receivedInvite")}
+          <textarea value={incoming} maxLength={2048} rows={2}
+            onChange={e=>setIncoming(e.target.value)} placeholder={t("mesh.v1.paste")}/>
+        </label>
+        <button type="button" className="ghost compact-button"
+          disabled={pairingBusy||!incoming.trim()||!snapshot}
+          onClick={()=>void checkAndPrepareReply()}>{t("mesh.quick.checkInvite")}</button>
+        {challengeOutgoing?<div className="vision-mesh-quick-result">
+          <p role="status">{t("mesh.quick.replyReady")}</p>
+          <button type="button" className="ghost compact-button"
+            onClick={()=>void copyPublicMessage(challengeOutgoing)}>{t("mesh.quick.copyPublicReply")}</button>
+          <small>{t("mesh.quick.notPaired")}</small>
+        </div>:null}
+        {clipboardStatus?<p role="status">{t(clipboardStatus==="ok"?"mesh.quick.copied":"mesh.quick.copyFailed")}</p>:null}
+        <p className="vision-mesh-warning">{t("mesh.quick.discoveryPending")}</p>
+      </div>
+      <details className="vision-mesh-advanced">
+      <summary>{t("mesh.quick.technicalOptions")}</summary>
       <p>{t("mesh.v1.description")}</p>
       <div className="vision-mesh-actions">
         <button type="button" className="ghost compact-button" onClick={()=>void prepareIdentity()}
@@ -414,6 +488,7 @@ function MeshReadinessStrip() {
       <button type="button" className="ghost compact-button" onClick={()=>void inspectOffer()}
         disabled={pairingBusy||!incoming.trim()||!snapshot}>{t("mesh.v1.verify")}</button>
       {inspected?<p className="vision-mesh-fingerprint">{t("mesh.v1.verifiedNotPaired")}: <code>{inspected.fingerprint}</code></p>:null}
+      </details>
       <details className="vision-mesh-advanced">
         <summary>{t("mesh.v2.title")}</summary>
       <p>{t("mesh.v2.notice")}</p>
