@@ -19,7 +19,7 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::mesh_identity::fingerprint;
 use crate::mesh_trust::ApprovedPeer;
 
-const TLS_PEER_DNS_NAME: &str = "mesh.katoos.invalid";
+pub(crate) const TLS_PEER_DNS_NAME: &str = "mesh.katoos.invalid";
 const CERT_MAX_BYTES: usize = 8192;
 
 /// Only public certificate material and keychain-derived in-process private key.
