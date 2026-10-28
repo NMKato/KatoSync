@@ -16,9 +16,13 @@ function makeDB(){
  const challenges:Stored[]=[], devices:Device[]=[];
  const dispatch=async(input:RequestInfo|URL,init?:RequestInit):Promise<Response>=>{
   const u=new URL(String(input)); assert.equal(u.origin,ORIGIN);
+  if(u.pathname.startsWith("/rest/v1/")){
+   const header=init?.method==="PATCH"||init?.method==="POST"?"Content-Profile":"Accept-Profile";
+   assert.equal((init?.headers as Record<string,string>)?.[header],"katosync");
+  }
   const body=init?.body ? JSON.parse(String(init.body)):null;
   if(u.pathname==="/auth/v1/user")return Response.json({id:OWNER,is_anonymous:false});
-  if(u.pathname.endsWith("/katosync_mesh_enrollment_challenges")){
+  if(u.pathname.endsWith("/mesh_enrollment_challenges")){
    if(init?.method==="POST"){
     const id=crypto.randomUUID(), now=new Date().toISOString();
     const d={challenge_id:id,created_at:now,consumed_at:null,...body};
@@ -37,8 +41,8 @@ function makeDB(){
    const id=u.searchParams.get("challenge_id")?.replace("eq.","");
    return Response.json(challenges.filter(x=>x.challenge_id===id));
   }
-  if(u.pathname.endsWith("/katosync_mesh_owner_policy"))return Response.json([]);
-  if(u.pathname.endsWith("/katosync_mesh_devices")){
+  if(u.pathname.endsWith("/mesh_owner_policy"))return Response.json([]);
+  if(u.pathname.endsWith("/mesh_devices")){
    if(init?.method==="POST"){
     devices.push(body);
     return new Response(null,{status:201});

@@ -105,9 +105,10 @@ pub async fn mesh_account_devices_list() -> Result<MeshDirectoryRead, String> {
         .build()
         .map_err(|_| "MESH_DIRECTORY_UNAVAILABLE".to_string())?;
     // Hardcoded database origin and allowlisted columns; no caller-supplied URL.
-    let url = format!("{}/rest/v1/katosync_mesh_devices", crate::KATOSYNC_AUTH_URL);
+    let url = format!("{}/rest/v1/mesh_devices", crate::KATOSYNC_AUTH_URL);
     let request = client
         .get(url)
+        .header("Accept-Profile", "katosync")
         .query(&[("select","device_id,owner_user_id,display_name,persona_name,platform_os,membership_state,fingerprint,last_seen_at"),("order","created_at.desc"),("limit","11")])
         .header("apikey",crate::KATOSYNC_AUTH_ANON_KEY)
         .bearer_auth(token.as_str());

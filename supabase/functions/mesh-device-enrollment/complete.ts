@@ -2,6 +2,7 @@
 // This does NOT pair devices, authorize a peer, enable transport or writers.
 import {inspectEnrollmentRegistry} from "./registry-policy.ts";
 const ORIGIN="https://xbnnlyyxiilklsygxcof.supabase.co";
+const SCHEMA="katosync";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BASE64=/^[A-Za-z0-9_-]+$/;
 const out=(status:number,error:string)=>new Response(JSON.stringify({error}),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
@@ -38,11 +39,11 @@ export async function completeMeshDeviceDiscovery(req:Request,env:Env,request:ty
     if(typeof info.id!=="string"||!UUID.test(info.id)||info.is_anonymous===true)return out(401,"LOGIN_REQUIRED");
     const uid=info.id;
     const headers={apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:"Bearer "+env.SUPABASE_SERVICE_ROLE_KEY};
-    const query=new URL(ORIGIN+"/rest/v1/katosync_mesh_enrollment_challenges");
+    const query=new URL(ORIGIN+"/rest/v1/mesh_enrollment_challenges");
     query.searchParams.set("select","challenge_id,owner_user_id,signing_public_key,nonce,expires_at,consumed_at");
     query.searchParams.set("challenge_id","eq."+proof.challengeId);
     query.searchParams.set("owner_user_id","eq."+uid);
-    const check=await request(query,{headers,signal:AbortSignal.timeout(8000)});
+    const check=await request(query,{headers:{...headers,"Accept-Profile":SCHEMA},signal:AbortSignal.timeout(8000)});
     if(!check.ok)return out(503,"REGISTRY_UNAVAILABLE");
     const records:unknown=await check.json();
     if(!Array.isArray(records)||records.length!==1)return out(404,"CHALLENGE_UNKNOWN");
@@ -58,23 +59,23 @@ export async function completeMeshDeviceDiscovery(req:Request,env:Env,request:ty
       ["katosync-mesh-device-enrollment-proof-v1",uid,proof.challengeId,proof.nonce,proof.publicKey,String(Date.parse(proof.expiresAt))].join("\n"));
     if(!await crypto.subtle.verify("Ed25519",verificationKey,sig,payload))return out(403,"BAD_SIGNATURE");
     // Discovery quota is intentionally separate from trust/remote job grants.
-    const existingURL=new URL(ORIGIN+"/rest/v1/katosync_mesh_devices");
+    const existingURL=new URL(ORIGIN+"/rest/v1/mesh_devices");
     // A previously revoked signing key must NOT be revived by repeating
     // a possession proof. Membership is server-owned, never client supplied.
     existingURL.searchParams.set("select","device_id,signing_public_key,membership_state,revoked_at");
     existingURL.searchParams.set("owner_user_id","eq."+uid);
     existingURL.searchParams.set("limit","11");
-    const existing=await request(existingURL,{headers,signal:AbortSignal.timeout(8000)});
+    const existing=await request(existingURL,{headers:{...headers,"Accept-Profile":SCHEMA},signal:AbortSignal.timeout(8000)});
     if(!existing.ok)return out(503,"REGISTRY_UNAVAILABLE");
     const current:unknown=await existing.json();
     const inspection=inspectEnrollmentRegistry(current,proof.publicKey);
     if(inspection.kind==="invalid")return out(503,"REGISTRY_UNAVAILABLE");
     if(inspection.kind==="revoked")return out(403,"DEVICE_REVOKED");
-    const policyURL=new URL(ORIGIN+"/rest/v1/katosync_mesh_owner_policy");
+    const policyURL=new URL(ORIGIN+"/rest/v1/mesh_owner_policy");
     policyURL.searchParams.set("select","allowed_devices");
     policyURL.searchParams.set("owner_user_id","eq."+uid);
     policyURL.searchParams.set("limit","1");
-    const policy=await request(policyURL,{headers,signal:AbortSignal.timeout(8000)});
+    const policy=await request(policyURL,{headers:{...headers,"Accept-Profile":SCHEMA},signal:AbortSignal.timeout(8000)});
     if(!policy.ok)return out(503,"REGISTRY_UNAVAILABLE");
     const policies:unknown=await policy.json();
     if(!Array.isArray(policies)||policies.length>1)return out(503,"REGISTRY_UNAVAILABLE");
@@ -83,14 +84,14 @@ export async function completeMeshDeviceDiscovery(req:Request,env:Env,request:ty
     const known=inspection.kind==="known";
     if(!known&&inspection.count>=max)return out(429,"DEVICE_QUOTA");
     // Atomic single-use consumption: racing requests cannot reuse one signed proof.
-    const consumeURL=new URL(ORIGIN+"/rest/v1/katosync_mesh_enrollment_challenges");
+    const consumeURL=new URL(ORIGIN+"/rest/v1/mesh_enrollment_challenges");
     consumeURL.searchParams.set("select","challenge_id");
     consumeURL.searchParams.set("challenge_id","eq."+proof.challengeId);
     consumeURL.searchParams.set("owner_user_id","eq."+uid);
     consumeURL.searchParams.set("consumed_at","is.null");
     consumeURL.searchParams.set("expires_at","gt."+new Date().toISOString());
     const consumed=await request(consumeURL,{method:"PATCH",
-      headers:{...headers,"content-type":"application/json",Prefer:"return=representation"},
+      headers:{...headers,"Content-Profile":SCHEMA,"content-type":"application/json",Prefer:"return=representation"},
       body:JSON.stringify({consumed_at:new Date().toISOString()}),signal:AbortSignal.timeout(8000)});
     if(!consumed.ok)return out(503,"REGISTRY_UNAVAILABLE");
     const updates:unknown=await consumed.json();
@@ -98,8 +99,8 @@ export async function completeMeshDeviceDiscovery(req:Request,env:Env,request:ty
     if(!known){
       const digest=new Uint8Array(await crypto.subtle.digest("SHA-256",key));
       const fingerprint=Array.from(digest.slice(0,16),x=>x.toString(16).toUpperCase().padStart(2,"0")).join("-");
-      const register=await request(ORIGIN+"/rest/v1/katosync_mesh_devices",{
-        method:"POST",headers:{...headers,"content-type":"application/json",Prefer:"return=minimal"},
+      const register=await request(ORIGIN+"/rest/v1/mesh_devices",{
+        method:"POST",headers:{...headers,"Content-Profile":SCHEMA,"content-type":"application/json",Prefer:"return=minimal"},
         body:JSON.stringify({owner_user_id:uid,signing_public_key:proof.publicKey,fingerprint,
           display_name:proof.deviceName,platform_os:proof.platformOs,membership_state:"discovered",
           enrolled_at:new Date().toISOString(),last_seen_at:new Date().toISOString()}),

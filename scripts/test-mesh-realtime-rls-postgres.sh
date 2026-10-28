@@ -12,5 +12,5 @@ trap cleanup EXIT
 "$BIN/pg_ctl" -D "$DATA" -o "-p 55474 -k '$SOCKET' -c listen_addresses=''" -w start >/dev/null
 export PGHOST="$SOCKET" PGPORT=55474 PGUSER="$(id -un)" PGDATABASE=postgres
 psql -X -q -v ON_ERROR_STOP=1 -f "$ROOT/tests/sql/mesh_realtime_setup.sql"
-psql -X -q -v ON_ERROR_STOP=1 -f "$ROOT/supabase/migrations/20261028115220_mesh_owner_private_realtime_signaling.sql"
+psql -X -q -v ON_ERROR_STOP=1 -f "$ROOT/supabase/staged-migrations/20261028115220_mesh_owner_private_realtime_signaling.sql"
 psql -X -q -v ON_ERROR_STOP=1 -f "$ROOT/tests/sql/mesh_realtime_assert.sql"

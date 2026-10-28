@@ -138,9 +138,10 @@ pub(crate) async fn require_both_devices_enrolled(
         .timeout(Duration::from_secs(8))
         .build()
         .map_err(|_| "MESH_ENROLLMENT_UNAVAILABLE".to_string())?;
-    let url = format!("{}/rest/v1/katosync_mesh_devices", crate::KATOSYNC_AUTH_URL);
+    let url = format!("{}/rest/v1/mesh_devices", crate::KATOSYNC_AUTH_URL);
     let response = client
         .get(url)
+        .header("Accept-Profile", "katosync")
         .query(&[
             ("select", "owner_user_id,signing_public_key,fingerprint,membership_state,enrolled_at,revoked_at"),
             ("owner_user_id", &format!("eq.{owner}")),

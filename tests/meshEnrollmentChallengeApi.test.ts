@@ -18,6 +18,11 @@ function fakeRemote(recentCount=0,authOk=true,insertOk=true){
  const call=async(input:RequestInfo|URL,init?:RequestInit)=>{
   const url=String(input);
   assert.ok(url.startsWith(origin));
+  if(url.includes("/rest/v1/")){
+   const header=init?.method==="POST"?"Content-Profile":"Accept-Profile";
+   assert.equal((init?.headers as Record<string,string>)?.[header],"katosync");
+   assert.ok(!url.includes("katosync_mesh_"));
+  }
   if(url.endsWith("/auth/v1/user")){
    assert.equal(init?.headers && (init.headers as Record<string,string>).Authorization?.startsWith("Bearer "),true);
    return Response.json(authOk?{id:uid,is_anonymous:false}:{error:"bad"},{status:authOk?200:401});
@@ -27,7 +32,7 @@ function fakeRemote(recentCount=0,authOk=true,insertOk=true){
    assert.ok(url.includes("owner_user_id=eq."));
    return Response.json(Array.from({length:recentCount},()=>({challenge_id:crypto.randomUUID()})));
   }
-  if(url.endsWith("/rest/v1/katosync_mesh_enrollment_challenges")){
+  if(url.endsWith("/rest/v1/mesh_enrollment_challenges")){
    assert.equal(init?.method,"POST");
    inserted=JSON.parse(String(init?.body));
    return Response.json(insertOk?[{challenge_id:"22222222-2222-4222-8222-222222222222"}]:{error:"failed"},{status:insertOk?201:403});

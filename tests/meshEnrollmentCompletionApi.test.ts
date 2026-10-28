@@ -18,14 +18,19 @@ async function fixture(){
   const writes:string[]=[];
   const call=async(input:RequestInfo|URL,init?:RequestInit)=>{
    const url=String(input); assert.ok(url.startsWith(origin));
+   if(url.includes("/rest/v1/")){
+    const header=init?.method==="PATCH"||init?.method==="POST"?"Content-Profile":"Accept-Profile";
+    assert.equal((init?.headers as Record<string,string>)?.[header],"katosync");
+    assert.ok(!url.includes("katosync_mesh_"),"must not reference old public Mesh tables");
+   }
    if(url.endsWith("/auth/v1/user"))return Response.json(options.invalidAuth?{}:{id:owner},{status:options.invalidAuth?401:200});
-   if(url.includes("/katosync_mesh_enrollment_challenges")&&init?.method!=="PATCH")
+   if(url.includes("/mesh_enrollment_challenges")&&init?.method!=="PATCH")
     return Response.json([{challenge_id:challengeId,owner_user_id:owner,signing_public_key:publicKey,nonce,expires_at:expiresAt,consumed_at:options.used?"2026-10-28T08:00:00Z":null}]);
-   if(url.includes("/katosync_mesh_enrollment_challenges")&&init?.method==="PATCH"){
+   if(url.includes("/mesh_enrollment_challenges")&&init?.method==="PATCH"){
     writes.push("consume");return Response.json(options.used?[]:[{challenge_id:challengeId}]);
    }
-   if(url.includes("/katosync_mesh_owner_policy"))return Response.json([]);
-   if(url.includes("/katosync_mesh_devices")&&init?.method!=="POST")
+   if(url.includes("/mesh_owner_policy"))return Response.json([]);
+   if(url.includes("/mesh_devices")&&init?.method!=="POST")
     return Response.json(options.quota?
       [{signing_public_key:"Z".repeat(43),membership_state:"discovered",revoked_at:null},
        {signing_public_key:"Y".repeat(43),membership_state:"pending",revoked_at:null}]:
@@ -33,7 +38,7 @@ async function fixture(){
       [{signing_public_key:publicKey,membership_state:"revoked",revoked_at:"2026-10-28T14:00:00Z"}]:
       options.existing?
       [{signing_public_key:publicKey,membership_state:"trusted",revoked_at:null}]:[]);
-   if(url.includes("/katosync_mesh_devices")&&init?.method==="POST"){
+   if(url.includes("/mesh_devices")&&init?.method==="POST"){
     writes.push("register"); const data=JSON.parse(String(init.body));
     assert.equal(data.membership_state,"discovered");
     assert.equal(data.signing_public_key,publicKey);
