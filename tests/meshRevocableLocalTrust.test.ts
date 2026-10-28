@@ -5,7 +5,7 @@ import {readFileSync} from "node:fs";
 const read=(p:string)=>readFileSync(new URL(p,import.meta.url),"utf8");
 const rust=read("../src-tauri/src/mesh_trust.rs");
 const hs=read("../src-tauri/src/mesh_handshake.rs");
-const view=read("../src/components/VisionWorkspace.tsx");
+const view=read("../src/components/MeshConnectionCard.tsx");
 const lib=read("../src-tauri/src/lib.rs");
 
 test("explicit approval uses verified issuer and typed fresh safety code",()=>{

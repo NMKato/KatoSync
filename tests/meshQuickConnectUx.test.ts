@@ -3,7 +3,7 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 const read=(path:string)=>readFileSync(new URL(path,import.meta.url),"utf8");
-const ui=read("../src/components/VisionWorkspace.tsx");
+const ui=read("../src/components/MeshConnectionCard.tsx");
 const native=read("../src-tauri/src/mesh_identity.rs");
 
 test("quick connect prepares verified identity first, then signs a bounded invitation",()=>{

@@ -6,7 +6,7 @@ const read=(file:string)=>readFileSync(new URL(file,import.meta.url),"utf8");
 const rust=read("../src-tauri/src/mesh_handshake.rs");
 const first=read("../src-tauri/src/mesh_identity.rs");
 const lib=read("../src-tauri/src/lib.rs");
-const view=read("../src/components/VisionWorkspace.tsx");
+const view=read("../src/components/MeshConnectionCard.tsx");
 
 test("native handshake registers only user-initiated challenge and signed response commands",()=>{
  for(const cmd of ["mesh_pairing_challenge_create","mesh_pairing_response_create","mesh_pairing_response_verify"])

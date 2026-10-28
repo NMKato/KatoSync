@@ -5,7 +5,7 @@ import {readFileSync} from "node:fs";
 const read=(x:string)=>readFileSync(new URL(x,import.meta.url),"utf8");
 const rust=read("../src-tauri/src/mesh_directory.rs");
 const lib=read("../src-tauri/src/lib.rs");
-const view=read("../src/components/VisionWorkspace.tsx");
+const view=read("../src/components/MeshConnectionCard.tsx");
 test("account directory is a read-only native Tauri command gated by issuer",()=>{
   assert.match(lib,/mesh_directory::mesh_account_devices_list/);
   assert.match(rust,/verified_katosync_user\(\)\s*\.await/);

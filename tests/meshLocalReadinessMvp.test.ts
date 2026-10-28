@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 const source=(path:string)=>readFileSync(new URL(path,import.meta.url),"utf8");
 const rust=source("../src-tauri/src/mesh_readiness.rs");
 const root=source("../src-tauri/src/lib.rs");
-const view=source("../src/components/VisionWorkspace.tsx");
+const view=source("../src/components/MeshConnectionCard.tsx");
 const css=source("../src/styles.css");
 
 test("native readiness command returns only local non-sensitive status",()=>{
@@ -31,7 +31,7 @@ test("heartbeats are local only and stale/invalid time cannot grant peer trust",
  assert.match(rust,/return "unknown"/);
 });
 test("Vision mesh strip shows explicitly unpaired peer and remote writer blocked",()=>{
- assert.match(view,/<MeshReadinessStrip\s*\/>/);
+ assert.match(source("../src/components/ProviderManager.tsx"),/<MeshConnectionCard\s*\/>/);
  assert.match(view,/invoke<MeshLocalReadiness>\("mesh_local_readiness"\)/);
  assert.match(view,/actual\.verifiedPeers!==0/);
  assert.match(view,/actual\.remoteReadOnlyDispatch \|\| actual\.crossDeviceWrites/);

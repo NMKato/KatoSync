@@ -26,7 +26,7 @@ test("mesh account/keychain failures categorized without OS-secret leakage",()=>
 });
 test("native command keeps auth revalidation and cannot switch on remote jobs",()=>{
  const rust=read("../src-tauri/src/mesh_identity.rs");
- const ui=read("../src/components/VisionWorkspace.tsx");
+ const ui=read("../src/components/MeshConnectionCard.tsx");
  assert.match(rust,/pub async fn mesh_device_identity_prepare/);
  assert.match(rust,/MESH_IDENTITY_STORE_WRITE/);
  assert.match(rust,/classify_mesh_auth_failure/);
