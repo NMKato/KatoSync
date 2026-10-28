@@ -125,7 +125,7 @@ const brandAssets = {
   openai: "/agent-openai.png",
   claude: "/agent-claude.png",
   kai: "/kai-ai-icon.png",
-  katosync: "/katoos_icon_logo_trans.png"
+  katosync: "/katosync_logo_centered.png"
 } as const;
 
 function LaneBrandIcon({ lane, size = 20 }: { lane: AgentLane; size?: number }) {

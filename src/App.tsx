@@ -567,7 +567,7 @@ export default function App() {
   if (showSplash) {
     return (
       <div className="startup-splash" aria-label={t("shell.preparing")}>
-        <img alt="" src="/katoos_icon_logo_trans.png" />
+        <img alt="" src="/katosync_logo_centered.png" />
         <strong>KatoSync</strong>
         <span className="startup-tagline">Project Memory Uploader</span>
       </div>
@@ -621,7 +621,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <img alt="" src="/katoos_icon_logo_trans.png" />
+            <img alt="" src="/katosync_logo_centered.png" />
           </div>
           <div className="brand-copy">
             <strong>KatoSync</strong>
@@ -2963,7 +2963,7 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
     <div className="login-gate">
       <div className="login-card">
         <div className="login-brand">
-          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <img alt="" src="/katosync_logo_centered.png" />
           <div>
             <strong>KatoSync</strong>
             <span>{import.meta.env.VITE_KATOOS_AUTH_QA==="1"?
@@ -3063,7 +3063,7 @@ function LicenseDialog({
           </button>
         ) : null}
         <header>
-          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <img alt="" src="/katosync_logo_centered.png" />
           <div>
             <span className="section-label">KatoSync</span>
             <h2 id="license-title">{license.title}</h2>
@@ -3372,7 +3372,7 @@ function OnboardingDialog({
           <X size={17} />
         </button>
         <div className="onboarding-brand">
-          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <img alt="" src="/katosync_logo_centered.png" />
           <span>{t("onboarding.brand")}</span>
         </div>
         <div

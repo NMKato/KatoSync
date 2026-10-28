@@ -209,16 +209,23 @@ button:disabled {
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 82px;
-  height: 82px;
-  border-radius: 18px;
-  background: rgba(255, 107, 53, 0.04);
+  width: 88px;
+  height: 88px;
+  flex: 0 0 88px;
+  overflow: hidden;
+  border-radius: 21px;
+  border: 1px solid rgba(112, 214, 200, 0.17);
+  background: radial-gradient(circle at 30% 20%, rgba(27, 76, 76, 0.74), rgba(9, 22, 27, 0.96));
+  box-shadow: inset 0 1px 1px rgba(224, 255, 251, 0.12),
+              inset 0 -9px 14px rgba(0, 0, 0, 0.20),
+              0 6px 17px rgba(0, 0, 0, 0.24);
 }
 
 .brand-mark img {
-  width: 96px;
-  height: 96px;
+  width: 80px;
+  height: 80px;
   object-fit: contain;
+  filter: drop-shadow(0 4px 4px rgba(0, 0, 0, 0.38));
 }
 
 .brand-copy {
@@ -3155,11 +3162,13 @@ pre {
   .brand-mark {
     width: 56px;
     height: 56px;
+    flex-basis: 56px;
+    border-radius: 14px;
   }
 
   .brand-mark img {
-    width: 68px;
-    height: 68px;
+    width: 52px;
+    height: 52px;
   }
 
   .brand div:last-child,
@@ -5340,7 +5349,9 @@ pre {
 
 /* ===== Agent-Sync-Shell ===== */
 .app-shell.mode-agentSync .step.active svg { color: var(--agent); }
-.app-shell.mode-agentSync .brand-mark { background: var(--agent-soft); }
+.app-shell.mode-agentSync .brand-mark {
+  background: radial-gradient(circle at 30% 20%, rgba(27, 83, 81, 0.8), rgba(8, 24, 29, 0.97));
+}
 .app-shell.mode-agentSync .brand span { color: var(--agent); }
 
 .app-shell.mode-agentSync .workspace {
