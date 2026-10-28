@@ -95,6 +95,61 @@ fn validate_peer(peer: &ApprovedPeer) -> Result<(), String> {
     }
     Ok(())
 }
+/// Enforces an exact, explicitly approved local pin. An arbitrary caller
+/// supplied ApprovedPeer object is never sufficient for network admission.
+fn select_approved_peer(
+    peers: &[ApprovedPeer],
+    requested_fingerprint: &str,
+    local_key: &VerifyingKey,
+    now: i64,
+) -> Result<ApprovedPeer, String> {
+    if requested_fingerprint.len() != 47
+        || !requested_fingerprint.bytes().enumerate().all(|(i, c)| {
+            if i % 3 == 2 {
+                c == b'-'
+            } else {
+                c.is_ascii_hexdigit() && !c.is_ascii_lowercase()
+            }
+        })
+    {
+        return Err("MESH_ADMISSION_BAD_FINGERPRINT".into());
+    }
+    let mut matches = peers
+        .iter()
+        .filter(|p| p.fingerprint == requested_fingerprint);
+    let matched = matches
+        .next()
+        .ok_or_else(|| "MESH_ADMISSION_PEER_NOT_APPROVED".to_string())?;
+    if matches.next().is_some()
+        || validate_peer(matched).is_err()
+        || matched.approved_at > now.saturating_add(5)
+        || matched.public_key == URL_SAFE_NO_PAD.encode(local_key.as_bytes())
+    {
+        return Err("MESH_ADMISSION_PEER_INVALID".into());
+    }
+    Ok(matched.clone())
+}
+
+/// Native-only account-scoped Keychain read. Called immediately before and
+/// after a one-shot TLS probe; never accept a pin supplied by the web UI.
+pub(crate) fn approved_peer_for_account(
+    owner_uid: &str,
+    requested_fingerprint: &str,
+    local_key: &VerifyingKey,
+) -> Result<ApprovedPeer, String> {
+    let _guard = state_lock()
+        .lock()
+        .map_err(|_| "MESH_ADMISSION_STORE_LOCKED")?;
+    let peers = parse_inventory(read_raw(owner_uid, TRUST_ACCOUNT)?)
+        .map_err(|_| "MESH_ADMISSION_STORE_UNAVAILABLE".to_string())?;
+    select_approved_peer(
+        &peers,
+        requested_fingerprint,
+        local_key,
+        Utc::now().timestamp(),
+    )
+}
+
 fn parse_inventory(raw: Option<String>) -> Result<Vec<ApprovedPeer>, String> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
@@ -319,6 +374,41 @@ mod tests {
         peers[0].fingerprint = "WRONG".into();
         assert!(parse_inventory(Some(serde_json::to_string(&peers).unwrap())).is_err());
     }
+    #[test]
+    fn native_admission_requires_exact_preapproved_nonself_pin() {
+        let own = key(11);
+        let friend = key(12);
+        let stranger = key(13);
+        let mut pins = Vec::new();
+        approve_peer(&mut pins, &friend, 100).unwrap();
+        let expected = fingerprint(&friend);
+        assert_eq!(
+            select_approved_peer(&pins, &expected, &own, 200)
+                .unwrap()
+                .public_key,
+            URL_SAFE_NO_PAD.encode(friend.as_bytes())
+        );
+        assert!(select_approved_peer(&pins, &fingerprint(&stranger), &own, 200).is_err());
+        assert!(select_approved_peer(&[], &expected, &own, 200).is_err());
+        assert!(select_approved_peer(&pins, &expected.to_lowercase(), &own, 200).is_err());
+        assert!(select_approved_peer(&pins, &expected.replace('-', ""), &own, 200).is_err());
+
+        let mut self_pins = Vec::new();
+        approve_peer(&mut self_pins, &own, 100).unwrap();
+        assert!(select_approved_peer(&self_pins, &fingerprint(&own), &own, 200).is_err());
+        let mut future = pins.clone();
+        future[0].approved_at = 9999;
+        assert!(select_approved_peer(&future, &expected, &own, 200).is_err());
+        let mut tampered = pins.clone();
+        tampered[0].fingerprint = fingerprint(&stranger);
+        assert!(select_approved_peer(&tampered, &tampered[0].fingerprint, &own, 200).is_err());
+        let mut revoked = pins.clone();
+        revoked.clear();
+        assert!(select_approved_peer(&revoked, &expected, &own, 200).is_err());
+        let duplicated = vec![pins[0].clone(), pins[0].clone()];
+        assert!(select_approved_peer(&duplicated, &expected, &own, 200).is_err());
+    }
+
     #[test]
     fn revoke_in_memory_keeps_transport_and_remote_jobs_disabled() {
         let mut peers = Vec::new();

@@ -36,13 +36,15 @@ mod mesh_handshake;
 mod mesh_hub;
 mod mesh_identity;
 mod mesh_readiness;
+// Stage 2D: native-only owner + pin admission. Deliberately no runtime
+// caller/IPC until real enrollment, session revocation and user consent.
+#[allow(dead_code)]
+mod mesh_admission;
 mod mesh_tls;
-// Explicit staging boundary: never call the transport from IPC or a runtime
-// listener until mutual owner approval, revocation and session gates ship.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "Stage 2B transport is not wired to runtime yet")
-)]
+// Explicit staging boundary: no IPC/runtime listener. The Stage 2D native
+// admission service may reference this module; it remains deliberately unused
+// by app runtime until revocation/session enforcement is released.
+#[allow(dead_code)]
 mod mesh_transport;
 mod mesh_trust;
 mod model_distribution;
