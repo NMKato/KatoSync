@@ -10942,3 +10942,30 @@ button.agent-tile:hover {
 /* Status retry is available even when initial GitHub read fails. */
 .github-provider-status-retry{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
 .github-provider-status-retry .agent-empty{margin:0;}
+
+
+/* Explicit read-only refresh actions on the Connections page */
+.connections-refresh-hint {
+  margin: -4px 0 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.mesh-status-refresh {
+  flex: 0 0 auto;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+}
+.github-status-refresh {
+  justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+}

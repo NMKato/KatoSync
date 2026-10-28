@@ -3,7 +3,7 @@
 import {useEffect,useRef,useState} from "react";
 import {invoke} from "@tauri-apps/api/core";
 import {openUrl} from "@tauri-apps/plugin-opener";
-import {CheckCircle2,Copy,ExternalLink,Github,Info,ShieldCheck,Unplug} from "lucide-react";
+import {CheckCircle2,Copy,ExternalLink,Github,Info,RefreshCcw,ShieldCheck,Unplug} from "lucide-react";
 import {useT, type TKey} from "../i18n";
 import {classifyGithubAuthFailure,type GithubAuthFailure} from "../lib/githubAuthError";
 import {ProviderBrandMark} from "./ProviderBrandMark";
@@ -18,7 +18,7 @@ type Device = {
  sessionId:string;userCode:string;verificationUri:string;expiresIn:number;interval:number;
 };
 type Poll = {state:string;retryAfterSeconds:number;login:string|null};
-export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{variant?:"nested"|"provider";onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void}){
+export function GithubAppConnectionPanel({variant="nested",refreshEpoch=0,onChatHandoff}:{variant?:"nested"|"provider";refreshEpoch?:number;onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void}){
  const {t}=useT();
  const [status,setStatus]=useState<Status|null>(null);
  const [device,setDevice]=useState<Device|null>(null);
@@ -39,10 +39,14 @@ export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{varia
   void invoke<Status>("github_app_connection_status").then(s=>{
    if(mounted.current&&version===latest.current)setStatus(s);
   }).catch((e:unknown)=>{
-   if(mounted.current&&version===latest.current)setError(classifyGithubAuthFailure(e));
+   if(mounted.current&&version===latest.current){
+     // Never keep displaying a stale "connected" account after verification failed.
+     setStatus(null);
+     setError(classifyGithubAuthFailure(e));
+   }
   });
   return ()=>{mounted.current=false;latest.current++;};
- },[]);
+ },[refreshEpoch]);
  // GitHub confirms user consent in the browser, but a device-code approval
  // MUST be polled by the native app to finish token storage. Perform that
  // follow-up automatically only after the user explicitly starts Device Flow.
@@ -113,9 +117,19 @@ export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{varia
   finally{if(mounted.current&&version===latest.current)setBusy(false);}
  }
  function refreshStatus(){
+  if(busy||device)return; // no concurrent status polling during device-code login
+  const version=latest.current+1;
   void perform(async()=>{
-   const actual=await invoke<Status>("github_app_connection_status");
-   if(mounted.current)setStatus(actual);
+   try {
+     const actual=await invoke<Status>("github_app_connection_status");
+     if(mounted.current&&version===latest.current){
+       setStatus(actual);
+       setError(null);
+     }
+   }catch(e){
+     if(mounted.current&&version===latest.current)setStatus(null);
+     throw e;
+   }
   });
  }
  function start(){
@@ -187,6 +201,11 @@ export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{varia
         </div>
         <small>{t("kickoff.authExpires",{count:Math.ceil(device.expiresIn/60)})}</small>
        </div>}
+    {variant==="provider"&&status!==null&&status.configured!==false?<button type="button"
+      className="ghost compact-button github-status-refresh" disabled={busy||Boolean(device)}
+      onClick={refreshStatus}>
+      <RefreshCcw size={14} className={busy?"spin":""}/>{t("connections.refreshGithub")}
+    </button>:null}
     {error?<p className="tone-warn" role="alert">
       {t("kickoff.authError")} {t(diagnosis[error])}
     </p>:null}
@@ -205,7 +224,7 @@ export function GithubAppConnectionPanel({variant="nested",onChatHandoff}:{varia
     </span>
    </header>
    <div className="github-provider-card-controls">{controls}</div>
-   {status?.connected?<GithubAppReadOnlyInventory key={status.login ?? "github-user"} onChatHandoff={onChatHandoff} />:null}
+   {status?.connected?<GithubAppReadOnlyInventory key={(status.login ?? "github-user")+":"+refreshEpoch} onChatHandoff={onChatHandoff} />:null}
    <details className="github-provider-card-info">
     <summary><Info size={15}/>{t("github.integration.infoLabel")}</summary>
     <div className="github-provider-card-info-body">

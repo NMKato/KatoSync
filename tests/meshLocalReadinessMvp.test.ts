@@ -30,8 +30,8 @@ test("heartbeats are local only and stale/invalid time cannot grant peer trust",
  assert.match(rust,/"stale"/);
  assert.match(rust,/return "unknown"/);
 });
-test("Vision mesh strip shows explicitly unpaired peer and remote writer blocked",()=>{
- assert.match(source("../src/components/ProviderManager.tsx"),/<MeshConnectionCard\s*\/>/);
+test("Connections mesh card shows explicitly unpaired peer and remote writer blocked",()=>{
+ assert.match(source("../src/components/ProviderManager.tsx"),/<MeshConnectionCard\s+refreshEpoch=\{connectionRefreshEpoch\}\s*\/>/);
  assert.match(view,/invoke<MeshLocalReadiness>\("mesh_local_readiness"\)/);
  assert.match(view,/actual\.verifiedPeers!==0/);
  assert.match(view,/actual\.remoteReadOnlyDispatch \|\| actual\.crossDeviceWrites/);

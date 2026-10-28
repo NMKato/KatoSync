@@ -11,7 +11,7 @@ test("Vision canvas remains clean",()=>{
  assert.ok(!vision.includes("renew_katoos_qa_session"));
 });
 test("Provider contains model, GitHub and Mesh connections",()=>{
- assert.ok(provider.includes("<MeshConnectionCard />"));
+ assert.ok(provider.includes("<MeshConnectionCard refreshEpoch={connectionRefreshEpoch} />"));
  assert.ok(provider.includes("GithubAppConnectionPanel"));
  assert.ok(provider.includes("cardProviders"));
 });
