@@ -1,0 +1,15 @@
+{
+  "productName": "KatoSync Mesh QA",
+  "identifier": "com.nmkato.katosync.meshqa",
+  "build": {
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [{
+      "title": "KatoSync · Mesh QA (isoliert)",
+      "width": 1240, "height": 820,
+      "minWidth": 1040, "minHeight": 720,
+      "resizable": true, "center": true
+    }]
+  }
+}
