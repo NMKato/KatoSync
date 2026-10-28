@@ -92,6 +92,8 @@ function formatTime(value: string | null | undefined, withDate = true): string {
 
 export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void }) {
   const { t } = useT();
+  const [connectionRefreshEpoch,setConnectionRefreshEpoch]=useState(0);
+  const [connectionRefreshBusy,setConnectionRefreshBusy]=useState(false);
   const config = vm.config;
   if (!config) return null;
   const priority = normalizeProviderPriority(config.providerPriority);
@@ -102,6 +104,19 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
   );
   const anyBusy = Object.keys(vm.providerBusy).length > 0;
   const localControl = vm.providerStatuses.find((status) => status.provider === "local_control");
+
+  // Read-only refresh: model diagnostics + GitHub account/repository status +
+  // local Mesh readiness. Never log in, clear tokens, enroll or pair devices.
+  const refreshConnections=async()=>{
+    if(connectionRefreshBusy||anyBusy)return;
+    setConnectionRefreshBusy(true);
+    setConnectionRefreshEpoch(previous=>previous+1);
+    try {
+      await vm.handleRefreshProviders(true);
+    }finally {
+      setConnectionRefreshBusy(false);
+    }
+  };
 
   const copyDiagnostics = async () => {
     const ok = await copyText(buildSanitizedProviderDiagnostics(vm.providerStatuses, config.appVersion));
@@ -122,12 +137,13 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
         <div className="provider-hero-actions">
           <button
             className="secondary"
-            disabled={anyBusy}
-            onClick={() => void vm.handleRefreshProviders(true)}
+            disabled={anyBusy||connectionRefreshBusy}
+            onClick={() => void refreshConnections()}
             type="button"
+            aria-label={t("connections.refreshAll")}
           >
-            {anyBusy ? <Loader2 className="spin" size={16} /> : <RefreshCcw size={16} />}
-            {t("providers.testAll")}
+            {anyBusy||connectionRefreshBusy ? <Loader2 className="spin" size={16} /> : <RefreshCcw size={16} />}
+            {t("connections.refreshAll")}
           </button>
           <button className="ghost" disabled={!vm.providerStatuses.length} onClick={() => void copyDiagnostics()} type="button">
             <Copy size={16} />
@@ -136,6 +152,7 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
         </div>
       </div>
 
+      <p className="connections-refresh-hint">{t("connections.refreshHint")}</p>
       <div className="provider-route-wrap">
         <span className="provider-route-title">{t("providers.routeTitle")}</span>
         <ol className="provider-route" aria-label={t("providers.routeAria")}>
@@ -159,7 +176,7 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
         {cardProviders.map((provider) => (
           <Fragment key={provider}>
             {provider === "local" && vm.sessionStatus.loggedIn ? (
-              <GithubAppConnectionPanel key={vm.sessionStatus.email ?? "signed-in-account"} variant="provider" onChatHandoff={onChatHandoff} />
+              <GithubAppConnectionPanel key={vm.sessionStatus.email ?? "signed-in-account"} variant="provider" refreshEpoch={connectionRefreshEpoch} onChatHandoff={onChatHandoff} />
             ) : null}
             <ProviderCard
               provider={provider}
@@ -170,7 +187,7 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
             />
           </Fragment>
         ))}
-        {vm.sessionStatus.loggedIn ? <MeshConnectionCard /> : null}
+        {vm.sessionStatus.loggedIn ? <MeshConnectionCard refreshEpoch={connectionRefreshEpoch} /> : null}
       </div>
 
       <div className="provider-info-grid">

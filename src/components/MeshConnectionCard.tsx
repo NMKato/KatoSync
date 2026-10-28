@@ -95,7 +95,7 @@ type MeshPeerInventory = {
 
 // No peer registration or network request: only a Tauri read of local daemon
 // state. RDC connectivity is intentionally NOT counted as trusted Mesh peers.
-export function MeshConnectionCard() {
+export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const {t,lang}=useT();
   const [detailsOpen,setDetailsOpen]=useState(false);
   const [hubPreference,setHubPreference]=useState<MeshHubPreference|null>(null);
@@ -107,7 +107,7 @@ export function MeshConnectionCard() {
       .then(preference=>{if(active){setHubPreference(preference);setHubError(false);}})
       .catch(()=>{if(active)setHubError(true);});
     return ()=>{active=false;};
-  },[]);
+  },[refreshEpoch]);
   const setHubPreferred=async(preferred:boolean)=>{
     setHubBusy(true);
     setHubError(false);
@@ -362,7 +362,14 @@ export function MeshConnectionCard() {
       setError(true);
     } finally {setLoading(false);}
   },[]);
-  useEffect(()=>{void refresh();},[refresh]);
+  useEffect(()=>{
+    // A status refresh is deliberately read-only: do NOT invoke
+    // mesh_account_device_discover (which registers the local device).
+    // Old discovered roster rows must not look freshly verified.
+    setDirectory(null);
+    setDirectoryError(false);
+    void refresh();
+  },[refresh,refreshEpoch]);
   const authRejected=identityError&&
     ["account","session","refresh","invalid","changed"].includes(identityFailure??"");
   const revealReauth=()=>{
@@ -381,6 +388,11 @@ export function MeshConnectionCard() {
           </span>
           <small>{t("mesh.simple.noPeers")}</small>
         </div>
+        <button type="button" className="ghost compact-button mesh-status-refresh"
+          aria-label={t("connections.refreshMesh")} title={t("connections.refreshMesh")}
+          onClick={()=>void refresh()} disabled={loading||pairingBusy||directoryBusy}>
+          <RefreshCcw size={16} className={loading?"spin":""}/>
+        </button>
       </div>
       <div className="vision-mesh-compact-actions">
         <button type="button" className="ghost compact-button" disabled={directoryBusy||!snapshot}
