@@ -31,9 +31,9 @@ INSERT INTO auth.users(id) VALUES
 
 -- Execute exactly the repository's three pending staged migrations, with
 -- no remote connections or live schema modifications.
-\ir ../../supabase/migrations/20261027153306_mesh_device_registry_fail_closed.sql
-\ir ../../supabase/migrations/20261028081746_mesh_device_enrollment_challenge.sql
-\ir ../../supabase/migrations/20261028115220_mesh_owner_private_realtime_signaling.sql
+\ir ../../supabase/staged-migrations/20261027153306_mesh_device_registry_fail_closed.sql
+\ir ../../supabase/staged-migrations/20261028081746_mesh_device_enrollment_challenge.sql
+\ir ../../supabase/staged-migrations/20261028115220_mesh_owner_private_realtime_signaling.sql
 
 -- Seed only synthetic public credentials, isolated to the throwaway cluster.
 INSERT INTO public.katosync_mesh_owner_policy(owner_user_id, allowed_devices)

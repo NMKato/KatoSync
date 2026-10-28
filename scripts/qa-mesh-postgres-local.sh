@@ -34,6 +34,11 @@ if "$PG_BIN/psql" -h 127.0.0.1 -p "$PORT" -U postgres -d postgres -X -c 'select 
   echo "MESH_QA_UNEXPECTED_TCP_LISTENER" >&2; exit 3
 fi
 echo "MESH_QA_EPHEMERAL_CLUSTER_ONLY"
+case "${1:-legacy}" in
+  legacy) TEST_FILE="$ROOT/tests/sql/mesh_registry_backend_qa.sql" ;;
+  katosync) TEST_FILE="$ROOT/tests/sql/katosync_owned_schema_qa.sql" ;;
+  *) echo "MESH_QA_UNKNOWN_TEST_SELECTION" >&2; exit 2 ;;
+esac
 "$PG_BIN/psql" -h "$DIR" -p "$PORT" -U postgres -d postgres -X -v ON_ERROR_STOP=1 \
-  -f "$ROOT/tests/sql/mesh_registry_backend_qa.sql"
+  -f "$TEST_FILE"
 echo "MESH_QA_ALL_SQL_ASSERTIONS_PASSED"
