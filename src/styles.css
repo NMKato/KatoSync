@@ -4049,6 +4049,16 @@ pre {
   box-shadow: var(--e-2);
 }
 
+/* Device-local future hub preference: this is not an online mesh server. */
+.mesh-hub-preference{padding:13px 12px;margin:0 0 13px;border-radius:13px;
+ border:1px solid var(--line);background:color-mix(in srgb,var(--surface-raised) 82%,transparent);}
+.mesh-hub-preference-option{display:flex;align-items:center;gap:12px;cursor:pointer;}
+.mesh-hub-preference-option>input{width:17px;height:17px;flex-shrink:0;accent-color:var(--brand);}
+.mesh-hub-preference-option>span{display:grid;gap:4px;min-width:0;}
+.mesh-hub-preference-option strong{font-size:13px;}
+.mesh-hub-preference-option small{font-size:11px;line-height:1.5;color:var(--text-muted);}
+.mesh-hub-preference-note{font-size:11px;margin:10px 0 0;color:var(--text-muted);}
+
 /* KatoSync Mesh is a first-class connection card, never a Vision overlay.
    Keep the account form in Details and bound its readable width. */
 .provider-cards > .provider-mesh-card {

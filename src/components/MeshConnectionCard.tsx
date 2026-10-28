@@ -32,6 +32,14 @@ type MeshLocalReadiness = {
   crossDeviceWrites: boolean;
 };
 
+type MeshHubPreference = {
+  preferred: boolean;
+  hubActive: false;
+  transportReady: false;
+  remoteJobsEnabled: false;
+  status: "preference_only";
+};
+
 type MeshAccountDevice = {
   deviceId:string;
   ownerUserId:string;
@@ -90,6 +98,34 @@ type MeshPeerInventory = {
 export function MeshConnectionCard() {
   const {t,lang}=useT();
   const [detailsOpen,setDetailsOpen]=useState(false);
+  const [hubPreference,setHubPreference]=useState<MeshHubPreference|null>(null);
+  const [hubBusy,setHubBusy]=useState(false);
+  const [hubError,setHubError]=useState(false);
+  useEffect(()=>{
+    let active=true;
+    invoke<MeshHubPreference>("mesh_hub_preference_get")
+      .then(preference=>{if(active){setHubPreference(preference);setHubError(false);}})
+      .catch(()=>{if(active)setHubError(true);});
+    return ()=>{active=false;};
+  },[]);
+  const setHubPreferred=async(preferred:boolean)=>{
+    setHubBusy(true);
+    setHubError(false);
+    try {
+      const confirmed=await invoke<MeshHubPreference>("mesh_hub_preference_set",{preferred});
+      if(confirmed.hubActive || confirmed.transportReady || confirmed.remoteJobsEnabled ||
+          confirmed.status!=="preference_only" || confirmed.preferred!==preferred){
+        setHubError(true);
+      }else{
+        setHubPreference(confirmed);
+      }
+    }catch{
+      setHubError(true);
+    }finally{
+      setHubBusy(false);
+    }
+  };
+
   const [reauthOpen,setReauthOpen]=useState(false);
   const [snapshot,setSnapshot]=useState<MeshLocalReadiness|null>(null);
   const [loading,setLoading]=useState(false);
@@ -380,6 +416,19 @@ export function MeshConnectionCard() {
       {t(clipboardStatus==="ok"?"mesh.quick.copied":"mesh.quick.copyFailed")}
     </p>:null}
     <div className="vision-mesh-technical" id="vision-mesh-technical-details" hidden={!detailsOpen}>
+      <section className="mesh-hub-preference" aria-label={t("mesh.hub.heading")}>
+        <label className="mesh-hub-preference-option">
+          <input type="checkbox" checked={hubPreference?.preferred??false}
+            disabled={!hubPreference||hubBusy}
+            onChange={e=>void setHubPreferred(e.target.checked)}/>
+          <span>
+            <strong>{t("mesh.hub.prefer")}</strong>
+            <small>{t("mesh.hub.description")}</small>
+          </span>
+        </label>
+        <p className="mesh-hub-preference-note" role="status">{t("mesh.hub.notActive")}</p>
+        {hubError?<p className="vision-mesh-error" role="alert">{t("mesh.hub.error")}</p>:null}
+      </section>
       <div className="vision-mesh-technical-status">
         <strong>{t("mesh.simple.diagnostics")}</strong>
         <span>{t("mesh.v0.title")} · {snapshot?(snapshot.platform+" · "+snapshot.architecture):t("mesh.v0.localUnknown")}</span>
