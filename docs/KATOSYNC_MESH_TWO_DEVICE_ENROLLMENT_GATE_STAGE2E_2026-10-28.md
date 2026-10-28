@@ -56,7 +56,12 @@ Die PostgreSQL-Metadatenprüfung per `to_regclass(...)` ergab für
 `katosync_mesh_devices`, `katosync_mesh_owner_policy`,
 `katosync_mesh_enrollment_challenges` und `katosync_mesh_invites`
 jeweils **NULL**: Die nötigen Tabellen fehlen im derzeit verbundenen
-KATOOS-Backend. Es wurden keine personenbezogenen Datensätze gelesen.
+KATOOS-Backend. Die anschließend über das Supabase-Konto ausgelesene
+Liste der aktiven Edge Functions enthält lediglich
+`kai-response` und `kai-response-secure`; die im Repository
+vorbereitete `mesh-device-enrollment`-Function ist also ebenfalls
+**noch nicht deployed**. Es wurden keine personenbezogenen Datensätze
+gelesen und keine Edge-Function-Änderung vorgenommen.
 
 **Konsequenz:** Der neue Enrollment-Validator lehnt den tatsächlichen
 Verbindungsaufbau ordnungsgemäß ab (`MESH_ENROLLMENT_UNAVAILABLE`).
