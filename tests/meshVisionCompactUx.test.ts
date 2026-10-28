@@ -33,7 +33,7 @@ test("no fake connected or uptime label in stage zero",()=>{
 
 test("existing secure reauth, signature, SAS and revoke tools remain behind Details",()=>{
  for(const text of ["renew_katoos_qa_session","mesh_pairing_offer_create","mesh_pairing_challenge_create",
-   "mesh_pairing_response_verify","mesh_local_revoke_peer","mesh_account_devices_list",
+   "mesh_pairing_response_verify","mesh_local_revoke_peer","mesh_account_device_discover",
    "vision-mesh-reauth","vision-mesh-pairing","vision-mesh-approved"]){
    assert.ok(part.includes(text),text);
  }

@@ -282,6 +282,106 @@ pub async fn mesh_pairing_offer_inspect(offer_json: String) -> Result<MeshIdenti
     })
 }
 
+// Enrollment Stage A — sign only the server's public 90-second challenge.
+// A signature proves key possession, never peer trust or remote permissions.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MeshEnrollmentChallenge {
+    pub protocol: String,
+    pub challenge_id: String,
+    pub nonce: String,
+    pub public_key: String,
+    pub expires_at: String,
+    pub discovery_only: bool,
+    pub paired: bool,
+    pub transport_ready: bool,
+}
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeshEnrollmentProof {
+    pub protocol: &'static str,
+    pub challenge_id: String,
+    pub nonce: String,
+    pub public_key: String,
+    pub expires_at: String,
+    pub signature: String,
+    pub paired: bool,
+    pub transport_ready: bool,
+}
+const ENROLLMENT_PROTOCOL: &str = "katosync-mesh-enrollment-challenge-v1";
+fn enrollment_message(uid: &str, challenge: &MeshEnrollmentChallenge) -> String {
+    format!(
+        "katosync-mesh-device-enrollment-proof-v1\n{}\n{}\n{}\n{}\n{}",
+        uid,
+        challenge.challenge_id,
+        challenge.nonce,
+        challenge.public_key,
+        chrono::DateTime::parse_from_rfc3339(&challenge.expires_at)
+            .map(|time| time.timestamp_millis())
+            .unwrap_or_default()
+    )
+}
+fn build_enrollment_proof(
+    identity: &SigningKey,
+    uid: &str,
+    challenge: MeshEnrollmentChallenge,
+    now: i64,
+) -> Result<MeshEnrollmentProof, &'static str> {
+    if challenge.protocol != ENROLLMENT_PROTOCOL
+        || !challenge.discovery_only
+        || challenge.paired
+        || challenge.transport_ready
+        || uuid::Uuid::parse_str(&challenge.challenge_id).is_err()
+        || challenge.nonce.len() != 43
+        || URL_SAFE_NO_PAD
+            .decode(&challenge.nonce)
+            .map_or(true, |b| b.len() != 32)
+        || URL_SAFE_NO_PAD.encode(identity.verifying_key().as_bytes()) != challenge.public_key
+    {
+        return Err("MESH_ENROLLMENT_BAD_CHALLENGE");
+    }
+    let expiry = chrono::DateTime::parse_from_rfc3339(&challenge.expires_at)
+        .map_err(|_| "MESH_ENROLLMENT_BAD_CHALLENGE")?
+        .timestamp();
+    if expiry <= now || expiry > now + 95 {
+        return Err("MESH_ENROLLMENT_EXPIRED");
+    }
+    let signature = URL_SAFE_NO_PAD.encode(
+        identity
+            .sign(enrollment_message(uid, &challenge).as_bytes())
+            .to_bytes(),
+    );
+    Ok(MeshEnrollmentProof {
+        protocol: "katosync-mesh-enrollment-proof-v1",
+        challenge_id: challenge.challenge_id,
+        nonce: challenge.nonce,
+        public_key: challenge.public_key,
+        expires_at: challenge.expires_at,
+        signature,
+        paired: false,
+        transport_ready: false,
+    })
+}
+#[tauri::command]
+pub async fn mesh_device_enrollment_proof(
+    challenge: MeshEnrollmentChallenge,
+) -> Result<MeshEnrollmentProof, String> {
+    if !cfg!(feature = "katoos-auth-qa") {
+        return Err("MESH_ENROLLMENT_NOT_CONFIGURED".to_string());
+    }
+    let uid = crate::github_app_auth::verified_katosync_user()
+        .await
+        .map_err(|_| "MESH_ENROLLMENT_LOGIN_REQUIRED".to_string())?;
+    let identity =
+        ensure_identity(&uid).map_err(|_| "MESH_ENROLLMENT_IDENTITY_UNAVAILABLE".to_string())?;
+    let proof = build_enrollment_proof(&identity, &uid, challenge, Utc::now().timestamp())
+        .map_err(str::to_string)?;
+    same_account_still_verified(&uid)
+        .await
+        .map_err(|_| "MESH_ENROLLMENT_LOGIN_REQUIRED".to_string())?;
+    Ok(proof)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,6 +389,53 @@ mod tests {
     const OTHER: &str = "9a1ee918-6af6-4109-a50f-31c01abf789c";
     fn signing(seed: u8) -> SigningKey {
         SigningKey::from_bytes(&[seed; 32])
+    }
+    fn fake_enrollment(key: &SigningKey, expires: i64) -> MeshEnrollmentChallenge {
+        MeshEnrollmentChallenge {
+            protocol: ENROLLMENT_PROTOCOL.to_string(),
+            challenge_id: "11111111-1111-4111-8111-111111111111".to_string(),
+            nonce: URL_SAFE_NO_PAD.encode([5u8; 32]),
+            public_key: URL_SAFE_NO_PAD.encode(key.verifying_key().as_bytes()),
+            expires_at: chrono::DateTime::from_timestamp(expires, 0)
+                .unwrap()
+                .to_rfc3339(),
+            discovery_only: true,
+            paired: false,
+            transport_ready: false,
+        }
+    }
+    #[test]
+    fn enrollment_proof_is_domain_separated_and_never_grants_trust() {
+        let key = signing(7);
+        let ch = fake_enrollment(&key, 1_800_000_090);
+        let message = enrollment_message(OWNER, &ch);
+        let proof = build_enrollment_proof(&key, OWNER, ch, 1_800_000_000).unwrap();
+        assert!(!proof.paired && !proof.transport_ready);
+        let raw = URL_SAFE_NO_PAD.decode(proof.signature).unwrap();
+        key.verifying_key()
+            .verify(message.as_bytes(), &Signature::from_slice(&raw).unwrap())
+            .unwrap();
+        assert!(key
+            .verifying_key()
+            .verify(
+                enrollment_message(OTHER, &fake_enrollment(&key, 1_800_000_090)).as_bytes(),
+                &Signature::from_slice(&raw).unwrap()
+            )
+            .is_err());
+    }
+    #[test]
+    fn enrollment_rejects_bad_keys_expired_and_wrong_protocol() {
+        let key = signing(3);
+        let mut ch = fake_enrollment(&key, 1_800_000_090);
+        assert!(build_enrollment_proof(&key, OWNER, ch.clone(), 1_800_000_091).is_err());
+        ch.public_key = URL_SAFE_NO_PAD.encode(signing(4).verifying_key().as_bytes());
+        assert_eq!(
+            build_enrollment_proof(&key, OWNER, ch.clone(), 1_800_000_000).err(),
+            Some("MESH_ENROLLMENT_BAD_CHALLENGE")
+        );
+        ch = fake_enrollment(&key, 1_800_000_090);
+        ch.protocol = "untrusted-protocol".into();
+        assert!(build_enrollment_proof(&key, OWNER, ch, 1_800_000_000).is_err());
     }
     #[test]
     fn signed_invitation_verifies_but_never_authorizes_remote_use() {
