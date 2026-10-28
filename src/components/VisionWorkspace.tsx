@@ -260,6 +260,7 @@ type MeshPeerInventory = {
 // state. RDC connectivity is intentionally NOT counted as trusted Mesh peers.
 function MeshReadinessStrip() {
   const {t,lang}=useT();
+  const [detailsOpen,setDetailsOpen]=useState(false);
   const [snapshot,setSnapshot]=useState<MeshLocalReadiness|null>(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(false);
@@ -497,27 +498,61 @@ function MeshReadinessStrip() {
   },[]);
   useEffect(()=>{void refresh();},[refresh]);
   const readiness=snapshot?.localControl??"unknown";
-  return <section className="vision-mesh-readiness glass" aria-label={t("mesh.v0.title")}>
-    <div className="vision-mesh-heading">
-      <ShieldCheck size={18} aria-hidden="true"/>
-      <div><strong>{t("mesh.v0.title")}</strong>
-        <small>{t("mesh.v0.subtitle")}</small>
+  return <section className="vision-mesh-readiness vision-mesh-compact glass" aria-label={t("mesh.simple.title")}>
+    <div className="vision-mesh-compact-top">
+      <div className="vision-mesh-compact-identity">
+        <span className="vision-mesh-compact-icon"><ShieldCheck size={19} aria-hidden="true"/></span>
+        <div className="vision-mesh-compact-status">
+          <strong>{t("mesh.simple.title")}</strong>
+          <span className="vision-mesh-compact-state"><span className="vision-mesh-offline-dot"/>
+            {error?t("mesh.simple.unavailable"):t("mesh.simple.disconnected")}
+          </span>
+          <small>{t("mesh.simple.noPeers")}</small>
+        </div>
+      </div>
+      <div className="vision-mesh-compact-actions">
+        <button type="button" className="ghost compact-button" disabled={directoryBusy||!snapshot}
+          onClick={()=>void loadAccountDirectory()}>
+          <RefreshCcw size={15} className={directoryBusy?"spin":""}/>
+          {t("mesh.directory.refresh")}
+        </button>
+        <button type="button" className="primary compact-button"
+          disabled={pairingBusy||!snapshot}
+          onClick={()=>void prepareAndInvite()}>{t("mesh.simple.connect")}</button>
+        <button type="button" className="ghost compact-button" aria-expanded={detailsOpen}
+          aria-controls="vision-mesh-technical-details"
+          onClick={()=>setDetailsOpen(value=>!value)}>{t("mesh.simple.details")}</button>
       </div>
     </div>
-    <div className="vision-mesh-chips">
-      <span className="vision-mesh-chip">
-        {snapshot?(snapshot.platform+" · "+snapshot.architecture):t("mesh.v0.localUnknown")}
-      </span>
-      <span className="vision-mesh-chip">{t("mesh.v0.control")}: {t(("mesh.v0."+readiness) as TKey)}</span>
-      <span className="vision-mesh-chip mesh-unpaired">{t("mesh.v0.notPaired")}</span>
-      <span className="vision-mesh-chip mesh-unpaired">{t("mesh.v0.noDispatch")}</span>
-    </div>
-    <div className="vision-mesh-last">
-      <small>{error?t("mesh.v0.unavailable"):t("mesh.v0.trustBoundary")}</small>
-      <button type="button" className="ghost compact-button" onClick={()=>void refresh()} disabled={loading}>
-        <RefreshCcw size={14} className={loading?"spin":""}/>{t("mesh.v0.check")}
-      </button>
-    </div>
+    {offer?<div className="vision-mesh-compact-notice" role="status">
+      <span>{t("mesh.simple.offerReady")}</span>
+      <button type="button" className="ghost compact-button"
+        onClick={()=>void copyPublicMessage(offer)}>{t("mesh.quick.copyPublicInvite")}</button>
+    </div>:null}
+    {directoryError?<p className="vision-mesh-compact-notice" role="status">
+      {t("mesh.simple.discoveryNotReady")}</p>:null}
+    {directory?.devices.length===0?<p className="vision-mesh-compact-notice" role="status">
+      {t("mesh.directory.empty")}</p>:null}
+    {identityError?<p role="alert" className="vision-mesh-compact-notice vision-mesh-error">
+      {t("mesh.v1.failed")}
+      {identityFailure?" "+t(("mesh.identity.diag."+identityFailure) as TKey):null}
+    </p>:null}
+    {clipboardStatus?<p className="vision-mesh-compact-notice" role="status">
+      {t(clipboardStatus==="ok"?"mesh.quick.copied":"mesh.quick.copyFailed")}
+    </p>:null}
+    <div className="vision-mesh-technical" id="vision-mesh-technical-details" hidden={!detailsOpen}>
+      <div className="vision-mesh-technical-status">
+        <strong>{t("mesh.simple.diagnostics")}</strong>
+        <span>{t("mesh.v0.title")} · {snapshot?(snapshot.platform+" · "+snapshot.architecture):t("mesh.v0.localUnknown")}</span>
+        <span>{t("mesh.v0.control")}: {t(("mesh.v0."+readiness) as TKey)}</span>
+        <span>{t("mesh.v0.notPaired")} · {t("mesh.v0.noDispatch")}</span>
+        <span>{t("mesh.simple.qualityUnknown")} · {t("mesh.simple.uptimeUnknown")}</span>
+        <small>{error?t("mesh.v0.unavailable"):t("mesh.v0.trustBoundary")}</small>
+        <button type="button" className="ghost compact-button"
+          onClick={()=>void refresh()} disabled={loading}>
+          <RefreshCcw size={14} className={loading?"spin":""}/>{t("mesh.v0.check")}
+        </button>
+      </div>
     {import.meta.env.VITE_KATOOS_AUTH_QA==="1"?<details className="vision-mesh-reauth">
       <summary>{t("mesh.reauth.title")}</summary>
       <p>{t("mesh.reauth.description")}</p>
@@ -539,10 +574,7 @@ function MeshReadinessStrip() {
     <section className="vision-mesh-account-directory" aria-label={t("mesh.directory.heading")}>
       <div className="vision-mesh-directory-heading">
         <strong>{t("mesh.directory.heading")}</strong>
-        <button className="ghost compact-button" type="button" disabled={directoryBusy||!snapshot}
-          onClick={()=>void loadAccountDirectory()}>
-          <RefreshCcw size={14} className={directoryBusy?"spin":""}/>{t("mesh.directory.refresh")}
-        </button>
+        <span className="vision-mesh-directory-note">{t("mesh.simple.discoveryStatus")}</span>
       </div>
       <p>{t("mesh.directory.notice")}</p>
       {directory?.devices.length===0?<p role="status">{t("mesh.directory.empty")}</p>:null}
@@ -563,8 +595,7 @@ function MeshReadinessStrip() {
       <div className="vision-mesh-quick-panel" aria-label={t("mesh.quick.heading")}>
         <strong>{t("mesh.quick.heading")}</strong>
         <p>{t("mesh.quick.accountSafety")}</p>
-        <button type="button" className="primary" disabled={pairingBusy||!snapshot}
-          onClick={()=>void prepareAndInvite()}>{t("mesh.quick.connect")}</button>
+
         {offer?<div className="vision-mesh-quick-result">
           <p role="status">{t("mesh.quick.publicInviteReady")}</p>
           <button type="button" className="ghost compact-button"
@@ -585,10 +616,6 @@ function MeshReadinessStrip() {
           <small>{t("mesh.quick.notPaired")}</small>
         </div>:null}
         {clipboardStatus?<p role="status">{t(clipboardStatus==="ok"?"mesh.quick.copied":"mesh.quick.copyFailed")}</p>:null}
-        {identityError?<p role="alert" className="vision-mesh-error">
-          {t("mesh.v1.failed")}
-          {identityFailure? " "+t(("mesh.identity.diag."+identityFailure) as TKey):null}
-        </p>:null}
         <p className="vision-mesh-warning">{t("mesh.quick.discoveryPending")}</p>
       </div>
       <details className="vision-mesh-advanced">
@@ -670,6 +697,7 @@ function MeshReadinessStrip() {
       </details>
       {approvalError?<p role="alert" className="vision-mesh-error">{t("mesh.v3.error")}</p>:null}
     </details>
+    </div>
   </section>;
 }
 

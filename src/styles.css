@@ -10743,6 +10743,37 @@ button.agent-tile:hover {
   border:1px solid rgba(78,177,178,.22);
   border-radius:17px;background:linear-gradient(110deg,rgba(44,131,137,.08),rgba(80,122,159,.035));
 }
+/* Compact, user-first Mesh controls above the Vision canvas.
+ * Detailed QA internals stay mounted but are hidden unless requested. */
+.vision-mesh-compact{display:block;padding:13px 16px;margin:8px 0 12px;
+  background:linear-gradient(112deg,rgba(37,103,115,.11),rgba(39,46,67,.055));}
+.vision-mesh-compact-top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;}
+.vision-mesh-compact-identity{display:flex;align-items:center;gap:11px;min-width:0;}
+.vision-mesh-compact-icon{height:41px;width:41px;display:grid;place-items:center;flex-shrink:0;
+ border-radius:13px;color:#65d4c9;background:rgba(69,188,181,.11);}
+.vision-mesh-compact-status{display:grid;gap:2px;}
+.vision-mesh-compact-status strong{font-size:14px;line-height:1.25;}
+.vision-mesh-compact-status small{font-size:11px;color:var(--text-muted);}
+.vision-mesh-compact-state{display:flex;align-items:center;gap:6px;color:var(--text-muted);font-size:12px;}
+.vision-mesh-offline-dot{height:7px;width:7px;background:#d5a75c;border-radius:99px;flex-shrink:0;}
+.vision-mesh-compact-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;}
+.vision-mesh-compact-actions .compact-button{font-size:12px;min-height:36px;padding:7px 12px;display:inline-flex;gap:6px;align-items:center;}
+.vision-mesh-compact-actions .primary{background:#ec8742;color:#13151a;font-weight:650;border-radius:10px;}
+.vision-mesh-compact-notice{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+ font-size:12px;line-height:1.45;color:var(--text-muted);padding:8px 10px;margin:10px 0 0;
+ border:1px solid var(--line);border-radius:10px;}
+.vision-mesh-compact-notice.vision-mesh-error{color:#e7aa82;}
+.vision-mesh-technical[hidden]{display:none;}
+.vision-mesh-technical{margin-top:15px;padding-top:12px;border-top:1px solid var(--line);}
+.vision-mesh-technical-status{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 0;}
+.vision-mesh-technical-status>span,.vision-mesh-technical-status>small{font-size:11px;color:var(--text-muted);}
+.vision-mesh-technical-status>strong{font-size:12px;margin-right:8px;}
+.vision-mesh-directory-note{font-size:11px;color:var(--text-muted);}
+@media(max-width:760px){
+ .vision-mesh-compact-top{align-items:stretch;}
+ .vision-mesh-compact-actions{width:100%;}
+ .vision-mesh-compact-actions .compact-button{flex:1;justify-content:center;}
+}
 .vision-mesh-heading {display:flex;align-items:center;gap:12px;}
 .vision-mesh-heading svg {color:#58c0ba;}
 .vision-mesh-heading div {display:grid;gap:2px;}
