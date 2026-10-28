@@ -71,3 +71,19 @@ begin
 end $test$;
 reset role;
 select 'MESH_DEVICE_QUOTA_AND_UNIQUE_KEY_PASS' as result;
+set role service_role;
+-- Existing fixture challenge is first owner request; two additional allowed.
+insert into public.katosync_mesh_enrollment_challenges(owner_user_id,signing_public_key,nonce,expires_at)
+ values ('11111111-1111-4111-8111-111111111111',repeat('D',43),repeat('R',43),now()+interval '80 seconds'),
+        ('11111111-1111-4111-8111-111111111111',repeat('E',43),repeat('S',43),now()+interval '80 seconds');
+do $test$
+begin
+ begin
+  insert into public.katosync_mesh_enrollment_challenges(owner_user_id,signing_public_key,nonce,expires_at)
+   values ('11111111-1111-4111-8111-111111111111',repeat('F',43),repeat('T',43),now()+interval '80 seconds');
+  raise exception 'Fourth challenge unexpectedly allowed';
+ exception when check_violation then null;
+ end;
+end $test$;
+reset role;
+select 'MESH_CHALLENGE_DB_RATE_LIMIT_PASS' as result;

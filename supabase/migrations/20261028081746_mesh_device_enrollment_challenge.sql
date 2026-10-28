@@ -58,3 +58,27 @@ grant execute on function public.katosync_mesh_device_quota_guard() to service_r
 create trigger katosync_mesh_device_quota_before_insert
  before insert on public.katosync_mesh_devices
  for each row execute function public.katosync_mesh_device_quota_guard();
+
+-- Authoritative concurrent challenge budget: the Edge pre-check is only an
+-- early rejection; the DB trigger serializes simultaneous requests per owner.
+create function public.katosync_mesh_challenge_rate_guard()
+ returns trigger language plpgsql security invoker set search_path = ''
+as $$
+declare issued integer;
+begin
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(new.owner_user_id::text)::bigint);
+ select count(*) into issued
+ from public.katosync_mesh_enrollment_challenges
+ where owner_user_id = new.owner_user_id
+   and created_at >= pg_catalog.now() - interval '1 minute';
+ if issued >= 3 then
+  raise exception 'KATOSYNC_MESH_CHALLENGE_RATE_LIMIT' using errcode = '23514';
+ end if;
+ return new;
+end;
+$$;
+revoke all on function public.katosync_mesh_challenge_rate_guard() from public, anon, authenticated;
+grant execute on function public.katosync_mesh_challenge_rate_guard() to service_role;
+create trigger katosync_mesh_challenge_rate_before_insert
+ before insert on public.katosync_mesh_enrollment_challenges
+ for each row execute function public.katosync_mesh_challenge_rate_guard();

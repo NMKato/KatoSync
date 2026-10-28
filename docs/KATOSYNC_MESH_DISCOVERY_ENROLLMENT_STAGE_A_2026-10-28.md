@@ -30,3 +30,9 @@ Stand 28.10.2026, Entwicklungs-/QA-Branch, nicht produktiv deployt.
 ## Prüfungen
 - Lokale isolierte PostgreSQL-17-Datenbank ohne Listener: MESH_RLS_LOCAL_TESTS_PASS, MESH_ENROLLMENT_CHALLENGE_RLS_PASS, MESH_DEVICE_QUOTA_AND_UNIQUE_KEY_PASS.
 - Node/TypeScript/Web-Tests, native Rust-Tests, Code-Signatur und QA-Checks getrennt.
+
+
+## Nachprüfung 28.10.2026
+- PostgreSQL-Trigger garantiert die Challenge-Ratenbegrenzung auch bei parallelen Anfragen. HTTP 429 wird ohne interne Datenbankdetails gemeldet.
+- Zusätzlicher kompletter Zwei-Geräte-Test mit beiden echten Edge-Handlern, Ed25519-WebCrypto-Signaturen und simuliertem REST-Speicher: zwei Geräte nur als discovered registriert; Replay und drittes Gerät verweigert.
+- Server-/DB-Rollout bleibt gesperrt, bis die QA-Umgebung und der M2/M3-Live-Test möglich sind.

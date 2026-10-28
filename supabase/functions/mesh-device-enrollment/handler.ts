@@ -58,7 +58,16 @@ export async function handleMeshEnrollmentChallenge(req:Request,env:Env,request:
       body:JSON.stringify({owner_user_id:owner,signing_public_key:publicKey,nonce,expires_at:expiresAt}),
       signal:AbortSignal.timeout(8000)
     });
-    if(!created.ok)return fail("MESH_REGISTRY_UNAVAILABLE",503);
+    if(!created.ok){
+      if(created.status===409 || created.status===400){
+        const rejected:unknown=await created.json().catch(()=>null);
+        if(rejected&&typeof rejected==="object"&&!Array.isArray(rejected)&&
+           (rejected as {code?:unknown;message?:unknown}).code==="23514"&&
+           (rejected as {message?:unknown}).message==="KATOSYNC_MESH_CHALLENGE_RATE_LIMIT")
+          return fail("RATE_LIMIT",429);
+      }
+      return fail("MESH_REGISTRY_UNAVAILABLE",503);
+    }
     const inserted:unknown=await created.json();
     if(!Array.isArray(inserted)||inserted.length!==1||typeof inserted[0]?.challenge_id!=="string"||
         !UUID.test(inserted[0].challenge_id))return fail("MESH_REGISTRY_UNAVAILABLE",503);

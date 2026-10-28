@@ -81,3 +81,18 @@ test("service-write failure cannot pretend successful enrollment",async()=>{
  const r=await handleMeshEnrollmentChallenge(makeReq(),env,remote.call);
  assert.equal(r.status,503);assert.equal((await r.json()).error,"MESH_REGISTRY_UNAVAILABLE");
 });
+
+test("concurrent DB challenge rate rejection maps to 429 without leaking DB error",async()=>{
+ let dbCalls=0;
+ const request=async(input:RequestInfo|URL,init?:RequestInit)=>{
+   const url=String(input);
+   if(url.endsWith("/auth/v1/user"))return Response.json({id:"11111111-1111-4111-8111-111111111111"});
+   if(url.includes("select=challenge_id"))return Response.json([]);
+   if(init?.method==="POST"){dbCalls++;return Response.json({code:"23514",message:"KATOSYNC_MESH_CHALLENGE_RATE_LIMIT"},{status:409});}
+   throw Error("Unexpected call");
+ };
+ const response=await handleMeshEnrollmentChallenge(makeReq(),env,request as typeof fetch);
+ assert.equal(response.status,429);
+ assert.deepEqual(await response.json(),{error:"RATE_LIMIT"});
+ assert.equal(dbCalls,1);
+});
