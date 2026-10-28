@@ -5,9 +5,9 @@ import { readFileSync } from "node:fs";
 const read=(path:string)=>readFileSync(new URL(path,import.meta.url),"utf8");
 const view=read("../src/components/MeshConnectionCard.tsx");
 const css=read("../src/styles.css");
-const part=view.slice(view.indexOf("function MeshConnectionCard()"));
+const part=view.slice(view.indexOf("function MeshConnectionCard("));
 
-test("Vision Mesh has one compact primary Connect and Discover plus Details",()=>{
+test("Connections Mesh has one compact primary Connect and Discover plus Details",()=>{
  assert.match(part,/vision-mesh-compact-top/);
  assert.match(part,/mesh\.simple\.disconnected/);
  assert.match(part,/onClick=\{\(\)=>void loadAccountDirectory\(\)\}/);

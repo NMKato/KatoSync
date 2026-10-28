@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 const file=(p:string)=>readFileSync(new URL(p,import.meta.url),"utf8");
 const view=file("../src/components/MeshConnectionCard.tsx");
-const section=view.slice(view.indexOf("function MeshConnectionCard()"));
+const section=view.slice(view.indexOf("function MeshConnectionCard("));
 test("rejected issuer session offers direct reauth instead of hiding behind Details",()=>{
  for(const f of ['"account"','"session"','"refresh"','"invalid"','"changed"'])
   assert.ok(section.includes(f));
