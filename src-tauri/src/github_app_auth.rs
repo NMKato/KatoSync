@@ -40,8 +40,18 @@ fn cached_uid() -> Option<String> {
 struct SupabaseUserIdentity {
     id: String,
 }
-fn should_refresh_katosync_session(status: reqwest::StatusCode) -> bool {
+// GoTrue can reject a stale/malformed access JWT as 403 + bad_jwt rather
+// than 401. Only that issuer-defined error may trigger the existing one-time
+// refresh path; arbitrary 403 (forbidden, banned, missing permissions) must
+// remain fail-closed. Never log or return the response body or token.
+fn should_refresh_katosync_session(status: reqwest::StatusCode, error_code: Option<&str>) -> bool {
     status == reqwest::StatusCode::UNAUTHORIZED
+        || (status == reqwest::StatusCode::FORBIDDEN && error_code == Some("bad_jwt"))
+}
+fn issuer_error_code(body: &serde_json::Value) -> Option<&str> {
+    body.get("error_code")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| body.get("code").and_then(serde_json::Value::as_str))
 }
 async fn fetch_katosync_identity(token: &str) -> Result<reqwest::Response, String> {
     network()?
@@ -53,28 +63,36 @@ async fn fetch_katosync_identity(token: &str) -> Result<reqwest::Response, Strin
         .map_err(|_| "KatoSync-Sitzung nicht überprüfbar.".to_string())
 }
 pub(crate) async fn verified_katosync_user() -> Result<String, String> {
-    let mut token = crate::ensure_supabase_access_token()
-        .await
-        .map_err(|_| "Bitte zuerst bei KatoSync anmelden.".to_string())?;
-    let mut response = fetch_katosync_identity(&token).await;
-    // Access tokens expire during long-running desktop sessions. Retry exactly
-    // once after a 401, only if the rejected token still belongs to this session.
-    if response
-        .as_ref()
-        .is_ok_and(|r| should_refresh_katosync_session(r.status()))
-    {
-        // Rotation and explicit QA login are synchronized by one Tokio mutex.
-        // If a parallel task already rotated the token, retry with that exact
-        // current access token instead of rotating its one-time grant again.
-        let replacement = crate::replace_rejected_supabase_access_token(&token)
+    // Zeroize on every return path, including network failure and a refused
+    // issuer identity. No secret is exposed to frontend diagnostics.
+    let mut token = zeroize::Zeroizing::new(
+        crate::ensure_supabase_access_token()
+            .await
+            .map_err(|_| "Bitte zuerst bei KatoSync anmelden.".to_string())?,
+    );
+    let mut response = Some(fetch_katosync_identity(token.as_str()).await?);
+    let status = response.as_ref().expect("issuer result").status();
+
+    // Reading a 403's small structured error consumes its HTTP response.
+    // All other responses remain intact for the verified /auth/v1/user parse.
+    let needs_refresh = if status == reqwest::StatusCode::FORBIDDEN {
+        let rejected = response.take().expect("issuer 403");
+        let body: Option<serde_json::Value> = rejected.json().await.ok();
+        should_refresh_katosync_session(status, body.as_ref().and_then(issuer_error_code))
+    } else {
+        should_refresh_katosync_session(status, None)
+    };
+    if needs_refresh {
+        // One retry only; serialized with QA login/rotation in lib.rs.
+        // A parallel caller may already have replaced this rejected token.
+        let replacement = crate::replace_rejected_supabase_access_token(token.as_str())
             .await
             .map_err(|_| "Bitte KatoSync-Sitzung erneuern.".to_string())?;
         token.zeroize();
-        token = replacement;
-        response = fetch_katosync_identity(&token).await;
+        *token = replacement;
+        response = Some(fetch_katosync_identity(token.as_str()).await?);
     }
-    token.zeroize();
-    let response = response?;
+    let response = response.ok_or("Bitte KatoSync-Sitzung erneuern.")?;
     if !response.status().is_success() {
         return Err("Bitte KatoSync-Sitzung erneuern.".into());
     }
@@ -97,6 +115,45 @@ pub(crate) async fn verified_katosync_user() -> Result<String, String> {
     }
     Ok(uid)
 }
+#[cfg(test)]
+mod katosync_issuer_bad_jwt_retry_tests {
+    use super::*;
+
+    #[test]
+    fn only_401_or_exact_403_bad_jwt_can_rotate_a_rejected_session() {
+        assert!(should_refresh_katosync_session(
+            reqwest::StatusCode::UNAUTHORIZED,
+            None
+        ));
+        assert!(should_refresh_katosync_session(
+            reqwest::StatusCode::FORBIDDEN,
+            Some("bad_jwt")
+        ));
+        assert!(!should_refresh_katosync_session(
+            reqwest::StatusCode::FORBIDDEN,
+            None
+        ));
+        assert!(!should_refresh_katosync_session(
+            reqwest::StatusCode::FORBIDDEN,
+            Some("user_banned")
+        ));
+        assert!(!should_refresh_katosync_session(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            Some("bad_jwt")
+        ));
+    }
+
+    #[test]
+    fn error_code_reader_accepts_both_gotrue_envelopes_but_not_numeric_code() {
+        let current = serde_json::json!({"code": 403, "error_code": "bad_jwt"});
+        let legacy = serde_json::json!({"code": "bad_jwt"});
+        let unrelated = serde_json::json!({"code": 403, "msg": "access denied"});
+        assert_eq!(issuer_error_code(&current), Some("bad_jwt"));
+        assert_eq!(issuer_error_code(&legacy), Some("bad_jwt"));
+        assert_eq!(issuer_error_code(&unrelated), None);
+    }
+}
+
 const VERIFY_URL: &str = "https://github.com/login/device";
 const MAX_POLL_INTERVAL: u64 = 120;
 
@@ -753,9 +810,10 @@ mod tests {
         }
     }
     #[test]
-    fn only_expired_access_token_401_triggers_one_session_refresh() {
+    fn unauthenticated_401_always_retries_but_403_without_bad_jwt_does_not() {
         assert!(should_refresh_katosync_session(
-            reqwest::StatusCode::UNAUTHORIZED
+            reqwest::StatusCode::UNAUTHORIZED,
+            None,
         ));
         for status in [
             reqwest::StatusCode::FORBIDDEN,
@@ -763,7 +821,7 @@ mod tests {
             reqwest::StatusCode::INTERNAL_SERVER_ERROR,
             reqwest::StatusCode::OK,
         ] {
-            assert!(!should_refresh_katosync_session(status));
+            assert!(!should_refresh_katosync_session(status, None));
         }
     }
 
