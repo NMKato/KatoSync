@@ -17,6 +17,17 @@ It is **not** a public release authorization.
 - No repository-root LICENSE, SECURITY.md or CONTRIBUTING.md existed on
   the audited branch. This patch supplies disclosure/contribution
   guidelines, **not** a legal license.
+- The **Git history still contains internal files** although they are
+  now excluded from the index: MEMORY.md (14 historical commits),
+  PROJECT_STATUS_FLOW.md (33), and RELEASE_OWNER_RUNBOOK.md (2).
+  Inspect content privately and prefer a separately curated, clean-history
+  public source release rather than making the entire private development
+  history public. Do not destructively rewrite the active shared history.
+- A bounded keyword scan of 1,715 reachable text blob objects found no
+  recognized PEM private keys, GitHub PAT formats, AWS access key IDs,
+  Supabase sb_secret keys or live Stripe keys. This is **not**
+  comprehensive secret/history/privacy clearance: other formats,
+  personal information and artifacts remain outside the scan.
 - The large native `src-tauri/src/lib.rs` and frontend `src/App.tsx`
   and `useKatoSyncViewModel.ts` remain maintainability risks;
   refactoring is a separate behavioral-preserving workstream.
