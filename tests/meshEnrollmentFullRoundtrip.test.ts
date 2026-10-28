@@ -21,6 +21,9 @@ function makeDB(){
    assert.equal((init?.headers as Record<string,string>)?.[header],"katosync");
   }
   const body=init?.body ? JSON.parse(String(init.body)):null;
+  if(u.pathname.endsWith("/account_memberships"))return Response.json([{
+    user_id:OWNER,access_state:"active",authorized_at:"2026-10-28T12:00:00Z",revoked_at:null
+  }]);
   if(u.pathname==="/auth/v1/user")return Response.json({id:OWNER,is_anonymous:false});
   if(u.pathname.endsWith("/mesh_enrollment_challenges")){
    if(init?.method==="POST"){

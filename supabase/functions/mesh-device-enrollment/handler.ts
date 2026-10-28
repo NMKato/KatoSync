@@ -1,5 +1,7 @@
 // NMKato Solutions — Stage A: online owner-verified, server-only device challenges.
-// No enrollment, peer trust, key exchange or remote control in this stage.
+// Only explicitly authorized KatoSync users may mint device challenges;
+ // peer trust and remote control remain separate and disabled.
+import {requireKatoSyncMembership} from "./membership-gate.ts";
 const ORIGIN = "https://xbnnlyyxiilklsygxcof.supabase.co";
 const SCHEMA = "katosync";
 const KEY = /^[A-Za-z0-9_-]{43}$/;
@@ -40,6 +42,9 @@ export async function handleMeshEnrollmentChallenge(req:Request,env:Env,request:
       return fail("LOGIN_REQUIRED",401);
     const owner=account.id;
     const headers={apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:"Bearer "+env.SUPABASE_SERVICE_ROLE_KEY};
+    const member=await requireKatoSyncMembership(owner,headers,request);
+    if(member==="not_member")return fail("KATOSYNC_MEMBERSHIP_REQUIRED",403);
+    if(member!=="active")return fail("MEMBERSHIP_UNAVAILABLE",503);
     // Per-owner fixed-window upper bound, not only a per-key throttle.
     const since=new Date(Date.now()-60_000).toISOString();
     const url=new URL(ORIGIN+"/rest/v1/mesh_enrollment_challenges");
