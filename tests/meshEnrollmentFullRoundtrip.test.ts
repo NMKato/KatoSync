@@ -43,7 +43,10 @@ function makeDB(){
     devices.push(body);
     return new Response(null,{status:201});
    }
-   return Response.json(devices.map(x=>({signing_public_key:x.signing_public_key,device_id:crypto.randomUUID()})));
+   return Response.json(devices.map(x=>({
+    signing_public_key:x.signing_public_key,device_id:crypto.randomUUID(),
+    membership_state:x.membership_state,revoked_at:null
+   })));
   }
   throw Error("unexpected route: "+u.pathname);
  };

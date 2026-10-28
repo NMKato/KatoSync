@@ -14,7 +14,7 @@ async function fixture(){
  const signature=b64(new Uint8Array(await crypto.subtle.sign("Ed25519",key.privateKey,new TextEncoder().encode(text))));
  const proof={protocol:"katosync-mesh-enrollment-proof-v1",challengeId,nonce,publicKey,expiresAt,signature,deviceName:"M2 Pro",platformOs:"macos"};
  function request(data:unknown=proof){return new Request("https://local.example/complete",{method:"POST",headers:{authorization:"Bearer "+"a".repeat(65)},body:JSON.stringify(data)});}
- function backend(options:{invalidAuth?:boolean;used?:boolean;existing?:boolean;quota?:boolean}={}){
+ function backend(options:{invalidAuth?:boolean;used?:boolean;existing?:boolean;revoked?:boolean;quota?:boolean}={}){
   const writes:string[]=[];
   const call=async(input:RequestInfo|URL,init?:RequestInit)=>{
    const url=String(input); assert.ok(url.startsWith(origin));
@@ -26,7 +26,13 @@ async function fixture(){
    }
    if(url.includes("/katosync_mesh_owner_policy"))return Response.json([]);
    if(url.includes("/katosync_mesh_devices")&&init?.method!=="POST")
-    return Response.json(options.quota?[{signing_public_key:"Z".repeat(43)},{signing_public_key:"Y".repeat(43)}]:options.existing?[{signing_public_key:publicKey}]:[]);
+    return Response.json(options.quota?
+      [{signing_public_key:"Z".repeat(43),membership_state:"discovered",revoked_at:null},
+       {signing_public_key:"Y".repeat(43),membership_state:"pending",revoked_at:null}]:
+      options.revoked?
+      [{signing_public_key:publicKey,membership_state:"revoked",revoked_at:"2026-10-28T14:00:00Z"}]:
+      options.existing?
+      [{signing_public_key:publicKey,membership_state:"trusted",revoked_at:null}]:[]);
    if(url.includes("/katosync_mesh_devices")&&init?.method==="POST"){
     writes.push("register"); const data=JSON.parse(String(init.body));
     assert.equal(data.membership_state,"discovered");
@@ -73,4 +79,12 @@ test("already-discovered same key never downgrades trust row",async()=>{
  const f=await fixture(),b=f.backend({existing:true});
  assert.equal((await completeMeshDeviceDiscovery(f.request(),env,b.call)).status,200);
  assert.deepEqual(b.writes,["consume"]);
+});
+
+test("a revoked device key cannot re-enroll or get a false discovery receipt",async()=>{
+ const f=await fixture(),b=f.backend({revoked:true});
+ const response=await completeMeshDeviceDiscovery(f.request(),env,b.call);
+ assert.equal(response.status,403);
+ assert.deepEqual(await response.json(),{error:"DEVICE_REVOKED"});
+ assert.deepEqual(b.writes,[]);
 });
