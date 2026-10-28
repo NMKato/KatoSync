@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { GithubAppConnectionPanel } from "./GithubAppConnectionPanel";
+import { MeshConnectionCard } from "./MeshConnectionCard";
 import { ProviderBrandMark } from "./ProviderBrandMark";
 import type {GithubIssueHandoff} from "../lib/githubChatHandoff";
 import { copyText } from "../lib/clipboard";
@@ -169,6 +170,7 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
             />
           </Fragment>
         ))}
+        {vm.sessionStatus.loggedIn ? <MeshConnectionCard /> : null}
       </div>
 
       <div className="provider-info-grid">

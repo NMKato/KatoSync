@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 const read=(path:string)=>readFileSync(new URL(path,import.meta.url),"utf8");
 const native=read("../src-tauri/src/lib.rs");
-const ui=read("../src/components/VisionWorkspace.tsx");
+const ui=read("../src/components/MeshConnectionCard.tsx");
 const auth=read("../src-tauri/src/github_app_auth.rs");
 const section=native.slice(native.indexOf("async fn renew_katoos_qa_session("),native.indexOf("async fn recover_supabase("));
 test("QA-only reauth validates same account and preserves GitHub",()=>{

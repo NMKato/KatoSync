@@ -5,7 +5,7 @@ import {readFileSync} from "node:fs";
 const read=(file:string)=>readFileSync(new URL(file,import.meta.url),"utf8");
 const rust=read("../src-tauri/src/mesh_identity.rs");
 const root=read("../src-tauri/src/lib.rs");
-const view=read("../src/components/VisionWorkspace.tsx");
+const view=read("../src/components/MeshConnectionCard.tsx");
 
 test("cryptographic identity uses OS keychain + issuer-verified account without exposed secret",()=>{
  assert.match(rust,/verified_katosync_user\(\)\.await/);
