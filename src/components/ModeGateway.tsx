@@ -46,7 +46,7 @@ export function ModeGateway({
       </div>
       <main className="mode-gateway-inner" aria-labelledby="mode-gateway-title">
         <header className="mode-gateway-head">
-          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <img alt="" src="/katosync_logo_centered.png" />
           <span className="section-label">{t("gateway.eyebrow")}</span>
           <h1 id="mode-gateway-title">{t("gateway.title")}</h1>
           <p>{t("gateway.text")}</p>

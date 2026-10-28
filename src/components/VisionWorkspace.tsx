@@ -47,7 +47,7 @@ interface Transform {
 }
 
 const ASSET_SRC: Record<VisionAsset, string> = {
-  katosync: "/katoos_icon_logo_trans.png",
+  katosync: "/katosync_logo_centered.png",
   kai: "/kai-ai-icon.png"
 };
 
