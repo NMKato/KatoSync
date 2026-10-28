@@ -8,6 +8,7 @@ use keyring::Entry;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::{Mutex, OnceLock};
 use zeroize::Zeroize;
 
 pub(crate) const OFFER_LIFETIME_SECS: i64 = 300;
@@ -76,7 +77,21 @@ fn open_identity(uid: &str) -> Result<Option<SigningKey>, String> {
     Ok(Some(signing))
 }
 
+// Serialize first-use identity generation inside one Tauri process: two
+// concurrent Mesh operations must never replace each other's new key.
+static IDENTITY_CREATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+pub(crate) fn existing_identity(uid: &str) -> Result<SigningKey, String> {
+    // Connection admission must never silently create a new device identity.
+    open_identity(uid)?
+        .ok_or_else(|| "Geräteidentität fehlt; explizite Vorbereitung erforderlich.".into())
+}
+
 pub(crate) fn ensure_identity(uid: &str) -> Result<SigningKey, String> {
+    let _lock = IDENTITY_CREATION_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| "Geräteidentität derzeit gesperrt.".to_string())?;
     if let Some(x) = open_identity(uid)? {
         return Ok(x);
     }
