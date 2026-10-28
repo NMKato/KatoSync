@@ -33,6 +33,7 @@ mod memory_fabric;
 mod mesh_directory;
 mod mesh_enrollment_client;
 mod mesh_handshake;
+mod mesh_hub;
 mod mesh_identity;
 mod mesh_readiness;
 mod mesh_tls;
@@ -403,6 +404,8 @@ pub fn run() {
             read_logs,
             local_control_snapshot,
             mesh_readiness::mesh_local_readiness,
+            mesh_hub::mesh_hub_preference_get,
+            mesh_hub::mesh_hub_preference_set,
             mesh_directory::mesh_account_devices_list,
             mesh_enrollment_client::mesh_account_device_discover,
             mesh_identity::mesh_device_identity_prepare,
