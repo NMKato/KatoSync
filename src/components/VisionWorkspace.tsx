@@ -261,6 +261,7 @@ type MeshPeerInventory = {
 function MeshReadinessStrip() {
   const {t,lang}=useT();
   const [detailsOpen,setDetailsOpen]=useState(false);
+  const [reauthOpen,setReauthOpen]=useState(false);
   const [snapshot,setSnapshot]=useState<MeshLocalReadiness|null>(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(false);
@@ -497,6 +498,12 @@ function MeshReadinessStrip() {
     } finally {setLoading(false);}
   },[]);
   useEffect(()=>{void refresh();},[refresh]);
+  const authRejected=identityError&&
+    ["account","session","refresh","invalid","changed"].includes(identityFailure??"");
+  const revealReauth=()=>{
+    setDetailsOpen(true);
+    setReauthOpen(true);
+  };
   const readiness=snapshot?.localControl??"unknown";
   return <section className="vision-mesh-readiness vision-mesh-compact glass" aria-label={t("mesh.simple.title")}>
     <div className="vision-mesh-compact-top">
@@ -536,6 +543,9 @@ function MeshReadinessStrip() {
     {identityError?<p role="alert" className="vision-mesh-compact-notice vision-mesh-error">
       {t("mesh.v1.failed")}
       {identityFailure?" "+t(("mesh.identity.diag."+identityFailure) as TKey):null}
+      {authRejected&&import.meta.env.VITE_KATOOS_AUTH_QA==="1"?
+        <button type="button" className="ghost compact-button"
+          onClick={revealReauth}>{t("mesh.simple.renewAction")}</button>:null}
     </p>:null}
     {clipboardStatus?<p className="vision-mesh-compact-notice" role="status">
       {t(clipboardStatus==="ok"?"mesh.quick.copied":"mesh.quick.copyFailed")}
@@ -553,7 +563,8 @@ function MeshReadinessStrip() {
           <RefreshCcw size={14} className={loading?"spin":""}/>{t("mesh.v0.check")}
         </button>
       </div>
-    {import.meta.env.VITE_KATOOS_AUTH_QA==="1"?<details className="vision-mesh-reauth">
+    {import.meta.env.VITE_KATOOS_AUTH_QA==="1"?<details className="vision-mesh-reauth"
+      open={reauthOpen} onToggle={e=>setReauthOpen(e.currentTarget.open)}>
       <summary>{t("mesh.reauth.title")}</summary>
       <p>{t("mesh.reauth.description")}</p>
       <form onSubmit={e=>{e.preventDefault();void renewSession();}}>

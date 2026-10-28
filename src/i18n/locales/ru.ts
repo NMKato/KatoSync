@@ -1654,6 +1654,7 @@ const ru: Record<TKey, string> = {
   "mesh.simple.unavailable": "Статус недоступен",
   "mesh.simple.noPeers": "Нет подключенных устройств",
   "mesh.simple.connect": "Подключить",
+  "mesh.simple.renewAction": "Обновить сессию",
   "mesh.simple.details": "Подробнее",
   "mesh.simple.offerReady": "Безопасное приглашение подготовлено. Сопряжение ещё не завершено.",
   "mesh.simple.discoveryNotReady": "Автоматический поиск устройств пока недоступен. Нет связанных устройств.",

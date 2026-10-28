@@ -1675,6 +1675,7 @@ const de = {
   "mesh.simple.unavailable": "Status nicht verfügbar",
   "mesh.simple.noPeers": "Keine Geräte verbunden",
   "mesh.simple.connect": "Verbinden",
+  "mesh.simple.renewAction": "Sitzung erneuern",
   "mesh.simple.details": "Details",
   "mesh.simple.offerReady": "Sichere Einladung vorbereitet. Die Kopplung ist noch nicht abgeschlossen.",
   "mesh.simple.discoveryNotReady": "Automatische Geräteerkennung ist noch nicht aktiviert. Keine Geräte wurden gekoppelt.",

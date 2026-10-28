@@ -1654,6 +1654,7 @@ const en: Record<TKey, string> = {
   "mesh.simple.unavailable": "Status unavailable",
   "mesh.simple.noPeers": "No devices connected",
   "mesh.simple.connect": "Connect",
+  "mesh.simple.renewAction": "Renew session",
   "mesh.simple.details": "Details",
   "mesh.simple.offerReady": "Secure invitation prepared. Pairing is not complete yet.",
   "mesh.simple.discoveryNotReady": "Automatic device discovery is not enabled yet. No devices have been paired.",
