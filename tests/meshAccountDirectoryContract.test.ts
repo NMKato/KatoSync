@@ -16,7 +16,7 @@ test("account directory is a read-only native Tauri command gated by issuer",()=
   assert.doesNotMatch(rust,/\.post\(|\.patch\(|\.delete\(|TcpListener|remote_task_execute/);
 });
 test("UI distinguishes discovery from actual peer trust and remote rights",()=>{
-  assert.match(view,/mesh_account_devices_list/);
+  assert.match(view,/mesh_account_device_discover/);
   assert.match(view,/roster\.discoveryOnly!==true/);
   assert.match(view,/roster\.transportReady!==false/);
   assert.match(view,/roster\.remoteJobsEnabled!==false/);

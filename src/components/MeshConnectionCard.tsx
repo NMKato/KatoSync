@@ -154,7 +154,7 @@ export function MeshConnectionCard() {
   const loadAccountDirectory=async()=>{
     setDirectoryBusy(true);setDirectoryError(false);setDirectory(null);
     try{
-      const roster=await invoke<MeshAccountDirectory>("mesh_account_devices_list");
+      const roster=await invoke<MeshAccountDirectory>("mesh_account_device_discover");
       if(roster.accountVerified!==true || roster.discoveryOnly!==true ||
          roster.transportReady!==false || roster.remoteJobsEnabled!==false ||
          !Array.isArray(roster.devices) || roster.devices.length>10 ||

@@ -31,6 +31,7 @@ mod local_brain;
 mod local_control;
 mod memory_fabric;
 mod mesh_directory;
+mod mesh_enrollment_client;
 mod mesh_handshake;
 mod mesh_identity;
 mod mesh_readiness;
@@ -403,7 +404,9 @@ pub fn run() {
             local_control_snapshot,
             mesh_readiness::mesh_local_readiness,
             mesh_directory::mesh_account_devices_list,
+            mesh_enrollment_client::mesh_account_device_discover,
             mesh_identity::mesh_device_identity_prepare,
+            mesh_identity::mesh_device_enrollment_proof,
             mesh_identity::mesh_pairing_offer_create,
             mesh_identity::mesh_pairing_offer_inspect,
             mesh_handshake::mesh_pairing_challenge_create,
