@@ -23,6 +23,9 @@ async function fixture(){
     assert.equal((init?.headers as Record<string,string>)?.[header],"katosync");
     assert.ok(!url.includes("katosync_mesh_"),"must not reference old public Mesh tables");
    }
+   if(url.includes("/rest/v1/account_memberships"))return Response.json([{
+     user_id:owner,access_state:"active",authorized_at:"2026-10-28T12:00:00Z",revoked_at:null
+   }]);
    if(url.endsWith("/auth/v1/user"))return Response.json(options.invalidAuth?{}:{id:owner},{status:options.invalidAuth?401:200});
    if(url.includes("/mesh_enrollment_challenges")&&init?.method!=="PATCH")
     return Response.json([{challenge_id:challengeId,owner_user_id:owner,signing_public_key:publicKey,nonce,expires_at:expiresAt,consumed_at:options.used?"2026-10-28T08:00:00Z":null}]);

@@ -32,6 +32,22 @@ INSERT INTO auth.users(id) VALUES
 -- Execute exactly the repository's three pending staged migrations, with
 -- no remote connections or live schema modifications.
 \ir ../../supabase/migrations/20261028202403_katosync_mesh_owned_schema.sql
+\ir ../../supabase/migrations/20261028204216_katosync_account_membership_admission.sql
+
+INSERT INTO katosync.account_memberships(user_id,access_state,authorized_at)
+VALUES ('11111111-1111-4111-8111-111111111111','active',now()),
+ ('22222222-2222-4222-8222-222222222222','pending',null);
+DO $$
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+   WHERE n.nspname='katosync' AND c.relname='account_memberships' AND c.relrowsecurity)
+ THEN RAISE EXCEPTION 'KATOSYNC_MEMBER_RLS_MISSING'; END IF;
+ IF has_schema_privilege('anon','katosync','USAGE')
+ OR has_table_privilege('authenticated','katosync.account_memberships','INSERT')
+ OR has_table_privilege('authenticated','katosync.account_memberships','UPDATE')
+ OR has_table_privilege('authenticated','katosync.account_memberships','DELETE')
+ THEN RAISE EXCEPTION 'KATOSYNC_MEMBER_CLIENT_WRITER_OPEN'; END IF;
+END $$;
 
 -- Seed only synthetic public credentials, isolated to the throwaway cluster.
 INSERT INTO katosync.mesh_owner_policy(owner_user_id, allowed_devices)
@@ -81,6 +97,15 @@ SELECT set_config('request.jwt.claim.sub','11111111-1111-4111-8111-111111111111'
 SELECT set_config('request.jwt.claims','{"is_anonymous":false}',false);
 DO $$
 BEGIN
+  IF (SELECT count(*) FROM katosync.account_memberships) <> 1
+  OR (SELECT access_state FROM katosync.account_memberships) <> 'active'
+  THEN RAISE EXCEPTION 'KATOSYNC_MEMBER_CROSS_OWNER_LEAK'; END IF;
+  BEGIN
+    UPDATE katosync.account_memberships SET access_state='active'
+    WHERE user_id='22222222-2222-4222-8222-222222222222';
+    RAISE EXCEPTION 'KATOSYNC_MEMBER_UNAUTHORIZED_PROMOTION';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
   IF (SELECT count(*) FROM katosync.mesh_devices) <> 2
   OR (SELECT count(*) FROM katosync.mesh_owner_policy) <> 1
   OR (SELECT count(*) FROM katosync.mesh_invites) <> 1
@@ -107,6 +132,9 @@ END $$;
 SELECT set_config('request.jwt.claim.sub','22222222-2222-4222-8222-222222222222',false);
 DO $$
 BEGIN
+  IF (SELECT count(*) FROM katosync.account_memberships) <> 1
+   OR (SELECT access_state FROM katosync.account_memberships) <> 'pending'
+  THEN RAISE EXCEPTION 'KATOSYNC_MEMBER_WRONG_OWNER'; END IF;
   IF (SELECT count(*) FROM katosync.mesh_devices) <> 1
   OR (SELECT count(*) FROM katosync.mesh_owner_policy) <> 0
   OR (SELECT count(*) FROM katosync.mesh_invites) <> 0
@@ -116,6 +144,8 @@ END $$;
 SELECT set_config('request.jwt.claim.sub','',false);
 DO $$
 BEGIN
+  IF (SELECT count(*) FROM katosync.account_memberships) <> 0
+   THEN RAISE EXCEPTION 'KATOSYNC_MEMBERSHIP_NO_JWT_LEAK'; END IF;
   IF (SELECT count(*) FROM katosync.mesh_devices) <> 0
   OR (SELECT count(*) FROM katosync.mesh_invites) <> 0
   THEN RAISE EXCEPTION 'MESH_QA_MISSING_JWT_OWNER_LEAK'; END IF;

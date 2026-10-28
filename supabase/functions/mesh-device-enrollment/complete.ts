@@ -1,6 +1,7 @@
 // NMKato Solutions — discovery-only registration after key possession proof.
 // This does NOT pair devices, authorize a peer, enable transport or writers.
 import {inspectEnrollmentRegistry} from "./registry-policy.ts";
+import {requireKatoSyncMembership} from "./membership-gate.ts";
 const ORIGIN="https://xbnnlyyxiilklsygxcof.supabase.co";
 const SCHEMA="katosync";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -39,6 +40,9 @@ export async function completeMeshDeviceDiscovery(req:Request,env:Env,request:ty
     if(typeof info.id!=="string"||!UUID.test(info.id)||info.is_anonymous===true)return out(401,"LOGIN_REQUIRED");
     const uid=info.id;
     const headers={apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:"Bearer "+env.SUPABASE_SERVICE_ROLE_KEY};
+    const member=await requireKatoSyncMembership(uid,headers,request);
+    if(member==="not_member")return out(403,"KATOSYNC_MEMBERSHIP_REQUIRED");
+    if(member!=="active")return out(503,"MEMBERSHIP_UNAVAILABLE");
     const query=new URL(ORIGIN+"/rest/v1/mesh_enrollment_challenges");
     query.searchParams.set("select","challenge_id,owner_user_id,signing_public_key,nonce,expires_at,consumed_at");
     query.searchParams.set("challenge_id","eq."+proof.challengeId);
@@ -83,6 +87,11 @@ export async function completeMeshDeviceDiscovery(req:Request,env:Env,request:ty
     if(!Number.isInteger(max)||max<1||max>10)return out(503,"REGISTRY_UNAVAILABLE");
     const known=inspection.kind==="known";
     if(!known&&inspection.count>=max)return out(429,"DEVICE_QUOTA");
+    // Re-check KatoSync membership near the irreversible single-use consume.
+    // A deleted/suspended owner must not get a new discovery receipt.
+    const freshMember=await requireKatoSyncMembership(uid,headers,request);
+    if(freshMember!=="active")return out(freshMember==="not_member"?403:503,
+      freshMember==="not_member"?"KATOSYNC_MEMBERSHIP_REQUIRED":"MEMBERSHIP_UNAVAILABLE");
     // Atomic single-use consumption: racing requests cannot reuse one signed proof.
     const consumeURL=new URL(ORIGIN+"/rest/v1/mesh_enrollment_challenges");
     consumeURL.searchParams.set("select","challenge_id");
