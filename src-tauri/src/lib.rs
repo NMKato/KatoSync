@@ -37,6 +37,13 @@ mod mesh_hub;
 mod mesh_identity;
 mod mesh_readiness;
 mod mesh_tls;
+// Explicit staging boundary: never call the transport from IPC or a runtime
+// listener until mutual owner approval, revocation and session gates ship.
+#[expect(
+    dead_code,
+    reason = "Native-only Stage 2B transport has no production caller yet"
+)]
+mod mesh_transport;
 mod mesh_trust;
 mod model_distribution;
 mod offline_stt;
