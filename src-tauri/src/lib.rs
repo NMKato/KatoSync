@@ -32,6 +32,9 @@ mod local_control;
 mod memory_fabric;
 mod mesh_directory;
 mod mesh_enrollment_client;
+// Read-only owner-key registration gate; no direct IPC, listener or job grant.
+#[allow(dead_code)]
+mod mesh_enrollment_gate;
 mod mesh_handshake;
 mod mesh_hub;
 mod mesh_identity;

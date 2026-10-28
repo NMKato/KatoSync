@@ -6,6 +6,7 @@
 //! session persistence or writer authorization is enabled.
 
 use crate::{
+    mesh_enrollment_gate::require_both_devices_enrolled,
     mesh_identity::{existing_identity, same_account_still_verified},
     mesh_tls::DeviceTlsIdentity,
     mesh_transport,
@@ -51,6 +52,11 @@ async fn authorize(requested_fingerprint: &str) -> Result<NativeAdmission, Strin
     let peer = approved_peer_for_account(&uid, requested_fingerprint, &signing.verifying_key())
         .map_err(|_| "MESH_ADMISSION_PEER_NOT_APPROVED".to_string())?;
 
+    // Server-side registry must independently show both exact Ed25519 keys
+    // under the verified owner, neither revoked. Discovery never grants trust.
+    require_both_devices_enrolled(&uid, &signing.verifying_key(), &peer)
+        .await
+        .map_err(|_| "MESH_ADMISSION_ENROLLMENT_REQUIRED".to_string())?;
     same_account_still_verified(&uid)
         .await
         .map_err(|_| "MESH_ADMISSION_ACCOUNT_CHANGED".to_string())?;
@@ -74,6 +80,12 @@ async fn recheck_after_probe(
     same_account_still_verified(&admitted.owner_uid)
         .await
         .map_err(|_| "MESH_ADMISSION_ACCOUNT_CHANGED".to_string())?;
+    // A rotated/replaced local Keychain identity invalidates this probe.
+    let live_signing = existing_identity(&admitted.owner_uid)
+        .map_err(|_| "MESH_ADMISSION_LOCAL_IDENTITY_CHANGED".to_string())?;
+    if live_signing.verifying_key() != admitted.local_signing.verifying_key() {
+        return Err("MESH_ADMISSION_LOCAL_IDENTITY_CHANGED".into());
+    }
     let fresh = approved_peer_for_account(
         &admitted.owner_uid,
         requested_fingerprint,
@@ -83,7 +95,11 @@ async fn recheck_after_probe(
     if !approval_unchanged(&admitted.approved_peer, &fresh) {
         return Err("MESH_ADMISSION_PEER_CHANGED".into());
     }
-    Ok(())
+    // Verify neither endpoint was de-registered while the one-shot TLS probe
+    // was in flight. A persistent session still needs a revocation watcher.
+    require_both_devices_enrolled(&admitted.owner_uid, &live_signing.verifying_key(), &fresh)
+        .await
+        .map_err(|_| "MESH_ADMISSION_ENROLLMENT_REVOKED".to_string())
 }
 
 /// An internal service must supply the peer certificate and a socket. Never
