@@ -267,4 +267,145 @@ mod tests {
         });
         assert_eq!(result.err().as_deref(), Some("MESH_PROBE_TIMEOUT"));
     }
+
+    // Pure test-only input policy, independent from network IO and UI.
+    // Check source/destination relative to the selected QA role.
+    fn allowed_private_lan_fixture(
+        role: &str,
+        address: std::net::SocketAddr,
+        expected_ip: std::net::IpAddr,
+    ) -> bool {
+        use std::net::IpAddr;
+        let private_lan = |ip: IpAddr| matches!(ip, IpAddr::V4(v) if v.is_private() && !v.is_loopback() && !v.is_link_local());
+        private_lan(address.ip())
+            && private_lan(expected_ip)
+            && address.port() > 1024
+            && match role {
+                "server" => address.ip() != expected_ip,
+                "client" | "client-wrong-pin" => address.ip() == expected_ip,
+                _ => false,
+            }
+    }
+
+    #[test]
+    fn hardware_qa_guard_rejects_public_loopback_and_role_mismatches() {
+        use std::net::{IpAddr, SocketAddr};
+        let server: SocketAddr = "192.168.1.10:39400".parse().unwrap();
+        let remote: IpAddr = "192.168.1.20".parse().unwrap();
+        assert!(allowed_private_lan_fixture("server", server, remote));
+        assert!(!allowed_private_lan_fixture("server", server, server.ip()));
+        assert!(!allowed_private_lan_fixture("client", server, remote));
+        assert!(allowed_private_lan_fixture("client", server, server.ip()));
+        assert!(allowed_private_lan_fixture(
+            "client-wrong-pin",
+            server,
+            server.ip()
+        ));
+        assert!(!allowed_private_lan_fixture("unknown", server, remote));
+        assert!(!allowed_private_lan_fixture(
+            "server",
+            "127.0.0.1:39400".parse().unwrap(),
+            remote
+        ));
+        assert!(!allowed_private_lan_fixture(
+            "server",
+            "8.8.8.8:39400".parse().unwrap(),
+            remote
+        ));
+        assert!(!allowed_private_lan_fixture(
+            "server",
+            "192.168.1.10:443".parse().unwrap(),
+            remote
+        ));
+        assert!(!allowed_private_lan_fixture(
+            "server",
+            server,
+            "2001:db8::1".parse().unwrap()
+        ));
+    }
+
+    /// Explicit opt-in hardware QA only. Two Macs share ONLY these public,
+    /// synthetic fixture identities; they cannot access OS keychains,
+    /// register a device, or authorize any real Mesh job. The test must be
+    /// launched separately on each device using private LAN addresses.
+    #[tokio::test]
+    #[ignore = "manual two-machine LAN QA: synthetic test keys, explicit one-shot private socket only"]
+    async fn manual_two_host_private_lan_pinned_tls_probe() {
+        use std::{
+            env,
+            net::{IpAddr, SocketAddr},
+        };
+
+        assert_eq!(
+            env::var("KATOSYNC_MESH_LAN_QA_ALLOW").as_deref(),
+            Ok("SYNTHETIC_FIXTURES_ONLY"),
+            "Manual LAN test requires an explicit synthetic-only approval flag."
+        );
+        let address: SocketAddr = env::var("KATOSYNC_MESH_LAN_QA_ADDRESS")
+            .expect("Explicit LAN test socket address is required")
+            .parse()
+            .expect("Invalid LAN socket address");
+        let expected_ip: IpAddr = env::var("KATOSYNC_MESH_LAN_QA_EXPECT_PEER")
+            .expect("Explicit expected remote peer IP is required")
+            .parse()
+            .expect("Invalid expected peer IP");
+        let role = env::var("KATOSYNC_MESH_LAN_QA_ROLE")
+            .expect("Required QA role: server, client or client-wrong-pin");
+        assert!(
+            allowed_private_lan_fixture(&role, address, expected_ip),
+            "Manual QA requires permitted RFC1918 peers, roles and unprivileged port"
+        );
+
+        let a = signing(41);
+        let b = signing(42);
+        let local_a = DeviceTlsIdentity::from_signing_key(&a).unwrap();
+        let local_b = DeviceTlsIdentity::from_signing_key(&b).unwrap();
+        match role.as_str() {
+            "server" => {
+                let listener = TcpListener::bind(address)
+                    .await
+                    .expect("Could not bind explicit private LAN interface");
+                // One connection, bounded lifetime. Never a background server.
+                let (socket, peer) =
+                    tokio::time::timeout(Duration::from_secs(45), listener.accept())
+                        .await
+                        .expect("Peer did not arrive")
+                        .expect("TCP accept failed");
+                assert_eq!(peer.ip(), expected_ip, "Unknown LAN source refused");
+                let result =
+                    server_probe(socket, &local_b, &approved(&a), local_a.certificate_der()).await;
+                // The negative client mode should never be mistaken for success.
+                let negative =
+                    env::var("KATOSYNC_MESH_LAN_QA_NEGATIVE").ok().as_deref() == Some("YES");
+                if negative {
+                    assert!(result.is_err(), "Negative TLS probe unexpectedly succeeded");
+                } else {
+                    result.expect("Pinned mutual TLS LAN server probe failed");
+                }
+            }
+            "client" | "client-wrong-pin" => {
+                let socket =
+                    tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(address))
+                        .await
+                        .expect("TCP connect timed out")
+                        .expect("TCP connection failed");
+                assert_eq!(
+                    socket.peer_addr().unwrap().ip(),
+                    expected_ip,
+                    "Connected to unexpected LAN peer"
+                );
+                let actual = approved(&b);
+                let outsider = signing(43);
+                let invalid = approved(&outsider);
+                let pin = if role == "client" { &actual } else { &invalid };
+                let result = client_probe(socket, &local_a, pin, local_b.certificate_der()).await;
+                if role == "client" {
+                    result.expect("Pinned mutual TLS LAN client probe failed");
+                } else {
+                    assert!(result.is_err(), "Wrong pin unexpectedly authenticated");
+                }
+            }
+            _ => panic!("Unsupported QA role; no network operation allowed"),
+        }
+    }
 }

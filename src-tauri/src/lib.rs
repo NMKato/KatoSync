@@ -39,9 +39,9 @@ mod mesh_readiness;
 mod mesh_tls;
 // Explicit staging boundary: never call the transport from IPC or a runtime
 // listener until mutual owner approval, revocation and session gates ship.
-#[expect(
-    dead_code,
-    reason = "Native-only Stage 2B transport has no production caller yet"
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Stage 2B transport is not wired to runtime yet")
 )]
 mod mesh_transport;
 mod mesh_trust;
