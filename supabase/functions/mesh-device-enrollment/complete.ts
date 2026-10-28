@@ -1,5 +1,6 @@
 // NMKato Solutions — discovery-only registration after key possession proof.
 // This does NOT pair devices, authorize a peer, enable transport or writers.
+import {inspectEnrollmentRegistry} from "./registry-policy.ts";
 const ORIGIN="https://xbnnlyyxiilklsygxcof.supabase.co";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BASE64=/^[A-Za-z0-9_-]+$/;
@@ -58,13 +59,17 @@ export async function completeMeshDeviceDiscovery(req:Request,env:Env,request:ty
     if(!await crypto.subtle.verify("Ed25519",verificationKey,sig,payload))return out(403,"BAD_SIGNATURE");
     // Discovery quota is intentionally separate from trust/remote job grants.
     const existingURL=new URL(ORIGIN+"/rest/v1/katosync_mesh_devices");
-    existingURL.searchParams.set("select","device_id,signing_public_key");
+    // A previously revoked signing key must NOT be revived by repeating
+    // a possession proof. Membership is server-owned, never client supplied.
+    existingURL.searchParams.set("select","device_id,signing_public_key,membership_state,revoked_at");
     existingURL.searchParams.set("owner_user_id","eq."+uid);
     existingURL.searchParams.set("limit","11");
     const existing=await request(existingURL,{headers,signal:AbortSignal.timeout(8000)});
     if(!existing.ok)return out(503,"REGISTRY_UNAVAILABLE");
     const current:unknown=await existing.json();
-    if(!Array.isArray(current)||current.length>10)return out(503,"REGISTRY_UNAVAILABLE");
+    const inspection=inspectEnrollmentRegistry(current,proof.publicKey);
+    if(inspection.kind==="invalid")return out(503,"REGISTRY_UNAVAILABLE");
+    if(inspection.kind==="revoked")return out(403,"DEVICE_REVOKED");
     const policyURL=new URL(ORIGIN+"/rest/v1/katosync_mesh_owner_policy");
     policyURL.searchParams.set("select","allowed_devices");
     policyURL.searchParams.set("owner_user_id","eq."+uid);
@@ -75,8 +80,8 @@ export async function completeMeshDeviceDiscovery(req:Request,env:Env,request:ty
     if(!Array.isArray(policies)||policies.length>1)return out(503,"REGISTRY_UNAVAILABLE");
     const max=policies.length===0?2:policies[0]?.allowed_devices;
     if(!Number.isInteger(max)||max<1||max>10)return out(503,"REGISTRY_UNAVAILABLE");
-    const known=current.some(d=>d.signing_public_key===proof.publicKey);
-    if(!known&&current.length>=max)return out(429,"DEVICE_QUOTA");
+    const known=inspection.kind==="known";
+    if(!known&&inspection.count>=max)return out(429,"DEVICE_QUOTA");
     // Atomic single-use consumption: racing requests cannot reuse one signed proof.
     const consumeURL=new URL(ORIGIN+"/rest/v1/katosync_mesh_enrollment_challenges");
     consumeURL.searchParams.set("select","challenge_id");
