@@ -119,3 +119,54 @@ war durch die alte generische UI-Meldung **nicht rückwirkend
 belegbar**. Ein realer Chat-Frage-/Antwortlauf mit dem
 neuen Modellfehlerhinweis und anschließendem lokalen Modellstart
 bleibt als eigener Schritt vor Offline-Freigabe offen.
+
+## Nachprüfung am 29.10., tatsächlicher Offline-Chat-End-to-End-Lauf
+
+Die bereits installierte und auf beiden Macs identisch signierte QA-App
+wurde erneut **auf M2 in der sichtbaren Oberfläche** getestet.
+Lokaler Gemma-Server war an 127.0.0.1 erreichbar; im Chat erschien
+der Status `Offline`, es gab keinen Cloud-Fallback.
+
+1. `Agent Sync → Master-Chat → registriertes Projekt KatoSync`:
+   Fünf vorherige Turns wurden lesbar dargestellt, ohne
+   Datenbankmigration oder Änderung der Projekt-Registry.
+2. Die neue Frage nach den aus den Projektquellen belegten
+   lokalen Runnern wurde ausdrücklich über die Chat-Oberfläche
+   gesendet. Gemma antwortete sinngemäß `Codex CLI` und
+   `Claude Code CLI` mit Quellenhinweis `[5]`; acht
+   lokale Quellenverweise waren zugeordnet.
+3. Die SQLite-Datenbank `memory-v1.sqlite3` enthielt danach
+   **sechs** statt fünf Turns, den erwarteten neuen QA-Fragemarker
+   und die beiden Runner in der gespeicherten Antwort.
+   `PRAGMA quick_check = ok`.
+4. Nach Wechsel zu `Verbindungen` und zurück in den
+   `Master-Chat`, erneuter Auswahl des KatoSync-Projekts:
+   **Die neu gespeicherte Frage und Antwort erschienen erneut
+   aus dem lokalen Verlauf**. Die Historie bleibt also nach
+   UI-Neumontage bestehen.
+5. Negativtest: Frage nach einer erfundenen KatoSync-Version
+   `99.99` für `Mercury OS`. Die Antwort war
+   **exakt `NOT_IN_MEMORY`**, statt eine Veröffentlichung
+   zu erfinden. Sie wurde als **siebter** Turn persistiert.
+
+**E2E-Ergebnis für M2:** History laden, Offline-Antwort,
+Quellenbezug, persistentes Schreiben, UI-Wiederladen und
+Nichtwissen-Fallback erfolgreich nachgewiesen.
+Der alte Fehlermeldungspfad war damit im aktuellen M2-QA-Profil
+behoben. Dies bestätigt **nicht** die V1-Migrations-/Backup-Gates
+auf anderen Maschinen, den Erstimport auf M3 oder einen
+öffentlichen Release. Die in Issue #130 vorgesehenen
+V1-/Root-Mismatch-/Rollback-Negativfälle bleiben separat offen.
+
+**Read-only-Jobbelege unabhängig nochmals kontrolliert:**
+Es existieren im für das signierte QA-Bundle isolierten
+`readonly-dispatch-v1` zwei echte JSON-Receipts, je eines
+von Codex und Claude, beide mit Status `success`, Exit 0,
+korrekt überprüfter BRANCH/HEAD/STATUS-Antwort und vollständig
+identischen Git-Belegen vor/nach dem Lauf. Vorherige Meldungen
+von `0 Jobs` beruhten auf der Kontrolle eines alten,
+falschen App-Data-Verzeichnisses.
+
+Die QA-Fakten wurden aus Metadaten und visueller Abnahme
+ermittelt; keine Tokens, Systempfade, E-Mail-Adressen,
+Private Keys oder Chatdatenbanken in das öffentliche Repo übernommen.
