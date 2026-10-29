@@ -8,6 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { presentChatAnswer } from "../lib/chatAnswerPresentation";
 import { parseHumanView } from "../lib/chatAdaptiveViews";
+import {classifyLocalChatFailure} from "../lib/localChatError";
 import { useT } from "../i18n";
 
 type ChatDiagnostics = {code:string;canRepair:boolean};
@@ -406,13 +407,15 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
           return Object.fromEntries([...entries,[current+":"+result.sequence,outgoingImage.thumbnail]]);
         });
       }
-    } catch {
+    } catch (cause) {
       if (requestRef.current === request) {
-        // Restore only if the next draft is still empty. No invisible lost input.
+        // MARK: Modellfehler erfordern keine riskante Memory-Reparatur.
+        // Auch unbekannte Fehler nie mit rohen Pfaden/Tokens an die UI weiterreichen.
+        const failure=classifyLocalChatFailure(cause);
         setQuestion(existing=>existing||text);
         setImageDraft(existing=>existing||outgoingImage);
-        setError(t("continuity.chat.saveError"));
-        setLoaded(false); // recheck native sequence rather than blindly retrying writes
+        setError(t(failure.key));
+        if(failure.reload)setLoaded(false); // only stale/project/storage needs fresh native read
       }
     } finally {
       if (requestRef.current === request) {

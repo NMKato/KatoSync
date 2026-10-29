@@ -3490,6 +3490,7 @@ async fn run_codex_task(
     })
 }
 
+#[cfg(target_os = "macos")]
 /// Setzt einen Runner-Lauf als interaktive Terminal-Session fort (Human-in-the-Loop):
 /// schreibt eine ausfuehrbare `.command`-Datei (cd ins Repo + `claude --resume <id>` bzw.
 /// `codex resume <id>`) und oeffnet sie mit `open` → Terminal.app startet die Session mit
@@ -3567,6 +3568,16 @@ fn resume_runner_session(
         return Err("Terminal konnte die Session nicht starten.".to_string());
     }
     Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn resume_runner_session(
+    _repo_path: String,
+    _runner: String,
+    _session_id: Option<String>,
+) -> Result<(), String> {
+    Err("RESUME_UNSUPPORTED_PLATFORM".to_string())
 }
 
 #[tauri::command]

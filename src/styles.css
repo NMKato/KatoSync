@@ -10367,7 +10367,7 @@ button.agent-tile:hover {
 
 /* Local project-memory recovery: explicit consent, no silent schema upgrade. */
 .continuity-chat-recovery {
-  display:grid;justify-items:start;gap:10px;min-width:0;
+  display:grid;grid-template-columns:minmax(0,1fr);justify-items:stretch;gap:10px;min-width:0;
   padding:13px 15px;border:1px solid var(--line);border-radius:var(--r-md);
   background:var(--surface-raised);
 }
@@ -10375,10 +10375,15 @@ button.agent-tile:hover {
 .continuity-chat-recovery > p {margin:0;line-height:1.5;font-size:13px;color:var(--text-muted);}
 .continuity-repair-consent {
   display:flex;align-items:flex-start;gap:10px;font-size:12px;
-  line-height:1.5;max-width:690px;
+  line-height:1.5;width:min(100%,690px);min-width:0;
 }
-.continuity-repair-consent input {flex:0 0 auto;margin-top:3px;}
-.continuity-chat-recovery > button {max-width:100%;white-space:normal;}
+.continuity-repair-consent input[type="checkbox"] {
+  flex:0 0 18px;width:18px;height:18px;margin:2px 0 0;
+}
+.continuity-repair-consent > span {
+  flex:1 1 auto;min-width:0;white-space:normal;overflow-wrap:break-word;
+}
+.continuity-chat-recovery > button {justify-self:start;max-width:100%;white-space:normal;}
 
 /* Chat 2.0: readable safe Markdown, local image composer, isolated HTML preview. */
 .continuity-chat-turn {padding:14px 17px;}
