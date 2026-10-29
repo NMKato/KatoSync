@@ -1949,7 +1949,26 @@ fn gh_bin() -> String {
     "gh".to_string()
 }
 
+// Windows Tauri resources are next to the installed executable, unlike
+// macOS .app/Contents/Resources. Do not assume Unix executable filenames.
+#[cfg(target_os = "windows")]
+fn windows_bundled_tool(group: &str, exe_name: &str) -> Option<String> {
+    let executable = std::env::current_exe().ok()?;
+    let install_dir = executable.parent()?;
+    for relative in ["resources", "resources/resources", "."] {
+        let candidate = install_dir.join(relative).join(group).join(exe_name);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
 fn pdftotext_bin() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    if let Some(path) = windows_bundled_tool("poppler", "pdftotext.exe") {
+        return Some(path);
+    }
     // 1) Gebuendelte poppler-Binary (self-contained, Contents/Resources/poppler/pdftotext) ->
     //    PDF->Text funktioniert IMMER, auch ohne System-Installation. Pfad relativ zur laufenden
     //    Executable (Contents/MacOS/<app> -> ../Resources/poppler/pdftotext).
@@ -1979,6 +1998,10 @@ fn pdftotext_bin() -> Option<String> {
 
 // Gebuendelte typst-Binary finden (fuer PDF-Erzeugung im Datei-Modus). Analog zu pdftotext_bin.
 fn typst_bin() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    if let Some(path) = windows_bundled_tool("typst", "typst.exe") {
+        return Some(path);
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(contents) = exe.parent().and_then(Path::parent) {
             let res = contents.join("Resources");
