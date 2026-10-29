@@ -73,6 +73,14 @@ type MeshSignedOffer = {
   accountScope: string;
   signature: string;
 };
+type NativeInboxInvite = {
+  protocol:"katosync-mesh-inbox-send-v1";
+  sourceDeviceId:string;
+  targetDeviceId:string;
+  signedOffer:MeshSignedOffer;
+  dispatchSignature:string;
+};
+// Public signatures only. Stage 2M deliberately does not send anything.
 type MeshPairingProof = {
   fingerprint: string;
   comparisonCode: string;
@@ -185,10 +193,32 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     }
   };
   const [directory,setDirectory]=useState<MeshAccountDirectory|null>(null);
+  const [nativeInboxBusy,setNativeInboxBusy]=useState(false);
+  const [nativeInboxError,setNativeInboxError]=useState(false);
+  const [nativeInboxPrepared,setNativeInboxPrepared]=useState<string|null>(null);
   const [directoryBusy,setDirectoryBusy]=useState(false);
   const [directoryError,setDirectoryError]=useState(false);
+  const prepareNativeInbox=async(targetDeviceId:string)=>{
+    if(nativeInboxBusy||!directory?.devices.some(d=>d.deviceId===targetDeviceId&&d.membershipState==="discovered"))return;
+    setNativeInboxBusy(true);setNativeInboxError(false);setNativeInboxPrepared(null);
+    try {
+      const result=await invoke<NativeInboxInvite>("mesh_inbox_invite_prepare",{targetDeviceId});
+      if(result.protocol!=="katosync-mesh-inbox-send-v1"||
+         result.targetDeviceId!==targetDeviceId||
+         !result.sourceDeviceId||result.sourceDeviceId===targetDeviceId||
+         result.signedOffer?.protocol!=="katosync-mesh-pairing-v1"||
+         !/^[A-Za-z0-9_-]{86}$/.test(result.dispatchSignature)||
+         result.signedOffer.expiresAt*1000<=Date.now()){
+        throw new Error("invalid_native_inbox_receipt");
+      }
+      // No Edge call, no auto-trust, no remote job. Only a native public signed draft.
+      setNativeInboxPrepared(targetDeviceId);
+    }catch{setNativeInboxError(true);}
+    finally{setNativeInboxBusy(false);}
+  };
   const loadAccountDirectory=async()=>{
     setDirectoryBusy(true);setDirectoryError(false);setDirectory(null);
+    setNativeInboxPrepared(null);setNativeInboxError(false);
     try{
       const roster=await invoke<MeshAccountDirectory>("mesh_account_device_discover");
       if(roster.accountVerified!==true || roster.discoveryOnly!==true ||
@@ -487,7 +517,19 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <small>{device.lastSeenAt?
           t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
           t("mesh.directory.notSeen")}</small>
+        {import.meta.env.VITE_KATOOS_AUTH_QA==="1"&&device.membershipState==="discovered"?
+          <button type="button" className="ghost compact-button"
+            disabled={nativeInboxBusy||pairingBusy||directoryBusy}
+            onClick={()=>void prepareNativeInbox(device.deviceId)}>
+            {t("mesh.inbox.prepare")}
+          </button>:null}
       </div>)}
+      {nativeInboxPrepared?<p role="status" className="vision-mesh-compact-notice">
+        {t("mesh.inbox.prepared")} {t("mesh.inbox.notSent")}
+      </p>:null}
+      {nativeInboxError?<p role="alert" className="vision-mesh-error">
+        {t("mesh.inbox.failed")}
+      </p>:null}
       {directoryError?<p role="alert">{t("mesh.directory.unavailable")}</p>:null}
     </section>
     <details className="vision-mesh-pairing">

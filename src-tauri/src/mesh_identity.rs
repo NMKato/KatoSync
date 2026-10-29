@@ -133,7 +133,7 @@ fn offer_message(offer: &MeshOffer) -> Vec<u8> {
 pub(crate) fn make_test_offer(signing: &SigningKey, uid: &str, now: i64) -> MeshOffer {
     generate_offer(signing, uid, now)
 }
-fn generate_offer(signing: &SigningKey, uid: &str, now: i64) -> MeshOffer {
+pub(crate) fn generate_offer(signing: &SigningKey, uid: &str, now: i64) -> MeshOffer {
     let mut random = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut random);
     let mut offer = MeshOffer {
