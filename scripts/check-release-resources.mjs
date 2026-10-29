@@ -65,7 +65,7 @@ export async function verifyReleaseResources(projectRoot,platformTarget=target()
     try{stat=lstatSync(file);}catch{reject("RELEASE_REQUIRED_BINARY_MISSING");}
     if(!stat.isFile()||stat.size<4)reject("RELEASE_REQUIRED_BINARY_INVALID");
     if(realpathSync(file)!==file)reject("RELEASE_BINARY_SYMLINK_FORBIDDEN");
-    if(platformTarget.startsWith("darwin")&&(stat.mode&0o111)===0)
+    if(platformTarget.startsWith("darwin")&&process.platform==="darwin"&&(stat.mode&0o111)===0)
       reject("RELEASE_BINARY_NOT_EXECUTABLE");
     checkBinaryMagic(file,platformTarget.startsWith("win32"));
     if(await hashFile(file)!==digest)reject("RELEASE_SHA256_MISMATCH");
