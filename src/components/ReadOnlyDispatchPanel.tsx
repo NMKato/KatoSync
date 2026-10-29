@@ -11,7 +11,7 @@ type Proof={branch:string;head:string;clean:boolean;changedCount:number};
 type Probe={
  id:string;provider:string;machine:string;project:string;startedAt:string;
  durationMs:number;status:"success"|"failed"|"timeout"|"changed";
- exitCode:number|null;before:Proof;after:Proof;reply:string;
+ exitCode:number|null;before:Proof;after:Proof;reply:string;failureCode?:string|null;
 };
 export function ReadOnlyDispatchPanel({projects}: {projects:RegistryProject[]}){
  const {t}=useT();
@@ -38,6 +38,13 @@ export function ReadOnlyDispatchPanel({projects}: {projects:RegistryProject[]}){
    case "RO_REGISTRY": return t("readonly.errorRegistry");
    case "RO_GIT": return t("readonly.errorGit");
    case "RO_HISTORY": return t("readonly.errorHistory");
+   case "RO_PROVIDER": return t("readonly.errorProvider");
+   case "RO_PROVIDER_START": return t("readonly.errorProviderStart");
+   case "RO_PROVIDER_EXIT": return t("readonly.errorProviderExit");
+   case "RO_REPLY_INVALID": return t("readonly.errorReply");
+   case "RO_SCRATCH": return t("readonly.errorScratch");
+   case "RO_TIMEOUT": return t("readonly.errorTimeout");
+   case "RO_GIT_CHANGED": return t("readonly.errorGitChanged");
    case "RO_INPUT": return t("readonly.errorInput");
    case "RO_OK": return t("readonly.preflightOk");
    default: return t("readonly.error");
@@ -116,6 +123,9 @@ export function ReadOnlyDispatchPanel({projects}: {projects:RegistryProject[]}){
      <span>{t("readonly.git")}: {job.before.clean?"clean":"dirty"} → {job.after.clean?"clean":"dirty"}</span>
      <span>{t("readonly.exit")}: {job.exitCode??"—"}</span>
     </div>
+    {job.failureCode?<p className="tone-warn" role="status">
+      <AlertTriangle size={14}/>{safeError(job.failureCode)}
+    </p>:null}
     <pre className="readonly-dispatch-output">{job.reply||t("readonly.noReply")}</pre>
    </article>)}
   </div>

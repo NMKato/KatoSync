@@ -55,6 +55,9 @@ pub struct ReadOnlyProbe {
     before: GitProof,
     after: GitProof,
     reply: String,
+    /// Stable, public category. Never persist raw stderr, command args or tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    failure_code: Option<String>,
     // Source path, credentials, full environment, and raw model events are intentionally omitted.
 }
 
@@ -170,10 +173,45 @@ fn extract_reply(provider: &str, stdout: &str) -> String {
     String::new()
 }
 
+/// Find the actual CLI in the desktop app's environment; macOS Finder/Tauri
+/// does not inherit an interactive shell's ~/.local/bin PATH.
+fn provider_executable(provider: &str) -> Result<PathBuf, &'static str> {
+    let name = match provider {
+        "codex" => "codex",
+        "claude" => "claude",
+        _ => return Err("RO_INPUT"),
+    };
+    let mut choices = Vec::new();
+    if provider == "codex" {
+        choices.push(PathBuf::from(super::codex_bin()));
+    } else {
+        choices.push(PathBuf::from(super::claude_bin()));
+    }
+    if let Some(home) = dirs::home_dir() {
+        choices.push(home.join(".local").join("bin").join(name));
+    }
+    for prefix in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
+        choices.push(Path::new(prefix).join(name));
+    }
+    if let Some(paths) = std::env::var_os("PATH") {
+        for folder in std::env::split_paths(&paths) {
+            choices.push(folder.join(name));
+            if cfg!(windows) {
+                choices.push(folder.join(format!("{name}.exe")));
+            }
+        }
+    }
+    choices
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or("RO_PROVIDER")
+}
+
 fn prepare_command(provider: &str, prompt: &str, neutral: &Path) -> Result<Command, String> {
+    let executable = provider_executable(provider).map_err(str::to_string)?;
     let mut c = match provider {
         "codex" => {
-            let mut c = Command::new(super::codex_bin());
+            let mut c = Command::new(&executable);
             c.args([
                 "exec",
                 "--ephemeral",
@@ -188,7 +226,7 @@ fn prepare_command(provider: &str, prompt: &str, neutral: &Path) -> Result<Comma
             c
         }
         "claude" => {
-            let mut c = Command::new(super::claude_bin());
+            let mut c = Command::new(&executable);
             c.args([
                 "-p",
                 "--output-format",
@@ -314,6 +352,7 @@ async fn validated_probe(
         .unwrap_or("Registriertes Projekt")
         .to_string();
     let before = git_proof(&repo).map_err(|_| "RO_GIT")?;
+    provider_executable(&req.provider)?;
     Ok((uid, repo, name, before))
 }
 
@@ -340,29 +379,44 @@ pub async fn readonly_dispatch_probe(
     let start = Instant::now();
     // Disposable neutral current directory: no repo instructions or source file access.
     let neutral = std::env::temp_dir().join(format!("katosync-ro-{job_id}"));
-    fs::create_dir(&neutral)
-        .map_err(|_| "Isolierter Diagnoseraum konnte nicht angelegt werden.".to_string())?;
     let prompt = clean_prompt(&before);
-    let mut command = prepare_command(&req.provider, &prompt, &neutral)?;
-    let output = timeout(Duration::from_secs(95), command.output()).await;
-    let _ = fs::remove_dir(&neutral);
-    let (exit_code, reply, mut status) = match output {
-        Ok(Ok(outcome)) => {
-            let code = outcome.status.code();
-            let reply = extract_reply(&req.provider, &String::from_utf8_lossy(&outcome.stdout));
-            let status = if outcome.status.success() && recognized_result(&reply, &before) {
-                "success"
-            } else {
-                "failed"
-            };
-            (code, reply, status)
-        }
-        Ok(Err(_)) => (None, String::new(), "failed"),
-        Err(_) => (None, String::new(), "timeout"),
+    // MARK: Even a missing temporary scratch directory or a provider startup
+    // error receives a durable receipt, provided the owner and Git root were
+    // verified. Never invoke the model without an isolated neutral directory.
+    let (exit_code, reply, mut status, mut failure_code): (
+        Option<i32>,
+        String,
+        &str,
+        Option<&str>,
+    ) = if fs::create_dir(&neutral).is_err() {
+        (None, String::new(), "failed", Some("RO_SCRATCH"))
+    } else {
+        let result = match prepare_command(&req.provider, &prompt, &neutral) {
+            Ok(mut command) => match timeout(Duration::from_secs(95), command.output()).await {
+                Ok(Ok(outcome)) => {
+                    let code = outcome.status.code();
+                    let reply =
+                        extract_reply(&req.provider, &String::from_utf8_lossy(&outcome.stdout));
+                    if !outcome.status.success() {
+                        (code, reply, "failed", Some("RO_PROVIDER_EXIT"))
+                    } else if !recognized_result(&reply, &before) {
+                        (code, reply, "failed", Some("RO_REPLY_INVALID"))
+                    } else {
+                        (code, reply, "success", None)
+                    }
+                }
+                Ok(Err(_)) => (None, String::new(), "failed", Some("RO_PROVIDER_START")),
+                Err(_) => (None, String::new(), "timeout", Some("RO_TIMEOUT")),
+            },
+            Err(_) => (None, String::new(), "failed", Some("RO_PROVIDER_START")),
+        };
+        let _ = fs::remove_dir(&neutral);
+        result
     };
     let after = git_proof(&repo).map_err(|_| "RO_GIT".to_string())?;
     if before != after {
         status = "changed";
+        failure_code = Some("RO_GIT_CHANGED");
     }
     // On session switch fail closed, and do not show prior user's job in the new session.
     let verified_after = crate::github_app_auth::verified_katosync_user()
@@ -385,6 +439,7 @@ pub async fn readonly_dispatch_probe(
         before,
         after,
         reply,
+        failure_code: failure_code.map(str::to_string),
     };
     persist_record(&app, &uid, &record).map_err(|_| "RO_HISTORY".to_string())?;
     Ok(record)
@@ -429,6 +484,25 @@ mod tests {
         .await;
         assert!(!result.ok);
         assert_eq!(result.code, "RO_INPUT");
+    }
+
+    #[test]
+    fn unavailable_provider_has_safe_code_not_a_raw_command_path() {
+        assert_eq!(provider_executable("not-allowed"), Err("RO_INPUT"));
+    }
+
+    #[test]
+    fn old_receipts_remain_readable_without_failure_code() {
+        let record = serde_json::json!({
+          "id":"ro-test","provider":"codex","machine":"local-device",
+          "project":"fixture","startedAt":"2026-10-29T09:00:00Z",
+          "durationMs":1,"status":"success","exitCode":0,
+          "before":{"branch":"main","head":"a".repeat(40),"clean":true,"changedCount":0},
+          "after":{"branch":"main","head":"a".repeat(40),"clean":true,"changedCount":0},
+          "reply":"ok"
+        });
+        let parsed: ReadOnlyProbe = serde_json::from_value(record).unwrap();
+        assert!(parsed.failure_code.is_none());
     }
 
     #[test]

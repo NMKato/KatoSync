@@ -71,3 +71,20 @@ test("Native preflight is isolated from model invocation, redacts native errors 
  assert.match(panel,/setError\(safeError\(String\(cause\)\)\)/);
  assert.doesNotMatch(panel,/setError\(String\(cause\)\)/);
 });
+
+test("Provider CLI preflight handles limited macOS GUI PATH and failures persist categorized receipts",()=>{
+ const native=read("../src-tauri/src/read_only_dispatch.rs");
+ const panel=read("../src/components/ReadOnlyDispatchPanel.tsx");
+ assert.match(native,/fn provider_executable\(provider: &str\)/);
+ assert.match(native,/\.join\("\.local"\)\.join\("bin"\)/);
+ assert.match(native,/provider_executable\(&req\.provider\)\?/);
+ assert.match(native,/RO_PROVIDER_START/);
+ assert.match(native,/RO_PROVIDER_EXIT/);
+ assert.match(native,/RO_REPLY_INVALID/);
+ assert.match(native,/RO_SCRATCH/);
+ assert.match(native,/failure_code: failure_code\.map\(str::to_string\)/);
+ assert.match(native,/serde\(default, skip_serializing_if = "Option::is_none"\)/);
+ assert.match(panel,/job\.failureCode/);
+ assert.match(panel,/readonly\.errorProviderStart/);
+ assert.doesNotMatch(native,/\.stderr\(Stdio::piped\(\)\)/);
+});
