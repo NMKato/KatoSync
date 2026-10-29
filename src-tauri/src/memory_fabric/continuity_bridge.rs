@@ -483,10 +483,7 @@ pub(crate) async fn continuity_chat_send(
             image_data,
         )
         .await
-        .map_err(|_| {
-            "Gemma konnte das Bild lokal nicht auswerten; keine Textantwort vorgetäuscht."
-                .to_string()
-        })?
+        .map_err(|_| "CHAT_IMAGE_MODEL_NOT_READY".to_string())?
     } else if rag.citations.is_empty() {
         "NOT_IN_MEMORY".to_string()
     } else {
@@ -496,7 +493,7 @@ pub(crate) async fn continuity_chat_send(
             &orientation,
         )
         .await
-        .map_err(|_| "Gemma lokal nicht bereit; kein Cloud-Fallback.".to_string())?
+        .map_err(|_| "CHAT_MODEL_NOT_READY".to_string())?
     };
     blocking(move || {
         let _guard = WRITE_LOCK

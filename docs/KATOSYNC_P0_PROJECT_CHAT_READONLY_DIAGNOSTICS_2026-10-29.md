@@ -63,3 +63,59 @@ keine Übertragung von lokalen M2-Chatdaten/Keys.
 In diesem Schritt wurden keine vorhandenen Projektdateien, Datenbanken,
 M2/M3-Keychain-Identitäten, installiertes QA-Bundle, Git-Branches
 in Nutzerrepositories oder Produktions-Mesh-Policies verändert.
+
+## Live-UI-Abnahme: Read-only und lokaler Projektchat
+
+Am 29.10. wurde die aktualisierte, Developer-ID-signierte isolierte
+QA-App auf M2 und M3 installiert; SHA-256 und Signatur beider
+ausführbaren Dateien waren vor UI-Tests identisch.
+
+Auf M2 über `Agent Sync → Jobs & Queue → Sicherer Testauftrag`:
+- KatoSync als registriertes lokales Projekt ausgewählt;
+- Codex-Preflight **grün**, danach ein echter expliziter Job:
+  Erfolg, Exit 0, 5,2 Sekunden, account-scoped JSON-Quittung,
+  before/after Branch, HEAD und Git-Porcelain **unverändert**;
+- Claude-Preflight **grün**, danach ein echter expliziter Job:
+  Erfolg, Exit 0, 5,9 Sekunden, eigene account-scoped
+  JSON-Quittung, before/after Git-Nachweis **unverändert**.
+- CLI-Prompts enthielten **ausschließlich begrenzte Git-Metadaten**,
+  keine Projektdateien. Kein schreibender Runner ausgeführt.
+Damit ist der Reproduktionsfall aus Issue #125 auf dem M2
+**positiv abgenommen**. Kein entsprechender E2E-Lauf auf Windows
+oder M3 wurde behauptet.
+
+Über `Agent Sync → Master-Chat` wurde auf M2 das registrierte
+Projekt KatoSync gewählt. Das Fenster lädt die fünf vorhandenen
+lokalen Einträge inklusive Markdown/Tabellen korrekt. Der
+alte reine Historien-Ladefehler (#130) ist für dieses QA-
+Projekt **nicht mehr reproduzierbar**.
+
+Ein ausdrücklicher **einmaliger lokaler Offline-Gemma-Frageversuch**
+lieferte hingegen eine **generische** UI-Meldung
+('Antwort nicht gespeichert oder Chat-Verlauf inzwischen geändert').
+Die SQLite-DB blieb `quick_check=ok`, Version 4, fünf Turns.
+In der bisherigen React-Implementierung wurden **alle**
+Backend-Fehler pauschal als Speicherproblem behandelt und die
+History-Ansicht vorschnell gesperrt.
+
+Die nachfolgende gezielte Korrektur:
+- Modellfehler bekommen feste Backend-Codes
+  `CHAT_MODEL_NOT_READY` und `CHAT_IMAGE_MODEL_NOT_READY`;
+- ein reiner UI-Classifier trennt **Modell nicht bereit**,
+  **Historie geändert**, **Projektidentität geändert** und
+  **Speicher/anderer Fehler**; keine rohen Backenddaten/Tokens
+  werden in die UI übernommen;
+- bei fehlendem Gemma bleibt die geladenen Historie sichtbar
+  und die nicht gesendete Frage erhalten; **keine automatische
+  DB-Reparatur oder Cloud-Ausweichroute**;
+- bei echten Race-/Git-/Storage-Konflikten bleiben
+  Fail-Closed und erforderliches Neuladen aktiv;
+- 4 neue Tests für Klassifizierung, Sicherheit und
+  React/native Verknüpfung. Gesamt: **335 Node grün**,
+  **220 Rust bestanden, 8 ignoriert**, QA-Web-Build grün.
+
+Wichtig: Die präzise Ursache des ersten Modellfehlers
+war durch die alte generische UI-Meldung **nicht rückwirkend
+belegbar**. Ein realer Chat-Frage-/Antwortlauf mit dem
+neuen Modellfehlerhinweis und anschließendem lokalen Modellstart
+bleibt als eigener Schritt vor Offline-Freigabe offen.
