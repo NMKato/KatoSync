@@ -78,3 +78,32 @@
 
 Keine fremden Projektdateien, Produktionsdatenbanken,
 Benutzerschlüssel oder KAI-Desktop-Anwendungen verändert.
+
+## Ergänzung: native Windows-QA-Abnahme, 29.10.2026
+
+Nach dem macOS-only-CFG-Fix wurde der gesamte Debug-Tauri
+Build auf einem realen Windows-11-x64-Rechner mit MSVC erfolgreich
+kompiliert. Die App-Datei `target/debug/katosync.exe` wurde
+erzeugt und über `Start-Process` geöffnet. Windows meldete
+`Responding=True` und den isolierten Fenstertitel
+`KatoSync · Mesh QA (isoliert)`. Ein Bildschirmtest zeigte
+das echte KATOOS-Login-Gate im nativen WebView2-Fenster.
+Es wurden **keine** Zugangsdaten eingegeben; nach dem
+Start-Smoketest wurde ausschließlich dieser un-signierte
+QA-Debugprozess wieder geschlossen. Die vorhandene
+KAI-/THEORG-App sowie deren Modellserver blieben unverändert.
+
+Die Node- und Web-Build-Strecke auf Windows war ebenfalls
+erfolgreich, jedoch scheiterte der erste GitHub-Windows-Node-
+Job nach dem Commit an einem neuen Regressionstest, der
+Unix-Zeilenenden im Git-Quelltext vorausgesetzt hatte.
+Der Test für die Resume-Plattformgrenze wurde deshalb auf
+robuste Quelltextabschnittsprüfung ohne feste Zeilenendencodierung
+umgestellt. Vollständige CI-Reabnahme bleibt bis zum neuen
+GitHub-Gate erforderlich.
+
+**Nicht freigegeben:** Der Windows-Debug-Build verwendet
+explizite `.test-only`-Platzhalter für fehlende Poppler-/Typst-
+Ressourcen. Keine echte PDF-/Typst-Funktion, kein signierter
+Installer, keine Update-Signatur, kein authentifizierter
+Windows-Agentenauftrag. Der Starttest ersetzt diese Gates nicht.
