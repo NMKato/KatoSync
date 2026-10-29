@@ -108,6 +108,49 @@ pub(super) fn query_terms(text: &str) -> Vec<String> {
     terms
 }
 
+/// Eng gefasste, lokale Sucherweiterung fuer belegte Code-Runner.
+/// Nur bei expliziten Code-/CLI-Runner-Fragen: keine Modellantworten injizieren,
+/// sondern die zugehoerigen Namen als *Suchkandidaten* hinzufuegen.
+/// Allerweltswoerter entfernen, damit sie die BM25-Rangfolge nicht verdraengen.
+/// Bei anderen Fragen bleibt die bisherige FTS-Suche unveraendert.
+pub(super) fn retrieval_terms(text: &str) -> Vec<String> {
+    let original = query_terms(text);
+    let code_runner = original
+        .iter()
+        .any(|term| matches!(term.as_str(), "runner" | "runners" | "runnern"))
+        && original
+            .iter()
+            .any(|term| matches!(term.as_str(), "code" | "coding" | "cli"));
+    if !code_runner {
+        return original;
+    }
+    const FILLER: &[&str] = &[
+        "welche",
+        "welcher",
+        "welches",
+        "sind",
+        "laut",
+        "bitte",
+        "kurz",
+        "mit",
+        "which",
+        "are",
+        "according",
+        "the",
+        "and",
+    ];
+    let mut terms: Vec<String> = original
+        .into_iter()
+        .filter(|term| !FILLER.contains(&term.as_str()))
+        .collect();
+    for candidate in ["codex", "claude"] {
+        if terms.len() < MAX_QUERY_TERMS && !terms.iter().any(|term| term == candidate) {
+            terms.push(candidate.to_string());
+        }
+    }
+    terms
+}
+
 /// FTS5-Ausdruck: jeder Begriff als gequotetes Praefix, ODER-verknuepft (Recall vor Praezision;
 /// das Ranking uebernimmt bm25). Begriffe enthalten nur alphanumerische Zeichen.
 fn match_expression(terms: &[String]) -> String {
@@ -176,7 +219,7 @@ impl MemoryStore {
     ) -> Result<MemoryQueryResult, String> {
         let project_id = validate_project_id(&query.project_id)?;
         let limit = query.limit.clamp(1, MAX_LIMIT);
-        let terms = query_terms(&query.text);
+        let terms = retrieval_terms(&query.text);
         let mut result = MemoryQueryResult {
             schema_version: MEMORY_FABRIC_SCHEMA_VERSION.to_string(),
             project_id: project_id.to_string(),

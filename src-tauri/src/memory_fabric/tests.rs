@@ -7,7 +7,7 @@ use super::{
         MAX_CHUNK_CHARS,
     },
     projection::{export_projection, is_pristine_projection, project_markdown, ProjectionTarget},
-    retrieve::{query_terms, LexicalOnly, MemoryQuery, MAX_LIMIT},
+    retrieve::{query_terms, retrieval_terms, LexicalOnly, MemoryQuery, MAX_LIMIT},
     DirectoryTarget, Freshness, IngestBatch, LiveState, MemoryFabricOverview, MemoryStore,
     NameOrigin, NamedIdentityProposal, NodeIdentityKind, ProjectIdentity, Promotion, TruthLevel,
     PROJECTION_MARKER, REX_MAIN_NAME,
@@ -617,6 +617,66 @@ fn retrieval_and_context_are_bounded() {
             .is_ok());
     }
     assert_eq!(query(&store, "alpha", "keyword", None).hits.len(), 8);
+}
+
+#[test]
+fn code_runner_questions_find_named_provider_evidence_without_polluting_other_queries() {
+    let terms = retrieval_terms(
+        "M3-QA 29.10.: Welche lokalen Code-Runner sind laut KatoSync-Projektquellen dokumentiert? Bitte kurz mit Quellen.",
+    );
+    assert!(terms.contains(&"code".to_string()));
+    assert!(terms.contains(&"runner".to_string()));
+    assert!(terms.contains(&"codex".to_string()));
+    assert!(terms.contains(&"claude".to_string()));
+    assert!(!terms.contains(&"welche".to_string()));
+    assert!(!terms.contains(&"bitte".to_string()));
+    assert!(terms.len() <= 16);
+    // Weder ein freier Codebegriff noch eine fremde Projektfrage erhalten
+    // durch diese Heuristik erfundene Anbieter oder Quellen.
+    let unrelated = retrieval_terms("Welche Funktionen hat die API?");
+    assert!(!unrelated.contains(&"codex".to_string()));
+    assert!(!unrelated.contains(&"claude".to_string()));
+    let unrelated_runner = retrieval_terms("Welcher Runner ist auf Windows installiert?");
+    assert!(!unrelated_runner.contains(&"codex".to_string()));
+    let hostile = retrieval_terms(r#"Code-Runner xyz" OR DROP TABLE:fake"#);
+    assert!(!hostile.is_empty());
+}
+
+#[test]
+fn local_code_runner_question_retrieves_named_project_docs() {
+    let dir = temp_dir("qa-runner-recall");
+    let mut store = MemoryStore::open(&dir.join("memory.sqlite3")).unwrap();
+    let mut documents = Vec::new();
+    for number in 0..12 {
+        documents.push(source(
+            &format!("docs/QA_{number:02}.md"),
+            "status",
+            "# KatoSync Projektstatus QA\nM3 QA 29.10 Projektquellen und lokale Ausfuehrung sind dokumentiert.",
+            true,
+        ));
+    }
+    documents.push(source(
+        "docs/RUNNERS.md",
+        "architecture",
+        "# Native Code Runner\nKatoSync nutzt Codex CLI und Claude Code CLI fuer lokale Code-Runner-Auftraege.",
+        true,
+    ));
+    store.ingest(batch("alpha", Some(HEAD), documents)).unwrap();
+    let result = query(
+        &store,
+        "alpha",
+        "M3-QA 29.10.: Welche lokalen Code-Runner sind laut KatoSync-Projektquellen dokumentiert? Bitte kurz mit Quellen.",
+        None,
+    );
+    assert!(result.terms.contains(&"codex".to_string()));
+    assert!(result.terms.contains(&"claude".to_string()));
+    assert!(result
+        .hits
+        .iter()
+        .any(|hit| hit.relative_path == "docs/RUNNERS.md"
+            && hit.text.contains("Codex CLI")
+            && hit.text.contains("Claude Code CLI")));
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
