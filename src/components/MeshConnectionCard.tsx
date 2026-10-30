@@ -81,6 +81,26 @@ type MeshInboxSentReceipt = {
   transportReady:false;
   remoteJobsEnabled:false;
 };
+type MeshReceivedItem = {
+  requestId:string;
+  sourceDeviceId:string;
+  expiresAt:string;
+  fingerprint:string;
+};
+type MeshReceivedInbox = {
+  invitations:MeshReceivedItem[];
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
+type MeshReceivedDecision = {
+  requestId:string;
+  state:"accepted"|"rejected";
+  decisionOnly:true;
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
 type NativeInboxInvite = {
   protocol:"katosync-mesh-inbox-send-v1";
   sourceDeviceId:string;
@@ -205,6 +225,40 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [nativeInboxError,setNativeInboxError]=useState(false);
   const [nativeInboxPrepared,setNativeInboxPrepared]=useState<string|null>(null);
   const [nativeInboxSent,setNativeInboxSent]=useState<string|null>(null);
+  const [recipientInbox,setRecipientInbox]=useState<MeshReceivedItem[]|null>(null);
+  const [recipientBusy,setRecipientBusy]=useState(false);
+  const [recipientError,setRecipientError]=useState(false);
+  const [recipientDecision,setRecipientDecision]=useState<"accepted"|"rejected"|null>(null);
+  const loadRecipientInbox=async()=>{
+    if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientBusy)return;
+    setRecipientBusy(true);setRecipientError(false);setRecipientDecision(null);setRecipientInbox(null);
+    try{
+      const result=await invoke<MeshReceivedInbox>("mesh_inbox_recipient_list");
+      if(result.paired!==false||result.transportReady!==false||result.remoteJobsEnabled!==false||
+         !Array.isArray(result.invitations)||result.invitations.length>10||
+         result.invitations.some(item=>!item.requestId||!item.sourceDeviceId||
+            Date.parse(item.expiresAt)<=Date.now()||!/^[0-9A-F]{2}(-[0-9A-F]{2}){15}$/.test(item.fingerprint)))
+        throw new Error("invalid_recipient_inbox");
+      setRecipientInbox(result.invitations);
+    }catch{setRecipientError(true);}finally{setRecipientBusy(false);}
+  };
+  const decideRecipientInvite=async(item:MeshReceivedItem,action:"accept"|"reject")=>{
+    if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientBusy||
+       !recipientInbox?.some(x=>x.requestId===item.requestId)||Date.parse(item.expiresAt)<=Date.now())return;
+    setRecipientBusy(true);setRecipientError(false);setRecipientDecision(null);
+    try{
+      const result=await invoke<MeshReceivedDecision>("mesh_inbox_recipient_decide",
+        {requestId:item.requestId,action});
+      if(result.requestId!==item.requestId||
+         result.state!==(action==="accept"?"accepted":"rejected")||
+         result.decisionOnly!==true||result.paired!==false||
+         result.transportReady!==false||result.remoteJobsEnabled!==false)
+        throw new Error("invalid_recipient_decision");
+      setRecipientInbox(list=>list?.filter(x=>x.requestId!==item.requestId)??null);
+      setRecipientDecision(result.state);
+    }catch{setRecipientError(true);}finally{setRecipientBusy(false);}
+  };
+
   const [directoryBusy,setDirectoryBusy]=useState(false);
   const [directoryError,setDirectoryError]=useState(false);
   const sendNativeInbox=async(targetDeviceId:string)=>{
@@ -242,7 +296,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   };
   const loadAccountDirectory=async()=>{
     setDirectoryBusy(true);setDirectoryError(false);setDirectory(null);
-    setNativeInboxPrepared(null);setNativeInboxError(false);setNativeInboxSent(null);
+    setNativeInboxPrepared(null);setNativeInboxError(false);setNativeInboxSent(null);setRecipientInbox(null);setRecipientDecision(null);
     try{
       const roster=await invoke<MeshAccountDirectory>("mesh_account_device_discover");
       if(roster.accountVerified!==true || roster.discoveryOnly!==true ||
@@ -565,6 +619,35 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         {t("mesh.inbox.failed")}
       </p>:null}
       {directoryError?<p role="alert">{t("mesh.directory.unavailable")}</p>:null}
+      {import.meta.env.VITE_KATOOS_AUTH_QA==="1"&&
+       import.meta.env.VITE_MESH_INBOX_RECEIVE_QA==="1"?<section className="vision-mesh-recipient-inbox"
+         aria-label={t("mesh.recipient.heading")}>
+        <strong>{t("mesh.recipient.heading")}</strong>
+        <p>{t("mesh.recipient.notice")}</p>
+        <button type="button" className="ghost compact-button"
+          disabled={recipientBusy||directoryBusy}
+          onClick={()=>void loadRecipientInbox()}>{t("mesh.recipient.refresh")}</button>
+        {recipientInbox?.length===0?<p role="status">{t("mesh.recipient.empty")}</p>:null}
+        {recipientInbox?.map(item=><div className="vision-mesh-directory-row" key={item.requestId}>
+          <div>
+            <strong>{directory?.devices.find(d=>d.deviceId===item.sourceDeviceId)?.displayName||
+              t("mesh.recipient.unknownSource")}</strong>
+            <small>{t("mesh.recipient.expires")}: {relativeTime(item.expiresAt,lang)||"—"}</small>
+            <small>{item.fingerprint}</small>
+          </div>
+          <button type="button" className="ghost compact-button" disabled={recipientBusy}
+            onClick={()=>void decideRecipientInvite(item,"accept")}>{t("mesh.recipient.accept")}</button>
+          <button type="button" className="ghost compact-button" disabled={recipientBusy}
+            onClick={()=>void decideRecipientInvite(item,"reject")}>{t("mesh.recipient.reject")}</button>
+        </div>)}
+        {recipientDecision?<p role="status">
+          {t(recipientDecision==="accepted"?"mesh.recipient.accepted":"mesh.recipient.rejected")}
+          {" "}{t("mesh.recipient.notConnected")}
+        </p>:null}
+        {recipientError?<p role="alert" className="vision-mesh-error">
+          {t("mesh.recipient.failed")}
+        </p>:null}
+      </section>:null}
     </section>
     <details className="vision-mesh-pairing">
       <summary>{t("mesh.v1.heading")}</summary>
