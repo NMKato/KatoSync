@@ -7,13 +7,19 @@ const rust=read("../src-tauri/src/mesh_inbox.rs");
 const core=read("../src-tauri/src/mesh_identity.rs");
 const lib=read("../src-tauri/src/lib.rs");
 const view=read("../src/components/MeshConnectionCard.tsx");
+// Stage 2N adds separate opt-in delivery; Stage 2M's preparation boundary remains read-only.
+const prepareFunction=rust.split("async fn prepare_inbox_message(")[1]
+  .split("/// Only creates a public native")[0];
+const prepareUi=view.split("const prepareNativeInbox=async(")[1]
+  .split("const loadAccountDirectory=async(")[0];
+
 
 test("the sender is a native Tauri command, built only with the existing Keychain signing key",()=>{
  assert.match(lib,/mod mesh_inbox;/);
  assert.match(lib,/mesh_inbox::mesh_inbox_invite_prepare/);
  assert.match(rust,/pub async fn mesh_inbox_invite_prepare\(/);
  assert.match(rust,/existing_identity\(&uid\)/);
- assert.doesNotMatch(rust,/ensure_identity\(|SigningKey::generate|set_password|localStorage|remote_job/);
+ assert.doesNotMatch(prepareFunction,/ensure_identity\(|SigningKey::generate|set_password|localStorage|remote_job_execute/);
  assert.match(core,/pub\(crate\) fn generate_offer/);
 });
 test("owner scoped registry and native crypto bind source and target before preparing",()=>{
@@ -25,14 +31,14 @@ test("owner scoped registry and native crypto bind source and target before prep
   /store_outbound_offer/]){
   assert.match(rust,required);
  }
- assert.doesNotMatch(rust,/\.post\(|\.patch\(|\.delete\(|TcpListener/);
+ assert.doesNotMatch(prepareFunction,/\.post\(|\.patch\(|\.delete\(|TcpListener/);
 });
 test("new native UI marks preparation only, never delivered or paired",()=>{
  assert.match(view,/invoke<NativeInboxInvite>\("mesh_inbox_invite_prepare"/);
  assert.match(view,/result.targetDeviceId!==targetDeviceId/);
  assert.match(view,/mesh\.inbox\.notSent/);
  assert.match(view,/nativeInboxError/);
- assert.doesNotMatch(view,/mesh_inbox_invite_send|mesh_inbox_invite_approve/);
+ assert.doesNotMatch(prepareUi,/mesh_inbox_invite_send|mesh_inbox_invite_approve/);
 });
 test("messages are localized in all four supported languages",()=>{
  for(const lang of ["de","en","es","ru"]){

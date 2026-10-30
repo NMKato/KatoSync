@@ -425,6 +425,7 @@ pub fn run() {
             mesh_identity::mesh_device_enrollment_proof,
             mesh_identity::mesh_pairing_offer_create,
             mesh_inbox::mesh_inbox_invite_prepare,
+            mesh_inbox::mesh_inbox_invite_send,
             mesh_identity::mesh_pairing_offer_inspect,
             mesh_handshake::mesh_pairing_challenge_create,
             mesh_handshake::mesh_pairing_response_create,
