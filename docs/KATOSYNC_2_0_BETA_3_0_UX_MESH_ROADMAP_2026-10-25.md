@@ -59,3 +59,13 @@ Keine Secrets, Kennwörter, privaten Pfade, Tokens, Nutzerkennungen oder interne
 - Native Rust-Tauri-Kommandos \`mesh_inbox_recipient_list\`/\`mesh_inbox_recipient_decide\`; QA-only Schaltflächen und mehrsprachiger Status. Native Prüfung der ursprünglichen Sender-Signatur und Zielbindung unabhängig vom Edge-Dienst.
 - 375 Node-Tests, 229 aktive Rust-Tests (8 bewusst ignoriert), TypeScript/Vite/Rustfmt und isolierte PostgreSQL-17-Tests bestanden.
 - **Nicht deployed/aktiviert:** keine reale Einladung, keine angenommene M2/M3-Nachricht und keine bestehende vertrauenswürdige Peer-Verbindung. Stage 2P ist SAS/key-pin/mTLS-Hardwareabnahme; nur danach getrennte Freigabe von Read-only-Remote-Tasks. Kein Writer.
+
+
+## Nachtrag 30.10.2026 – Stage 2O.1: Empfänger-Proof direkt an Entscheidung gebunden
+
+- Reviewfund: Bisher war die Ed25519-Gerätebestätigung nur im Edge-Dienst, nicht als FK/Trigger-Vertrag der tatsächlichen Invite-Entscheidung verankert.
+- Neue additive Migration \`20261030074910_mesh_resolution_proof_binding.sql\`: \`resolution_proof_id\`, UNIQUE/FK und Trigger für exakt denselben Eigentümer, Empfänger, Antrag und Akzeptieren/Ablehnen-Vorgang, inklusive noch gültigem Proof. Quellschlüsselwechsel nach Versand sperrt die Entscheidung.
+- Edge-Nachweisquittung von PostgREST muss exakt mit der frisch eingetragenen Proof-Zeile übereinstimmen, sonst wird abgebrochen. Proof-ID kommt nur aus dem Backend; kein JS- oder Geräteparameter.
+- Negativtests für fehlenden/falschen Proof, falsche Aktion, falsche Einladung, Schlüsselrotation und zweite Entscheidung; temporärer PostgreSQL-17-Cluster erfolgreich.
+- **380/380 Node**, **229/229 aktive Rust** (8 bewusst ignoriert), TypeScript/Vite/Rustfmt und Release-Blocker geprüft. Live-DB weiterhin unverändert, keine M2/M3-Neuinstallation.
+- Nächste Gates: gesonderter gestapelter Sicherheitsreview/QA-Rollout, M2/M3 echte Inbox- und Widerrufstests, Stage 2P SAS + Key-Pinning + mTLS. Kein automatisch verbundenes Mesh und kein Writer.
