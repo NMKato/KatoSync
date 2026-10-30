@@ -97,7 +97,7 @@ export async function handleMeshInboxReceive(req:Request,env:Env,request:typeof 
 
   // Bind one valid signature to one use. DB unique index + transaction rate guard.
   const used=await request(ORIGIN+"/rest/v1/mesh_inbox_proofs",{
-    method:"POST",headers:{...headers,"Content-Profile":SCHEMA,"content-type":"application/json",Prefer:"return=minimal"},
+    method:"POST",headers:{...headers,"Content-Profile":SCHEMA,"content-type":"application/json",Prefer:"return=representation"},
     body:JSON.stringify({owner_user_id:owner,device_id:proof.deviceId,nonce:proof.nonce,
       action:proof.action,request_id:proof.requestId,expires_at:new Date(proof.expiresAt*1000).toISOString()}),
     signal:AbortSignal.timeout(8000)
@@ -110,6 +110,21 @@ export async function handleMeshInboxReceive(req:Request,env:Env,request:typeof 
     }
     return fail(503,"INBOX_UNAVAILABLE");
   }
+
+  // A receipt confirms the exact, newly inserted single-use proof. Never allow
+  // arbitrary client supplied proof IDs to select a different recipient/action.
+  const proofRows:unknown=await used.json().catch(()=>null);
+  if(!Array.isArray(proofRows)||proofRows.length!==1)return fail(503,"INBOX_PROOF_UNCONFIRMED");
+  const saved=proofRows[0] as Record<string,unknown>;
+  if(typeof saved.proof_id!=="string"||!UUID.test(saved.proof_id)||
+     saved.owner_user_id!==owner||saved.device_id!==proof.deviceId||
+     saved.action!==proof.action||saved.request_id!==proof.requestId||
+     saved.nonce!==proof.nonce||typeof saved.expires_at!=="string"||
+     Date.parse(saved.expires_at)!==proof.expiresAt*1000)
+    return fail(503,"INBOX_PROOF_UNCONFIRMED");
+  // Long network stalls or account revocation must not authorize a late
+  // read/update just because the signature passed at request ingress.
+  if(proof.expiresAt*1000<=Date.now())return fail(409,"PROOF_EXPIRED");
 
   // Owner membership can be revoked while checking signature; re-check before data access.
   const fresh=await requireKatoSyncMembership(owner,headers,request);
@@ -143,9 +158,11 @@ export async function handleMeshInboxReceive(req:Request,env:Env,request:typeof 
   inboxURL.searchParams.set("request_id","eq."+proof.requestId);
   inboxURL.searchParams.set("select","request_id,owner_user_id,target_device_id,state,resolved_at");
   const decision=proof.action==="accept"?"accepted":"rejected";
+  if(proof.expiresAt*1000<=Date.now())return fail(409,"PROOF_EXPIRED");
   const updated=await request(inboxURL,{
     method:"PATCH",headers:{...headers,"Content-Profile":SCHEMA,"content-type":"application/json",Prefer:"return=representation"},
-    body:JSON.stringify({state:decision,resolved_at:new Date().toISOString()}),signal:AbortSignal.timeout(8000)
+    body:JSON.stringify({state:decision,resolved_at:new Date().toISOString(),
+      resolution_proof_id:saved.proof_id}),signal:AbortSignal.timeout(8000)
   });
   if(!updated.ok)return fail(503,"INBOX_UNAVAILABLE");
   const rows:unknown=await updated.json();

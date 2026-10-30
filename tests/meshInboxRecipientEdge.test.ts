@@ -33,7 +33,7 @@ function makeRequest(body:unknown,token="valid-test-access-token-1234567890"){
  });
 }
 type Options={userRejected?:boolean;memberRejected?:boolean;deviceOwner?:string;
- revoked?:boolean;deviceKey?:string;registryDown?:boolean;failedProof?:boolean;invalidList?:boolean};
+ revoked?:boolean;deviceKey?:string;registryDown?:boolean;failedProof?:boolean;invalidProofReceipt?:boolean;invalidList?:boolean};
 function backend(publicKey:string,opts:Options={}){
  const state={updates:0,reads:0,nonceWrites:0,nonces:new Set<string>(),inviteState:"pending"};
  const calls=async(input:RequestInfo|URL,init?:RequestInit)=>{
@@ -53,20 +53,29 @@ function backend(publicKey:string,opts:Options={}){
   }
   if(url.includes("/rest/v1/mesh_inbox_proofs")){
    assert.equal(init?.method,"POST");
-   const body=JSON.parse(String(init.body)) as {nonce:string;owner_user_id:string;device_id:string};
+   const body=JSON.parse(String(init.body)) as {
+     nonce:string;owner_user_id:string;device_id:string;
+     action:string;request_id:string;expires_at:string;
+   };
    assert.equal(body.owner_user_id,OWNER);assert.equal(body.device_id,DEVICE);
    state.nonceWrites++;
    if(opts.failedProof)return Response.json({error:"unavailable"},{status:503});
    if(state.nonces.has(body.nonce))return Response.json({code:"23505"},{status:409});
    state.nonces.add(body.nonce);
-   return new Response(null,{status:201});
+   return Response.json([{proof_id:"55555555-5555-4555-8555-555555555555",
+     owner_user_id:body.owner_user_id,device_id:body.device_id,
+     action:opts.invalidProofReceipt?"reject":body.action,request_id:body.request_id,nonce:body.nonce,
+     expires_at:body.expires_at}],{status:201});
   }
   if(url.includes("/rest/v1/mesh_invites")){
    assert.ok(url.includes("target_device_id=eq."));assert.ok(url.includes("owner_user_id=eq."));
    assert.ok(url.includes("state=eq.pending"));assert.ok(url.includes("expires_at=gt."));
    if(init?.method==="PATCH"){
     state.updates++;
-    const body=JSON.parse(String(init.body)) as {state:string;resolved_at:string};
+    const body=JSON.parse(String(init.body)) as {
+      state:string;resolved_at:string;resolution_proof_id:string;
+    };
+    assert.equal(body.resolution_proof_id,"55555555-5555-4555-8555-555555555555");
     if(state.inviteState!=="pending")return Response.json([]);
     state.inviteState=body.state;
     return Response.json([{request_id:INVITE,owner_user_id:OWNER,target_device_id:DEVICE,
@@ -162,4 +171,24 @@ test("malformed action/short bearer/reused list sentinel rejected before registr
  }
  const p=await f.proof();
  assert.equal((await handleMeshInboxReceive(makeRequest(p,"short"),env,b.call)).status,401);
+});
+
+test("a mismatched persisted proof receipt never authorizes accept or listing",async()=>{
+ const fixtureData=await fixture();
+ for(const action of ["accept","list"] as const){
+  const b=backend(fixtureData.publicKey,{invalidProofReceipt:true});
+  const requestId=action==="list"?EMPTY:INVITE;
+  const response=await handleMeshInboxReceive(makeRequest(await fixtureData.proof(action,requestId)),env,b.call);
+  assert.equal(response.status,503);
+  assert.equal((await response.json()).error,"INBOX_PROOF_UNCONFIRMED");
+  assert.equal(b.state.updates,0);
+  assert.equal(b.state.reads,0);
+ }
+});
+test("a valid receipt is never an access grant: strict proof id must be attached to PATCH",async()=>{
+ const f=await fixture(),b=backend(f.publicKey);
+ const result=await handleMeshInboxReceive(makeRequest(await f.proof("accept",INVITE)),env,b.call);
+ assert.equal(result.status,200);
+ assert.equal((await result.json()).paired,false);
+ assert.equal(b.state.updates,1);
 });
