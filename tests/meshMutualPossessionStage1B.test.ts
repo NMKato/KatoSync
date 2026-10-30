@@ -17,9 +17,12 @@ test("native handshake registers only user-initiated challenge and signed respon
  // The new Stage3D test may create a LOCAL ephemeral socket inside the
  // Rust #[cfg(test)] module only. Release handshake code must still have
  // NO listener, dispatch command or network server: never scan test code.
- const testBoundary="\n#[cfg(test)]\nmod tests {";
- assert.ok(rust.includes(testBoundary),"Rust unit-test boundary missing");
- const shippingHandshake=rust.slice(0,rust.indexOf(testBoundary));
+ // GitHub's Windows checkout may contain CRLF, while macOS uses LF.
+ // Both must find the same Rust #[cfg(test)] boundary before scanning.
+ const testBoundary=/\r?\n#\[cfg\(test\)\]\r?\nmod tests \{/;
+ const boundary=testBoundary.exec(rust);
+ assert.ok(boundary,"Rust unit-test boundary missing");
+ const shippingHandshake=rust.slice(0,boundary.index);
  for(const action of ["TcpListener","UdpSocket","new_peer_socket","run_codex_task","run_claude_task","GithubAppToken"])
    assert.ok(!shippingHandshake.includes(action),"unexpected production remote action "+action);
 });
