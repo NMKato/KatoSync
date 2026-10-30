@@ -39,6 +39,7 @@ mod mesh_handshake;
 mod mesh_hub;
 mod mesh_identity;
 mod mesh_inbox;
+mod mesh_inbox_receiver;
 mod mesh_readiness;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.
@@ -426,6 +427,8 @@ pub fn run() {
             mesh_identity::mesh_pairing_offer_create,
             mesh_inbox::mesh_inbox_invite_prepare,
             mesh_inbox::mesh_inbox_invite_send,
+            mesh_inbox_receiver::mesh_inbox_recipient_list,
+            mesh_inbox_receiver::mesh_inbox_recipient_decide,
             mesh_identity::mesh_pairing_offer_inspect,
             mesh_handshake::mesh_pairing_challenge_create,
             mesh_handshake::mesh_pairing_response_create,
