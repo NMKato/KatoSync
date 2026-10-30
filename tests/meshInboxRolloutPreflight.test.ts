@@ -17,9 +17,10 @@ const baseline=()=>({
   edgeFunctions:["mesh-device-enrollment"],
   database:{
     invites:0,resolved:0,discovered:2,trusted:0,owners:1,revoked:0,missingKeys:0,
-    proofTable:0,dispatchColumn:0,resolutionColumn:0,
+    proofTable:0,dispatchColumn:0,resolutionColumn:0,proofKeyColumn:0,
     directClientInviteSelect:true,serviceInviteUpdate:true,
-    proofTableRls:false,proofTableClientWrite:false
+    proofTableRls:false,proofTableClientWrite:false,
+    proofKeyConstraint:false,proofKeyInsertTrigger:false,proofKeyResolutionTrigger:false
   }
 });
 const staged=()=>{
@@ -27,7 +28,8 @@ const staged=()=>{
  x.migrations=[...baseMigrations,...inboxMigrations];
  x.edgeFunctions.push("mesh-inbox-send","mesh-inbox-receive");
  Object.assign(x.database,{
-  proofTable:1,dispatchColumn:1,resolutionColumn:1,
+  proofTable:1,dispatchColumn:1,resolutionColumn:1,proofKeyColumn:1,
+  proofKeyConstraint:true,proofKeyInsertTrigger:true,proofKeyResolutionTrigger:true,
   directClientInviteSelect:false,proofTableRls:true
  });
  return x;
@@ -37,9 +39,9 @@ const blocked=(snapshot:ReturnType<typeof baseline>,code:string,phase:"baseline"
   error=>error instanceof Error&&error.message.includes("MESH_ROLLOUT_BLOCKED: "+code));
 };
 
-test("all six migrations exist and Stage2L/2O/2O.1 hashes match reviewed sources",()=>{
+test("seven migrations exist with SHA-pinned Stage 2L/2O/2O.1/2S stack",()=>{
  const x=verifyLocalContract();
- assert.equal(x.versions.length,6);
+ assert.equal(x.versions.length,7);
  assert.ok(x.requiredFlags.length>=6);
 });
 test("live baseline gives review-only, never Mesh connection or deployment authority",()=>{
@@ -52,7 +54,7 @@ test("live baseline gives review-only, never Mesh connection or deployment autho
 test("post-schema inventory checks strict service/RLS grants and presence of both Edges",()=>{
  const x=validateSnapshot(staged(),"schema-staged");
  assert.equal(x.result,"STAGED_SCHEMA_REVIEW_ONLY");
- assert.equal(x.verifiedMigrations,3);
+ assert.equal(x.verifiedMigrations,4);
  assert.equal(x.connected,false);
 });
 test("partial rollout, unexpected unreviewed schema and edge deployment fail closed",()=>{
@@ -73,6 +75,14 @@ test("post schema refuses missing Edge, wrong client grants or absent RLS",()=>{
  blocked(noEdge,"INBOX_EDGE_NOT_DEPLOYED","schema-staged");
  const exposed=staged();exposed.database.directClientInviteSelect=true;
  blocked(exposed,"STAGED_SCHEMA_SECURITY_DRIFT","schema-staged");
+ const noKey=staged();noKey.database.proofKeyColumn=0;
+ blocked(noKey,"STAGED_SCHEMA_SECURITY_DRIFT","schema-staged");
+ const noKeyCheck=staged();noKeyCheck.database.proofKeyConstraint=false;
+ blocked(noKeyCheck,"STAGED_SCHEMA_SECURITY_DRIFT","schema-staged");
+ const noInsert=staged();noInsert.database.proofKeyInsertTrigger=false;
+ blocked(noInsert,"STAGED_SCHEMA_SECURITY_DRIFT","schema-staged");
+ const noDecision=staged();noDecision.database.proofKeyResolutionTrigger=false;
+ blocked(noDecision,"STAGED_SCHEMA_SECURITY_DRIFT","schema-staged");
  const noRls=staged();noRls.database.proofTableRls=false;
  blocked(noRls,"STAGED_SCHEMA_SECURITY_DRIFT","schema-staged");
  const write=staged();write.database.proofTableClientWrite=true;

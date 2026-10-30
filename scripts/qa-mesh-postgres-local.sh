@@ -40,6 +40,8 @@ case "${1:-legacy}" in
   inbox) TEST_FILE="$ROOT/tests/sql/mesh_inbox_send_qa.sql" ;;
   inbox-receiver) TEST_FILE="$ROOT/tests/sql/mesh_inbox_receive_qa.sql" ;;
   inbox-proof) TEST_FILE="$ROOT/tests/sql/mesh_resolution_proof_qa.sql" ;;
+  inbox-continuity) TEST_FILE="$ROOT/tests/sql/mesh_inbox_key_continuity_qa.sql" ;;
+  inbox-continuity) TEST_FILE="$ROOT/tests/sql/mesh_inbox_key_continuity_qa.sql" ;;
   *) echo "MESH_QA_UNKNOWN_TEST_SELECTION" >&2; exit 2 ;;
 esac
 "$PG_BIN/psql" -h "$DIR" -p "$PORT" -U postgres -d postgres -X -v ON_ERROR_STOP=1 \

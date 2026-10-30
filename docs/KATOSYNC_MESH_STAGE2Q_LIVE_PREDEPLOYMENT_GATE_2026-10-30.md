@@ -58,3 +58,7 @@ Für die Snapshot-Daten verwenden wir nur Aggregationen, `information_schema`, `
 **Rest-Risiko:** Die aktuelle Eingabe ist ein vom Bediener übernommener Snapshot und daher nur so aktuell/vertrauenswürdig wie die vorausgehende separate read-only-Erhebung. Ein Offline-Test kann weder aktive Serverflags noch reale Gerätefreigaben allein beweisen. Für produktive Freigabe sind außerdem ein echtes `supabase db push --dry-run`, eine vollständige Berechtigungs-/Migrationsprüfung und ein separater Owner-Releaseentscheid erforderlich.
 
 **Status:** Live-Baseline nachgewiesen, lokale Migrationstests bestanden, echter Inbox-Workflow noch nicht deployed, echte M2/M3-Verbindung weiterhin nicht hergestellt.
+
+## Korrektur / Erweiterung nach Stage 2S (30.10.2026)
+
+Die obige Beschreibung mit **drei** Inbox-Migrationen ist ein historischer Stand von Stage 2Q und wurde durch Stage 2S erweitert. **Aktuelle verbindliche Reihenfolge: vier Inbox-Migrationen**, zuletzt `20261030093323_mesh_inbox_recipient_key_continuity.sql`. Der Predeployment-Prüfer hat dafür eine zusätzliche lokale SHA-256-Prüfung sowie die Pflichtfelder `proofKeyColumn`, `proofKeyConstraint`, `proofKeyInsertTrigger`, `proofKeyResolutionTrigger` erhalten. Ein nach Stage2O.1 stehengebliebener Schema-Stand darf **nicht** als für echten Inbox-E2E bereit angesehen werden. Siehe `KATOSYNC_MESH_STAGE2S_RECIPIENT_KEY_CONTINUITY_2026-10-30.md`.

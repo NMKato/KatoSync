@@ -99,7 +99,7 @@ export async function handleMeshInboxReceive(req:Request,env:Env,request:typeof 
   // Bind one valid signature to one use. DB unique index + transaction rate guard.
   const used=await request(ORIGIN+"/rest/v1/mesh_inbox_proofs",{
     method:"POST",headers:{...headers,"Content-Profile":SCHEMA,"content-type":"application/json",Prefer:"return=representation"},
-    body:JSON.stringify({owner_user_id:owner,device_id:proof.deviceId,nonce:proof.nonce,
+    body:JSON.stringify({owner_user_id:owner,device_id:proof.deviceId,signing_public_key:device.signing_public_key,nonce:proof.nonce,
       action:proof.action,request_id:proof.requestId,expires_at:new Date(proof.expiresAt*1000).toISOString()}),
     signal:AbortSignal.timeout(8000)
   });
@@ -119,6 +119,7 @@ export async function handleMeshInboxReceive(req:Request,env:Env,request:typeof 
   const saved=proofRows[0] as Record<string,unknown>;
   if(typeof saved.proof_id!=="string"||!UUID.test(saved.proof_id)||
      saved.owner_user_id!==owner||saved.device_id!==proof.deviceId||
+     saved.signing_public_key!==device.signing_public_key||
      saved.action!==proof.action||saved.request_id!==proof.requestId||
      saved.nonce!==proof.nonce||typeof saved.expires_at!=="string"||
      Date.parse(saved.expires_at)!==proof.expiresAt*1000)

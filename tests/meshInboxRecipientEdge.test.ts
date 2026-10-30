@@ -49,7 +49,7 @@ function makeRequest(body:unknown,token="valid-test-access-token-1234567890"){
  });
 }
 type Options={userRejected?:boolean;memberRejected?:boolean;deviceOwner?:string;
- revoked?:boolean;deviceKey?:string;registryDown?:boolean;failedProof?:boolean;invalidProofReceipt?:boolean;invalidList?:boolean;
+ revoked?:boolean;deviceKey?:string;registryDown?:boolean;failedProof?:boolean;invalidProofReceipt?:boolean;invalidKeyReceipt?:boolean;invalidList?:boolean;
  sourceRevoked?:boolean;sourceWrongKey?:boolean;sourceWrongOwner?:boolean;
  sourceAbsent?:boolean;sourceRegistryDown?:boolean;tamperedOffer?:boolean;
  tamperedDispatch?:boolean;};
@@ -83,9 +83,10 @@ function backend(f:Awaited<ReturnType<typeof fixture>>,opts:Options={}){
    assert.equal(init?.method,"POST");
    const body=JSON.parse(String(init.body)) as {
      nonce:string;owner_user_id:string;device_id:string;
-     action:string;request_id:string;expires_at:string;
+     action:string;request_id:string;expires_at:string;signing_public_key:string;
    };
    assert.equal(body.owner_user_id,OWNER);assert.equal(body.device_id,DEVICE);
+   assert.equal(body.signing_public_key,opts.deviceKey??f.publicKey);
    state.nonceWrites++;
    if(opts.failedProof)return Response.json({error:"unavailable"},{status:503});
    if(state.nonces.has(body.nonce))return Response.json({code:"23505"},{status:409});
@@ -93,6 +94,7 @@ function backend(f:Awaited<ReturnType<typeof fixture>>,opts:Options={}){
    return Response.json([{proof_id:"55555555-5555-4555-8555-555555555555",
      owner_user_id:body.owner_user_id,device_id:body.device_id,
      action:opts.invalidProofReceipt?"reject":body.action,request_id:body.request_id,nonce:body.nonce,
+     signing_public_key:opts.invalidKeyReceipt?f.sourcePublicKey:body.signing_public_key,
      expires_at:body.expires_at}],{status:201});
   }
   if(url.includes("/rest/v1/mesh_invites")){
@@ -256,4 +258,14 @@ test("an empty inbox needs no sender roster query and remains strictly non-trust
  const body=await empty.json();
  assert.deepEqual(body.invitations,[]);
  assert.deepEqual([body.paired,body.transportReady,body.remoteJobsEnabled],[false,false,false]);
+});
+
+
+test("stored proof must confirm exact recipient signing key, not another valid key",async()=>{
+ const f=await fixture(),b=backend(f,{invalidKeyReceipt:true});
+ const result=await handleMeshInboxReceive(makeRequest(await f.proof("accept",INVITE)),env,b.call);
+ assert.equal(result.status,503);
+ assert.equal((await result.json()).error,"INBOX_PROOF_UNCONFIRMED");
+ assert.equal(b.state.updates,0);
+ assert.equal(b.state.reads,0);
 });
