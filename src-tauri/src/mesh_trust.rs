@@ -331,6 +331,39 @@ pub async fn mesh_local_revoke_peer(fingerprint: String) -> Result<PeerInventory
     Ok(inventory(peers))
 }
 
+// Test-only bridge into the real native approval and admission predicates.
+// This remains compiled out of release builds: no OS keychain, Tauri command,
+// live account, or production network can be touched by an offline test.
+#[cfg(test)]
+pub(crate) fn qa_confirm_synthetic_peer(
+    peers: &mut Vec<ApprovedPeer>,
+    local: &VerifyingKey,
+    peer: &VerifyingKey,
+    sas_from_signed_challenge: &str,
+    manually_typed_sas: &str,
+    expires_at: i64,
+    now: i64,
+) -> Result<ApprovedPeer, String> {
+    // Exactly the signed challenge expiry, never an invented fresh TTL.
+    let pending = PendingApproval {
+        public_key: URL_SAFE_NO_PAD.encode(peer.as_bytes()),
+        comparison_code: sas_from_signed_challenge.to_string(),
+        expires_at,
+    };
+    confirm_pending(&pending, manually_typed_sas, now, local, peers)?;
+    select_approved_peer(peers, &fingerprint(peer), local, now)
+}
+
+#[cfg(test)]
+pub(crate) fn qa_synthetic_admission(
+    peers: &[ApprovedPeer],
+    local: &VerifyingKey,
+    peer: &VerifyingKey,
+    now: i64,
+) -> Result<ApprovedPeer, String> {
+    select_approved_peer(peers, &fingerprint(peer), local, now)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
