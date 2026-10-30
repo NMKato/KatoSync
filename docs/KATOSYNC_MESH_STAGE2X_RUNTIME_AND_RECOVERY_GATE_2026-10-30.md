@@ -64,3 +64,7 @@ Für den **gemeinsam genutzten Hauptbranch** gilt standardmäßig **NO-GO**. Vor
 - [Supabase Edge Function Configuration / JWT](https://supabase.com/docs/guides/functions/function-configuration)
 
 **Status:** Der heutige Schritt ist ausschließlich **offline QA und Wiederherstellungsplanung**, keine Live-Freigabe. Nächste unverzichtbare Operatorentscheidung: Backupstatus, RPO/RTO und bei Bedarf Budgetfreigabe für eine isolierte QA-Umgebung.
+
+## Stage 2Y ergänzender Live-Backup-Nachweis (30.10.2026)
+
+Die obige Momentaufnahme aus Stage 2X („Backup-Verfügbarkeit noch nicht bestätigt“) ist durch den späteren **read-only Supabase-CLI-Abgleich** präzisiert: **8 `COMPLETED` physische Backups** im Zeitraum 23.–30.10.2026, letztes Backup 30.10.2026 06:07 UTC. **PITR ist deaktiviert**, WAL-Archivierung ist aktiviert. Eine tatsächliche Recovery-Probe sowie RPO/RTO und Betreiberfreigabe fehlen weiterhin. Der Live-Rollout bleibt daher NO-GO. Siehe `KATOSYNC_MESH_STAGE2Y_BACKUP_READINESS_2026-10-30.md`.
