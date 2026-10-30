@@ -3,23 +3,31 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {spawnSync} from "node:child_process";
+import {fileURLToPath} from "node:url";
 const script=new URL("../scripts/qa-mesh-two-host-signed-invite.mjs",import.meta.url);
 const shell=new URL("../scripts/qa-mesh-two-host-signed-invite-server.sh",import.meta.url);
 const src=readFileSync(script,"utf8"),server=readFileSync(shell,"utf8");
 test("real-host QA client refuses accidental startup before opening any socket",()=>{
- const r=spawnSync(process.execPath,[script.pathname],{
+ const r=spawnSync(process.execPath,[fileURLToPath(script)],{
   encoding:"utf8",timeout:3000,
   env:{PATH:process.env.PATH??"",HOME:"/tmp"}
  });
  assert.equal(r.status,2);
  assert.match(r.stderr,/MESH_TWO_HOST_BLOCKED:SYNTHETIC_LAN_OPT_IN/);
 });
-test("server helper refuses without explicit synthetic gate before creating a certificate",()=>{
- const r=spawnSync("bash",[shell.pathname],{
+test("server helper is fail-closed on macOS/Linux and statically guarded on Windows",()=>{
+ // No bash executable is guaranteed on Windows CI. Avoid treating an absent
+ // shell as a security-pass or as a regression. Inspect the guard and only
+ // execute the negative test on hosts with the POSIX shell.
+ assert.match(server,/MESH_TWO_HOST_BLOCKED: explicit synthetic server opt-in missing/);
+ assert.match(server,/umask 077/);
+ assert.match(server,/trap cleanup EXIT INT TERM/);
+ if(process.platform==="win32")return;
+ const r=spawnSync("bash",[fileURLToPath(shell)],{
   encoding:"utf8",timeout:3000,
   env:{PATH:process.env.PATH??"",HOME:"/tmp"}
  });
- assert.equal(r.status,2);
+ assert.equal(r.status,2,r.stderr);
  assert.match(r.stderr,/MESH_TWO_HOST_BLOCKED: explicit synthetic/);
 });
 test("short-lived TLS 1.3 pinned, Ed25519 double signature, never grants trust",()=>{

@@ -3,13 +3,14 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {spawnSync} from "node:child_process";
+import {fileURLToPath} from "node:url";
 const read=(path:string)=>readFileSync(new URL(path,import.meta.url),"utf8");
 const run=read("../scripts/qa-mesh-postgres-local.sh");
 const qa=read("meshInboxEdgePostgresE2e.qa.ts");
 const sql=read("sql/mesh_inbox_edge_e2e_setup.sql");
 test("direct E2E entrypoint without explicit disposable socket fails before database access",()=>{
  const result=spawnSync(process.execPath,["--experimental-strip-types",
-  new URL("meshInboxEdgePostgresE2e.qa.ts",import.meta.url).pathname],{
+  fileURLToPath(new URL("meshInboxEdgePostgresE2e.qa.ts",import.meta.url))],{
   encoding:"utf8",timeout:2000,env:{PATH:process.env.PATH??""}
  });
  assert.notEqual(result.status,0);
