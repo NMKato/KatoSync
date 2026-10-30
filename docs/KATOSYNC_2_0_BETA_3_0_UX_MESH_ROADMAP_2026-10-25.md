@@ -69,3 +69,15 @@ Keine Secrets, Kennwörter, privaten Pfade, Tokens, Nutzerkennungen oder interne
 - Negativtests für fehlenden/falschen Proof, falsche Aktion, falsche Einladung, Schlüsselrotation und zweite Entscheidung; temporärer PostgreSQL-17-Cluster erfolgreich.
 - **380/380 Node**, **229/229 aktive Rust** (8 bewusst ignoriert), TypeScript/Vite/Rustfmt und Release-Blocker geprüft. Live-DB weiterhin unverändert, keine M2/M3-Neuinstallation.
 - Nächste Gates: gesonderter gestapelter Sicherheitsreview/QA-Rollout, M2/M3 echte Inbox- und Widerrufstests, Stage 2P SAS + Key-Pinning + mTLS. Kein automatisch verbundenes Mesh und kein Writer.
+
+
+## Nachtrag 30.10.2026 – Stage 2P Hardware-QA: synthetisches mTLS M2↔M3
+
+- **M2 und M3 real erreichbar, per LAN verbunden und geprüft:** bestehende \`mesh_tls.rs\`, \`mesh_transport.rs\` und \`mesh_admission.rs\` auf beiden Macs byte-identisch (jeweils SHA-256 verglichen).
+- Positiver Test: M2 als einmaliger privater TLS-1.3/mTLS-Server und M3 als Client, gegenseitige künstliche Gerätezertifikate und gepinnte Schlüssel, 1/1 PASS auf beiden Macs.
+- Negativer Test: M3 mit **absichtlich falschem Pin** zurückgewiesen, erwarteter Fehlschlag 1/1 PASS auf beiden Macs. Keine stille Ersatzauthentifizierung, kein Remote-Auftrag.
+- Gefahrenabstand: **nur künstliche Testschlüssel (41/42/43)**, keine reale Keychain-/Kontodaten, nicht die installierte QA-App; 0 verbleibende QA-Listener, temporäre Build-Placeholders entfernt, App SHA-256 auf beiden Macs weiterhin identisch und unverändert.
+- Reproduzierbarkeit: neues explizit erlaubnispflichtiges \`scripts/qa-mesh-two-mac-synthetic.sh\` (manueller one-shot, sonst fail-closed), abgesichert durch Node-Vertragstests.
+- **Nicht erledigt:** Stage 2L–2O.1 Migrationen/Edge live, realer Invite-E2E mit Keychain-Geräten, persönlicher beidseitiger SAS, echte Session-Pins/Revocation und nachhaltiger TLS-Kanal. 0 trusted, kein Remote-Reader/Writer. Erst nach separatem realen Hardware-QA darf der UI-Status "Verbunden" lauten.
+
+- Wiederholungsprüfung erfolgreich: M2-Launcher mit explizitem `KATOSYNC_MESH_LAN_QA_SCAFFOLD=YES` gegen M3-Testclient, auf beiden Seiten 1/1 PASS. Temporäre Build-Scaffolds per Exit-Trap entfernt; ohne Flag keine automatische Anlage fehlender Release-Ressourcen.
