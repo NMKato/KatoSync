@@ -20,6 +20,8 @@ export const MIGRATIONS=[
    sha256:"ca57d61435f7f3620ec2f311d93a188210ef12d25ac7a520f74b781ac634197e"},
   {version:"20261030074910",name:"mesh_resolution_proof_binding",kind:"inbox",
    sha256:"cd1b2e9c1e52b28e7012f4cccaf5ce193c5f6e317ee190e28e272d4d5bab8281"},
+  {version:"20261030093323",name:"mesh_inbox_recipient_key_continuity",kind:"inbox",
+   sha256:"358beec0cab70d43065428a4627d2888b22b9f85c5e858fdb32e01c322cbf361"},
 ];
 const REQUIRED_ROLLOUT_FLAGS=[
  "KATOSYNC_MESH_INBOX_STAGE=send-only", // Edge only, after schema.
@@ -53,7 +55,9 @@ export function verifyLocalContract(root=ROOT){
     !rustReceive.includes('KATOSYNC_MESH_INBOX_RECEIVE_QA')||
     !ui.includes('VITE_MESH_INBOX_SEND_QA')||
     !ui.includes('VITE_MESH_INBOX_RECEIVE_QA'))fail("QA_FLAGS_MISSING");
-  if(!receive.includes("resolution_proof_id:saved.proof_id")||
+  if(!receive.includes("signing_public_key:device.signing_public_key")||
+    !receive.includes("saved.signing_public_key!==device.signing_public_key")||
+    !receive.includes("resolution_proof_id:saved.proof_id")||
     !receive.includes("paired:false")||!send.includes("paired:false"))
     fail("PROOF_OR_NONTRUST_RESPONSE_MISSING");
   return Object.freeze({versions:MIGRATIONS.map(x=>x.version),requiredFlags:REQUIRED_ROLLOUT_FLAGS});
@@ -76,8 +80,10 @@ export function validateSnapshot(raw,phase="baseline"){
  const applied=MIGRATIONS.filter(x=>x.kind==="inbox"&&versionMap.has(x.version));
  if(applied.some(x=>versionMap.get(x.version)!==x.name))fail("MIGRATION_NAME_DRIFT");
  if(phase==="baseline"&&applied.length!==0)fail("PARTIALLY_DEPLOYED_INBOX");
- if(phase==="schema-staged"&&applied.length!==3)fail("INCOMPLETE_SCHEMA_STAGE");
- if(applied.length>0&&applied.length<3)fail("PARTIALLY_DEPLOYED_INBOX");
+ if(phase==="schema-staged"&&applied.length!==MIGRATIONS.filter(x=>x.kind==="inbox").length)
+   fail("INCOMPLETE_SCHEMA_STAGE");
+ if(applied.length>0&&applied.length<MIGRATIONS.filter(x=>x.kind==="inbox").length)
+   fail("PARTIALLY_DEPLOYED_INBOX");
  if(!Array.isArray(raw.edgeFunctions)||raw.edgeFunctions.length>200||
     raw.edgeFunctions.some(x=>typeof x!=="string"||x.length>100))fail("EDGE_INVENTORY_UNAVAILABLE");
  const edges=new Set(raw.edgeFunctions);
@@ -89,10 +95,11 @@ export function validateSnapshot(raw,phase="baseline"){
  const db=raw.database;
  if(!db||typeof db!=="object"||Array.isArray(db))fail("DATABASE_PREFLIGHT_MISSING");
  for(const name of ["invites","resolved","discovered","trusted","owners","revoked",
-   "missingKeys","proofTable","dispatchColumn","resolutionColumn"])
+   "missingKeys","proofTable","dispatchColumn","resolutionColumn","proofKeyColumn"])
   if(!isNonnegativeSafeInt(db[name]))fail("INVALID_DB_VALUE_"+name);
  for(const name of ["directClientInviteSelect","serviceInviteUpdate",
-   "proofTableRls","proofTableClientWrite"])
+   "proofTableRls","proofTableClientWrite","proofKeyConstraint",
+   "proofKeyInsertTrigger","proofKeyResolutionTrigger"])
   if(typeof db[name]!=="boolean")fail("INVALID_DB_PERMISSION_"+name);
  if(db.invites!==0||db.resolved!==0)fail("EXISTING_INVITES_REQUIRE_REVIEW");
  if(db.discovered!==2||db.owners!==1||db.trusted!==0||
@@ -100,9 +107,13 @@ export function validateSnapshot(raw,phase="baseline"){
  if(!db.serviceInviteUpdate)fail("EDGE_DATABASE_UPDATE_NOT_AUTHORIZED");
  if(phase==="baseline"){
   if(db.proofTable!==0||db.dispatchColumn!==0||db.resolutionColumn!==0||
-     !db.directClientInviteSelect)fail("BASELINE_SCHEMA_DRIFT");
+     db.proofKeyColumn!==0||db.proofKeyConstraint||db.proofKeyInsertTrigger||
+     db.proofKeyResolutionTrigger||!db.directClientInviteSelect)
+    fail("BASELINE_SCHEMA_DRIFT");
  }else{
   if(db.proofTable!==1||db.dispatchColumn!==1||db.resolutionColumn!==1||
+     db.proofKeyColumn!==1||!db.proofKeyConstraint||
+     !db.proofKeyInsertTrigger||!db.proofKeyResolutionTrigger||
      db.directClientInviteSelect||!db.proofTableRls||db.proofTableClientWrite)
     fail("STAGED_SCHEMA_SECURITY_DRIFT");
  }
