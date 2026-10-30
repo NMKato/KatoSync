@@ -81,3 +81,10 @@ Keine Secrets, Kennwörter, privaten Pfade, Tokens, Nutzerkennungen oder interne
 - **Nicht erledigt:** Stage 2L–2O.1 Migrationen/Edge live, realer Invite-E2E mit Keychain-Geräten, persönlicher beidseitiger SAS, echte Session-Pins/Revocation und nachhaltiger TLS-Kanal. 0 trusted, kein Remote-Reader/Writer. Erst nach separatem realen Hardware-QA darf der UI-Status "Verbunden" lauten.
 
 - Wiederholungsprüfung erfolgreich: M2-Launcher mit explizitem `KATOSYNC_MESH_LAN_QA_SCAFFOLD=YES` gegen M3-Testclient, auf beiden Seiten 1/1 PASS. Temporäre Build-Scaffolds per Exit-Trap entfernt; ohne Flag keine automatische Anlage fehlender Release-Ressourcen.
+
+## Nachtrag 30.10.2026 – Stage 2Q: verbindliches read-only Rollout-Preflight
+
+- Live-Abgleich belegt: genau 3 Basis-Migrationen installiert; die Stage 2L/2O/2O.1-Migrationen und beide Inbox-Edge-Dienste noch nicht installiert. 2 discovered, 0 trusted, 0 Invites, 0 revoked; 1 Owner. Bestehender owner-RLS-Client-SELECT bleibt bis zum Stage2O-Change aktiv.
+- Neuer rein offline arbeitender `scripts/qa-mesh-inbox-rollout-gate.mjs` prüft einen unabhängig read-only erhobenen anonymisierten Snapshot. Pinnt SHA-256 der drei sicherheitskritischen SQL-Migrationen und erwartet die vollständige geordnete Kette, keine Teilmigration, richtige Berechtigungen, richtige Gerätebasis sowie strikt getrennte QA-Flags. Der Code führt keine Schemaänderungen, Edge-Deployments oder Remote-Jobs aus.
+- Echter Live-Baseline-Snapshot: `BASELINE_MATCHES_REVIEW_ONLY`, mit weiterhin `connected=false`, `remoteJobsEnabled=false`, `remoteSessionReady=false`. Lokale gestapelte PostgreSQL-Migrationen erneut mit `MESH_INBOX_RESOLUTION_PROOF_BINDING_PASS` überprüft.
+- Nächstes Gate: Unabhängige Sicherheitsfreigabe von Migration- und Edge-Rollout, danach erneuter Live-Schema-/Rechteabgleich, echter M2→M3-Keychain-Invite-E2E, gegenseitiges SAS und echte TLS-Admisson. Keine automatische Installation, kein Writer.
