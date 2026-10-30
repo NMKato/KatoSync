@@ -4,3 +4,10 @@ supabase/migrations/20261029211243_mesh_inbox_signed_send_guard.sql text eol=lf
 supabase/migrations/20261030072543_mesh_recipient_signed_inbox_atomic_decisions.sql text eol=lf
 supabase/migrations/20261030074910_mesh_resolution_proof_binding.sql text eol=lf
 supabase/migrations/20261030093323_mesh_inbox_recipient_key_continuity.sql text eol=lf
+
+# Exact source-byte pins for the reviewed Deno Edge dependency graph.
+supabase/functions/mesh-inbox-send/index.ts text eol=lf
+supabase/functions/mesh-inbox-send/send.ts text eol=lf
+supabase/functions/mesh-inbox-receive/index.ts text eol=lf
+supabase/functions/mesh-inbox-receive/receive.ts text eol=lf
+supabase/functions/mesh-device-enrollment/membership-gate.ts text eol=lf

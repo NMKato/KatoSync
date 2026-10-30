@@ -46,6 +46,13 @@ test("two unchanged Deno Edge entrypoints compile with all pinned security depen
  assert.equal(x.result,"REVIEW_ONLY_NO_DEPLOYMENT");
  assert.deepEqual(x.migrationOrder,MIGRATIONS.filter(y=>y.kind==="inbox").map(y=>y.version));
  assert.equal(x.sourceFiles.length,5);
+ const attributes=readFileSync(join(root,".gitattributes"),"utf8").split(/\r?\n/);
+ for(const f of x.sourceFiles) {
+  assert.ok(attributes.includes(f.name+" text eol=lf"),
+   "Windows checkout must preserve pinned Edge source bytes: "+f.name);
+  assert.ok(!readFileSync(join(root,f.name),"utf8").includes("\r"),
+   "Reviewed Edge source must use LF only: "+f.name);
+ }
  assert.equal(x.edgeBundles.length,2);
  assert.equal(x.baseline.result,"BASELINE_MATCHES_REVIEW_ONLY");
  assert.equal(x.authorizedToDeploy,false);
