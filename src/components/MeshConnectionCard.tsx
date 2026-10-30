@@ -73,6 +73,14 @@ type MeshSignedOffer = {
   accountScope: string;
   signature: string;
 };
+type MeshInboxSentReceipt = {
+  requestId:string;
+  expiresAt:string;
+  deliveryOnly:true;
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
 type NativeInboxInvite = {
   protocol:"katosync-mesh-inbox-send-v1";
   sourceDeviceId:string;
@@ -196,8 +204,24 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [nativeInboxBusy,setNativeInboxBusy]=useState(false);
   const [nativeInboxError,setNativeInboxError]=useState(false);
   const [nativeInboxPrepared,setNativeInboxPrepared]=useState<string|null>(null);
+  const [nativeInboxSent,setNativeInboxSent]=useState<string|null>(null);
   const [directoryBusy,setDirectoryBusy]=useState(false);
   const [directoryError,setDirectoryError]=useState(false);
+  const sendNativeInbox=async(targetDeviceId:string)=>{
+    // A separate, explicitly activated QA-only command; no implicit send from discovery.
+    if(import.meta.env.VITE_MESH_INBOX_SEND_QA!=="1"||nativeInboxBusy||
+       !directory?.devices.some(d=>d.deviceId===targetDeviceId&&d.membershipState==="discovered"))return;
+    setNativeInboxBusy(true);setNativeInboxError(false);setNativeInboxSent(null);setNativeInboxPrepared(null);
+    try{
+      const result=await invoke<MeshInboxSentReceipt>("mesh_inbox_invite_send",{targetDeviceId});
+      if(!result.requestId||!Number.isFinite(Date.parse(result.expiresAt))||
+         Date.parse(result.expiresAt)<=Date.now()||
+         result.deliveryOnly!==true||result.paired!==false||
+         result.transportReady!==false||result.remoteJobsEnabled!==false)
+        throw new Error("invalid_delivery_receipt");
+      setNativeInboxSent(targetDeviceId);
+    }catch{setNativeInboxError(true);}finally{setNativeInboxBusy(false);}
+  };
   const prepareNativeInbox=async(targetDeviceId:string)=>{
     if(nativeInboxBusy||!directory?.devices.some(d=>d.deviceId===targetDeviceId&&d.membershipState==="discovered"))return;
     setNativeInboxBusy(true);setNativeInboxError(false);setNativeInboxPrepared(null);
@@ -218,7 +242,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   };
   const loadAccountDirectory=async()=>{
     setDirectoryBusy(true);setDirectoryError(false);setDirectory(null);
-    setNativeInboxPrepared(null);setNativeInboxError(false);
+    setNativeInboxPrepared(null);setNativeInboxError(false);setNativeInboxSent(null);
     try{
       const roster=await invoke<MeshAccountDirectory>("mesh_account_device_discover");
       if(roster.accountVerified!==true || roster.discoveryOnly!==true ||
@@ -523,7 +547,17 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
             onClick={()=>void prepareNativeInbox(device.deviceId)}>
             {t("mesh.inbox.prepare")}
           </button>:null}
+        {import.meta.env.VITE_KATOOS_AUTH_QA==="1"&&
+         import.meta.env.VITE_MESH_INBOX_SEND_QA==="1"&&device.membershipState==="discovered"?
+          <button type="button" className="ghost compact-button"
+            disabled={nativeInboxBusy||pairingBusy||directoryBusy}
+            onClick={()=>void sendNativeInbox(device.deviceId)}>
+            {t("mesh.inbox.send")}
+          </button>:null}
       </div>)}
+      {nativeInboxSent?<p role="status" className="vision-mesh-compact-notice">
+        {t("mesh.inbox.sent")} {t("mesh.inbox.noTrust")}
+      </p>:null}
       {nativeInboxPrepared?<p role="status" className="vision-mesh-compact-notice">
         {t("mesh.inbox.prepared")} {t("mesh.inbox.notSent")}
       </p>:null}
