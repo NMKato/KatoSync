@@ -114,3 +114,9 @@ Keine Secrets, Kennwörter, privaten Pfade, Tokens, Nutzerkennungen oder interne
 - **Negativtest** am realen M3: absichtlich falscher Zertifikats-Pin zurückgewiesen; Positivtest M2/M3 mit übereinstimmendem Skript-SHA256 und Exit-Code 0. Nur private LAN-Adressen und Port 49331; Skript startet standardmäßig ohne ausdrückliches Synthetic-QA-Opt-in überhaupt nicht.
 - Abgrenzung: keine echten Mac-Keychain-Identitäten, keine authentifizierte Supabase-Inbox und kein Nutzer-SAS; es ist **kein** produktives Geräte-Pairing. Stage2T deckt getrennt echte SQL-/Edge-Transaktionen ab, Stage2P getrennt synthetisches gepinntes mTLS; diese drei QA-Strecken dürfen nicht mit einer endgültigen Realgerätefreigabe gleichgesetzt werden.
 - Nächstes Gate: vier Inbox-Migrationen + beide Edge-Dienste kontrolliert prüfen/ausrollen, danach echte M2↔M3-Keychain-/SAS-/mTLS-Verbindung mit Widerrufskontrolle.
+
+## Nachtrag 30.10.2026 – Stage 2V: plattformübergreifende Freigabeprüfung
+
+- Im echten GitHub-Windows-Node-Lauf von PR #187 wurden **5 von 407 Tests rot**, obwohl die Mac-Prüfungen grün waren. Ursachen: zwei falsch mit `URL.pathname` statt `fileURLToPath` gestartete Node-Subprozesse, ein auf Windows fälschlich verlangtes POSIX-Bash-Programm und die von Git-Checkout zu CRLF umgewandelten vier SHA256-gepinnten SQL-Dateien.
+- Stage 2V korrigiert die plattformgerechten Pfade und testet den POSIX-Shell-Helfer auf Windows nur statisch; auf macOS/Linux weiterhin mit negativem echten Start. Vier exakte `.gitattributes`-LF-Regeln halten die bisherigen geprüften SQL-Datei-Hashes auf allen Plattformen unverändert. Neuer regulärer CI-Regressionstest sichert die LF-Regeln und Pfadverwendung.
+- **Rollout-Sperre bleibt bis zu einem neuen nachweislich grünen Windows-CI-Lauf aktiv**; keine geänderten SQL-Inhalte, kein Supabase-Deployment, keine echte Gerätekopplung.
