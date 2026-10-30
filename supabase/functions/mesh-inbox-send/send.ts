@@ -43,6 +43,15 @@ async function verified(body:Send,uid:string):Promise<boolean>{
  return await crypto.subtle.verify("Ed25519",key,sig,enc.encode(payload))
     &&await crypto.subtle.verify("Ed25519",key,recipientSig,enc.encode(delivery));
 }
+// Re-verify stored offers on READ as well as WRITE. A signed-in owner alone
+// cannot make a forged, stale, or recipient-rebound inbox item trustworthy.
+export async function verifyStoredSignedMeshInvite(
+  raw:unknown, owner:string
+):Promise<boolean>{
+  const parsed=parse(raw);
+  if(!parsed)return false;
+  try{return await verified(parsed,owner);}catch{return false;}
+}
 export async function submitSignedMeshInvite(req:Request,env:Env,request:typeof fetch=fetch):Promise<Response>{
  if(req.method!=="POST")return fail(405,"METHOD_NOT_ALLOWED");
  if(env.KATOSYNC_MESH_INBOX_STAGE!=="send-only"||env.SUPABASE_URL!==ORIGIN||

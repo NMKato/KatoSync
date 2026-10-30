@@ -17,6 +17,22 @@ type Action="list"|"accept"|"reject";
 async function fixture(){
  const key=await crypto.subtle.generateKey("Ed25519",true,["sign","verify"]);
  const publicKey=b64(new Uint8Array(await crypto.subtle.exportKey("raw",key.publicKey)));
+ const sender=await crypto.subtle.generateKey("Ed25519",true,["sign","verify"]);
+ const sourcePublicKey=b64(new Uint8Array(await crypto.subtle.exportKey("raw",sender.publicKey)));
+ const accountScope=b64(new Uint8Array(await crypto.subtle.digest("SHA-256",
+   enc.encode("katosync-mesh-v1-account-scope:"+ORIGIN+":"+OWNER))));
+ const sendNonce=b64(crypto.getRandomValues(new Uint8Array(32)));
+ const sendExpiresAt=Math.floor(Date.now()/1000)+240;
+ const offerProtocol="katosync-mesh-pairing-v1";
+ const offerPayload=[offerProtocol,accountScope,sourcePublicKey,sendNonce,String(sendExpiresAt)].join("|");
+ const offerSignature=b64(new Uint8Array(await crypto.subtle.sign(
+   "Ed25519",sender.privateKey,enc.encode(offerPayload))));
+ const signedOffer={protocol:offerProtocol,publicKey:sourcePublicKey,nonce:sendNonce,
+   expiresAt:sendExpiresAt,accountScope,signature:offerSignature};
+ const dispatchPayload=["katosync-mesh-inbox-send-v1",accountScope,SOURCE,DEVICE,
+   sendNonce,String(sendExpiresAt)].join("|");
+ const dispatchSignature=b64(new Uint8Array(await crypto.subtle.sign(
+   "Ed25519",sender.privateKey,enc.encode(dispatchPayload))));
  const proof=async(action:Action="list",requestId=action==="list"?EMPTY:INVITE)=>{
   const nonce=b64(crypto.getRandomValues(new Uint8Array(32)));
   const expiresAt=Math.floor(Date.now()/1000)+65;
@@ -25,7 +41,7 @@ async function fixture(){
   const signature=b64(new Uint8Array(await crypto.subtle.sign("Ed25519",key.privateKey,enc.encode(payload))));
   return {protocol,deviceId:DEVICE,action,requestId,nonce,expiresAt,signature};
  };
- return {publicKey,proof};
+ return {publicKey,proof,sourcePublicKey,signedOffer,dispatchSignature};
 }
 function makeRequest(body:unknown,token="valid-test-access-token-1234567890"){
  return new Request("https://qa.example/inbox",{
@@ -33,8 +49,11 @@ function makeRequest(body:unknown,token="valid-test-access-token-1234567890"){
  });
 }
 type Options={userRejected?:boolean;memberRejected?:boolean;deviceOwner?:string;
- revoked?:boolean;deviceKey?:string;registryDown?:boolean;failedProof?:boolean;invalidProofReceipt?:boolean;invalidList?:boolean};
-function backend(publicKey:string,opts:Options={}){
+ revoked?:boolean;deviceKey?:string;registryDown?:boolean;failedProof?:boolean;invalidProofReceipt?:boolean;invalidList?:boolean;
+ sourceRevoked?:boolean;sourceWrongKey?:boolean;sourceWrongOwner?:boolean;
+ sourceAbsent?:boolean;sourceRegistryDown?:boolean;tamperedOffer?:boolean;
+ tamperedDispatch?:boolean;};
+function backend(f:Awaited<ReturnType<typeof fixture>>,opts:Options={}){
  const state={updates:0,reads:0,nonceWrites:0,nonces:new Set<string>(),inviteState:"pending"};
  const calls=async(input:RequestInfo|URL,init?:RequestInit)=>{
   const url=String(input),headers=init?.headers as Record<string,string>|undefined;
@@ -47,8 +66,17 @@ function backend(publicKey:string,opts:Options={}){
   if(url.includes("/rest/v1/account_memberships"))
    return Response.json(opts.memberRejected?[]:[{user_id:OWNER,access_state:"active",authorized_at:"2026-10-28T12:00:00Z",revoked_at:null}]);
   if(url.includes("/rest/v1/mesh_devices")){
+   if(new URL(url).searchParams.get("device_id")?.startsWith("in.(")){
+    if(opts.sourceRegistryDown)return Response.json({error:"down"},{status:503});
+    if(opts.sourceAbsent)return Response.json([]);
+    return Response.json([{device_id:SOURCE,
+      owner_user_id:opts.sourceWrongOwner?"99999999-9999-4999-8999-999999999999":OWNER,
+      signing_public_key:opts.sourceWrongKey?f.publicKey:f.sourcePublicKey,
+      membership_state:opts.sourceRevoked?"revoked":"discovered",
+      revoked_at:opts.sourceRevoked?"2026-10-30T07:00:00Z":null}]);
+   }
    if(opts.registryDown)return Response.json({error:"down"},{status:503});
-   return Response.json([{device_id:DEVICE,owner_user_id:opts.deviceOwner??OWNER,signing_public_key:opts.deviceKey??publicKey,
+   return Response.json([{device_id:DEVICE,owner_user_id:opts.deviceOwner??OWNER,signing_public_key:opts.deviceKey??f.publicKey,
      membership_state:opts.revoked?"revoked":"discovered",revoked_at:opts.revoked?"2026-10-30T07:00:00Z":null}]);
   }
   if(url.includes("/rest/v1/mesh_inbox_proofs")){
@@ -86,7 +114,8 @@ function backend(publicKey:string,opts:Options={}){
    return Response.json(state.inviteState==="pending"?[{
       request_id:INVITE,owner_user_id:OWNER,source_device_id:SOURCE,target_device_id:DEVICE,
       state:"pending",expires_at:new Date(Date.now()+180_000).toISOString(),
-      signed_offer:{protocol:"katosync-mesh-pairing-v1"},dispatch_signature:"A".repeat(86)
+      signed_offer:opts.tamperedOffer?{...f.signedOffer,nonce:"A".repeat(43)}:f.signedOffer,
+      dispatch_signature:opts.tamperedDispatch?"A".repeat(86):f.dispatchSignature
    }]:[]);
   }
   throw Error("unexpected "+url);
@@ -94,13 +123,13 @@ function backend(publicKey:string,opts:Options={}){
  return {call:calls as typeof fetch,state};
 }
 test("endpoint is disabled by default, no server access",async()=>{
- const f=await fixture(),b=backend(f.publicKey);
+ const f=await fixture(),b=backend(f);
  const p=await f.proof();
  const response=await handleMeshInboxReceive(makeRequest(p),{...env,KATOSYNC_MESH_INBOX_RECEIVE_STAGE:""},b.call);
  assert.equal(response.status,503);assert.equal(b.state.nonceWrites,0);
 });
 test("real Ed25519 proof can list only target inbox; never returns trust",async()=>{
- const f=await fixture(),b=backend(f.publicKey);
+ const f=await fixture(),b=backend(f);
  const result=await handleMeshInboxReceive(makeRequest(await f.proof()),env,b.call);
  assert.equal(result.status,200);const body=await result.json();
  assert.equal(body.invitations.length,1);
@@ -110,7 +139,7 @@ test("real Ed25519 proof can list only target inbox; never returns trust",async(
  assert.equal(b.state.nonceWrites,1);assert.equal(b.state.reads,1);
 });
 test("accepted decision updates pending invitation once, without trust",async()=>{
- const f=await fixture(),b=backend(f.publicKey);
+ const f=await fixture(),b=backend(f);
  const p=await f.proof("accept",INVITE);
  const first=await handleMeshInboxReceive(makeRequest(p),env,b.call);
  assert.equal(first.status,200);const body=await first.json();
@@ -123,7 +152,7 @@ test("accepted decision updates pending invitation once, without trust",async()=
  assert.equal(after.status,409);assert.equal(b.state.updates,2);
 });
 test("explicit rejection never grants trust",async()=>{
- const f=await fixture(),b=backend(f.publicKey);
+ const f=await fixture(),b=backend(f);
  const res=await handleMeshInboxReceive(makeRequest(await f.proof("reject",INVITE)),env,b.call);
  assert.equal(res.status,200);assert.equal((await res.json()).state,"rejected");
  assert.equal(b.state.inviteState,"rejected");
@@ -135,7 +164,7 @@ test("recipient and signature cannot be swapped by signed-in owner",async()=>{
   (p:Awaited<ReturnType<typeof f.proof>>)=>({...p,action:"reject",requestId:INVITE}),
   (p:Awaited<ReturnType<typeof f.proof>>)=>({...p,signature:"B".repeat(86)})
  ]){
-  const b=backend(f.publicKey);
+  const b=backend(f);
   const res=await handleMeshInboxReceive(makeRequest(mutate(await f.proof())),env,b.call);
   assert.ok([400,403].includes(res.status));assert.equal(b.state.nonceWrites,0);
  }
@@ -147,23 +176,23 @@ test("missing login or membership, foreign/revoked device fail closed",async()=>
   [{deviceOwner:"99999999-9999-4999-8999-999999999999"},403],
   [{revoked:true},403],[{registryDown:true},503]
  ] as const){
-  const b=backend(f.publicKey,opts);
+  const b=backend(f,opts);
   assert.equal((await handleMeshInboxReceive(makeRequest(await f.proof()),env,b.call)).status,status);
   assert.equal(b.state.nonceWrites,0);
  }
 });
 test("nonce proof failure blocks data read and decision",async()=>{
- const f=await fixture(),b=backend(f.publicKey,{failedProof:true});
+ const f=await fixture(),b=backend(f,{failedProof:true});
  const r=await handleMeshInboxReceive(makeRequest(await f.proof("accept",INVITE)),env,b.call);
  assert.equal(r.status,503);assert.equal(b.state.updates,0);assert.equal(b.state.reads,0);
 });
 test("untrusted malformed records cannot be displayed as valid invitations",async()=>{
- const f=await fixture(),b=backend(f.publicKey,{invalidList:true});
+ const f=await fixture(),b=backend(f,{invalidList:true});
  const r=await handleMeshInboxReceive(makeRequest(await f.proof()),env,b.call);
  assert.equal(r.status,503);assert.equal((await r.json()).error,"INBOX_INVALID_RESPONSE");
 });
 test("malformed action/short bearer/reused list sentinel rejected before registry access",async()=>{
- const f=await fixture(),b=backend(f.publicKey);
+ const f=await fixture(),b=backend(f);
  for(const p of [{...await f.proof(),unknown:true},{...await f.proof(),requestId:INVITE},
    {...await f.proof("accept",INVITE),requestId:EMPTY}]){
   const r=await handleMeshInboxReceive(makeRequest(p),env,b.call);
@@ -176,7 +205,7 @@ test("malformed action/short bearer/reused list sentinel rejected before registr
 test("a mismatched persisted proof receipt never authorizes accept or listing",async()=>{
  const fixtureData=await fixture();
  for(const action of ["accept","list"] as const){
-  const b=backend(fixtureData.publicKey,{invalidProofReceipt:true});
+  const b=backend(fixtureData,{invalidProofReceipt:true});
   const requestId=action==="list"?EMPTY:INVITE;
   const response=await handleMeshInboxReceive(makeRequest(await fixtureData.proof(action,requestId)),env,b.call);
   assert.equal(response.status,503);
@@ -186,9 +215,45 @@ test("a mismatched persisted proof receipt never authorizes accept or listing",a
  }
 });
 test("a valid receipt is never an access grant: strict proof id must be attached to PATCH",async()=>{
- const f=await fixture(),b=backend(f.publicKey);
+ const f=await fixture(),b=backend(f);
  const result=await handleMeshInboxReceive(makeRequest(await f.proof("accept",INVITE)),env,b.call);
  assert.equal(result.status,200);
  assert.equal((await result.json()).paired,false);
  assert.equal(b.state.updates,1);
+});
+
+test("inbox LIST verifies original sender key, Ed25519 offer and recipient dispatch",async()=>{
+ const f=await fixture();
+ for(const [opts,status,error] of [
+   [{sourceRevoked:true},503,"INBOX_SOURCE_UNVERIFIED"],
+   [{sourceWrongKey:true},503,"INBOX_SOURCE_UNVERIFIED"],
+   [{sourceWrongOwner:true},503,"INBOX_SOURCE_UNVERIFIED"],
+   [{sourceAbsent:true},503,"INBOX_SOURCE_UNVERIFIED"],
+   [{sourceRegistryDown:true},503,"INBOX_SOURCE_UNAVAILABLE"],
+   [{tamperedOffer:true},503,"INBOX_SOURCE_UNVERIFIED"],
+   [{tamperedDispatch:true},503,"INBOX_SOURCE_UNVERIFIED"]
+ ] as const){
+   const b=backend(f,opts);
+   const result=await handleMeshInboxReceive(makeRequest(await f.proof()),env,b.call);
+   assert.equal(result.status,status);
+   assert.equal((await result.json()).error,error);
+   assert.equal(b.state.updates,0);
+ }
+});
+test("receiver does not accept a forged store-issued offer or a revoked sender in listing",async()=>{
+ const f=await fixture(),b=backend(f,{sourceRevoked:true});
+ const response=await handleMeshInboxReceive(makeRequest(await f.proof()),env,b.call);
+ assert.equal(response.status,503);
+ assert.notEqual((await response.json()).invitations?.length,1);
+});
+
+test("an empty inbox needs no sender roster query and remains strictly non-trusted",async()=>{
+ const f=await fixture(),b=backend(f);
+ const accepted=await handleMeshInboxReceive(makeRequest(await f.proof("accept",INVITE)),env,b.call);
+ assert.equal(accepted.status,200);
+ const empty=await handleMeshInboxReceive(makeRequest(await f.proof("list",EMPTY)),env,b.call);
+ assert.equal(empty.status,200);
+ const body=await empty.json();
+ assert.deepEqual(body.invitations,[]);
+ assert.deepEqual([body.paired,body.transportReady,body.remoteJobsEnabled],[false,false,false]);
 });
