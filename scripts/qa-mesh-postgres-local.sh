@@ -41,9 +41,14 @@ case "${1:-legacy}" in
   inbox-receiver) TEST_FILE="$ROOT/tests/sql/mesh_inbox_receive_qa.sql" ;;
   inbox-proof) TEST_FILE="$ROOT/tests/sql/mesh_resolution_proof_qa.sql" ;;
   inbox-continuity) TEST_FILE="$ROOT/tests/sql/mesh_inbox_key_continuity_qa.sql" ;;
-  inbox-continuity) TEST_FILE="$ROOT/tests/sql/mesh_inbox_key_continuity_qa.sql" ;;
+  inbox-edge-e2e) TEST_FILE="$ROOT/tests/sql/mesh_inbox_edge_e2e_setup.sql" ;;
   *) echo "MESH_QA_UNKNOWN_TEST_SELECTION" >&2; exit 2 ;;
 esac
 "$PG_BIN/psql" -h "$DIR" -p "$PORT" -U postgres -d postgres -X -v ON_ERROR_STOP=1 \
   -f "$TEST_FILE"
+if test "${1:-legacy}" = "inbox-edge-e2e"; then
+  KATOSYNC_MESH_E2E_ALLOW=EPHEMERAL_UNIX_SOCKET_ONLY \
+    KATOSYNC_MESH_E2E_SOCKET="$DIR" KATOSYNC_MESH_E2E_PORT="$PORT" \
+    node --experimental-strip-types --test "$ROOT/tests/meshInboxEdgePostgresE2e.qa.ts"
+fi
 echo "MESH_QA_ALL_SQL_ASSERTIONS_PASSED"
