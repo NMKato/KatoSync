@@ -34,7 +34,21 @@ if "$PG_BIN/psql" -h 127.0.0.1 -p "$PORT" -U postgres -d postgres -X -Atqc "sele
  echo "MESH_RESTORE_DRILL_BLOCKED: unexpected TCP listener" >&2;exit 4
 fi
 PSQL=("$PG_BIN/psql" -X -q -A -t -v ON_ERROR_STOP=1 -h "$DIR" -p "$PORT" -U postgres)
+# No inherited cron / outbound pg_net extensions in either QA database.
+external_jobs_guard() {
+ local db="$1"
+ local found
+ found="$("$PG_BIN/psql" -X -q -A -t -v ON_ERROR_STOP=1 -h "$DIR" -p "$PORT" -U postgres -d "$db" -c "SELECT count(*) FROM pg_extension WHERE extname IN ('pg_cron','pg_net','postgres_fdw','http')")"
+ if [[ "$found" != "0" ]]; then
+  echo "MESH_RESTORE_EXTERNAL_JOBS_BLOCKED: extension present" >&2;exit 10
+ fi
+ found="$("$PG_BIN/psql" -X -q -A -t -v ON_ERROR_STOP=1 -h "$DIR" -p "$PORT" -U postgres -d "$db" -c "SELECT count(*) FROM pg_namespace WHERE nspname IN ('cron','net')")"
+ if [[ "$found" != "0" ]]; then
+  echo "MESH_RESTORE_EXTERNAL_JOBS_BLOCKED: outbound schema present" >&2;exit 10
+ fi
+}
 echo "MESH_RESTORE_DRILL_EPHEMERAL_UNIX_SOCKET_ONLY"
+external_jobs_guard postgres
 "${PSQL[@]}" -d postgres -f "$ROOT/tests/sql/mesh_inbox_edge_e2e_setup.sql" >"$DIR/schema-fixture.log"
 KATOSYNC_MESH_E2E_ALLOW=EPHEMERAL_UNIX_SOCKET_ONLY \
  KATOSYNC_MESH_E2E_SOCKET="$DIR" KATOSYNC_MESH_E2E_PORT="$PORT" \
@@ -64,6 +78,7 @@ shasum -a 256 "$DIR/synthetic.pgcustom" | awk '{print "MESH_RESTORE_DRILL_ARCHIV
 "$PG_BIN/pg_restore" -h "$DIR" -p "$PORT" -U postgres -d recovered --no-owner --exit-on-error "$DIR/synthetic.pgcustom" >"$DIR/restore.log" 2>&1 || {
  tail -60 "$DIR/restore.log" >&2;exit 7;
 }
+external_jobs_guard recovered
 after="$(data_fingerprint recovered)"
 test "$before" = "$after" || { echo "MESH_RESTORE_DRILL_BLOCKED: restored data mismatch" >&2;exit 8; }
 echo "MESH_RESTORE_DRILL_DATA_FINGERPRINT_MATCH"
@@ -99,6 +114,7 @@ BEGIN
 END $$;
 SQL
 echo "MESH_RESTORE_DRILL_RLS_GRANTS_TRIGGERS_PASS"
+echo "MESH_RESTORE_NO_CRON_OR_NET_EXTENSIONS_PASS"
 "${PSQL[@]}" -d postgres -c \
  "UPDATE katosync.mesh_devices SET membership_state='revoked',revoked_at=now()
  WHERE device_id='22222222-2222-4222-8222-222222222222'" >/dev/null
