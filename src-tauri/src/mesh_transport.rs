@@ -402,10 +402,21 @@ mod tests {
                 if role == "client" {
                     result.expect("Pinned mutual TLS LAN client probe failed");
                 } else {
-                    assert!(result.is_err(), "Wrong pin unexpectedly authenticated");
+                    assert_eq!(
+                        result.err().as_deref(),
+                        Some("TLS-Zertifikat gehört nicht zur freigegebenen Geräteidentität."),
+                        "Wrong pinned key must fail at peer certificate binding, not just IO"
+                    );
                 }
             }
             _ => panic!("Unsupported QA role; no network operation allowed"),
         }
+        // A successful native two-host proof is transport-only. Neither the
+        // positive nor the negative test may change account trust or jobs.
+        let readiness =
+            serde_json::to_value(crate::mesh_readiness::mesh_local_readiness()).unwrap();
+        assert_eq!(readiness["verifiedPeers"], 0);
+        assert_eq!(readiness["remoteReadOnlyDispatch"], false);
+        assert_eq!(readiness["crossDeviceWrites"], false);
     }
 }
