@@ -1,6 +1,7 @@
 // NMKato Solutions — Stage 2O. Device-attested inbox and single-use decisions.
 // No automatic pairing, transport authorization, SAS skipping, or remote jobs.
 import {requireKatoSyncMembership} from "../mesh-device-enrollment/membership-gate.ts";
+import {verifyStoredSignedMeshInvite} from "../mesh-inbox-send/send.ts";
 
 const ORIGIN="https://xbnnlyyxiilklsygxcof.supabase.co", SCHEMA="katosync";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -145,7 +146,52 @@ export async function handleMeshInboxReceive(req:Request,env:Env,request:typeof 
     const rows:unknown=await listing.json();
     if(!Array.isArray(rows)||rows.length>10||!rows.every(x=>validInvite(x,owner,proof.deviceId)))
       return fail(503,"INBOX_INVALID_RESPONSE");
-    const invitations=(rows as Invite[]).map(x=>({
+    // Never promote a signed-in owner's *unverified database row* into a
+    // readable invitation. Re-check each original sender against the live
+    // account-scoped roster and independently verify both Ed25519 signatures.
+    // One batched roster query keeps the device lookup bounded to <= 10.
+    const pending=rows as Invite[];
+    if(pending.length){
+      const sourceIds=[...new Set(pending.map(x=>x.source_device_id))];
+      const sourceURL=new URL(ORIGIN+"/rest/v1/mesh_devices");
+      sourceURL.searchParams.set("select","device_id,owner_user_id,signing_public_key,membership_state,revoked_at");
+      sourceURL.searchParams.set("owner_user_id","eq."+owner);
+      sourceURL.searchParams.set("device_id","in.("+sourceIds.join(",")+")");
+      sourceURL.searchParams.set("limit",String(sourceIds.length+1));
+      const sourcesResponse=await request(sourceURL,{
+        headers:{...headers,"Accept-Profile":SCHEMA},signal:AbortSignal.timeout(8000)
+      });
+      if(!sourcesResponse.ok)return fail(503,"INBOX_SOURCE_UNAVAILABLE");
+      const sourceRows:unknown=await sourcesResponse.json();
+      if(!Array.isArray(sourceRows)||sourceRows.length!==sourceIds.length)
+        return fail(503,"INBOX_SOURCE_UNVERIFIED");
+      const sourceKeys=new Map<string,string>();
+      for(const item of sourceRows){
+        if(!item||typeof item!=="object"||Array.isArray(item))
+          return fail(503,"INBOX_SOURCE_UNVERIFIED");
+        const source=item as Device;
+        if(!sourceIds.includes(source.device_id)||sourceKeys.has(source.device_id)||
+          source.owner_user_id!==owner||source.membership_state!=="discovered"||
+          source.revoked_at!==null||typeof source.signing_public_key!=="string"||
+          !B43.test(source.signing_public_key))
+          return fail(503,"INBOX_SOURCE_UNVERIFIED");
+        sourceKeys.set(source.device_id,source.signing_public_key);
+      }
+      for(const invitation of pending){
+        const signedOffer=invitation.signed_offer as Record<string,unknown>;
+        if(sourceKeys.get(invitation.source_device_id)!==signedOffer.publicKey||
+          !await verifyStoredSignedMeshInvite({
+            protocol:"katosync-mesh-inbox-send-v1",
+            sourceDeviceId:invitation.source_device_id,
+            targetDeviceId:invitation.target_device_id,
+            signedOffer:invitation.signed_offer,
+            dispatchSignature:invitation.dispatch_signature
+          },owner))
+          return fail(503,"INBOX_SOURCE_UNVERIFIED");
+      }
+      if(proof.expiresAt*1000<=Date.now())return fail(409,"PROOF_EXPIRED");
+    }
+    const invitations=pending.map(x=>({
       requestId:x.request_id,sourceDeviceId:x.source_device_id,
       targetDeviceId:x.target_device_id,expiresAt:x.expires_at,
       signedOffer:x.signed_offer,dispatchSignature:x.dispatch_signature
