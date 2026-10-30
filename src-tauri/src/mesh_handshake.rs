@@ -375,6 +375,181 @@ mod tests {
         assert_eq!(proof_b.peer_count, 0);
         assert!(!proof_b.transport_ready);
     }
+    /// Stage 3D exercises a continuous SYNTHETIC chain of existing native
+    /// production predicates: signed owner-scoped offer -> two signed possession
+    /// proofs -> identical human SAS -> explicit two-sided local pin approval ->
+    /// pinned TLS 1.3 mTLS over OS TCP -> revocation denies new admission.
+    /// It never calls keyring, cloud enrollment, a Tauri IPC or production jobs.
+    #[tokio::test]
+    async fn synthetic_signed_sas_to_explicit_two_sided_pin_and_real_mtls_is_fail_closed() {
+        use crate::{
+            mesh_tls::DeviceTlsIdentity,
+            mesh_transport::{client_probe, server_probe},
+            mesh_trust::{qa_confirm_synthetic_peer, qa_synthetic_admission},
+        };
+        use tokio::net::{TcpListener, TcpStream};
+
+        let now = 1_800_000_010_i64;
+        let a = signing(21);
+        let b = signing(22);
+        let outsider = signing(23);
+        let offer = invitation(&a, now);
+        let challenge = generate_challenge(offer, &b, now + 1);
+        assert_eq!(
+            verify_challenge(&challenge, USER, now + 2).unwrap().0,
+            a.verifying_key()
+        );
+        assert!(verify_challenge(&challenge, OTHER, now + 2).is_err());
+        let response = generate_response(challenge.clone(), &a);
+        assert_eq!(
+            verify_response(&response, USER, now + 2).unwrap(),
+            b.verifying_key()
+        );
+        assert!(verify_response(&response, OTHER, now + 2).is_err());
+
+        // Both sides compute the SAME SAS from the exact signed transcript.
+        let a_proof = proof(b.verifying_key(), &challenge);
+        let b_proof = proof(a.verifying_key(), &challenge);
+        assert_eq!(a_proof.comparison_code, b_proof.comparison_code);
+        assert_eq!(a_proof.fingerprint, fingerprint(&b.verifying_key()));
+        assert_eq!(b_proof.fingerprint, fingerprint(&a.verifying_key()));
+        assert!(!a_proof.paired && !b_proof.paired);
+        assert!(!a_proof.transport_ready && !b_proof.transport_ready);
+
+        // Signature/SAS verification is NOT sufficient to admit either peer:
+        // explicit local confirmation must occur on EACH device.
+        let mut a_pins = Vec::new();
+        let mut b_pins = Vec::new();
+        assert!(
+            qa_synthetic_admission(&a_pins, &a.verifying_key(), &b.verifying_key(), now + 3)
+                .is_err()
+        );
+        assert!(
+            qa_synthetic_admission(&b_pins, &b.verifying_key(), &a.verifying_key(), now + 3)
+                .is_err()
+        );
+        assert!(qa_confirm_synthetic_peer(
+            &mut a_pins,
+            &a.verifying_key(),
+            &b.verifying_key(),
+            &a_proof.comparison_code,
+            "0000-0000-0000",
+            challenge.expires_at,
+            now + 3
+        )
+        .is_err());
+        assert!(a_pins.is_empty());
+        // Approval cannot extend the expiry of an already signed challenge.
+        let mut expired_pins = Vec::new();
+        assert!(qa_confirm_synthetic_peer(
+            &mut expired_pins,
+            &a.verifying_key(),
+            &b.verifying_key(),
+            &a_proof.comparison_code,
+            &a_proof.comparison_code,
+            challenge.expires_at,
+            challenge.expires_at
+        )
+        .is_err());
+        assert!(expired_pins.is_empty());
+        assert!(qa_confirm_synthetic_peer(
+            &mut b_pins,
+            &b.verifying_key(),
+            &a.verifying_key(),
+            &b_proof.comparison_code,
+            "AAAA-AAAA-AAAA",
+            challenge.expires_at,
+            now + 3
+        )
+        .is_err());
+        assert!(b_pins.is_empty());
+        assert!(qa_confirm_synthetic_peer(
+            &mut a_pins,
+            &a.verifying_key(),
+            &b.verifying_key(),
+            &a_proof.comparison_code,
+            &a_proof.comparison_code,
+            challenge.expires_at,
+            now + 3
+        )
+        .is_ok());
+        assert!(
+            qa_synthetic_admission(&b_pins, &b.verifying_key(), &a.verifying_key(), now + 3)
+                .is_err(),
+            "one-sided approval must not admit the other direction"
+        );
+        assert!(qa_confirm_synthetic_peer(
+            &mut b_pins,
+            &b.verifying_key(),
+            &a.verifying_key(),
+            &b_proof.comparison_code,
+            &b_proof.comparison_code,
+            challenge.expires_at,
+            now + 3
+        )
+        .is_ok());
+        assert_eq!(a_pins.len(), 1);
+        assert_eq!(b_pins.len(), 1);
+
+        // An unrelated Ed25519 key cannot reuse someone else's SAS/pin.
+        assert!(qa_synthetic_admission(
+            &a_pins,
+            &a.verifying_key(),
+            &outsider.verifying_key(),
+            now + 4
+        )
+        .is_err());
+        assert!(qa_confirm_synthetic_peer(
+            &mut a_pins,
+            &a.verifying_key(),
+            &a.verifying_key(),
+            &a_proof.comparison_code,
+            &a_proof.comparison_code,
+            challenge.expires_at,
+            now + 4
+        )
+        .is_err());
+        let approved_server =
+            qa_synthetic_admission(&a_pins, &a.verifying_key(), &b.verifying_key(), now + 4)
+                .unwrap();
+        let approved_client =
+            qa_synthetic_admission(&b_pins, &b.verifying_key(), &a.verifying_key(), now + 4)
+                .unwrap();
+        let a_tls = DeviceTlsIdentity::from_signing_key(&a).unwrap();
+        let b_tls = DeviceTlsIdentity::from_signing_key(&b).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
+        let client = client.unwrap();
+        let server = accepted.unwrap().0;
+        let (client_outcome, server_outcome) = tokio::join!(
+            client_probe(client, &a_tls, &approved_server, b_tls.certificate_der()),
+            server_probe(server, &b_tls, &approved_client, a_tls.certificate_der())
+        );
+        assert!(
+            client_outcome.is_ok(),
+            "SAS-approved client mTLS failed: {client_outcome:?}"
+        );
+        assert!(
+            server_outcome.is_ok(),
+            "SAS-approved server mTLS failed: {server_outcome:?}"
+        );
+
+        // Revocation removes exactly the local in-memory pin. New admission
+        // must fail despite the prior SUCCESSFUL proof and socket exchange.
+        a_pins.clear();
+        assert!(
+            qa_synthetic_admission(&a_pins, &a.verifying_key(), &b.verifying_key(), now + 5)
+                .is_err()
+        );
+        // No fake pairing status or remote execution emerges from the probe.
+        let readiness =
+            serde_json::to_value(crate::mesh_readiness::mesh_local_readiness()).unwrap();
+        assert_eq!(readiness["verifiedPeers"], 0);
+        assert_eq!(readiness["remoteReadOnlyDispatch"], false);
+        assert_eq!(readiness["crossDeviceWrites"], false);
+    }
+
     #[test]
     fn tampered_challenge_and_answer_fail_closed() {
         let a = signing(3);

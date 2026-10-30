@@ -14,8 +14,17 @@ test("native handshake registers only user-initiated challenge and signed respon
  assert.match(rust,/verified_katosync_user\(\)\.await/);
  assert.match(rust,/same_account_still_verified\(&uid\)\.await/);
  assert.match(first,/store_outbound_offer\(&uid, &offer\)/);
+ // The new Stage3D test may create a LOCAL ephemeral socket inside the
+ // Rust #[cfg(test)] module only. Release handshake code must still have
+ // NO listener, dispatch command or network server: never scan test code.
+ // GitHub's Windows checkout may contain CRLF, while macOS uses LF.
+ // Both must find the same Rust #[cfg(test)] boundary before scanning.
+ const testBoundary=/\r?\n#\[cfg\(test\)\]\r?\nmod tests \{/;
+ const boundary=testBoundary.exec(rust);
+ assert.ok(boundary,"Rust unit-test boundary missing");
+ const shippingHandshake=rust.slice(0,boundary.index);
  for(const action of ["TcpListener","UdpSocket","new_peer_socket","run_codex_task","run_claude_task","GithubAppToken"])
-   assert.ok(!rust.includes(action),"unexpected remote action "+action);
+   assert.ok(!shippingHandshake.includes(action),"unexpected production remote action "+action);
 });
 test("bounded time, nonce, signed domain separation and single-use pending record",()=>{
  assert.match(rust,/const MAX_MESSAGE_BYTES: usize = 8192/);
