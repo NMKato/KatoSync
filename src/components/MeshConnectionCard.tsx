@@ -87,6 +87,8 @@ type MeshReceivedItem = {
   sourceDeviceId:string;
   expiresAt:string;
   fingerprint:string;
+  // Public sender offer, verified by Rust before crossing IPC.
+  signedOffer:MeshSignedOffer;
 };
 type MeshReceivedInbox = {
   invitations:MeshReceivedItem[];
@@ -238,6 +240,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       setDirectory(null);setSelectedDeviceId(null);setGuideOpen(false);
       setNativeInboxPrepared(null);setNativeInboxSent(null);
       setRecipientInbox(null);setRecipientDecision(null);
+      challengeOperation.current++;challengeInFlight.current=false;
+      setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeError(false);setChallengeBusy(false);
       setDirectoryBusy(false);setNativeInboxBusy(false);setRecipientBusy(false);
     }
   };
@@ -250,18 +254,33 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [recipientBusy,setRecipientBusy]=useState(false);
   const [recipientError,setRecipientError]=useState(false);
   const [recipientDecision,setRecipientDecision]=useState<"accepted"|"rejected"|null>(null);
+  const [acceptedInboxOffer,setAcceptedInboxOffer]=useState<MeshReceivedItem|null>(null);
+  const [acceptedChallenge,setAcceptedChallenge]=useState<string|null>(null);
+  const [challengeError,setChallengeError]=useState(false);
+  const [challengeBusy,setChallengeBusy]=useState(false);
+  const challengeInFlight=useRef(false);
+  const challengeOperation=useRef(0);
   const loadRecipientInbox=async()=>{
     if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientInFlight.current)return;
     recipientInFlight.current=true;
     const operation=++recipientOperation.current;
     setRecipientBusy(true);setRecipientError(false);setRecipientDecision(null);setRecipientInbox(null);
+    // A new inbox scan never silently revives an earlier accepted offer.
+    challengeOperation.current++;challengeInFlight.current=false;
+    setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
     try{
       const result=await invoke<MeshReceivedInbox>("mesh_inbox_recipient_list");
       if(result.paired!==false||result.transportReady!==false||result.remoteJobsEnabled!==false||
          !Array.isArray(result.invitations)||result.invitations.length>10||
          result.invitations.some(item=>!item.requestId||!item.sourceDeviceId||
             !Number.isFinite(Date.parse(item.expiresAt))||
-            !/^[0-9A-F]{2}(-[0-9A-F]{2}){15}$/.test(item.fingerprint)))
+            !/^[0-9A-F]{2}(-[0-9A-F]{2}){15}$/.test(item.fingerprint)||
+            item.signedOffer?.protocol!=="katosync-mesh-pairing-v1"||
+            !/^[A-Za-z0-9_-]{43}$/.test(item.signedOffer.publicKey)||
+            !/^[A-Za-z0-9_-]{43}$/.test(item.signedOffer.nonce)||
+            !/^[A-Za-z0-9_-]{43}$/.test(item.signedOffer.accountScope)||
+            !/^[A-Za-z0-9_-]{86}$/.test(item.signedOffer.signature)||
+            item.signedOffer.expiresAt*1000!==Date.parse(item.expiresAt)))
         throw new Error("invalid_recipient_inbox");
       if(operation!==recipientOperation.current)return;
       // A message that expired while in flight is not a broken inbox.
@@ -298,12 +317,59 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         throw new Error("invalid_recipient_decision");
       if(operation!==recipientOperation.current)return;
       setRecipientInbox(list=>list?.filter(x=>x.requestId!==item.requestId)??null);
+      if(result.state==="accepted"&&item.signedOffer.expiresAt*1000>Date.now()){
+        setAcceptedInboxOffer(item);
+      }else{
+        setAcceptedInboxOffer(null);
+      }
+      setAcceptedChallenge(null);setChallengeError(false);
       setRecipientDecision(result.state);
     }catch{if(operation===recipientOperation.current)setRecipientError(true);}
     finally{if(operation===recipientOperation.current){
       recipientInFlight.current=false;setRecipientBusy(false);
     }}
   };
+
+  // The recipient may consciously move an ALREADY ACCEPTED, RUST-VERIFIED
+  // public offer into the existing signed possession-challenge protocol.
+  // No native command is invoked by merely receiving or accepting a request.
+  const prepareAcceptedChallenge=async()=>{
+    const accepted=acceptedInboxOffer;
+    if(challengeInFlight.current||!accepted||accepted.signedOffer.expiresAt*1000<=Date.now())return;
+    challengeInFlight.current=true;
+    const operation=++challengeOperation.current;
+    setChallengeBusy(true);setChallengeError(false);setAcceptedChallenge(null);
+    try{
+      const raw=await invoke<string>("mesh_pairing_challenge_create",
+        {offerJson:JSON.stringify(accepted.signedOffer)});
+      const challenge=JSON.parse(raw);
+      if(challenge.protocol!=="katosync-mesh-challenge-v1"||
+         challenge.offer?.protocol!==accepted.signedOffer.protocol||
+         challenge.offer?.publicKey!==accepted.signedOffer.publicKey||
+         challenge.offer?.nonce!==accepted.signedOffer.nonce||
+         challenge.offer?.signature!==accepted.signedOffer.signature||
+         challenge.offer?.accountScope!==accepted.signedOffer.accountScope||
+         challenge.offer?.expiresAt!==accepted.signedOffer.expiresAt||
+         !/^[A-Za-z0-9_-]{86}$/.test(challenge.signature)||
+         !Number.isFinite(challenge.expiresAt)||
+         challenge.expiresAt*1000<=Date.now()||
+         challenge.expiresAt>accepted.signedOffer.expiresAt)
+        throw new Error("unverified_native_challenge_receipt");
+      if(operation===challengeOperation.current){
+        setAcceptedChallenge(raw);setAcceptedInboxOffer(null);
+      }
+    }catch{if(operation===challengeOperation.current)setChallengeError(true);}
+    finally{if(operation===challengeOperation.current){
+      challengeInFlight.current=false;setChallengeBusy(false);
+    }}
+  };
+  useEffect(()=>{
+    if(!acceptedInboxOffer)return;
+    const delay=nextMeshInboxExpiryDelay([acceptedInboxOffer]);
+    if(delay===null){setAcceptedInboxOffer(null);return;}
+    const timeout=window.setTimeout(()=>setAcceptedInboxOffer(null),delay);
+    return ()=>window.clearTimeout(timeout);
+  },[acceptedInboxOffer]);
 
   const [directoryBusy,setDirectoryBusy]=useState(false);
   const [directoryError,setDirectoryError]=useState(false);
@@ -358,6 +424,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     setDirectoryBusy(true);setDirectoryError(false);setDirectory(null);
     setSelectedDeviceId(null);
     setNativeInboxPrepared(null);setNativeInboxError(false);setNativeInboxSent(null);setRecipientInbox(null);setRecipientDecision(null);
+    challengeOperation.current++;challengeInFlight.current=false;
+    setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
     try{
       // Opening the guide only READS the signed-in account's existing roster.
       // The explicit "Find devices" button alone performs enrollment.
@@ -557,6 +625,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     rosterOperation.current++;rosterInFlight.current=false;
     inboxOperation.current++;inboxInFlight.current=false;
     recipientOperation.current++;recipientInFlight.current=false;
+    challengeOperation.current++;challengeInFlight.current=false;
+    setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
     setDirectory(null);
     setSelectedDeviceId(null);
     setNativeInboxSent(null);setNativeInboxPrepared(null);
@@ -704,6 +774,26 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           {t(recipientDecision==="accepted"?"mesh.recipient.accepted":"mesh.recipient.rejected")}
           {" "}{t("mesh.recipient.notConnected")}
         </p>:null}
+        {acceptedInboxOffer?<div className="vision-mesh-guide-target" role="group"
+           aria-label={t("mesh.handoff.heading")}>
+          <strong>{t("mesh.handoff.heading")}</strong>
+          <p>{t("mesh.handoff.description")}</p>
+          <button type="button" className="ghost compact-button"
+             disabled={challengeBusy||recipientBusy||acceptedInboxOffer.signedOffer.expiresAt*1000<=Date.now()}
+             onClick={()=>void prepareAcceptedChallenge()}>
+            {t("mesh.handoff.createChallenge")}</button>
+          <small>{t("mesh.inbox.noTrust")}</small>
+        </div>:null}
+        {acceptedChallenge?<div className="vision-mesh-guide-target" role="status">
+          <strong>{t("mesh.handoff.ready")}</strong>
+          <p>{t("mesh.handoff.next")}</p>
+          <button type="button" className="ghost compact-button"
+             onClick={()=>void copyPublicMessage(acceptedChallenge)}>
+            {t("mesh.handoff.copyChallenge")}</button>
+          <small>{t("mesh.recipient.notConnected")}</small>
+        </div>:null}
+        {challengeError?<p role="alert" className="vision-mesh-error">
+          {t("mesh.handoff.failed")}</p>:null}
         {recipientError?<p role="alert" className="vision-mesh-error">
           {t("mesh.recipient.failed")}
         </p>:null}
