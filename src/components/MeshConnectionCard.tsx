@@ -104,6 +104,19 @@ type MeshReceivedDecision = {
   transportReady:false;
   remoteJobsEnabled:false;
 };
+type RelayPublicMessage = {
+  requestId:string; senderDeviceId:string; recipientDeviceId:string;
+  kind:"challenge"|"response";payloadJson:string;expiresAt:number;
+};
+type RelayRead = {
+  messages:RelayPublicMessage[];deliveryOnly:true;paired:false;
+  transportReady:false;remoteJobsEnabled:false;
+};
+type RelayDelivery = {
+  messageId:string;deliveryOnly:true;paired:false;
+  transportReady:false;remoteJobsEnabled:false;
+};
+type RelayWork = {requestId:string;deviceId:string;payloadJson:string};
 type NativeInboxInvite = {
   protocol:"katosync-mesh-inbox-send-v1";
   sourceDeviceId:string;
@@ -240,6 +253,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       setDirectory(null);setSelectedDeviceId(null);setGuideOpen(false);
       setNativeInboxPrepared(null);setNativeInboxSent(null);
       setRecipientInbox(null);setRecipientDecision(null);
+      resetRelay();
       challengeOperation.current++;challengeInFlight.current=false;
       setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeError(false);setChallengeBusy(false);
       setDirectoryBusy(false);setNativeInboxBusy(false);setRecipientBusy(false);
@@ -250,12 +264,28 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [nativeInboxError,setNativeInboxError]=useState(false);
   const [nativeInboxPrepared,setNativeInboxPrepared]=useState<string|null>(null);
   const [nativeInboxSent,setNativeInboxSent]=useState<string|null>(null);
+  const [sentRequest,setSentRequest]=useState<{requestId:string;deviceId:string;expiresAt:string}|null>(null);
   const [recipientInbox,setRecipientInbox]=useState<MeshReceivedItem[]|null>(null);
   const [recipientBusy,setRecipientBusy]=useState(false);
   const [recipientError,setRecipientError]=useState(false);
   const [recipientDecision,setRecipientDecision]=useState<"accepted"|"rejected"|null>(null);
   const [acceptedInboxOffer,setAcceptedInboxOffer]=useState<MeshReceivedItem|null>(null);
   const [acceptedChallenge,setAcceptedChallenge]=useState<string|null>(null);
+  const [challengeRelayWork,setChallengeRelayWork]=useState<RelayWork|null>(null);
+  const [responseRelayWork,setResponseRelayWork]=useState<RelayWork|null>(null);
+  const [relayMessages,setRelayMessages]=useState<RelayPublicMessage[]|null>(null);
+  const [relayReceipt,setRelayReceipt]=useState<"challenge"|"response"|null>(null);
+  const [relayProof,setRelayProof]=useState<MeshPairingProof|null>(null);
+  const [relayBusy,setRelayBusy]=useState(false);
+  const [relayError,setRelayError]=useState(false);
+  const relayInFlight=useRef(false);
+  const relayOperation=useRef(0);
+  const resetRelay=()=>{
+    relayOperation.current++;relayInFlight.current=false;
+    setSentRequest(null);setChallengeRelayWork(null);setResponseRelayWork(null);
+    setRelayMessages(null);setRelayReceipt(null);setRelayProof(null);
+    setRelayBusy(false);setRelayError(false);
+  };
   const [challengeError,setChallengeError]=useState(false);
   const [challengeBusy,setChallengeBusy]=useState(false);
   const challengeInFlight=useRef(false);
@@ -268,6 +298,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     // A new inbox scan never silently revives an earlier accepted offer.
     challengeOperation.current++;challengeInFlight.current=false;
     setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
+    setChallengeRelayWork(null);
     try{
       const result=await invoke<MeshReceivedInbox>("mesh_inbox_recipient_list");
       if(result.paired!==false||result.transportReady!==false||result.remoteJobsEnabled!==false||
@@ -322,7 +353,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       }else{
         setAcceptedInboxOffer(null);
       }
-      setAcceptedChallenge(null);setChallengeError(false);
+      setAcceptedChallenge(null);setChallengeRelayWork(null);setChallengeError(false);
       setRecipientDecision(result.state);
     }catch{if(operation===recipientOperation.current)setRecipientError(true);}
     finally{if(operation===recipientOperation.current){
@@ -356,7 +387,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
          challenge.expiresAt>accepted.signedOffer.expiresAt)
         throw new Error("unverified_native_challenge_receipt");
       if(operation===challengeOperation.current){
-        setAcceptedChallenge(raw);setAcceptedInboxOffer(null);
+        setAcceptedChallenge(raw);
+        setChallengeRelayWork({requestId:accepted.requestId,deviceId:accepted.sourceDeviceId,payloadJson:raw});
+        setAcceptedInboxOffer(null);
       }
     }catch{if(operation===challengeOperation.current)setChallengeError(true);}
     finally{if(operation===challengeOperation.current){
@@ -388,7 +421,10 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
          result.deliveryOnly!==true||result.paired!==false||
          result.transportReady!==false||result.remoteJobsEnabled!==false)
         throw new Error("invalid_delivery_receipt");
-      if(operation===inboxOperation.current)setNativeInboxSent(targetDeviceId);
+      if(operation===inboxOperation.current){
+        setNativeInboxSent(targetDeviceId);
+        setSentRequest({requestId:result.requestId,deviceId:targetDeviceId,expiresAt:result.expiresAt});
+      }
     }catch{if(operation===inboxOperation.current)setNativeInboxError(true);}
     finally{if(operation===inboxOperation.current){
       inboxInFlight.current=false;setNativeInboxBusy(false);
@@ -424,6 +460,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     setDirectoryBusy(true);setDirectoryError(false);setDirectory(null);
     setSelectedDeviceId(null);
     setNativeInboxPrepared(null);setNativeInboxError(false);setNativeInboxSent(null);setRecipientInbox(null);setRecipientDecision(null);
+    resetRelay();
     challengeOperation.current++;challengeInFlight.current=false;
     setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
     try{
@@ -451,6 +488,100 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const discoverDevices=()=>{
     setGuideOpen(true);
     void loadAccountDirectory("discover");
+  };
+  // Stage 3I is available only with BOTH the QA Web flag and the QA native
+  // build flag; the actual Edge endpoint has an independent server opt-in.
+  const relayQa=import.meta.env.VITE_KATOOS_AUTH_QA==="1"&&
+    import.meta.env.VITE_MESH_RELAY_QA==="1";
+  const sendRelay=async(work:RelayWork,kind:"challenge"|"response")=>{
+    if(!relayQa||relayInFlight.current)return;
+    let expires:number;
+    try {
+      const payload=JSON.parse(work.payloadJson);
+      expires=kind==="challenge"?payload.expiresAt:payload.challenge?.expiresAt;
+    }catch{return;}
+    if(!Number.isSafeInteger(expires)||expires*1000<=Date.now())return;
+    relayInFlight.current=true;const operation=++relayOperation.current;
+    setRelayBusy(true);setRelayError(false);setRelayReceipt(null);
+    try{
+      const result=await invoke<RelayDelivery>("mesh_pairing_relay_send",{
+        requestId:work.requestId,recipientDeviceId:work.deviceId,
+        kind,payloadJson:work.payloadJson
+      });
+      if(!/^[0-9a-f-]{36}$/i.test(result.messageId)||result.deliveryOnly!==true||
+         result.paired!==false||result.transportReady!==false||result.remoteJobsEnabled!==false)
+        throw new Error("invalid_relay_receipt");
+      if(operation===relayOperation.current){
+        setRelayReceipt(kind);
+        if(kind==="challenge")setChallengeRelayWork(null);
+        else setResponseRelayWork(null);
+      }
+    }catch{if(operation===relayOperation.current)setRelayError(true);}
+    finally{if(operation===relayOperation.current){
+      relayInFlight.current=false;setRelayBusy(false);
+    }}
+  };
+  const loadRelay=async()=>{
+    if(!relayQa||relayInFlight.current)return;
+    relayInFlight.current=true;const operation=++relayOperation.current;
+    setRelayBusy(true);setRelayError(false);setRelayMessages(null);
+    try{
+      const data=await invoke<RelayRead>("mesh_pairing_relay_list");
+      if(data.deliveryOnly!==true||data.paired!==false||
+         data.transportReady!==false||data.remoteJobsEnabled!==false||
+         !Array.isArray(data.messages)||data.messages.length>10||
+         data.messages.some(m=>!["challenge","response"].includes(m.kind)||
+           !/^[0-9a-f-]{36}$/i.test(m.requestId)||m.expiresAt*1000<=Date.now()||
+           !m.senderDeviceId||!m.recipientDeviceId||
+           m.payloadJson.length>8192))throw new Error("invalid_relay_list");
+      if(operation===relayOperation.current)setRelayMessages(data.messages);
+    }catch{if(operation===relayOperation.current)setRelayError(true);}
+    finally{if(operation===relayOperation.current){
+      relayInFlight.current=false;setRelayBusy(false);
+    }}
+  };
+  const prepareRelayResponse=async(item:RelayPublicMessage)=>{
+    if(!relayQa||relayInFlight.current||item.kind!=="challenge"||
+       !relayMessages?.includes(item)||item.expiresAt*1000<=Date.now())return;
+    relayInFlight.current=true;const operation=++relayOperation.current;
+    setRelayBusy(true);setRelayError(false);setResponseRelayWork(null);setRelayProof(null);
+    try{
+      const [publicJson,proof]=await invoke<[string,MeshPairingProof]>(
+        "mesh_pairing_response_create",{challengeJson:item.payloadJson}
+      );
+      if(JSON.parse(publicJson)?.protocol!=="katosync-mesh-response-v1"||
+         proof.paired!==false||proof.peerCount!==0||proof.transportReady!==false||
+         !/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(proof.comparisonCode))
+        throw new Error("invalid_relay_response");
+      if(operation===relayOperation.current){
+        setResponseRelayWork({requestId:item.requestId,deviceId:item.senderDeviceId,payloadJson:publicJson});
+        setRelayProof(proof);
+        setRelayMessages(null);
+      }
+    }catch{if(operation===relayOperation.current)setRelayError(true);}
+    finally{if(operation===relayOperation.current){
+      relayInFlight.current=false;setRelayBusy(false);
+    }}
+  };
+  const verifyRelayResponse=async(item:RelayPublicMessage)=>{
+    if(!relayQa||relayInFlight.current||item.kind!=="response"||
+       !relayMessages?.includes(item)||item.expiresAt*1000<=Date.now())return;
+    relayInFlight.current=true;const operation=++relayOperation.current;
+    setRelayBusy(true);setRelayError(false);setRelayProof(null);
+    try{
+      const proof=await invoke<MeshPairingProof>("mesh_pairing_response_verify",
+        {responseJson:item.payloadJson});
+      if(proof.paired!==false||proof.peerCount!==0||proof.transportReady!==false||
+        !/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(proof.comparisonCode))
+        throw new Error("invalid_relay_proof");
+      if(operation===relayOperation.current){
+        setRelayProof(proof);
+        setRelayMessages(null);
+      }
+    }catch{if(operation===relayOperation.current)setRelayError(true);}
+    finally{if(operation===relayOperation.current){
+      relayInFlight.current=false;setRelayBusy(false);
+    }}
   };
   const selectedDevice=directory?.devices.find(d=>d.deviceId===selectedDeviceId)??null;
   const qaAuthEnabled=import.meta.env.VITE_KATOOS_AUTH_QA==="1";
@@ -627,6 +758,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     recipientOperation.current++;recipientInFlight.current=false;
     challengeOperation.current++;challengeInFlight.current=false;
     setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
+    resetRelay();
     setDirectory(null);
     setSelectedDeviceId(null);
     setNativeInboxSent(null);setNativeInboxPrepared(null);
@@ -786,7 +918,11 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         </div>:null}
         {acceptedChallenge?<div className="vision-mesh-guide-target" role="status">
           <strong>{t("mesh.handoff.ready")}</strong>
-          <p>{t("mesh.handoff.next")}</p>
+          <p>{t(relayQa?"mesh.relay.signedReady":"mesh.handoff.next")}</p>
+          {relayQa&&challengeRelayWork?
+            <button type="button" className="primary compact-button"
+               disabled={relayBusy} onClick={()=>void sendRelay(challengeRelayWork,"challenge")}>
+              {t("mesh.relay.sendChallenge")}</button>:null}
           <button type="button" className="ghost compact-button"
              onClick={()=>void copyPublicMessage(acceptedChallenge)}>
             {t("mesh.handoff.copyChallenge")}</button>
@@ -797,6 +933,40 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         {recipientError?<p role="alert" className="vision-mesh-error">
           {t("mesh.recipient.failed")}
         </p>:null}
+      </section>:null}
+      {relayQa?<section className="vision-mesh-recipient-inbox"
+        aria-label={t("mesh.relay.heading")}>
+        <strong>{t("mesh.relay.heading")}</strong>
+        <p>{t("mesh.relay.notice")}</p>
+        {sentRequest?<small>{t("mesh.relay.sentInvite")}: {sentRequest.requestId}</small>:null}
+        <button type="button" className="ghost compact-button"
+          disabled={relayBusy||directoryBusy||recipientBusy}
+          onClick={()=>void loadRelay()}>{t("mesh.relay.check")}</button>
+        {relayMessages?.length===0?<p role="status">{t("mesh.relay.empty")}</p>:null}
+        {relayMessages?.map(item=><div className="vision-mesh-guide-target" key={item.requestId+item.kind}>
+          <strong>{t(item.kind==="challenge"?"mesh.relay.challengeReceived":"mesh.relay.responseReceived")}</strong>
+          <small>{t("mesh.recipient.expires")}: {relativeTime(new Date(item.expiresAt*1000).toISOString(),lang)||"—"}</small>
+          <button type="button" className="ghost compact-button"
+            disabled={relayBusy||item.expiresAt*1000<=Date.now()}
+            onClick={()=>void(item.kind==="challenge"?
+              prepareRelayResponse(item):verifyRelayResponse(item))}>
+            {t(item.kind==="challenge"?"mesh.relay.prepareResponse":"mesh.relay.verifyResponse")}
+          </button>
+        </div>)}
+        {responseRelayWork?<div className="vision-mesh-guide-target" role="status">
+          <strong>{t("mesh.relay.responseReady")}</strong>
+          <button type="button" className="primary compact-button"
+            disabled={relayBusy} onClick={()=>void sendRelay(responseRelayWork,"response")}>
+              {t("mesh.relay.sendResponse")}</button>
+          <small>{t("mesh.recipient.notConnected")}</small>
+        </div>:null}
+        {relayReceipt?<p role="status">{t("mesh.relay.delivered")} {t("mesh.recipient.notConnected")}</p>:null}
+        {relayProof?<div className="vision-mesh-guide-target" role="status">
+          <strong>{t("mesh.relay.sas")}: {relayProof.comparisonCode}</strong>
+          <small>{t("mesh.relay.compare")}</small>
+          <small>{t("mesh.recipient.notConnected")}</small>
+        </div>:null}
+        {relayError?<p role="alert" className="vision-mesh-error">{t("mesh.relay.failed")}</p>:null}
       </section>:null}
     </section>
     </div>:null}
