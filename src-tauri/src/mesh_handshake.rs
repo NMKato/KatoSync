@@ -232,6 +232,36 @@ fn verify_response(
         .map_err(|_| "Antwortsignatur ungültig.")?;
     Ok(responder)
 }
+/// Stage 3I: pure validation for public relay payloads. This never consumes
+/// challenges, creates device identities, stages trust, or changes the Keychain.
+pub(crate) fn relay_public_peer_keys(
+    uid: &str,
+    kind: &str,
+    json: &str,
+    now: i64,
+) -> Result<(String, String, i64), String> {
+    if json.len() > MAX_MESSAGE_BYTES {
+        return Err("MESH_RELAY_INVALID_MESSAGE".into());
+    }
+    let challenge = match kind {
+        "challenge" => serde_json::from_str::<PairingChallenge>(json)
+            .map_err(|_| "MESH_RELAY_INVALID_MESSAGE")?,
+        "response" => {
+            let response: PairingResponse =
+                serde_json::from_str(json).map_err(|_| "MESH_RELAY_INVALID_MESSAGE")?;
+            verify_response(&response, uid, now)?;
+            response.challenge
+        }
+        _ => return Err("MESH_RELAY_INVALID_KIND".into()),
+    };
+    let (initiator, responder) = verify_challenge(&challenge, uid, now)?;
+    Ok((
+        URL_SAFE_NO_PAD.encode(initiator.as_bytes()),
+        URL_SAFE_NO_PAD.encode(responder.as_bytes()),
+        challenge.expires_at,
+    ))
+}
+
 fn proof(peer: VerifyingKey, challenge: &PairingChallenge) -> PairingProof {
     PairingProof {
         fingerprint: fingerprint(&peer),
@@ -375,6 +405,52 @@ mod tests {
         assert_eq!(proof_b.peer_count, 0);
         assert!(!proof_b.transport_ready);
     }
+    #[test]
+    fn relay_public_validation_accepts_only_original_signed_offers_and_challenges() {
+        let a = signing(46);
+        let b = signing(47);
+        let now = 1_800_000_100i64;
+        let challenge = generate_challenge(invitation(&a, now), &b, now + 1);
+        let challenge_json = serde_json::to_string(&challenge).unwrap();
+        let initiator = URL_SAFE_NO_PAD.encode(a.verifying_key().as_bytes());
+        let responder = URL_SAFE_NO_PAD.encode(b.verifying_key().as_bytes());
+        let got = relay_public_peer_keys(USER, "challenge", &challenge_json, now + 2).unwrap();
+        assert_eq!(
+            got,
+            (initiator.clone(), responder.clone(), challenge.expires_at)
+        );
+        let response = generate_response(challenge.clone(), &a);
+        let response_json = serde_json::to_string(&response).unwrap();
+        assert_eq!(
+            relay_public_peer_keys(USER, "response", &response_json, now + 2).unwrap(),
+            (initiator, responder, challenge.expires_at)
+        );
+        assert!(relay_public_peer_keys(OTHER, "challenge", &challenge_json, now + 2).is_err());
+        assert!(relay_public_peer_keys(USER, "wrong", &challenge_json, now + 2).is_err());
+        assert!(
+            relay_public_peer_keys(USER, "challenge", &challenge_json, challenge.expires_at)
+                .is_err()
+        );
+        let mut forged = challenge.clone();
+        forged.responder_nonce = URL_SAFE_NO_PAD.encode([0u8; 32]);
+        assert!(relay_public_peer_keys(
+            USER,
+            "challenge",
+            &serde_json::to_string(&forged).unwrap(),
+            now + 2
+        )
+        .is_err());
+        let mut fake = response;
+        fake.signature = URL_SAFE_NO_PAD.encode([0u8; 64]);
+        assert!(relay_public_peer_keys(
+            USER,
+            "response",
+            &serde_json::to_string(&fake).unwrap(),
+            now + 2
+        )
+        .is_err());
+    }
+
     /// Stage 3D exercises a continuous SYNTHETIC chain of existing native
     /// production predicates: signed owner-scoped offer -> two signed possession
     /// proofs -> identical human SAS -> explicit two-sided local pin approval ->
