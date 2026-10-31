@@ -134,6 +134,9 @@ type MeshPeerInventory = {
 export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const {t,lang}=useT();
   const [detailsOpen,setDetailsOpen]=useState(false);
+  // A user-visible pairing guide is NOT an authenticated transport session.
+  const [guideOpen,setGuideOpen]=useState(false);
+  const [selectedDeviceId,setSelectedDeviceId]=useState<string|null>(null);
   const [hubPreference,setHubPreference]=useState<MeshHubPreference|null>(null);
   const [hubBusy,setHubBusy]=useState(false);
   const [hubError,setHubError]=useState(false);
@@ -294,11 +297,15 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     }catch{setNativeInboxError(true);}
     finally{setNativeInboxBusy(false);}
   };
-  const loadAccountDirectory=async()=>{
+  const loadAccountDirectory=async(mode:"list"|"discover"="discover")=>{
     setDirectoryBusy(true);setDirectoryError(false);setDirectory(null);
+    setSelectedDeviceId(null);
     setNativeInboxPrepared(null);setNativeInboxError(false);setNativeInboxSent(null);setRecipientInbox(null);setRecipientDecision(null);
     try{
-      const roster=await invoke<MeshAccountDirectory>("mesh_account_device_discover");
+      // Opening the guide only READS the signed-in account's existing roster.
+      // The explicit "Find devices" button alone performs enrollment.
+      const command=mode==="list"?"mesh_account_devices_list":"mesh_account_device_discover";
+      const roster=await invoke<MeshAccountDirectory>(command);
       if(roster.accountVerified!==true || roster.discoveryOnly!==true ||
          roster.transportReady!==false || roster.remoteJobsEnabled!==false ||
          !Array.isArray(roster.devices) || roster.devices.length>10 ||
@@ -310,6 +317,18 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     }catch{setDirectoryError(true);}
     finally{setDirectoryBusy(false);}
   };
+  const startConnectionGuide=()=>{
+    setGuideOpen(true);
+    if(!directory&&!directoryBusy)void loadAccountDirectory("list");
+  };
+  const discoverDevices=()=>{
+    setGuideOpen(true);
+    void loadAccountDirectory("discover");
+  };
+  const selectedDevice=directory?.devices.find(d=>d.deviceId===selectedDeviceId)??null;
+  const qaAuthEnabled=import.meta.env.VITE_KATOOS_AUTH_QA==="1";
+  const inboxSendEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_SEND_QA==="1";
+  const inboxReceiveEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_RECEIVE_QA==="1";
   const [clipboardStatus,setClipboardStatus]=useState<"ok"|"failed"|null>(null);
   const copyPublicMessage=async(payload:string)=>{
     // Es werden nur signierte, oeffentliche Pairing-Nachrichten kopiert.
@@ -475,6 +494,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     // mesh_account_device_discover (which registers the local device).
     // Old discovered roster rows must not look freshly verified.
     setDirectory(null);
+    setSelectedDeviceId(null);
+    setGuideOpen(false);
     setDirectoryError(false);
     void refresh();
   },[refresh,refreshEpoch]);
@@ -504,13 +525,13 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       </div>
       <div className="vision-mesh-compact-actions">
         <button type="button" className="ghost compact-button" disabled={directoryBusy||!snapshot}
-          onClick={()=>void loadAccountDirectory()}>
+          onClick={discoverDevices}>
           <RefreshCcw size={15} className={directoryBusy?"spin":""}/>
           {t("mesh.directory.refresh")}
         </button>
         <button type="button" className="primary compact-button"
           disabled={pairingBusy||!snapshot}
-          onClick={()=>void prepareAndInvite()}>{t("mesh.simple.connect")}</button>
+          onClick={startConnectionGuide}>{t("mesh.simple.connect")}</button>
         <button type="button" className="ghost compact-button" aria-expanded={detailsOpen}
           aria-controls="vision-mesh-technical-details"
           onClick={()=>setDetailsOpen(value=>!value)}>{t("mesh.simple.details")}</button>
@@ -521,9 +542,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       <button type="button" className="ghost compact-button"
         onClick={()=>void copyPublicMessage(offer)}>{t("mesh.quick.copyPublicInvite")}</button>
     </div>:null}
-    {directoryError?<p className="vision-mesh-compact-notice" role="status">
+    {directoryError&&!guideOpen?<p className="vision-mesh-compact-notice" role="status">
       {t("mesh.simple.discoveryNotReady")}</p>:null}
-    {directory?.devices.length===0?<p className="vision-mesh-compact-notice" role="status">
+    {directory?.devices.length===0&&!guideOpen?<p className="vision-mesh-compact-notice" role="status">
       {t("mesh.directory.empty")}</p>:null}
     {identityError?<p role="alert" className="vision-mesh-compact-notice vision-mesh-error">
       {t("mesh.v1.failed")}
@@ -535,6 +556,92 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     {clipboardStatus?<p className="vision-mesh-compact-notice" role="status">
       {t(clipboardStatus==="ok"?"mesh.quick.copied":"mesh.quick.copyFailed")}
     </p>:null}
+    {guideOpen?<div className="vision-mesh-guide" role="region"
+      aria-label={t("mesh.guide.heading")}>
+      <div className="vision-mesh-guide-heading">
+        <strong>{t("mesh.guide.heading")}</strong>
+        <small>{t("mesh.guide.notConnected")}</small>
+      </div>
+      <p>{t("mesh.guide.description")}</p>
+    <section className="vision-mesh-account-directory" aria-label={t("mesh.directory.heading")}>
+      <div className="vision-mesh-directory-heading">
+        <strong>{t("mesh.directory.heading")}</strong>
+        <span className="vision-mesh-directory-note">{t("mesh.simple.discoveryStatus")}</span>
+      </div>
+      <p>{t("mesh.directory.notice")}</p>
+      {directory===null&&!directoryBusy&&!directoryError?
+        <p>{t("mesh.guide.notLoaded")}</p>:null}
+      {directoryBusy?<p role="status">{t("mesh.guide.loading")}</p>:null}
+      {directory?.devices.length===0?<p role="status">{t("mesh.directory.empty")}</p>:null}
+      {directory?.devices.map(device=><button type="button"
+        className="vision-mesh-guide-device" key={device.deviceId}
+        aria-pressed={selectedDeviceId===device.deviceId}
+        disabled={directoryBusy||nativeInboxBusy||recipientBusy}
+        onClick={()=>setSelectedDeviceId(device.deviceId)}>
+        <span className="vision-mesh-guide-device-name"><strong>{device.personaName||device.displayName}</strong>
+          {device.personaName?<small>{device.displayName}</small>:null}
+          <small>{device.platformOs} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>
+          <small>{device.lastSeenAt?
+            t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
+            t("mesh.directory.notSeen")}</small>
+        </span>
+        <span className="vision-mesh-guide-select">{t(selectedDeviceId===device.deviceId?
+          "mesh.guide.selected":"mesh.guide.choose")}</span>
+      </button>)}
+      {selectedDevice?<div className="vision-mesh-guide-target" role="group"
+        aria-label={t("mesh.guide.target")}>
+        <strong>{selectedDevice.personaName||selectedDevice.displayName}</strong>
+        {selectedDevice.membershipState==="discovered"&&qaAuthEnabled?
+          inboxSendEnabled?
+            <button type="button" className="primary compact-button"
+              disabled={nativeInboxBusy||directoryBusy||recipientBusy}
+              onClick={()=>void sendNativeInbox(selectedDevice.deviceId)}>{t("mesh.inbox.send")}</button>:
+            <button type="button" className="ghost compact-button"
+              disabled={nativeInboxBusy||directoryBusy||recipientBusy}
+              onClick={()=>void prepareNativeInbox(selectedDevice.deviceId)}>{t("mesh.inbox.prepare")}</button>:
+          <small>{t("mesh.guide.sendUnavailable")}</small>}
+        <small>{t("mesh.inbox.noTrust")}</small>
+      </div>:null}
+      {nativeInboxSent?<p role="status" className="vision-mesh-compact-notice">
+        {t("mesh.inbox.sent")} {t("mesh.inbox.noTrust")}
+      </p>:null}
+      {nativeInboxPrepared?<p role="status" className="vision-mesh-compact-notice">
+        {t("mesh.inbox.prepared")} {t("mesh.inbox.notSent")}
+      </p>:null}
+      {nativeInboxError?<p role="alert" className="vision-mesh-error">
+        {t("mesh.inbox.failed")}
+      </p>:null}
+      {directoryError?<p role="alert">{t("mesh.directory.unavailable")}</p>:null}
+      {inboxReceiveEnabled?<section className="vision-mesh-recipient-inbox"
+         aria-label={t("mesh.recipient.heading")}>
+        <strong>{t("mesh.recipient.heading")}</strong>
+        <p>{t("mesh.recipient.notice")}</p>
+        <button type="button" className="ghost compact-button"
+          disabled={recipientBusy||directoryBusy}
+          onClick={()=>void loadRecipientInbox()}>{t("mesh.recipient.refresh")}</button>
+        {recipientInbox?.length===0?<p role="status">{t("mesh.recipient.empty")}</p>:null}
+        {recipientInbox?.map(item=><div className="vision-mesh-directory-row" key={item.requestId}>
+          <div>
+            <strong>{directory?.devices.find(d=>d.deviceId===item.sourceDeviceId)?.displayName||
+              t("mesh.recipient.unknownSource")}</strong>
+            <small>{t("mesh.recipient.expires")}: {relativeTime(item.expiresAt,lang)||"—"}</small>
+            <small>{item.fingerprint}</small>
+          </div>
+          <button type="button" className="ghost compact-button" disabled={recipientBusy}
+            onClick={()=>void decideRecipientInvite(item,"accept")}>{t("mesh.recipient.accept")}</button>
+          <button type="button" className="ghost compact-button" disabled={recipientBusy}
+            onClick={()=>void decideRecipientInvite(item,"reject")}>{t("mesh.recipient.reject")}</button>
+        </div>)}
+        {recipientDecision?<p role="status">
+          {t(recipientDecision==="accepted"?"mesh.recipient.accepted":"mesh.recipient.rejected")}
+          {" "}{t("mesh.recipient.notConnected")}
+        </p>:null}
+        {recipientError?<p role="alert" className="vision-mesh-error">
+          {t("mesh.recipient.failed")}
+        </p>:null}
+      </section>:null}
+    </section>
+    </div>:null}
     <div className="vision-mesh-technical" id="vision-mesh-technical-details" hidden={!detailsOpen}>
       <section className="mesh-hub-preference" aria-label={t("mesh.hub.heading")}>
         <label className="mesh-hub-preference-option">
@@ -580,80 +687,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       </form>
       {reauthResult?<p role="status">{t(reauthResult==="success"?"mesh.reauth.success":"mesh.reauth.failed")}</p>:null}
     </details>:null}
-    <section className="vision-mesh-account-directory" aria-label={t("mesh.directory.heading")}>
-      <div className="vision-mesh-directory-heading">
-        <strong>{t("mesh.directory.heading")}</strong>
-        <span className="vision-mesh-directory-note">{t("mesh.simple.discoveryStatus")}</span>
-      </div>
-      <p>{t("mesh.directory.notice")}</p>
-      {directory?.devices.length===0?<p role="status">{t("mesh.directory.empty")}</p>:null}
-      {directory?.devices.map(device=><div className="vision-mesh-directory-row" key={device.deviceId}>
-        <div><strong>{device.personaName||device.displayName}</strong>
-          {device.personaName?<small>{device.displayName}</small>:null}
-          <small>{device.platformOs} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>
-        </div>
-        <small>{device.lastSeenAt?
-          t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
-          t("mesh.directory.notSeen")}</small>
-        {import.meta.env.VITE_KATOOS_AUTH_QA==="1"&&device.membershipState==="discovered"?
-          <button type="button" className="ghost compact-button"
-            disabled={nativeInboxBusy||pairingBusy||directoryBusy}
-            onClick={()=>void prepareNativeInbox(device.deviceId)}>
-            {t("mesh.inbox.prepare")}
-          </button>:null}
-        {import.meta.env.VITE_KATOOS_AUTH_QA==="1"&&
-         import.meta.env.VITE_MESH_INBOX_SEND_QA==="1"&&device.membershipState==="discovered"?
-          <button type="button" className="ghost compact-button"
-            disabled={nativeInboxBusy||pairingBusy||directoryBusy}
-            onClick={()=>void sendNativeInbox(device.deviceId)}>
-            {t("mesh.inbox.send")}
-          </button>:null}
-      </div>)}
-      {nativeInboxSent?<p role="status" className="vision-mesh-compact-notice">
-        {t("mesh.inbox.sent")} {t("mesh.inbox.noTrust")}
-      </p>:null}
-      {nativeInboxPrepared?<p role="status" className="vision-mesh-compact-notice">
-        {t("mesh.inbox.prepared")} {t("mesh.inbox.notSent")}
-      </p>:null}
-      {nativeInboxError?<p role="alert" className="vision-mesh-error">
-        {t("mesh.inbox.failed")}
-      </p>:null}
-      {directoryError?<p role="alert">{t("mesh.directory.unavailable")}</p>:null}
-      {import.meta.env.VITE_KATOOS_AUTH_QA==="1"&&
-       import.meta.env.VITE_MESH_INBOX_RECEIVE_QA==="1"?<section className="vision-mesh-recipient-inbox"
-         aria-label={t("mesh.recipient.heading")}>
-        <strong>{t("mesh.recipient.heading")}</strong>
-        <p>{t("mesh.recipient.notice")}</p>
-        <button type="button" className="ghost compact-button"
-          disabled={recipientBusy||directoryBusy}
-          onClick={()=>void loadRecipientInbox()}>{t("mesh.recipient.refresh")}</button>
-        {recipientInbox?.length===0?<p role="status">{t("mesh.recipient.empty")}</p>:null}
-        {recipientInbox?.map(item=><div className="vision-mesh-directory-row" key={item.requestId}>
-          <div>
-            <strong>{directory?.devices.find(d=>d.deviceId===item.sourceDeviceId)?.displayName||
-              t("mesh.recipient.unknownSource")}</strong>
-            <small>{t("mesh.recipient.expires")}: {relativeTime(item.expiresAt,lang)||"—"}</small>
-            <small>{item.fingerprint}</small>
-          </div>
-          <button type="button" className="ghost compact-button" disabled={recipientBusy}
-            onClick={()=>void decideRecipientInvite(item,"accept")}>{t("mesh.recipient.accept")}</button>
-          <button type="button" className="ghost compact-button" disabled={recipientBusy}
-            onClick={()=>void decideRecipientInvite(item,"reject")}>{t("mesh.recipient.reject")}</button>
-        </div>)}
-        {recipientDecision?<p role="status">
-          {t(recipientDecision==="accepted"?"mesh.recipient.accepted":"mesh.recipient.rejected")}
-          {" "}{t("mesh.recipient.notConnected")}
-        </p>:null}
-        {recipientError?<p role="alert" className="vision-mesh-error">
-          {t("mesh.recipient.failed")}
-        </p>:null}
-      </section>:null}
-    </section>
     <details className="vision-mesh-pairing">
       <summary>{t("mesh.v1.heading")}</summary>
       <p>{t("mesh.quick.description")}</p>
       <div className="vision-mesh-quick-panel" aria-label={t("mesh.quick.heading")}>
         <strong>{t("mesh.quick.heading")}</strong>
+        <button type="button" className="ghost compact-button"
+          onClick={()=>void prepareAndInvite()} disabled={pairingBusy||!snapshot}>
+          {t("mesh.quick.connect")}</button>
         <p>{t("mesh.quick.accountSafety")}</p>
 
         {offer?<div className="vision-mesh-quick-result">

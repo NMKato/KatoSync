@@ -10,12 +10,16 @@ const part=view.slice(view.indexOf("function MeshConnectionCard("));
 test("Connections Mesh has one compact primary Connect and Discover plus Details",()=>{
  assert.match(part,/vision-mesh-compact-top/);
  assert.match(part,/mesh\.simple\.disconnected/);
- assert.match(part,/onClick=\{\(\)=>void loadAccountDirectory\(\)\}/);
+ assert.match(part,/onClick=\{discoverDevices\}/);
+ assert.match(part,/onClick=\{startConnectionGuide\}/);
  assert.match(part,/onClick=\{\(\)=>void prepareAndInvite\(\)\}/);
+ assert.match(part,/role="region"/);
+ assert.match(part,/vision-mesh-guide-device/);
  assert.match(part,/aria-expanded=\{detailsOpen\}/);
  assert.match(part,/id="vision-mesh-technical-details" hidden=\{!detailsOpen\}/);
  assert.equal((part.match(/onClick=\{\(\)=>void prepareAndInvite\(\)\}/g)||[]).length,1);
- assert.equal((part.match(/onClick=\{\(\)=>void loadAccountDirectory\(\)\}/g)||[]).length,1);
+ assert.equal((part.match(/onClick=\{discoverDevices\}/g)||[]).length,1);
+ assert.equal((part.match(/onClick=\{startConnectionGuide\}/g)||[]).length,1);
 });
 
 test("no fake connected or uptime label in stage zero",()=>{
