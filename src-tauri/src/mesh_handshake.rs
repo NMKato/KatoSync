@@ -172,6 +172,20 @@ fn generate_challenge(offer: MeshOffer, responder: &SigningKey, now: i64) -> Pai
     value.signature = URL_SAFE_NO_PAD.encode(responder.sign(&challenge_payload(&value)).to_bytes());
     value
 }
+// Stage 3J: generate a real Rust/Serde Ed25519 transcript for cross-language
+// protocol tests. Test-only, synthetic identities; never touches OS Keychain.
+#[cfg(test)]
+pub(crate) fn qa_relay_test_transcript(
+    offer: MeshOffer,
+    responder: &SigningKey,
+    initiator: &SigningKey,
+    now: i64,
+) -> (PairingChallenge, PairingResponse) {
+    let challenge = generate_challenge(offer, responder, now);
+    let response = generate_response(challenge.clone(), initiator);
+    (challenge, response)
+}
+
 fn verify_challenge(
     challenge: &PairingChallenge,
     uid: &str,
