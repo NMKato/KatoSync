@@ -577,6 +577,97 @@ mod tests {
             now + 61
         ));
     }
+    /// Actual Rust production serializers and ed25519-dalek signatures become
+    /// the public, secret-free fixture tested by TypeScript WebCrypto and Edge.
+    /// No OS-Keychain, Supabase, TCP or remote device operations.
+    #[test]
+    fn qa_emit_stage3j_edge_interop_fixture() {
+        let now = 2_000_000_000_i64;
+        let initiator = SigningKey::from_bytes(&[41u8; 32]);
+        let recipient = SigningKey::from_bytes(&[42u8; 32]);
+        let a = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let b = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        let req = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        let offer = crate::mesh_identity::make_test_offer(&initiator, OWNER, now);
+        let (challenge, response) = crate::mesh_handshake::qa_relay_test_transcript(
+            offer.clone(),
+            &recipient,
+            &initiator,
+            now + 1,
+        );
+        let challenge_json = serde_json::to_string(&challenge).unwrap();
+        let response_json = serde_json::to_string(&response).unwrap();
+        // The registered recipient B sends its signed challenge to initiator A.
+        let c = make_envelope(
+            &recipient,
+            OWNER,
+            req,
+            b,
+            a,
+            "challenge",
+            &challenge_json,
+            now + 245,
+        )
+        .unwrap();
+        let r = make_envelope(
+            &initiator,
+            OWNER,
+            req,
+            a,
+            b,
+            "response",
+            &response_json,
+            now + 245,
+        )
+        .unwrap();
+        let pa = signed_list(&initiator, OWNER, a, now + 2);
+        let pb = signed_list(&recipient, OWNER, b, now + 2);
+        assert!(signed_envelope_valid(
+            &c,
+            OWNER,
+            &recipient.verifying_key(),
+            now + 2
+        ));
+        assert!(signed_envelope_valid(
+            &r,
+            OWNER,
+            &initiator.verifying_key(),
+            now + 2
+        ));
+        assert!(crate::mesh_handshake::relay_public_peer_keys(
+            OWNER,
+            "challenge",
+            &challenge_json,
+            now + 2
+        )
+        .is_ok());
+        assert!(crate::mesh_handshake::relay_public_peer_keys(
+            OWNER,
+            "response",
+            &response_json,
+            now + 2
+        )
+        .is_ok());
+        let fixture = serde_json::json!({
+            "generatedBy":"rust-production-ed25519-dalek-serde",
+            "fixtureOnly":true,
+            "owner":OWNER,"nowMs":(now+2)*1000,
+            "sourceDeviceId":a,"targetDeviceId":b,"requestId":req,
+            "sourcePublicKey":URL_SAFE_NO_PAD.encode(initiator.verifying_key().as_bytes()),
+            "targetPublicKey":URL_SAFE_NO_PAD.encode(recipient.verifying_key().as_bytes()),
+            "invite":{
+                "request_id":req,"owner_user_id":OWNER,"source_device_id":a,
+                "target_device_id":b,"state":"accepted",
+                "expires_at":chrono::DateTime::from_timestamp(offer.expires_at,0).unwrap().to_rfc3339(),
+                "signed_offer":offer
+            },
+            "challenge":c,"response":r,
+            "listInitiator":pa,"listRecipient":pb
+        });
+        // Single marker for an explicit, authorized fixture capture by QA script.
+        println!("KATOSYNC_STAGE3J_RUST_FIXTURE={}", fixture);
+    }
+
     #[test]
     fn signed_read_proof_is_fresh_bound_to_device_and_owner() {
         let dev = Uuid::new_v4();
