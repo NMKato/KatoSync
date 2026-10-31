@@ -123,6 +123,9 @@ pub struct InboxItem {
     source_device_id: Uuid,
     expires_at: String,
     fingerprint: String,
+    /// Public, already-verified sender offer for the NEXT user-confirmed step.
+    /// No secret, peer trust, SAS approval or transport access is returned.
+    signed_offer: MeshOffer,
 }
 
 #[derive(Debug, Serialize)]
@@ -208,6 +211,11 @@ fn validate_inbox(
             source_device_id: entry.source_device_id,
             expires_at: entry.expires_at,
             fingerprint: crate::mesh_identity::fingerprint(&key),
+            // Both the offer signature and dispatch binding were checked above.
+            // Preserve only the public offer, not the untrusted raw wire or
+            // dispatch signature, so the user can consciously start the
+            // existing native challenge protocol after Inbox acceptance.
+            signed_offer: entry.signed_offer,
         });
     }
     Ok(InboxView {
@@ -428,6 +436,72 @@ mod tests {
         let wrong_action = sign_proof(&signing(), OWNER, device, "list", request, 1_800_000_000);
         assert!(wrong_action.is_err());
     }
+    #[test]
+    fn verified_public_offer_is_bound_to_sender_account_and_target_only() {
+        let now = 1_800_000_000i64;
+        let source = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let offer = crate::mesh_identity::make_test_offer(&signing(), OWNER, now);
+        let signed_dispatch = format!(
+            "katosync-mesh-inbox-send-v1|{}|{}|{}|{}|{}",
+            offer.account_scope, source, target, offer.nonce, offer.expires_at
+        );
+        let entry = InboundInvite {
+            request_id: Uuid::new_v4(),
+            source_device_id: source,
+            target_device_id: target,
+            expires_at: DateTime::from_timestamp(offer.expires_at, 0)
+                .unwrap()
+                .to_rfc3339(),
+            dispatch_signature: URL_SAFE_NO_PAD
+                .encode(signing().sign(signed_dispatch.as_bytes()).to_bytes()),
+            signed_offer: offer.clone(),
+        };
+        let wire = || InboxWire {
+            invitations: vec![InboundInvite {
+                request_id: entry.request_id,
+                source_device_id: entry.source_device_id,
+                target_device_id: entry.target_device_id,
+                expires_at: entry.expires_at.clone(),
+                signed_offer: entry.signed_offer.clone(),
+                dispatch_signature: entry.dispatch_signature.clone(),
+            }],
+            discovery_only: true,
+            paired: false,
+            transport_ready: false,
+            remote_jobs_enabled: false,
+        };
+        let verified = validate_inbox(wire(), OWNER, target, now + 1).unwrap();
+        assert_eq!(verified.invitations.len(), 1);
+        assert_eq!(
+            verified.invitations[0].fingerprint,
+            crate::mesh_identity::fingerprint(&signing().verifying_key())
+        );
+        assert_eq!(
+            serde_json::to_value(&verified.invitations[0].signed_offer).unwrap(),
+            serde_json::to_value(&offer).unwrap(),
+        );
+        // No offer may cross account boundaries, target IDs or expiry.
+        assert!(validate_inbox(
+            wire(),
+            "22222222-2222-4222-8222-222222222222",
+            target,
+            now + 1
+        )
+        .is_err());
+        assert!(validate_inbox(wire(), OWNER, Uuid::new_v4(), now + 1).is_err());
+        assert!(validate_inbox(wire(), OWNER, target, offer.expires_at).is_err());
+        let mut tampered = wire();
+        tampered.invitations[0].signed_offer.nonce = URL_SAFE_NO_PAD.encode([11u8; 32]);
+        assert!(validate_inbox(tampered, OWNER, target, now + 1).is_err());
+        let mut tampered = wire();
+        tampered.invitations[0].dispatch_signature = URL_SAFE_NO_PAD.encode([0u8; 64]);
+        assert!(validate_inbox(tampered, OWNER, target, now + 1).is_err());
+        let mut tampered = wire();
+        tampered.paired = true;
+        assert!(validate_inbox(tampered, OWNER, target, now + 1).is_err());
+    }
+
     #[test]
     fn decision_result_must_never_claim_peer_trust() {
         let request = Uuid::new_v4();
