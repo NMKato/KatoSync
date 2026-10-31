@@ -2,10 +2,11 @@
 // KatoSync connections: isolated Mesh QA controller.
 // UI is independent of Vision graph. Peer trust and remote jobs remain fail-closed.
 import { ShieldCheck, RefreshCcw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useT, type TKey } from "../i18n";
 import { classifyMeshIdentityFailure, type MeshIdentityFailure } from "../lib/meshIdentityDiagnosis";
+import { activeMeshInvitations, nextMeshInboxExpiryDelay } from "../lib/meshInboxExpiry";
 
 function relativeTime(value: string | null | undefined, lang: string): string | null {
   if (!value) return null;
@@ -137,6 +138,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   // A user-visible pairing guide is NOT an authenticated transport session.
   const [guideOpen,setGuideOpen]=useState(false);
   const [selectedDeviceId,setSelectedDeviceId]=useState<string|null>(null);
+  // Synchronous guards survive double-clicks before React can re-render.
+  // Epochs invalidate late async results after an account/surface refresh.
+  const rosterOperation=useRef(0);
+  const rosterInFlight=useRef(false);
+  const inboxOperation=useRef(0);
+  const inboxInFlight=useRef(false);
+  const recipientOperation=useRef(0);
+  const recipientInFlight=useRef(false);
   const [hubPreference,setHubPreference]=useState<MeshHubPreference|null>(null);
   const [hubBusy,setHubBusy]=useState(false);
   const [hubError,setHubError]=useState(false);
@@ -221,6 +230,15 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     }finally{
       setReauthPassword("");
       setReauthBusy(false);
+      // Reauth can switch the verified account, even when a subsequent
+      // identity check fails. Never display an old account's device names.
+      rosterOperation.current++;rosterInFlight.current=false;
+      inboxOperation.current++;inboxInFlight.current=false;
+      recipientOperation.current++;recipientInFlight.current=false;
+      setDirectory(null);setSelectedDeviceId(null);setGuideOpen(false);
+      setNativeInboxPrepared(null);setNativeInboxSent(null);
+      setRecipientInbox(null);setRecipientDecision(null);
+      setDirectoryBusy(false);setNativeInboxBusy(false);setRecipientBusy(false);
     }
   };
   const [directory,setDirectory]=useState<MeshAccountDirectory|null>(null);
@@ -233,21 +251,42 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [recipientError,setRecipientError]=useState(false);
   const [recipientDecision,setRecipientDecision]=useState<"accepted"|"rejected"|null>(null);
   const loadRecipientInbox=async()=>{
-    if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientBusy)return;
+    if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientInFlight.current)return;
+    recipientInFlight.current=true;
+    const operation=++recipientOperation.current;
     setRecipientBusy(true);setRecipientError(false);setRecipientDecision(null);setRecipientInbox(null);
     try{
       const result=await invoke<MeshReceivedInbox>("mesh_inbox_recipient_list");
       if(result.paired!==false||result.transportReady!==false||result.remoteJobsEnabled!==false||
          !Array.isArray(result.invitations)||result.invitations.length>10||
          result.invitations.some(item=>!item.requestId||!item.sourceDeviceId||
-            Date.parse(item.expiresAt)<=Date.now()||!/^[0-9A-F]{2}(-[0-9A-F]{2}){15}$/.test(item.fingerprint)))
+            !Number.isFinite(Date.parse(item.expiresAt))||
+            !/^[0-9A-F]{2}(-[0-9A-F]{2}){15}$/.test(item.fingerprint)))
         throw new Error("invalid_recipient_inbox");
-      setRecipientInbox(result.invitations);
-    }catch{setRecipientError(true);}finally{setRecipientBusy(false);}
+      if(operation!==recipientOperation.current)return;
+      // A message that expired while in flight is not a broken inbox.
+      // It must never be selectable, even if the server list was once valid.
+      setRecipientInbox(activeMeshInvitations(result.invitations));
+    }catch{if(operation===recipientOperation.current)setRecipientError(true);}
+    finally{if(operation===recipientOperation.current){
+      recipientInFlight.current=false;setRecipientBusy(false);
+    }}
   };
+  useEffect(()=>{
+    if(!recipientInbox?.length)return;
+    const delay=nextMeshInboxExpiryDelay(recipientInbox);
+    if(delay===null)return;
+    // One cancellable expiry event, never a background inbox poll.
+    const timer=window.setTimeout(()=>{
+      setRecipientInbox(items=>items?activeMeshInvitations(items):null);
+    },delay);
+    return ()=>window.clearTimeout(timer);
+  },[recipientInbox]);
   const decideRecipientInvite=async(item:MeshReceivedItem,action:"accept"|"reject")=>{
-    if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientBusy||
+    if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientInFlight.current||
        !recipientInbox?.some(x=>x.requestId===item.requestId)||Date.parse(item.expiresAt)<=Date.now())return;
+    recipientInFlight.current=true;
+    const operation=++recipientOperation.current;
     setRecipientBusy(true);setRecipientError(false);setRecipientDecision(null);
     try{
       const result=await invoke<MeshReceivedDecision>("mesh_inbox_recipient_decide",
@@ -257,17 +296,24 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
          result.decisionOnly!==true||result.paired!==false||
          result.transportReady!==false||result.remoteJobsEnabled!==false)
         throw new Error("invalid_recipient_decision");
+      if(operation!==recipientOperation.current)return;
       setRecipientInbox(list=>list?.filter(x=>x.requestId!==item.requestId)??null);
       setRecipientDecision(result.state);
-    }catch{setRecipientError(true);}finally{setRecipientBusy(false);}
+    }catch{if(operation===recipientOperation.current)setRecipientError(true);}
+    finally{if(operation===recipientOperation.current){
+      recipientInFlight.current=false;setRecipientBusy(false);
+    }}
   };
 
   const [directoryBusy,setDirectoryBusy]=useState(false);
   const [directoryError,setDirectoryError]=useState(false);
   const sendNativeInbox=async(targetDeviceId:string)=>{
     // A separate, explicitly activated QA-only command; no implicit send from discovery.
-    if(import.meta.env.VITE_MESH_INBOX_SEND_QA!=="1"||nativeInboxBusy||
+    if(import.meta.env.VITE_MESH_INBOX_SEND_QA!=="1"||inboxInFlight.current||
+       nativeInboxSent===targetDeviceId||selectedDeviceId!==targetDeviceId||
        !directory?.devices.some(d=>d.deviceId===targetDeviceId&&d.membershipState==="discovered"))return;
+    inboxInFlight.current=true;
+    const operation=++inboxOperation.current;
     setNativeInboxBusy(true);setNativeInboxError(false);setNativeInboxSent(null);setNativeInboxPrepared(null);
     try{
       const result=await invoke<MeshInboxSentReceipt>("mesh_inbox_invite_send",{targetDeviceId});
@@ -276,11 +322,17 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
          result.deliveryOnly!==true||result.paired!==false||
          result.transportReady!==false||result.remoteJobsEnabled!==false)
         throw new Error("invalid_delivery_receipt");
-      setNativeInboxSent(targetDeviceId);
-    }catch{setNativeInboxError(true);}finally{setNativeInboxBusy(false);}
+      if(operation===inboxOperation.current)setNativeInboxSent(targetDeviceId);
+    }catch{if(operation===inboxOperation.current)setNativeInboxError(true);}
+    finally{if(operation===inboxOperation.current){
+      inboxInFlight.current=false;setNativeInboxBusy(false);
+    }}
   };
   const prepareNativeInbox=async(targetDeviceId:string)=>{
-    if(nativeInboxBusy||!directory?.devices.some(d=>d.deviceId===targetDeviceId&&d.membershipState==="discovered"))return;
+    if(inboxInFlight.current||selectedDeviceId!==targetDeviceId||
+       !directory?.devices.some(d=>d.deviceId===targetDeviceId&&d.membershipState==="discovered"))return;
+    inboxInFlight.current=true;
+    const operation=++inboxOperation.current;
     setNativeInboxBusy(true);setNativeInboxError(false);setNativeInboxPrepared(null);
     try {
       const result=await invoke<NativeInboxInvite>("mesh_inbox_invite_prepare",{targetDeviceId});
@@ -293,11 +345,16 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         throw new Error("invalid_native_inbox_receipt");
       }
       // No Edge call, no auto-trust, no remote job. Only a native public signed draft.
-      setNativeInboxPrepared(targetDeviceId);
-    }catch{setNativeInboxError(true);}
-    finally{setNativeInboxBusy(false);}
+      if(operation===inboxOperation.current)setNativeInboxPrepared(targetDeviceId);
+    }catch{if(operation===inboxOperation.current)setNativeInboxError(true);}
+    finally{if(operation===inboxOperation.current){
+      inboxInFlight.current=false;setNativeInboxBusy(false);
+    }}
   };
   const loadAccountDirectory=async(mode:"list"|"discover"="discover")=>{
+    if(rosterInFlight.current)return;
+    rosterInFlight.current=true;
+    const operation=++rosterOperation.current;
     setDirectoryBusy(true);setDirectoryError(false);setDirectory(null);
     setSelectedDeviceId(null);
     setNativeInboxPrepared(null);setNativeInboxError(false);setNativeInboxSent(null);setRecipientInbox(null);setRecipientDecision(null);
@@ -313,9 +370,11 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
            !["macos","windows","linux"].includes(d.platformOs)||
            !["discovered","pending","trusted","revoked"].includes(d.membershipState)))
         throw new Error("invalid_directory_contract");
-      setDirectory(roster);
-    }catch{setDirectoryError(true);}
-    finally{setDirectoryBusy(false);}
+      if(operation===rosterOperation.current)setDirectory(roster);
+    }catch{if(operation===rosterOperation.current)setDirectoryError(true);}
+    finally{if(operation===rosterOperation.current){
+      rosterInFlight.current=false;setDirectoryBusy(false);
+    }}
   };
   const startConnectionGuide=()=>{
     setGuideOpen(true);
@@ -493,8 +552,16 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     // A status refresh is deliberately read-only: do NOT invoke
     // mesh_account_device_discover (which registers the local device).
     // Old discovered roster rows must not look freshly verified.
+    // Any response started before this refresh must not revive an old
+    // account's roster, pending send or incoming invitations.
+    rosterOperation.current++;rosterInFlight.current=false;
+    inboxOperation.current++;inboxInFlight.current=false;
+    recipientOperation.current++;recipientInFlight.current=false;
     setDirectory(null);
     setSelectedDeviceId(null);
+    setNativeInboxSent(null);setNativeInboxPrepared(null);
+    setRecipientInbox(null);setRecipientDecision(null);
+    setDirectoryBusy(false);setNativeInboxBusy(false);setRecipientBusy(false);
     setGuideOpen(false);
     setDirectoryError(false);
     void refresh();
@@ -594,7 +661,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         {selectedDevice.membershipState==="discovered"&&qaAuthEnabled?
           inboxSendEnabled?
             <button type="button" className="primary compact-button"
-              disabled={nativeInboxBusy||directoryBusy||recipientBusy}
+              disabled={nativeInboxBusy||directoryBusy||recipientBusy||
+                nativeInboxSent===selectedDevice.deviceId}
               onClick={()=>void sendNativeInbox(selectedDevice.deviceId)}>{t("mesh.inbox.send")}</button>:
             <button type="button" className="ghost compact-button"
               disabled={nativeInboxBusy||directoryBusy||recipientBusy}
