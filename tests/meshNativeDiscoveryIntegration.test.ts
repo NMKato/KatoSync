@@ -8,7 +8,11 @@ const identity=read("../src-tauri/src/mesh_identity.rs");
 const registry=read("../src-tauri/src/mesh_directory.rs");
 const root=read("../src-tauri/src/lib.rs");
 test("Scan uses native signed discovery; not an implicit login side effect",()=>{
- assert.ok(ui.includes('invoke<MeshAccountDirectory>("mesh_account_device_discover")'));
+ assert.ok(ui.includes('mode==="list"?"mesh_account_devices_list":"mesh_account_device_discover"'));
+ assert.match(ui,/if\(!directory&&!directoryBusy\)void loadAccountDirectory\("list"\)/);
+ assert.match(ui,/void loadAccountDirectory\("discover"\)/);
+ assert.match(ui,/onClick=\{discoverDevices\}/);
+ assert.match(ui,/onClick=\{startConnectionGuide\}/);
  assert.ok(native.includes("pub async fn mesh_account_device_discover"));
  assert.ok(root.includes("mesh_enrollment_client::mesh_account_device_discover,"));
  assert.ok(native.includes('cfg!(feature = "katoos-auth-qa")'));

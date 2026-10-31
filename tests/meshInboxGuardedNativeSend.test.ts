@@ -20,10 +20,12 @@ test("send command is native, deny-by-default, and requires two independent gate
 });
 test("user click is explicit and never piggybacks on prepare or discovery",()=>{
  assert.match(ui,/VITE_MESH_INBOX_SEND_QA==="1"/);
- assert.match(ui,/onClick=\{\(\)=>void sendNativeInbox\(device\.deviceId\)\}/);
+ assert.match(ui,/onClick=\{\(\)=>void sendNativeInbox\(selectedDevice\.deviceId\)\}/);
  assert.match(ui,/invoke<MeshInboxSentReceipt>\("mesh_inbox_invite_send"/);
  assert.match(ui,/setNativeInboxPrepared\(targetDeviceId\)/);
  assert.match(ui,/result\.deliveryOnly!==true/);
+ assert.match(ui,/inboxSendEnabled\?/);
+ assert.match(ui,/selectedDevice\.membershipState==="discovered"&&qaAuthEnabled/);
  assert.match(ui,/result\.paired!==false/);
  assert.match(ui,/result\.remoteJobsEnabled!==false/);
  assert.match(ui,/mesh\.inbox\.noTrust/);
