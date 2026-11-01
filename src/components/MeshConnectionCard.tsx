@@ -33,6 +33,18 @@ type MeshLocalReadiness = {
   crossDeviceWrites: boolean;
 };
 
+type MeshNativeIssuerReadiness = {
+  protocol:"mesh-native-issuer-boundary-v1";
+  compiledIssuer:"katoos_shared_qa"|"katosync_legacy"|"unknown_fail_closed";
+  isolatedPreviewSession:"independent_login_required";
+  currentSessionReusableForPreview:false;
+  previewTokenStoreIsolated:false;
+  previewCloudProbeEnabled:false;
+  onlinePreviewVerified:false;
+  devicePairingEnabled:false;
+  remoteJobsEnabled:false;
+};
+
 type MeshHubPreference = {
   preferred: boolean;
   hubActive: false;
@@ -191,6 +203,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
 
   const [reauthOpen,setReauthOpen]=useState(false);
   const [snapshot,setSnapshot]=useState<MeshLocalReadiness|null>(null);
+  const [issuerSnapshot,setIssuerSnapshot]=useState<MeshNativeIssuerReadiness|null>(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(false);
   const [identity,setIdentity]=useState<MeshIdentityStatus|null>(null);
@@ -731,19 +744,32 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     try {
       if(!window.__TAURI_INTERNALS__) {
         setSnapshot(null);
+        setIssuerSnapshot(null);
         setError(false);
         return;
       }
-      const actual=await invoke<MeshLocalReadiness>("mesh_local_readiness");
+      const [actual,issuer]=await Promise.all([
+        invoke<MeshLocalReadiness>("mesh_local_readiness"),
+        invoke<MeshNativeIssuerReadiness>("mesh_native_issuer_readiness").catch(()=>null)
+      ]);
       if(actual.protocol!=="mesh-readonly-v0" || actual.deviceIdentity!=="not_paired" ||
         actual.peerTransport!=="not_connected" || actual.verifiedPeers!==0 ||
         actual.remoteReadOnlyDispatch || actual.crossDeviceWrites) {
         throw new Error("unexpected_mesh_security_contract");
       }
+      const issuerValid=issuer?.protocol==="mesh-native-issuer-boundary-v1"&&
+        issuer.isolatedPreviewSession==="independent_login_required"&&
+        issuer.currentSessionReusableForPreview===false&&
+        issuer.previewTokenStoreIsolated===false&&
+        issuer.previewCloudProbeEnabled===false&&
+        issuer.onlinePreviewVerified===false&&
+        issuer.devicePairingEnabled===false&&issuer.remoteJobsEnabled===false;
+      setIssuerSnapshot(issuerValid?issuer:null);
       setSnapshot(actual);
       setError(false);
     } catch {
       setSnapshot(null);
+      setIssuerSnapshot(null);
       setError(true);
     } finally {setLoading(false);}
   },[]);
@@ -989,6 +1015,12 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <span>{t("mesh.v0.title")} · {snapshot?(snapshot.platform+" · "+snapshot.architecture):t("mesh.v0.localUnknown")}</span>
         <span>{t("mesh.v0.control")}: {t(("mesh.v0."+readiness) as TKey)}</span>
         <span>{t("mesh.v0.notPaired")} · {t("mesh.v0.noDispatch")}</span>
+        <strong>{t("mesh.issuer.title")}</strong>
+        <span>{issuerSnapshot?
+          t(issuerSnapshot.compiledIssuer==="katoos_shared_qa"?"mesh.issuer.shared":
+            issuerSnapshot.compiledIssuer==="katosync_legacy"?"mesh.issuer.legacy":"mesh.issuer.unknown"):
+          t("mesh.issuer.olderBuild")}</span>
+        <small>{t("mesh.issuer.separateLogin")}</small>
         <span>{t("mesh.simple.qualityUnknown")} · {t("mesh.simple.uptimeUnknown")}</span>
         <small>{error?t("mesh.v0.unavailable"):t("mesh.v0.trustBoundary")}</small>
         <button type="button" className="ghost compact-button"
