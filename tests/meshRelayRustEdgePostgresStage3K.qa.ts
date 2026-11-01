@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
 import {readFileSync} from "node:fs";
 import {handleMeshPairingRelay} from "../supabase/functions/mesh-pairing-relay/relay.ts";
+import {startStage3LLoopbackGateway} from "./meshStage3LLoopbackGateway.qa.ts";
 
 const SOCK=process.env.KATOSYNC_MESH_E2E_SOCKET??"";
 const PORT=process.env.KATOSYNC_MESH_E2E_PORT??"";
@@ -160,47 +161,75 @@ function backend(){
  };
  return {request:request as typeof fetch,counts};
 }
-function req(action:"send"|"list",payload:unknown){
+function req(action:"send"|"list",payload:unknown,
+ bearer="Bearer purely-synthetic-bearer-00000000000000000"){
  return new Request("https://local-qa.invalid/edge",{method:"POST",headers:{
-  authorization:"Bearer purely-synthetic-bearer-00000000000000000",
+  authorization:bearer,
   "content-type":"application/json"},body:JSON.stringify({action,payload})});
 }
 test("Rust-signed B->A Challenge and A->B Response pass real Edge+PostgreSQL",async()=>{
  putFixtureInLocalDb();
  const b=backend();
- const premature=await handleMeshPairingRelay(req("send",f.response),env,b.request);
+ const stage3l=process.env.KATOSYNC_STAGE3L_LOOPBACK==="SIGNED_LOCAL_ONLY";
+ const gateway=stage3l?await startStage3LLoopbackGateway(b.request,ORIGIN,OWNER):null;
+ const transport=gateway?.request??b.request;
+ const signedBearer=gateway?"Bearer "+gateway.tokenFor(OWNER):undefined;
+ const call=(action:"send"|"list",payload:unknown,bearer=signedBearer)=>
+  handleMeshPairingRelay(req(action,payload,bearer),env,transport);
+ try{
+ if(gateway){
+  const token=gateway.tokenFor(OWNER);
+  const corrupt=token.slice(0,-2)+(token.endsWith("AA")?"BB":"AA");
+  let denied=await call("send",f.challenge,"Bearer "+corrupt);
+  assert.equal(denied.status,401,"tampered synthetic JWT must be rejected");
+  denied=await call("send",f.challenge,"Bearer "+gateway.tokenFor(OWNER,-5));
+  assert.equal(denied.status,401,"expired synthetic JWT must be rejected");
+  denied=await call("send",f.challenge,"Bearer "+gateway.tokenFor("99999999-9999-4999-8999-999999999999"));
+  assert.equal(denied.status,503,"JWT for another owner must fail closed at membership gate");
+  const unprivileged=await fetch(gateway.listener+"/rest/v1/mesh_devices");
+  assert.equal(unprivileged.status,403,"local REST requires isolated service authorization");
+  const outside=await fetch(gateway.listener+"/unexpected-route");
+  assert.equal(outside.status,404,"unexpected paths must never reach SQL");
+  assert.equal(b.counts.sqlWrites,0,"invalid session must cause zero SQL writes");
+ }
+ const premature=await call("send",f.response);
  assert.equal(premature.status,503,"database must prevent Response before Challenge");
- let result=await handleMeshPairingRelay(req("send",f.challenge),env,b.request);
+ let result=await call("send",f.challenge);
  assert.equal(result.status,202,JSON.stringify(await result.clone().json()));
  assert.equal((await result.json()).paired,false);
- result=await handleMeshPairingRelay(req("list",f.listInitiator),env,b.request);
+ result=await call("list",f.listInitiator);
  assert.equal(result.status,200,JSON.stringify(await result.clone().json()));
  assert.deepEqual((await result.json()).messages,[f.challenge]);
- result=await handleMeshPairingRelay(req("send",f.response),env,b.request);
+ result=await call("send",f.response);
  assert.equal(result.status,202,JSON.stringify(await result.clone().json()));
- result=await handleMeshPairingRelay(req("list",f.listRecipient),env,b.request);
+ result=await call("list",f.listRecipient);
  assert.equal(result.status,200,JSON.stringify(await result.clone().json()));
  const payload=await result.json();
  assert.deepEqual(payload.messages,[f.response]);
  assert.deepEqual([payload.paired,payload.transportReady,payload.remoteJobsEnabled],[false,false,false]);
- result=await handleMeshPairingRelay(req("list",f.listInitiator),env,b.request);
+ result=await call("list",f.listInitiator);
  assert.equal(result.status,409,"SQL must deny repeated signed-read nonce");
- result=await handleMeshPairingRelay(req("send",
-  {...f.challenge,signature:"A".repeat(86)}),env,b.request);
+ result=await call("send", {...f.challenge,signature:"A".repeat(86)});
  assert.equal(result.status,403,"Edge must deny forged Rust envelope");
  // Live SQL device state (not a mock flag) must cause Edge to fail closed.
  pg("UPDATE katosync.mesh_devices SET membership_state='revoked',revoked_at=now() "+
   "WHERE device_id='"+id(f.targetDeviceId)+"'");
- result=await handleMeshPairingRelay(req("send",f.response),env,b.request);
+ result=await call("send",f.response);
  assert.equal(result.status,403,"revoked recipient cannot send or receive new relay data");
  assert.deepEqual(pg("SELECT json_build_object("+
   "'messages',(select count(*) from katosync.mesh_pairing_relay_messages),"+
   "'proofs',(select count(*) from katosync.mesh_pairing_relay_reads),"+
   "'trusted',(select count(*) from katosync.mesh_devices where membership_state='trusted'))"),
   {messages:2,proofs:2,trusted:0});
- assert.ok(b.counts.auth>=6);
+ if(gateway){
+  assert.ok(gateway.counts.http>=8);
+  assert.ok(gateway.counts.authDenied>=2);
+  assert.ok(gateway.counts.dbCalls>=7);
+ }else assert.ok(b.counts.auth>=6);
  assert.equal(b.counts.sqlWrites,3);
  assert.equal(b.counts.sqlReads,2);
  assert.equal(b.counts.proofs,3);
- console.log("STAGE3K_RUST_EDGE_REAL_POSTGRES_PASS");
+ console.log(stage3l?"STAGE3L_SIGNED_JWT_LOOPBACK_EDGE_POSTGRES_PASS":
+  "STAGE3K_RUST_EDGE_REAL_POSTGRES_PASS");
+ }finally{if(gateway)await gateway.close();}
 });
