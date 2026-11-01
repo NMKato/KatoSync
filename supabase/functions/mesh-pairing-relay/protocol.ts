@@ -30,9 +30,9 @@ async function signatureValid(publicKey:string,sig:string,payload:string):Promis
   return await crypto.subtle.verify("Ed25519",key,signature,enc.encode(payload));
  }catch{return false;}
 }
-export async function accountScope(owner:string):Promise<string>{
- if(!UUID.test(owner))throw Error("owner");
- return hash("katosync-mesh-v1-account-scope:"+ORIGIN+":"+owner);
+export async function accountScope(owner:string,origin=ORIGIN):Promise<string>{
+ if(!UUID.test(owner)||!(origin===ORIGIN||/^https:\/\/[a-z0-9]{20}\.supabase\.co$/.test(origin)))throw Error("owner_or_origin");
+ return hash("katosync-mesh-v1-account-scope:"+origin+":"+owner);
 }
 function validOffer(v:unknown):v is Offer{
  const o=obj(v);
@@ -75,15 +75,17 @@ export function parseRelayListProof(v:unknown):RelayListProof|null{
   typeof p.expiresAt!=="number"||!Number.isSafeInteger(p.expiresAt))return null;
  return p as RelayListProof;
 }
-export async function verifyRelayListProof(p:RelayListProof,owner:string,key:string,now=Date.now()):Promise<boolean>{
- return p.expiresAt*1000>now+1000&&p.expiresAt*1000<=now+90000&&
+export async function verifyRelayListProof(p:RelayListProof,owner:string,key:string,now=Date.now(),origin=ORIGIN):Promise<boolean>{
+ // Protocol v1 signed read lacks tenant origin. Refuse preview reads until
+ // native v2 signing includes the origin, preventing cloned-tenant replay.
+ return origin===ORIGIN&&p.expiresAt*1000>now+1000&&p.expiresAt*1000<=now+90000&&
  signatureValid(key,p.signature,[p.protocol,owner,p.deviceId,p.nonce,String(p.expiresAt)].join("|"));
 }
 // Validates the OUTER sender signature, ORIGINAL signed offer, and INNER
 // Ed25519 challenge/response. JSON field order is protocol-v1 canonical:
 // supplied by the existing Rust MeshOffer/PairingChallenge struct serializers.
 export async function verifyRelayEnvelope(
- p:RelayEnvelope,owner:string,sourceKey:string,targetKey:string,invite:RelayInvite,now=Date.now()
+ p:RelayEnvelope,owner:string,sourceKey:string,targetKey:string,invite:RelayInvite,now=Date.now(),origin=ORIGIN
 ):Promise<boolean>{
  try{
   if(!UUID.test(owner)||!B43.test(sourceKey)||!B43.test(targetKey)||sourceKey===targetKey||
@@ -92,7 +94,7 @@ export async function verifyRelayEnvelope(
   const o=invite.signed_offer,until=Date.parse(invite.expires_at);
   if(!Number.isFinite(until)||until<=now||o.expiresAt*1000!==until||
    p.expiresAt*1000<=now+1000||p.expiresAt*1000>until||p.expiresAt*1000>now+310000||
-   o.accountScope!==await accountScope(owner)||o.publicKey!==sourceKey)return false;
+   o.accountScope!==await accountScope(owner,origin)||o.publicKey!==sourceKey)return false;
   const from=p.kind==="challenge"?invite.target_device_id:invite.source_device_id;
   const to=p.kind==="challenge"?invite.source_device_id:invite.target_device_id;
   const signer=p.kind==="challenge"?targetKey:sourceKey;

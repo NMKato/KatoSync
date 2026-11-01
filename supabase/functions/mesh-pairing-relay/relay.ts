@@ -1,9 +1,10 @@
 // NMKato Solutions – Stage 3H: STAGED Edge relay, disabled by default.
 // Public Ed25519 challenge/response messages only. No SAS approval/trust/TLS.
 import {requireKatoSyncMembership} from "../mesh-device-enrollment/membership-gate.ts";
+import {resolveMeshRelayOrigin} from "./origin-gate.ts";
 import {parseRelayEnvelope,parseRelayListProof,verifyRelayEnvelope,
  verifyRelayListProof,type RelayEnvelope,type RelayListProof,type RelayInvite} from "./protocol.ts";
-const ORIGIN="https://xbnnlyyxiilklsygxcof.supabase.co",SCHEMA="katosync";
+const SCHEMA="katosync";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEAD={"content-type":"application/json","cache-control":"no-store"};
 const fail=(status:number,error:string)=>Response.json({error},{status,headers:HEAD});
@@ -22,9 +23,9 @@ async function records(url:URL,e:Env,request:typeof fetch,limit:number):Promise<
  const val=JSON.parse(bytes) as unknown;
  return Array.isArray(val)&&val.length<=limit?val:null;
 }
-async function devices(owner:string,ids:string[],e:Env,request:typeof fetch):Promise<Map<string,string>|null>{
+async function devices(owner:string,ids:string[],e:Env,request:typeof fetch,origin:string):Promise<Map<string,string>|null>{
  if(ids.length<1||ids.length>2||new Set(ids).size!==ids.length||!ids.every(x=>UUID.test(x)))return null;
- const url=new URL(ORIGIN+"/rest/v1/mesh_devices");
+ const url=new URL(origin+"/rest/v1/mesh_devices");
  url.searchParams.set("select","device_id,owner_user_id,signing_public_key,membership_state,revoked_at");
  url.searchParams.set("owner_user_id","eq."+owner);
  url.searchParams.set("device_id","in.("+ids.join(",")+")");
@@ -43,9 +44,9 @@ async function devices(owner:string,ids:string[],e:Env,request:typeof fetch):Pro
  if(new Set(mapped.values()).size!==mapped.size)return null;
  return mapped;
 }
-async function invite(owner:string,id:string,e:Env,request:typeof fetch):Promise<RelayInvite|null>{
+async function invite(owner:string,id:string,e:Env,request:typeof fetch,origin:string):Promise<RelayInvite|null>{
  if(!UUID.test(id))return null;
- const url=new URL(ORIGIN+"/rest/v1/mesh_invites");
+ const url=new URL(origin+"/rest/v1/mesh_invites");
  url.searchParams.set("select","request_id,owner_user_id,source_device_id,target_device_id,state,expires_at,signed_offer");
  url.searchParams.set("owner_user_id","eq."+owner);
  url.searchParams.set("request_id","eq."+id);
@@ -70,7 +71,8 @@ function toEnvelope(row:Row):RelayEnvelope|null{
 }
 export async function handleMeshPairingRelay(req:Request,e:Env,request:typeof fetch=fetch):Promise<Response>{
  if(req.method!=="POST")return fail(405,"METHOD_NOT_ALLOWED");
- if(e.KATOSYNC_MESH_PAIRING_RELAY_STAGE!=="qa-relay"||e.SUPABASE_URL!==ORIGIN||
+ const origin=resolveMeshRelayOrigin(e);
+ if(e.KATOSYNC_MESH_PAIRING_RELAY_STAGE!=="qa-relay"||!origin||
   !e.SUPABASE_ANON_KEY||!e.SUPABASE_SERVICE_ROLE_KEY)return fail(503,"RELAY_NOT_CONFIGURED");
  const bearer=req.headers.get("authorization")??"";
  if(!/^Bearer [A-Za-z0-9_.-]{30,8192}$/.test(bearer))return fail(401,"LOGIN_REQUIRED");
@@ -89,28 +91,28 @@ export async function handleMeshPairingRelay(req:Request,e:Env,request:typeof fe
   else return fail(400,"BAD_ACTION");
  }catch{return fail(400,"BAD_REQUEST");}
  try{
-  const auth=await request(ORIGIN+"/auth/v1/user",{headers:{Authorization:bearer,apikey:e.SUPABASE_ANON_KEY},
+  const auth=await request(origin+"/auth/v1/user",{headers:{Authorization:bearer,apikey:e.SUPABASE_ANON_KEY},
    signal:AbortSignal.timeout(8000)});
   if(!auth.ok)return fail(401,"LOGIN_REQUIRED");
   const user=await auth.json() as {id?:unknown;is_anonymous?:unknown};
   if(typeof user.id!=="string"||!UUID.test(user.id)||user.is_anonymous===true)return fail(401,"LOGIN_REQUIRED");
   const owner=user.id;
-  const membership=await requireKatoSyncMembership(owner,service(e),request);
+  const membership=await requireKatoSyncMembership(owner,service(e),request,origin);
   if(membership!=="active")return fail(membership==="not_member"?403:503,
    membership==="not_member"?"MEMBERSHIP_REQUIRED":"MEMBERSHIP_UNAVAILABLE");
   if(action==="send"){
    const msg=payload as RelayEnvelope;
-   const inv=await invite(owner,msg.requestId,e,request);
+   const inv=await invite(owner,msg.requestId,e,request,origin);
    if(!inv)return fail(403,"INVITE_NOT_ELIGIBLE");
-   const roster=await devices(owner,[inv.source_device_id,inv.target_device_id],e,request);
+   const roster=await devices(owner,[inv.source_device_id,inv.target_device_id],e,request,origin);
    if(!roster)return fail(403,"DEVICE_NOT_ELIGIBLE");
    if(!await verifyRelayEnvelope(msg,owner,roster.get(inv.source_device_id)??"",
-    roster.get(inv.target_device_id)??"",inv))return fail(403,"INVALID_DEVICE_SIGNATURE");
+    roster.get(inv.target_device_id)??"",inv,Date.now(),origin))return fail(403,"INVALID_DEVICE_SIGNATURE");
    // Membership and expired invitations must still be valid immediately before INSERT.
-   if(await requireKatoSyncMembership(owner,service(e),request)!=="active"||
+   if(await requireKatoSyncMembership(owner,service(e),request,origin)!=="active"||
     Date.parse(inv.expires_at)<=Date.now()||msg.expiresAt*1000<=Date.now())
     return fail(403,"RELAY_NO_LONGER_AUTHORIZED");
-   const inserted=await request(ORIGIN+"/rest/v1/mesh_pairing_relay_messages",{
+   const inserted=await request(origin+"/rest/v1/mesh_pairing_relay_messages",{
     method:"POST",headers:jsonHead(e),body:JSON.stringify({
      owner_user_id:owner,request_id:msg.requestId,sender_device_id:msg.senderDeviceId,
      recipient_device_id:msg.recipientDeviceId,kind:msg.kind,payload_b64:msg.payloadB64,
@@ -128,11 +130,11 @@ export async function handleMeshPairingRelay(req:Request,e:Env,request:typeof fe
     transportReady:false,remoteJobsEnabled:false},{status:202,headers:HEAD});
   }
   const proof=payload as RelayListProof;
-  const registered=await devices(owner,[proof.deviceId],e,request);
-  if(!registered||!await verifyRelayListProof(proof,owner,registered.get(proof.deviceId)??""))
+  const registered=await devices(owner,[proof.deviceId],e,request,origin);
+  if(!registered||!await verifyRelayListProof(proof,owner,registered.get(proof.deviceId)??"",Date.now(),origin))
    return fail(403,"INVALID_DEVICE_PROOF");
   // Atomic nonce replay defense. No direct authenticated SQL access.
-  const used=await request(ORIGIN+"/rest/v1/mesh_pairing_relay_reads",{
+  const used=await request(origin+"/rest/v1/mesh_pairing_relay_reads",{
    method:"POST",headers:jsonHead(e),body:JSON.stringify({owner_user_id:owner,
     device_id:proof.deviceId,nonce:proof.nonce,expires_at:new Date(proof.expiresAt*1000).toISOString()
    }),signal:AbortSignal.timeout(8000)});
@@ -144,9 +146,9 @@ export async function handleMeshPairingRelay(req:Request,e:Env,request:typeof fe
    Date.parse(String(readRows[0].expires_at))!==proof.expiresAt*1000)
    return fail(503,"READ_PROOF_UNCONFIRMED");
   if(proof.expiresAt*1000<=Date.now()||
-   await requireKatoSyncMembership(owner,service(e),request)!=="active")
+   await requireKatoSyncMembership(owner,service(e),request,origin)!=="active")
    return fail(403,"RELAY_NO_LONGER_AUTHORIZED");
-  const url=new URL(ORIGIN+"/rest/v1/mesh_pairing_relay_messages");
+  const url=new URL(origin+"/rest/v1/mesh_pairing_relay_messages");
   url.searchParams.set("select","message_id,owner_user_id,request_id,sender_device_id,recipient_device_id,kind,payload_b64,nonce,signature,expires_at");
   url.searchParams.set("owner_user_id","eq."+owner);
   url.searchParams.set("recipient_device_id","eq."+proof.deviceId);
@@ -162,11 +164,11 @@ export async function handleMeshPairingRelay(req:Request,e:Env,request:typeof fe
    if(!env||row.owner_user_id!==owner||env.recipientDeviceId!==proof.deviceId||
     seen.has(row.message_id))return fail(503,"RELAY_INVALID_RECORD");
    seen.add(row.message_id);
-   const inv=await invite(owner,env.requestId,e,request);
+   const inv=await invite(owner,env.requestId,e,request,origin);
    if(!inv)return fail(503,"RELAY_INVALID_RECORD");
-   const roster=await devices(owner,[inv.source_device_id,inv.target_device_id],e,request);
+   const roster=await devices(owner,[inv.source_device_id,inv.target_device_id],e,request,origin);
    if(!roster||!await verifyRelayEnvelope(env,owner,roster.get(inv.source_device_id)??"",
-    roster.get(inv.target_device_id)??"",inv))return fail(503,"RELAY_INVALID_SIGNATURE");
+    roster.get(inv.target_device_id)??"",inv,Date.now(),origin))return fail(503,"RELAY_INVALID_SIGNATURE");
    verified.push(env);
   }
   if(proof.expiresAt*1000<=Date.now())return fail(409,"PROOF_EXPIRED");
