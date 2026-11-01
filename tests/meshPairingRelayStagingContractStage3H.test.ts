@@ -5,15 +5,18 @@ import {readFileSync} from "node:fs";
 const load=(p:string)=>readFileSync(new URL(p,import.meta.url),"utf8");
 const edge=load("../supabase/functions/mesh-pairing-relay/relay.ts");
 const entry=load("../supabase/functions/mesh-pairing-relay/index.ts");
+const originGate=load("../supabase/functions/mesh-pairing-relay/origin-gate.ts");
 const sql=load("../supabase/migrations/20261031213900_mesh_pairing_relay_staged.sql");
 const runner=load("../scripts/qa-mesh-postgres-local.sh");
 const fixture=load("sql/mesh_pairing_relay_qa.sql");
 const inboxRollout=load("../scripts/qa-mesh-inbox-rollout-gate.mjs");
-test("new relay only runs with exact QA stage, verified live issuer and active membership",()=>{
+test("relay requires exact QA stage, verified tenant origin and active membership",()=>{
  assert.match(edge,/KATOSYNC_MESH_PAIRING_RELAY_STAGE!=="qa-relay"/);
- assert.match(edge,/SUPABASE_URL!==ORIGIN/);
+ assert.match(edge,/resolveMeshRelayOrigin\(e\)/);
+ assert.match(originGate,/MESH_LIVE_ORIGIN/);
+ assert.match(originGate,/isolated-preview-only/);
  assert.match(edge,/\/auth\/v1\/user/);
- assert.match(edge,/requireKatoSyncMembership\(owner,service\(e\),request\)/);
+ assert.match(edge,/requireKatoSyncMembership\(owner,service\(e\),request,origin\)/);
  assert.match(edge,/verifyRelayEnvelope\(msg,owner/);
  assert.match(edge,/verifyRelayListProof\(proof,owner/);
  assert.match(edge,/RELAY_ALREADY_SENT/);
