@@ -245,3 +245,7 @@ Keine Secrets, Kennwörter, privaten Pfade, Tokens, Nutzerkennungen oder interne
 ## Stage 3O – QA-Readiness, 01.11.2026
 
 Eigenständige lesende Preview-Prüfung für Authentifizierung, Mitgliedschaft und sieben Enrollment-/Inbox-/Relay-Tabellen. Produktive, SHA-gepinnte Funktionsquellen bleiben unverändert. 7/7 neue und 23/23 kombinierte lokale Tests bestanden. Die Cloud- und Geräteabnahme ist noch offen. Siehe `docs/KATOSYNC_MESH_STAGE3O_PREVIEW_READINESS_2026-11-01.md`.
+
+## Stage 3P – Mandantengebundener Enrollment-Nachweis
+
+Der neue QA-Vertrag signiert auch Supabase-Origin und Geräte-Metadaten. Rust-Test und 27 lokale Regressionen bestanden. Keine produktive Gerätekopplung. Details unter `docs/KATOSYNC_MESH_STAGE3P_ENROLLMENT_ORIGIN_PROOF_2026-11-01.md`.

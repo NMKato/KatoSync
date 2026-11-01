@@ -419,6 +419,40 @@ mod tests {
             transport_ready: false,
         }
     }
+    // Stage 3P: public-only synthetic fixture for native Rust -> Edge QA.
+    #[test]
+    fn qa_emit_stage3p_origin_bound_enrollment_v2_fixture() {
+        let owner = OWNER;
+        let origin = "https://abcdefghijklmnopqrst.supabase.co";
+        let now = 2_000_000_000_i64;
+        let key = signing(55);
+        let challenge = fake_enrollment(&key, now + 75);
+        let device_name = "KatoSync QA Mac M2";
+        let platform_os = "macos";
+        let millis = (now + 75) * 1000;
+        let signed = [
+            "katosync-mesh-device-enrollment-proof-v2",
+            owner,
+            origin,
+            &challenge.challenge_id,
+            &challenge.nonce,
+            &challenge.public_key,
+            &millis.to_string(),
+            device_name,
+            platform_os,
+        ]
+        .join("\n");
+        let signature = URL_SAFE_NO_PAD.encode(key.sign(signed.as_bytes()).to_bytes());
+        let fixture = serde_json::json!({
+            "fixtureOnly":true,"generatedBy":"rust-ed25519-serde-test",
+            "owner":owner,"origin":origin,"nowMs":(now+2)*1000,
+            "proof":{"protocol":"katosync-mesh-enrollment-proof-v2",
+                "challengeId":challenge.challenge_id,"origin":origin,"nonce":challenge.nonce,
+                "publicKey":challenge.public_key,"expiresAt":challenge.expires_at,
+                "signature":signature,"deviceName":device_name,"platformOs":platform_os}
+        });
+        println!("KATOSYNC_STAGE3P_RUST_V2_PROOF={fixture}");
+    }
     #[test]
     fn enrollment_proof_is_domain_separated_and_never_grants_trust() {
         let key = signing(7);
