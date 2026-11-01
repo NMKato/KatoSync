@@ -45,11 +45,19 @@ export async function startStage3LLoopbackGateway(
   try{
    const [header,payload,signature,...tail]=jwt.split(".");
    if(tail.length||!header||!payload||!signature)return null;
-   const h=JSON.parse(Buffer.from(header,"base64url").toString("utf8"));
+   const hBytes=Buffer.from(header,"base64url");
+   const pBytes=Buffer.from(payload,"base64url");
+   const actual=Buffer.from(signature,"base64url");
+   // Reject alternate textual encodings of the same bytes. JWT signatures
+   // have unused trailing Base64URL bits that must be canonicalized.
+   if(hBytes.toString("base64url")!==header||
+      pBytes.toString("base64url")!==payload||
+      actual.toString("base64url")!==signature)return null;
+   const h=JSON.parse(hBytes.toString("utf8"));
    if(h.alg!=="HS256"||h.typ!=="JWT")return null;
-   const expected=signed(header+"."+payload),actual=Buffer.from(signature,"base64url");
+   const expected=signed(header+"."+payload);
    if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return null;
-   const claims=JSON.parse(Buffer.from(payload,"base64url").toString("utf8")) as Claims;
+   const claims=JSON.parse(pBytes.toString("utf8")) as Claims;
    const now=Math.floor(Date.now()/1000);
    if(claims.iss!==ISSUER||claims.aud!=="authenticated"||claims.role!=="authenticated"||
     !/^[0-9a-f-]{36}$/.test(claims.sub)||claims.session_id!=="stage3l-loopback-session"||
