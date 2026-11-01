@@ -320,6 +320,57 @@ pub async fn mesh_inbox_invite_send(
 mod tests {
     use super::*;
     use ed25519_dalek::{Signature, Verifier};
+    #[test]
+    fn qa_emit_stage3q_tenant_bound_inbox_v2_fixture() {
+        use sha2::{Digest, Sha256};
+        let owner = "11111111-1111-4111-8111-111111111111";
+        let origin = "https://abcdefghijklmnopqrst.supabase.co";
+        let now = 2_000_000_000i64;
+        let sender = SigningKey::from_bytes(&[33u8; 32]);
+        let recipient = SigningKey::from_bytes(&[34u8; 32]);
+        let source = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let target = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        let scope_raw = format!("katosync-mesh-v1-account-scope:{origin}:{owner}");
+        let scope = URL_SAFE_NO_PAD.encode(Sha256::digest(scope_raw.as_bytes()));
+        let mut offer = MeshOffer {
+            protocol: "katosync-mesh-pairing-v1".into(),
+            public_key: URL_SAFE_NO_PAD.encode(sender.verifying_key().as_bytes()),
+            nonce: URL_SAFE_NO_PAD.encode([3u8; 32]),
+            expires_at: now + 245,
+            account_scope: scope,
+            signature: String::new(),
+        };
+        let offer_preimage = format!(
+            "{}|{}|{}|{}|{}",
+            offer.protocol, offer.account_scope, offer.public_key, offer.nonce, offer.expires_at
+        );
+        offer.signature = URL_SAFE_NO_PAD.encode(sender.sign(offer_preimage.as_bytes()).to_bytes());
+        let dispatch_preimage = format!(
+            "katosync-mesh-inbox-send-v2|{owner}|{origin}|{source}|{target}|{}|{}|{}|{}",
+            offer.account_scope, offer.public_key, offer.nonce, offer.expires_at
+        );
+        let dispatch = URL_SAFE_NO_PAD.encode(sender.sign(dispatch_preimage.as_bytes()).to_bytes());
+        let action = "list";
+        let sentinel = Uuid::parse_str("00000000-0000-4000-8000-000000000000").unwrap();
+        let recipient_nonce = URL_SAFE_NO_PAD.encode([4u8; 32]);
+        let expires = now + 65;
+        let recipient_preimage=format!("katosync-mesh-inbox-recipient-v2|{owner}|{origin}|{target}|{action}|{sentinel}|{recipient_nonce}|{expires}");
+        let recipient_signature =
+            URL_SAFE_NO_PAD.encode(recipient.sign(recipient_preimage.as_bytes()).to_bytes());
+        let fixture = serde_json::json!({
+            "fixtureOnly":true,"generatedBy":"rust-ed25519-serde-test",
+            "owner":owner,"origin":origin,"nowMs":(now+2)*1000,
+            "sourcePublicKey":offer.public_key,
+            "targetPublicKey":URL_SAFE_NO_PAD.encode(recipient.verifying_key().as_bytes()),
+            "send":{"protocol":"katosync-mesh-inbox-send-v2","origin":origin,
+                "sourceDeviceId":source,"targetDeviceId":target,
+                "signedOffer":offer,"dispatchSignature":dispatch},
+            "recipient":{"protocol":"katosync-mesh-inbox-recipient-v2","origin":origin,
+                "deviceId":target,"action":"list","requestId":sentinel,
+                "nonce":recipient_nonce,"expiresAt":expires,"signature":recipient_signature}
+        });
+        println!("KATOSYNC_STAGE3Q_PUBLIC_INBOX_V2={fixture}");
+    }
 
     fn device(id: u8, owner: Uuid, key: &str) -> DeviceRecord {
         DeviceRecord {
