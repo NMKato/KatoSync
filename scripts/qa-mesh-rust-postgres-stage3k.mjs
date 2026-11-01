@@ -12,6 +12,8 @@ const env={};
 for(const k of ["HOME","PATH","TMPDIR","CARGO_HOME","RUSTUP_HOME","CARGO_TARGET_DIR","LANG","LC_ALL"])
  if(process.env[k])env[k]=process.env[k];
 env.KATOSYNC_STAGE3K_FRESH_TEST_TIME="EPHEMERAL_ONLY";
+const stage3l=process.env.KATOSYNC_STAGE3L_LOOPBACK==="SIGNED_LOCAL_ONLY";
+if(stage3l)env.KATOSYNC_STAGE3L_LOOPBACK="SIGNED_LOCAL_ONLY";
 const temp=mkdtempSync(join("/tmp","katosync-stage3k-"));
 chmodSync(temp,0o700);
 const temporaryResourceStubs=[];
@@ -58,10 +60,13 @@ try{
  // It owns the database lifecycle and deletes its temp cluster on exit.
  const sqlOut=run("bash",["scripts/qa-mesh-postgres-local.sh","inbox-relay-rust-e2e"],
   {...env,KATOSYNC_STAGE3K_RUST_FIXTURE:fixture});
- if(!sqlOut.includes("STAGE3K_RUST_EDGE_REAL_POSTGRES_PASS")||
+ if(!sqlOut.includes(stage3l?"STAGE3L_SIGNED_JWT_LOOPBACK_EDGE_POSTGRES_PASS":
+    "STAGE3K_RUST_EDGE_REAL_POSTGRES_PASS")||
     !sqlOut.includes("MESH_QA_ALL_SQL_ASSERTIONS_PASSED"))
   throw Error("STAGE3K_MISSING_SQL_EDGE_E2E_ASSERTIONS");
- console.log("STAGE3K_RUST_EDGE_REAL_POSTGRES_PASS: fresh Rust signed Challenge/Response/read proofs -> Edge handler -> real disposable PostgreSQL; no cloud, trust or device pairing");
+ console.log(stage3l?
+  "STAGE3L_SIGNED_JWT_LOOPBACK_EDGE_POSTGRES_PASS: synthetic signed JWT verified on real loopback HTTP -> unchanged Edge handler -> real disposable PostgreSQL; no Cloud or device trust":
+  "STAGE3K_RUST_EDGE_REAL_POSTGRES_PASS: fresh Rust signed Challenge/Response/read proofs -> Edge handler -> real disposable PostgreSQL; no cloud, trust or device pairing");
 }catch(e){
  console.error("STAGE3K_BLOCKED: "+String(e instanceof Error?e.message:e));
  process.exitCode=1;
