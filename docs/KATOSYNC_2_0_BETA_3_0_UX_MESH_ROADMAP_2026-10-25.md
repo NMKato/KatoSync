@@ -241,3 +241,7 @@ Keine Secrets, Kennwörter, privaten Pfade, Tokens, Nutzerkennungen oder interne
 - Bestandskompatibilität: Produktions-v1 bleibt gültig, Preview-v1 gesperrt. Preview-v2 kann den rein lokalen Edge-Read mit simuliertem JWT/Membership und PostgREST-Adapter bestehen. Dieser Read setzt keinerlei Geräte-Trust, Remote-Jobs oder Transportfreigabe.
 - Ein nur mit `#[cfg(test)]` gebauter Rust/Serde/Ed25519-Signer liefert einen public-only v2-Testnachweis; die native produktive Tauri-Anwendung schaltet **nicht** ungeprüft auf Preview um. Dokumentation `docs/KATOSYNC_MESH_STAGE3N_ORIGIN_BOUND_READ_V2_2026-11-01.md`.
 - Die echten verbleibenden Schritte sind projektgebundenes Inbox-Send/Receive + Enrollment, eine verifizierte native Auth-/Issuer-Bindung, sichere Cloud-Preview mit Kosten-/Restorefreigabe, erst danach echte M2↔M3-SAS-/Keychain-/mTLS-Abnahme. Kein Produktiv-Merge oder Deployment im Rahmen Stage 3N.
+
+## Stage 3O – QA-Readiness, 01.11.2026
+
+Eigenständige lesende Preview-Prüfung für Authentifizierung, Mitgliedschaft und sieben Enrollment-/Inbox-/Relay-Tabellen. Produktive, SHA-gepinnte Funktionsquellen bleiben unverändert. 7/7 neue und 23/23 kombinierte lokale Tests bestanden. Die Cloud- und Geräteabnahme ist noch offen. Siehe `docs/KATOSYNC_MESH_STAGE3O_PREVIEW_READINESS_2026-11-01.md`.
