@@ -1,6 +1,7 @@
 // NMKato Solutions – Stage 3H: relay only; never peer trust or mTLS.
 export const RELAY_PROTOCOL="katosync-mesh-pairing-relay-v1";
 export const RELAY_LIST_PROTOCOL="katosync-mesh-pairing-relay-list-v1";
+export const RELAY_LIST_PROTOCOL_V2="katosync-mesh-pairing-relay-list-v2";
 const ORIGIN="https://xbnnlyyxiilklsygxcof.supabase.co";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const B43=/^[A-Za-z0-9_-]{43}$/,B86=/^[A-Za-z0-9_-]{86}$/;
@@ -8,7 +9,7 @@ const enc=new TextEncoder();
 type Obj=Record<string,unknown>;
 type Offer={protocol:string;publicKey:string;nonce:string;expiresAt:number;accountScope:string;signature:string};
 export type RelayEnvelope={protocol:string;requestId:string;senderDeviceId:string;recipientDeviceId:string;kind:"challenge"|"response";payloadB64:string;nonce:string;expiresAt:number;signature:string};
-export type RelayListProof={protocol:string;deviceId:string;nonce:string;expiresAt:number;signature:string};
+export type RelayListProof={protocol:string;deviceId:string;nonce:string;expiresAt:number;signature:string;origin?:string};
 export type RelayInvite={request_id:string;owner_user_id:string;source_device_id:string;target_device_id:string;state:string;expires_at:string;signed_offer:unknown};
 const obj=(v:unknown):Obj|null=>v&&typeof v==="object"&&!Array.isArray(v)?v as Obj:null;
 const exact=(v:Obj|null,k:string[])=>!!v&&Object.keys(v).length===k.length&&k.every(x=>Object.hasOwn(v,x));
@@ -67,19 +68,32 @@ export function parseRelayEnvelope(v:unknown):RelayEnvelope|null{
  catch{return null;}
  return p as RelayEnvelope;
 }
+// Stage 3N: v2 cryptographically binds Supabase issuer/origin to the signed
+// recipient read. The v1 form is still accepted ONLY on the original tenant.
 export function parseRelayListProof(v:unknown):RelayListProof|null{
- const p=obj(v);
- if(!exact(p,["protocol","deviceId","nonce","expiresAt","signature"])||!p||
-  p.protocol!==RELAY_LIST_PROTOCOL||typeof p.deviceId!=="string"||!UUID.test(p.deviceId)||
+ const p=obj(v),v1=p?.protocol===RELAY_LIST_PROTOCOL,v2=p?.protocol===RELAY_LIST_PROTOCOL_V2;
+ if((!v1&&!v2)||!exact(p,v2?["protocol","deviceId","origin","nonce","expiresAt","signature"]:
+  ["protocol","deviceId","nonce","expiresAt","signature"])||!p||
+  typeof p.deviceId!=="string"||!UUID.test(p.deviceId)||
   typeof p.nonce!=="string"||!B43.test(p.nonce)||typeof p.signature!=="string"||!B86.test(p.signature)||
-  typeof p.expiresAt!=="number"||!Number.isSafeInteger(p.expiresAt))return null;
+  typeof p.expiresAt!=="number"||!Number.isSafeInteger(p.expiresAt)||
+  (v2&&(typeof p.origin!=="string"||!isRelayOrigin(p.origin))))return null;
  return p as RelayListProof;
 }
+const isRelayOrigin=(v:string)=>v===ORIGIN||/^https:\/\/[a-z0-9]{20}\.supabase\.co$/.test(v);
 export async function verifyRelayListProof(p:RelayListProof,owner:string,key:string,now=Date.now(),origin=ORIGIN):Promise<boolean>{
- // Protocol v1 signed read lacks tenant origin. Refuse preview reads until
- // native v2 signing includes the origin, preventing cloned-tenant replay.
- return origin===ORIGIN&&p.expiresAt*1000>now+1000&&p.expiresAt*1000<=now+90000&&
- signatureValid(key,p.signature,[p.protocol,owner,p.deviceId,p.nonce,String(p.expiresAt)].join("|"));
+ if(!UUID.test(owner)||!isRelayOrigin(origin)||p.expiresAt*1000<=now+1000||
+  p.expiresAt*1000>now+90000)return false;
+ if(p.protocol===RELAY_LIST_PROTOCOL){
+  // v1 signature lacks origin; cannot ever authorize a QA-tenant read.
+  return origin===ORIGIN&&p.origin===undefined&&
+    signatureValid(key,p.signature,[p.protocol,owner,p.deviceId,p.nonce,String(p.expiresAt)].join("|"));
+ }
+ if(p.protocol===RELAY_LIST_PROTOCOL_V2){
+  return p.origin===origin&&
+    signatureValid(key,p.signature,[p.protocol,owner,origin,p.deviceId,p.nonce,String(p.expiresAt)].join("|"));
+ }
+ return false;
 }
 // Validates the OUTER sender signature, ORIGINAL signed offer, and INNER
 // Ed25519 challenge/response. JSON field order is protocol-v1 canonical:

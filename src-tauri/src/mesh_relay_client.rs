@@ -14,6 +14,7 @@ use crate::mesh_identity::{existing_identity, same_account_still_verified};
 
 const PROTOCOL: &str = "katosync-mesh-pairing-relay-v1";
 const LIST_PROTOCOL: &str = "katosync-mesh-pairing-relay-list-v1";
+const LIST_PROTOCOL_V2: &str = "katosync-mesh-pairing-relay-list-v2";
 const MAX_PUBLIC_JSON: usize = 8192;
 const MAX_HTTP_BODY: usize = 65_536;
 
@@ -53,6 +54,43 @@ struct ListProof {
     nonce: String,
     expires_at: i64,
     signature: String,
+}
+
+// Stage 3N. A v2 read proof includes the exact Supabase tenant origin in
+// BOTH its serialized fields and the Ed25519 preimage. Never auto-migrate v1.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ListProofV2 {
+    protocol: &'static str,
+    device_id: Uuid,
+    origin: String,
+    nonce: String,
+    expires_at: i64,
+    signature: String,
+}
+
+#[cfg(test)]
+fn signed_list_v2(
+    signing: &SigningKey,
+    uid: &str,
+    origin: &str,
+    own: Uuid,
+    now: i64,
+) -> ListProofV2 {
+    let mut p = ListProofV2 {
+        protocol: LIST_PROTOCOL_V2,
+        device_id: own,
+        origin: origin.to_string(),
+        nonce: nonce(),
+        expires_at: now + 65,
+        signature: String::new(),
+    };
+    let payload = format!(
+        "{}|{}|{}|{}|{}|{}",
+        p.protocol, uid, p.origin, p.device_id, p.nonce, p.expires_at
+    );
+    p.signature = URL_SAFE_NO_PAD.encode(signing.sign(payload.as_bytes()).to_bytes());
+    p
 }
 
 #[derive(Debug, Deserialize)]
@@ -675,6 +713,43 @@ mod tests {
         });
         // Single marker for an explicit, authorized fixture capture by QA script.
         println!("KATOSYNC_STAGE3J_RUST_FIXTURE={}", fixture);
+    }
+
+    /// Stage 3N public-only cross-language fixture: real Rust Ed25519 and
+    /// Serde serialization, but synthetic QA account/device and no Keychain.
+    #[test]
+    fn qa_emit_stage3n_tenant_bound_list_v2_fixture() {
+        let preview = "https://abcdefghijklmnopqrst.supabase.co";
+        let now = 2_000_000_000_i64;
+        let key = SigningKey::from_bytes(&[41u8; 32]);
+        let dev = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let proof = signed_list_v2(&key, OWNER, preview, dev, now);
+        let signed = format!(
+            "{}|{}|{}|{}|{}|{}",
+            proof.protocol, OWNER, preview, dev, proof.nonce, proof.expires_at
+        );
+        let sig_bytes = URL_SAFE_NO_PAD.decode(&proof.signature).unwrap();
+        let sig = Signature::from_slice(&sig_bytes).unwrap();
+        assert!(key.verifying_key().verify(signed.as_bytes(), &sig).is_ok());
+        assert!(key
+            .verifying_key()
+            .verify(
+                signed
+                    .replace(preview, "https://xbnnlyyxiilklsygxcof.supabase.co")
+                    .as_bytes(),
+                &sig
+            )
+            .is_err());
+        let fixture = serde_json::json!({
+            "fixtureOnly":true,
+            "generatedBy":"rust-production-ed25519-dalek-serde",
+            "owner":OWNER,
+            "origin":preview,
+            "nowMs":(now+2)*1000,
+            "publicKey":URL_SAFE_NO_PAD.encode(key.verifying_key().as_bytes()),
+            "readProof":proof
+        });
+        println!("KATOSYNC_STAGE3N_RUST_V2_READ_PROOF={fixture}");
     }
 
     #[test]

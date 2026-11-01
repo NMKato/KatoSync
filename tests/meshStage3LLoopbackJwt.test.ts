@@ -21,6 +21,18 @@ test("Stage 3L synthetic signed-JWT gateway permits only valid auth on HTTP loop
   const raw=gate.tokenFor(OWNER);
   const forged=raw.slice(0,-1)+(raw.endsWith("A")?"B":"A");
   assert.equal((await fetchUser(forged)).status,401);
+  // A 32-byte HMAC has 2 unused bits in its last Base64URL character.
+  // Mutating only those bits preserves the decoded signature bytes, but
+  // must NOT be accepted as a canonical representation of that token.
+  const alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const last=raw.at(-1)??"";
+  const index=alphabet.indexOf(last);
+  assert.ok(index>=0);
+  const alias=raw.slice(0,-1)+alphabet[index^1];
+  assert.notEqual(alias,raw);
+  assert.deepEqual(Buffer.from(alias.split(".").at(-1)??"","base64url"),
+   Buffer.from(raw.split(".").at(-1)??"","base64url"));
+  assert.equal((await fetchUser(alias)).status,401,"noncanonical Base64URL signature must be rejected");
   assert.equal((await gate.request(ORIGIN+"/rest/v1/mesh_devices")).status,403);
   assert.equal((await gate.request(ORIGIN+"/unrecognized")).status,404);
   await assert.rejects(gate.request("https://elsewhere.invalid/auth/v1/user"),/STAGE3L_NO_EXTERNAL_NETWORK/);
