@@ -582,7 +582,16 @@ mod tests {
     /// No OS-Keychain, Supabase, TCP or remote device operations.
     #[test]
     fn qa_emit_stage3j_edge_interop_fixture() {
-        let now = 2_000_000_000_i64;
+        // Stage 3J stays deterministic; Stage 3K explicitly opts into fresh
+        // wall-clock timestamps for PostgreSQL's real expiry constraints.
+        // Test-only keys remain synthetic and never enter the OS Keychain.
+        let now = if std::env::var("KATOSYNC_STAGE3K_FRESH_TEST_TIME").as_deref()
+            == Ok("EPHEMERAL_ONLY")
+        {
+            Utc::now().timestamp()
+        } else {
+            2_000_000_000_i64
+        };
         let initiator = SigningKey::from_bytes(&[41u8; 32]);
         let recipient = SigningKey::from_bytes(&[42u8; 32]);
         let a = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
