@@ -43,6 +43,7 @@ case "${1:-legacy}" in
   inbox-continuity) TEST_FILE="$ROOT/tests/sql/mesh_inbox_key_continuity_qa.sql" ;;
   inbox-edge-e2e) TEST_FILE="$ROOT/tests/sql/mesh_inbox_edge_e2e_setup.sql" ;;
   inbox-relay) TEST_FILE="$ROOT/tests/sql/mesh_pairing_relay_qa.sql" ;;
+  inbox-relay-rust-e2e) TEST_FILE="$ROOT/tests/sql/mesh_relay_stage3k_setup.sql" ;;
   *) echo "MESH_QA_UNKNOWN_TEST_SELECTION" >&2; exit 2 ;;
 esac
 "$PG_BIN/psql" -h "$DIR" -p "$PORT" -U postgres -d postgres -X -v ON_ERROR_STOP=1 \
@@ -51,5 +52,10 @@ if test "${1:-legacy}" = "inbox-edge-e2e"; then
   KATOSYNC_MESH_E2E_ALLOW=EPHEMERAL_UNIX_SOCKET_ONLY \
     KATOSYNC_MESH_E2E_SOCKET="$DIR" KATOSYNC_MESH_E2E_PORT="$PORT" \
     node --experimental-strip-types --test "$ROOT/tests/meshInboxEdgePostgresE2e.qa.ts"
+elif test "${1:-legacy}" = "inbox-relay-rust-e2e"; then
+  test -f "${KATOSYNC_STAGE3K_RUST_FIXTURE:-/nonexistent}" || { echo STAGE3K_RUST_FIXTURE_REQUIRED >&2; exit 2; }
+  KATOSYNC_MESH_E2E_ALLOW=EPHEMERAL_UNIX_SOCKET_ONLY \
+    KATOSYNC_MESH_E2E_SOCKET="$DIR" KATOSYNC_MESH_E2E_PORT="$PORT" \
+    node --experimental-strip-types --test "$ROOT/tests/meshRelayRustEdgePostgresStage3K.qa.ts"
 fi
 echo "MESH_QA_ALL_SQL_ASSERTIONS_PASSED"
