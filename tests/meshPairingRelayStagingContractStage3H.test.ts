@@ -16,7 +16,7 @@ test("relay requires exact QA stage, verified tenant origin and active membershi
  assert.match(originGate,/MESH_LIVE_ORIGIN/);
  assert.match(originGate,/isolated-preview-only/);
  assert.match(edge,/\/auth\/v1\/user/);
- assert.match(edge,/requireKatoSyncMembership\(owner,service\(e\),request,origin\)/);
+ assert.match(edge,/requireMeshRelayMembership\(owner,service\(e\),request,origin\)/);
  assert.match(edge,/verifyRelayEnvelope\(msg,owner/);
  assert.match(edge,/verifyRelayListProof\(proof,owner/);
  assert.match(edge,/RELAY_ALREADY_SENT/);

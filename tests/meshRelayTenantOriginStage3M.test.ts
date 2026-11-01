@@ -96,3 +96,20 @@ test("ref/issuer mismatch rejects requests before any network or SQL",async()=>{
  assert.equal(urls.length,1);
  assert.equal(urls[0],PREVIEW+"/auth/v1/user");
 });
+
+test("isolated Relay membership uses QA origin without changing pinned Inbox source",async()=>{
+ const {requireMeshRelayMembership}=await import(
+  "../supabase/functions/mesh-pairing-relay/qa-membership.ts");
+ const calls:string[]=[];
+ const transport:typeof fetch=async(input)=>{
+  calls.push(String(input));
+  return Response.json([{user_id:owner,access_state:"active",
+   authorized_at:"2026-10-28T12:00:00Z",revoked_at:null}]);
+ };
+ const headers={apikey:"synthetic",Authorization:"Bearer synthetic"};
+ assert.equal(await requireMeshRelayMembership(owner,headers,transport,PREVIEW),"active");
+ assert.equal(calls.length,1);
+ assert.ok(calls[0].startsWith(PREVIEW+"/rest/v1/account_memberships?"));
+ assert.equal(await requireMeshRelayMembership(owner,headers,transport,"https://evil.invalid"),"unavailable");
+ assert.equal(calls.length,1,"invalid origin cannot trigger a request");
+});

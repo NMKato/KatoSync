@@ -15,8 +15,9 @@ Unsere Mesh-Relay- und Inbox-Edge-Implementierungen waren fest an den KATOOS-Pro
 
 ## Verifizierte Offline-QA
 
-- Neue Tests: **4/4** Herkunfts-/Mandantentrennungsprüfungen bestanden. Negative Fälle: QA-Override auf Produktion, fehlender/widersprüchlicher Ref/Deployment-ID, unzulässige URL, abweichender Signatur-Kontext, kein Netzwerk bei ungültiger Konfiguration.
+- Neue Tests: Herkunfts-/Mandantentrennungsprüfungen einschließlich isolierter Membership-Abfrage; abschließende Anzahl siehe CI-PR. Negative Fälle: QA-Override auf Produktion, fehlender/widersprüchlicher Ref/Deployment-ID, unzulässige URL, abweichender Signatur-Kontext, kein Netzwerk bei ungültiger Konfiguration.
 - Bestehende Stage-3J-/3L-/3M-Tests: **13/13** bestanden. Native Rust→Edge→echtes Wegwerf-PostgreSQL Stage 3K/3L wird gesondert im QA-Kommentar des PR nachgewiesen.
+- Die SHA-gepinnte produktive Inbox-/Enrollment-Membership-Datei bleibt unverändert. Ein eigener Relay-QA-Adapter verwendet für produktive Anfragen denselben vorhandenen Membership-Gate und für zulässige Preview-Anfragen das ausgewertete identische Membership-Format.
 - Kein M2/M3-Schlüsselbund, keine reale KATOOS-Anmeldung, keine Edge-Deployment- oder SQL-Änderung am produktiven Supabase-Projekt.
 
 ## Noch NICHT Cloud-freigegeben

@@ -1,6 +1,6 @@
 // NMKato Solutions – Stage 3H: STAGED Edge relay, disabled by default.
 // Public Ed25519 challenge/response messages only. No SAS approval/trust/TLS.
-import {requireKatoSyncMembership} from "../mesh-device-enrollment/membership-gate.ts";
+import {requireMeshRelayMembership} from "./qa-membership.ts";
 import {resolveMeshRelayOrigin} from "./origin-gate.ts";
 import {parseRelayEnvelope,parseRelayListProof,verifyRelayEnvelope,
  verifyRelayListProof,type RelayEnvelope,type RelayListProof,type RelayInvite} from "./protocol.ts";
@@ -98,7 +98,7 @@ export async function handleMeshPairingRelay(req:Request,e:Env,request:typeof fe
   const user=await auth.json() as {id?:unknown;is_anonymous?:unknown};
   if(typeof user.id!=="string"||!UUID.test(user.id)||user.is_anonymous===true)return fail(401,"LOGIN_REQUIRED");
   const owner=user.id;
-  const membership=await requireKatoSyncMembership(owner,service(e),request,origin);
+  const membership=await requireMeshRelayMembership(owner,service(e),request,origin);
   if(membership!=="active")return fail(membership==="not_member"?403:503,
    membership==="not_member"?"MEMBERSHIP_REQUIRED":"MEMBERSHIP_UNAVAILABLE");
   if(action==="send"){
@@ -110,7 +110,7 @@ export async function handleMeshPairingRelay(req:Request,e:Env,request:typeof fe
    if(!await verifyRelayEnvelope(msg,owner,roster.get(inv.source_device_id)??"",
     roster.get(inv.target_device_id)??"",inv,Date.now(),origin))return fail(403,"INVALID_DEVICE_SIGNATURE");
    // Membership and expired invitations must still be valid immediately before INSERT.
-   if(await requireKatoSyncMembership(owner,service(e),request,origin)!=="active"||
+   if(await requireMeshRelayMembership(owner,service(e),request,origin)!=="active"||
     Date.parse(inv.expires_at)<=Date.now()||msg.expiresAt*1000<=Date.now())
     return fail(403,"RELAY_NO_LONGER_AUTHORIZED");
    const inserted=await request(origin+"/rest/v1/mesh_pairing_relay_messages",{
@@ -147,7 +147,7 @@ export async function handleMeshPairingRelay(req:Request,e:Env,request:typeof fe
    Date.parse(String(readRows[0].expires_at))!==proof.expiresAt*1000)
    return fail(503,"READ_PROOF_UNCONFIRMED");
   if(proof.expiresAt*1000<=Date.now()||
-   await requireKatoSyncMembership(owner,service(e),request,origin)!=="active")
+   await requireMeshRelayMembership(owner,service(e),request,origin)!=="active")
    return fail(403,"RELAY_NO_LONGER_AUTHORIZED");
   const url=new URL(origin+"/rest/v1/mesh_pairing_relay_messages");
   url.searchParams.set("select","message_id,owner_user_id,request_id,sender_device_id,recipient_device_id,kind,payload_b64,nonce,signature,expires_at");

@@ -21,11 +21,10 @@ export function evaluateMembership(raw:unknown,uid:string,now=Date.now()):Member
 }
 
 export async function requireKatoSyncMembership(
- uid:string, headers:{apikey:string;Authorization:string}, request:typeof fetch=fetch,
- origin:string=ORIGIN
+ uid:string, headers:{apikey:string;Authorization:string}, request:typeof fetch=fetch
 ):Promise<MemberGate>{
- if(!UUID.test(uid)||!(origin===ORIGIN||/^https:\/\/[a-z0-9]{20}\.supabase\.co$/.test(origin)))return "unavailable";
- const url=new URL(origin+"/rest/v1/account_memberships");
+ if(!UUID.test(uid))return "unavailable";
+ const url=new URL(ORIGIN+"/rest/v1/account_memberships");
  url.searchParams.set("select","user_id,access_state,authorized_at,revoked_at");
  url.searchParams.set("user_id","eq."+uid);
  url.searchParams.set("limit","2");
