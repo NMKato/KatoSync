@@ -21,7 +21,7 @@ pub struct MeshNativeIssuerReadiness {
 
 /// Only a syntactically isolated public project URL can be recognized.
 /// This is NOT an authentication check and must never authorize a cloud call.
-fn parse_preview_target(origin: &str, reference: &str, deployment_id: &str) -> bool {
+pub(crate) fn parse_preview_target(origin: &str, reference: &str, deployment_id: &str) -> bool {
     if reference.len() != 20
         || !reference
             .bytes()

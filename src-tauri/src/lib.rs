@@ -41,6 +41,7 @@ mod mesh_identity;
 mod mesh_inbox;
 mod mesh_inbox_receiver;
 mod mesh_native_issuer;
+mod mesh_preview_auth;
 mod mesh_readiness;
 mod mesh_relay_client;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
@@ -421,6 +422,10 @@ pub fn run() {
             local_control_snapshot,
             mesh_readiness::mesh_local_readiness,
             mesh_native_issuer::mesh_native_issuer_readiness,
+            mesh_preview_auth::mesh_preview_auth_status,
+            mesh_preview_auth::mesh_preview_auth_login,
+            mesh_preview_auth::mesh_preview_auth_verify_session,
+            mesh_preview_auth::mesh_preview_auth_logout,
             mesh_hub::mesh_hub_preference_get,
             mesh_hub::mesh_hub_preference_set,
             mesh_directory::mesh_account_devices_list,

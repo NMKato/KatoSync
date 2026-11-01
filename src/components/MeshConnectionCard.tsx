@@ -45,6 +45,18 @@ type MeshNativeIssuerReadiness = {
   remoteJobsEnabled:false;
 };
 
+type MeshPreviewAuthStatus = {
+  protocol:"mesh-preview-auth-v1";
+  configured:boolean;
+  previewIssuerOnly:boolean;
+  independentKeychain:boolean;
+  sessionVerified:boolean;
+  accountEmail:string|null;
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
+
 type MeshHubPreference = {
   preferred: boolean;
   hubActive: false;
@@ -204,6 +216,11 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [reauthOpen,setReauthOpen]=useState(false);
   const [snapshot,setSnapshot]=useState<MeshLocalReadiness|null>(null);
   const [issuerSnapshot,setIssuerSnapshot]=useState<MeshNativeIssuerReadiness|null>(null);
+  const [previewStatus,setPreviewStatus]=useState<MeshPreviewAuthStatus|null>(null);
+  const [previewEmail,setPreviewEmail]=useState("");
+  const [previewPassword,setPreviewPassword]=useState("");
+  const [previewBusy,setPreviewBusy]=useState(false);
+  const [previewError,setPreviewError]=useState(false);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState(false);
   const [identity,setIdentity]=useState<MeshIdentityStatus|null>(null);
@@ -745,12 +762,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       if(!window.__TAURI_INTERNALS__) {
         setSnapshot(null);
         setIssuerSnapshot(null);
+        setPreviewStatus(null);
         setError(false);
         return;
       }
-      const [actual,issuer]=await Promise.all([
+      const [actual,issuer,preview]=await Promise.all([
         invoke<MeshLocalReadiness>("mesh_local_readiness"),
-        invoke<MeshNativeIssuerReadiness>("mesh_native_issuer_readiness").catch(()=>null)
+        invoke<MeshNativeIssuerReadiness>("mesh_native_issuer_readiness").catch(()=>null),
+        invoke<MeshPreviewAuthStatus>("mesh_preview_auth_status").catch(()=>null)
       ]);
       if(actual.protocol!=="mesh-readonly-v0" || actual.deviceIdentity!=="not_paired" ||
         actual.peerTransport!=="not_connected" || actual.verifiedPeers!==0 ||
@@ -765,11 +784,17 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         issuer.onlinePreviewVerified===false&&
         issuer.devicePairingEnabled===false&&issuer.remoteJobsEnabled===false;
       setIssuerSnapshot(issuerValid?issuer:null);
+      const previewValid=preview?.protocol==="mesh-preview-auth-v1"&&
+        preview.paired===false&&preview.transportReady===false&&
+        preview.remoteJobsEnabled===false&&preview.sessionVerified===false&&
+        (!preview.configured||(preview.previewIssuerOnly&&preview.independentKeychain));
+      setPreviewStatus(previewValid?preview:null);
       setSnapshot(actual);
       setError(false);
     } catch {
       setSnapshot(null);
       setIssuerSnapshot(null);
+      setPreviewStatus(null);
       setError(true);
     } finally {setLoading(false);}
   },[]);
@@ -794,6 +819,31 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     setDirectoryError(false);
     void refresh();
   },[refresh,refreshEpoch]);
+  const previewAuthAction=async(action:"login"|"verify"|"logout")=>{
+    if(previewBusy||!previewStatus?.configured)return;
+    setPreviewBusy(true);
+    setPreviewError(false);
+    try {
+      const command=action==="login"?"mesh_preview_auth_login":
+        action==="verify"?"mesh_preview_auth_verify_session":"mesh_preview_auth_logout";
+      const args=action==="login"?{email:previewEmail.trim(),password:previewPassword}:{};
+      const result=await invoke<MeshPreviewAuthStatus>(command,args);
+      if(result.protocol!=="mesh-preview-auth-v1"||!result.configured||
+        !result.previewIssuerOnly||!result.independentKeychain||
+        result.paired||result.transportReady||result.remoteJobsEnabled||
+        (action==="logout"&&result.sessionVerified)||
+        (action!=="logout"&&(!result.sessionVerified||!result.accountEmail))) {
+        throw new Error("preview_contract_mismatch");
+      }
+      setPreviewStatus(result);
+    }catch{
+      setPreviewError(true);
+      setPreviewStatus(previous=>previous?{...previous,sessionVerified:false,accountEmail:null}:null);
+    }finally{
+      setPreviewPassword("");
+      setPreviewBusy(false);
+    }
+  };
   const authRejected=identityError&&
     ["account","session","refresh","invalid","changed"].includes(identityFailure??"");
   const revealReauth=()=>{
@@ -1021,6 +1071,41 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
             issuerSnapshot.compiledIssuer==="katosync_legacy"?"mesh.issuer.legacy":"mesh.issuer.unknown"):
           t("mesh.issuer.olderBuild")}</span>
         <small>{t("mesh.issuer.separateLogin")}</small>
+        <details className="vision-mesh-reauth">
+          <summary>{t("mesh.preview.title")}</summary>
+          <p>{t("mesh.preview.description")}</p>
+          <p role="status">{!previewStatus?t("mesh.preview.oldBuild"):
+            !previewStatus.configured?t("mesh.preview.notConfigured"):
+            previewStatus.sessionVerified?t("mesh.preview.verified"):
+            t("mesh.preview.notLoggedIn")}</p>
+          {previewStatus?.sessionVerified&&previewStatus.accountEmail?
+            <small>{previewStatus.accountEmail}</small>:null}
+          {previewStatus?.configured?<form onSubmit={e=>{
+            e.preventDefault();void previewAuthAction("login");
+          }}>
+            <label className="vision-mesh-field">{t("mesh.reauth.email")}
+              <input type="email" autoComplete="username" value={previewEmail}
+                onChange={e=>setPreviewEmail(e.target.value)} required/>
+            </label>
+            <label className="vision-mesh-field">{t("mesh.reauth.password")}
+              <input type="password" autoComplete="current-password" value={previewPassword}
+                onChange={e=>setPreviewPassword(e.target.value)} required/>
+            </label>
+            <button type="submit" className="secondary"
+              disabled={previewBusy||!previewEmail.trim()||!previewPassword}>
+              {t("mesh.preview.login")}
+            </button>
+          </form>:null}
+          {previewStatus?.configured?<div className="vision-mesh-compact-actions">
+            <button type="button" className="ghost compact-button" disabled={previewBusy}
+              onClick={()=>void previewAuthAction("verify")}>{t("mesh.preview.verify")}</button>
+            <button type="button" className="ghost compact-button" disabled={previewBusy}
+              onClick={()=>void previewAuthAction("logout")}>{t("mesh.preview.logout")}</button>
+          </div>:null}
+          {previewError?<p role="alert" className="vision-mesh-error">
+            {t("mesh.preview.error")}</p>:null}
+          <small>{t("mesh.preview.noTrust")}</small>
+        </details>
         <span>{t("mesh.simple.qualityUnknown")} · {t("mesh.simple.uptimeUnknown")}</span>
         <small>{error?t("mesh.v0.unavailable"):t("mesh.v0.trustBoundary")}</small>
         <button type="button" className="ghost compact-button"
