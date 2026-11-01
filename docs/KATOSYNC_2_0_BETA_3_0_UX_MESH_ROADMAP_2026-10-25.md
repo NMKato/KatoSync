@@ -249,3 +249,7 @@ Eigenständige lesende Preview-Prüfung für Authentifizierung, Mitgliedschaft u
 ## Stage 3P – Mandantengebundener Enrollment-Nachweis
 
 Der neue QA-Vertrag signiert auch Supabase-Origin und Geräte-Metadaten. Rust-Test und 27 lokale Regressionen bestanden. Keine produktive Gerätekopplung. Details unter `docs/KATOSYNC_MESH_STAGE3P_ENROLLMENT_ORIGIN_PROOF_2026-11-01.md`.
+
+## Stage 3Q – origin-gebundene Inbox-V2-Signaturen (01.11.2026)
+
+Separater QA-only-Send- und Recipient-Proof, mit nativer Rust-Ed25519-Testsignatur und Edge-WebCrypto-Prüfung. Ein neuer Verify-only-Endpoint kontrolliert Online-Login, Eigentümer-Mitgliedschaft und Geräteverzeichnis ausschließlich lesend; er stellt keine Einladung zu und trifft keine Empfängerentscheidung. 42 kombinierte Tests lokal grün. Freigabe weiterhin erst nach origin-gebundener nativer Auth, single-use-Replay-Abwehr für echten Inbox-Schreibpfad, isolierter Cloud-QA und M2/M3-SAS/mTLS. Siehe `docs/KATOSYNC_MESH_STAGE3Q_INBOX_ORIGIN_V2_2026-11-01.md`.

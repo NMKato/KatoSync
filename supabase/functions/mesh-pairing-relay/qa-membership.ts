@@ -15,8 +15,8 @@ export async function requireMeshRelayMembership(
  url.searchParams.set("user_id","eq."+uid);
  url.searchParams.set("limit","2");
  try{
-  const response=await request(url,{headers:{...headers,"Accept-Profile":"katosync"},
-   signal:AbortSignal.timeout(8000)});
+  const response=await request(url,{method:"GET",headers:{...headers,"Accept-Profile":"katosync"},
+   redirect:"error",signal:AbortSignal.timeout(8000)});
   if(!response.ok)return "unavailable";
   const raw=await response.text();
   if(raw.length>2048)return "unavailable";
