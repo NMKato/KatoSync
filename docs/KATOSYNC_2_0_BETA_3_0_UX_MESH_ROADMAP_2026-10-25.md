@@ -253,3 +253,7 @@ Der neue QA-Vertrag signiert auch Supabase-Origin und Geräte-Metadaten. Rust-Te
 ## Stage 3Q – origin-gebundene Inbox-V2-Signaturen (01.11.2026)
 
 Separater QA-only-Send- und Recipient-Proof, mit nativer Rust-Ed25519-Testsignatur und Edge-WebCrypto-Prüfung. Ein neuer Verify-only-Endpoint kontrolliert Online-Login, Eigentümer-Mitgliedschaft und Geräteverzeichnis ausschließlich lesend; er stellt keine Einladung zu und trifft keine Empfängerentscheidung. 42 kombinierte Tests lokal grün. Freigabe weiterhin erst nach origin-gebundener nativer Auth, single-use-Replay-Abwehr für echten Inbox-Schreibpfad, isolierter Cloud-QA und M2/M3-SAS/mTLS. Siehe `docs/KATOSYNC_MESH_STAGE3Q_INBOX_ORIGIN_V2_2026-11-01.md`.
+
+## Stage 3R – Native Preview-Issuer-Readiness (01.11.2026)
+
+M2 und M3 haben identische signierte Stage2I-QA-Programme (SHA-256 identisch). Beide aktuellen Builds verwenden noch keine unabhängige Preview-Anmeldung. Neu: Rust-Tauri-Kommando und mehrsprachige Mesh-UI zeigen die tatsächliche kompiliert vorgegebene Issuer-Klasse und blockierte Preview-Nutzung an, ohne Token, Keychain oder Netzwerk zu lesen. Native Rust-Tests 3/3, kombinierte Node-Tests 46/46 bestanden. Die installierten Apps blieben unverändert. Nächster P0: tatsächlich isolierte Preview-Authentifizierung mit separatem Credential-Namespace, danach Cloud-QA und erst dann M2/M3-Pairing. Siehe `docs/KATOSYNC_MESH_STAGE3R_NATIVE_ISSUER_AUDIT_2026-11-01.md`.
