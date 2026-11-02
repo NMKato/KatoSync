@@ -40,6 +40,7 @@ mod mesh_hub;
 mod mesh_identity;
 mod mesh_inbox;
 mod mesh_inbox_receiver;
+mod mesh_katoos_shared_preflight;
 mod mesh_native_issuer;
 mod mesh_preview_auth;
 mod mesh_readiness;
@@ -422,6 +423,7 @@ pub fn run() {
             local_control_snapshot,
             mesh_readiness::mesh_local_readiness,
             mesh_native_issuer::mesh_native_issuer_readiness,
+            mesh_katoos_shared_preflight::mesh_katoos_shared_preflight,
             mesh_preview_auth::mesh_preview_auth_status,
             mesh_preview_auth::mesh_preview_auth_login,
             mesh_preview_auth::mesh_preview_auth_verify_session,
