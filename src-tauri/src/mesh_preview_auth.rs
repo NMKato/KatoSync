@@ -16,6 +16,7 @@ fn transition() -> &'static Mutex<()> {
 #[derive(Clone)]
 struct PreviewConfig {
     origin: &'static str,
+    project_ref: &'static str,
     api_key: &'static str,
 }
 fn configured() -> Option<PreviewConfig> {
@@ -36,7 +37,11 @@ fn configured() -> Option<PreviewConfig> {
     {
         return None;
     }
-    Some(PreviewConfig { origin, api_key })
+    Some(PreviewConfig {
+        origin,
+        project_ref: reference,
+        api_key,
+    })
 }
 
 #[derive(Serialize)]
@@ -68,6 +73,7 @@ fn status(cfg: bool, email: Option<String>) -> PreviewAuthStatus {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredPreviewSession {
+    issuer_origin: String,
     owner_id: String,
     refresh_token: String,
 }
@@ -76,18 +82,22 @@ impl Drop for StoredPreviewSession {
         self.refresh_token.zeroize();
     }
 }
-fn isolated_entry() -> Result<Entry, String> {
-    Entry::new(SERVICE, ACCOUNT).map_err(|_| "PREVIEW_KEYCHAIN_UNAVAILABLE".into())
+fn preview_account(cfg: &PreviewConfig) -> String {
+    format!("{ACCOUNT}:{}", cfg.project_ref)
 }
-fn load_session() -> Result<StoredPreviewSession, String> {
+fn isolated_entry(cfg: &PreviewConfig) -> Result<Entry, String> {
+    Entry::new(SERVICE, &preview_account(cfg)).map_err(|_| "PREVIEW_KEYCHAIN_UNAVAILABLE".into())
+}
+fn load_session(cfg: &PreviewConfig) -> Result<StoredPreviewSession, String> {
     let raw = Zeroizing::new(
-        isolated_entry()?
+        isolated_entry(cfg)?
             .get_password()
             .map_err(|_| "PREVIEW_LOGIN_REQUIRED".to_string())?,
     );
     let stored: StoredPreviewSession =
         serde_json::from_str(&raw).map_err(|_| "PREVIEW_SESSION_INVALID".to_string())?;
-    if Uuid::parse_str(&stored.owner_id).is_err()
+    if stored.issuer_origin != cfg.origin
+        || Uuid::parse_str(&stored.owner_id).is_err()
         || stored.refresh_token.len() < 12
         || stored.refresh_token.len() > 8192
     {
@@ -95,17 +105,17 @@ fn load_session() -> Result<StoredPreviewSession, String> {
     }
     Ok(stored)
 }
-fn save_session(owner: &str, refresh: &str) -> Result<(), String> {
+fn save_session(cfg: &PreviewConfig, owner: &str, refresh: &str) -> Result<(), String> {
     if Uuid::parse_str(owner).is_err() || refresh.len() < 12 || refresh.len() > 8192 {
         return Err("PREVIEW_SESSION_INVALID".into());
     }
     let raw = Zeroizing::new(
         serde_json::json!({
-         "owner_id":owner,"refresh_token":refresh
+         "issuer_origin":cfg.origin,"owner_id":owner,"refresh_token":refresh
         })
         .to_string(),
     );
-    isolated_entry()?
+    isolated_entry(cfg)?
         .set_password(raw.as_str())
         .map_err(|_| "PREVIEW_KEYCHAIN_UNAVAILABLE".into())
 }
@@ -137,6 +147,26 @@ fn client() -> Result<reqwest::Client, String> {
         .build()
         .map_err(|_| "PREVIEW_NETWORK_UNAVAILABLE".into())
 }
+// Cap both advertised and chunked responses before accumulating into memory.
+async fn bounded_auth_body(
+    mut response: reqwest::Response,
+    failure: &'static str,
+) -> Result<Vec<u8>, String> {
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_RESPONSE as u64)
+    {
+        return Err(failure.into());
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| failure.to_string())? {
+        if chunk.len() > MAX_RESPONSE - out.len() {
+            return Err(failure.into());
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
 async fn token_grant(
     c: &reqwest::Client,
     cfg: &PreviewConfig,
@@ -154,13 +184,7 @@ async fn token_grant(
     if !response.status().is_success() {
         return Err("PREVIEW_LOGIN_REJECTED".into());
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|_| "PREVIEW_NETWORK_UNAVAILABLE".to_string())?;
-    if bytes.len() > MAX_RESPONSE {
-        return Err("PREVIEW_INVALID_RESPONSE".into());
-    }
+    let bytes = bounded_auth_body(response, "PREVIEW_INVALID_RESPONSE").await?;
     let tokens: GoTrueTokens =
         serde_json::from_slice(&bytes).map_err(|_| "PREVIEW_INVALID_RESPONSE".to_string())?;
     if !safe_tokens(&tokens) {
@@ -189,13 +213,7 @@ async fn verified_identity(
     if !response.status().is_success() {
         return Err("PREVIEW_IDENTITY_REJECTED".into());
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|_| "PREVIEW_NETWORK_UNAVAILABLE".to_string())?;
-    if bytes.len() > MAX_RESPONSE {
-        return Err("PREVIEW_IDENTITY_REJECTED".into());
-    }
+    let bytes = bounded_auth_body(response, "PREVIEW_IDENTITY_REJECTED").await?;
     let user: GoTrueIdentity =
         serde_json::from_slice(&bytes).map_err(|_| "PREVIEW_IDENTITY_REJECTED".to_string())?;
     if Uuid::parse_str(&user.id).is_err()
@@ -251,21 +269,21 @@ pub async fn mesh_preview_auth_login(
         return Err("PREVIEW_IDENTITY_MISMATCH".into());
     }
     // Existing preview owner cannot be switched without an explicit preview logout.
-    match load_session() {
+    match load_session(&cfg) {
         Ok(previous) if previous.owner_id != identity.id => {
             return Err("PREVIEW_ACCOUNT_SWITCH_BLOCKED".into())
         }
         Err(reason) if reason != "PREVIEW_LOGIN_REQUIRED" => return Err(reason),
         _ => {}
     }
-    save_session(&identity.id, &session.refresh_token)?;
+    save_session(&cfg, &identity.id, &session.refresh_token)?;
     Ok(status(true, identity.email))
 }
 #[tauri::command]
 pub async fn mesh_preview_auth_verify_session() -> Result<PreviewAuthStatus, String> {
     let cfg = configured().ok_or("PREVIEW_NOT_CONFIGURED")?;
     let _guard = transition().lock().await;
-    let previous = load_session()?;
+    let previous = load_session(&cfg)?;
     let c = client()?;
     let next = token_grant(
         &c,
@@ -281,7 +299,7 @@ pub async fn mesh_preview_auth_verify_session() -> Result<PreviewAuthStatus, Str
         return Err("PREVIEW_ACCOUNT_SWITCH_BLOCKED".into());
     }
     // Persist rotated refresh only AFTER online owner verification.
-    save_session(&identity.id, &next.refresh_token)?;
+    save_session(&cfg, &identity.id, &next.refresh_token)?;
     Ok(status(true, identity.email))
 }
 
@@ -289,7 +307,7 @@ pub async fn mesh_preview_auth_verify_session() -> Result<PreviewAuthStatus, Str
 pub async fn mesh_preview_auth_logout() -> Result<PreviewAuthStatus, String> {
     let cfg = configured().ok_or("PREVIEW_NOT_CONFIGURED")?;
     let _guard = transition().lock().await;
-    let entry = isolated_entry()?;
+    let entry = isolated_entry(&cfg)?;
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(status(!cfg.origin.is_empty(), None)),
         Err(_) => Err("PREVIEW_KEYCHAIN_UNAVAILABLE".into()),
@@ -344,3 +362,8 @@ mod tests {
         assert!(!r.paired && !r.transport_ready && !r.remote_jobs_enabled);
     }
 }
+
+// Stage 3T: exercise actual reqwest + GoTrue decoding on disposable loopback only.
+#[cfg(test)]
+#[path = "mesh_preview_auth_tests_3t.rs"]
+mod stage3t_tests;
