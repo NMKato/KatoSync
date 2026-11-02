@@ -59,3 +59,31 @@ test("Stage 3V local SQL proves owner RLS, no user inbox and no remote jobs",()=
      "STAGE3V_SHARED_KATOOS_SCHEMA_COMPAT_PASS"])assert.ok(sql.includes(part),part);
  assert.doesNotMatch(sql,/ALTER\s+TABLE\s+public\./i);
 });
+
+test("Canonical migration hash accepts Windows CRLF but rejects tampered SQL",async()=>{
+ const fs=await import("node:fs");
+ const os=await import("node:os");
+ const path=await import("node:path");
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"katosync-stage3v-"));
+ const source=new URL("../",import.meta.url);
+ try{
+  for(const [version,name] of [...expectedMigrations.base,...expectedMigrations.pending]){
+   const relative="supabase/migrations/"+version+"_"+name+".sql";
+   const target=path.join(root,relative);
+   fs.mkdirSync(path.dirname(target),{recursive:true});
+   const original=fs.readFileSync(new URL("../"+relative,import.meta.url),"utf8");
+   fs.writeFileSync(target,original.replace(/\r\n/g,"\n").replace(/\n/g,"\r\n"));
+  }
+  for(const relative of ["scripts/qa-mesh-postgres-local.sh",
+     "tests/sql/mesh_stage3v_shared_schema_compat.sql"]){
+   const target=path.join(root,relative);
+   fs.mkdirSync(path.dirname(target),{recursive:true});
+   fs.copyFileSync(new URL("../"+relative,import.meta.url),target);
+  }
+  assert.equal(checkPinnedFiles(root),true);
+  const [version,name]=expectedMigrations.pending[4];
+  const file=path.join(root,"supabase/migrations/"+version+"_"+name+".sql");
+  fs.appendFileSync(file,"\r\n-- unauthorized change\r\n");
+  assert.throws(()=>checkPinnedFiles(root),/STAGE3V_ROLLOUT_BLOCKED:DRIFT_/);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});

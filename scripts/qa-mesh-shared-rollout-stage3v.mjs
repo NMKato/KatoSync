@@ -26,7 +26,11 @@ export function checkPinnedFiles(root=ROOT){
     const path=join(root,"supabase","migrations",version+"_"+name+".sql");
     let bytes;
     try{bytes=readFileSync(path)}catch{deny("MISSING_"+version)}
-    if(sha&&createHash("sha256").update(bytes).digest("hex")!==sha)deny("DRIFT_"+version);
+    // Windows checkout may convert LF to CRLF; pin canonical SQL contents,
+    // never platform-specific checkout byte layouts.
+    const canonical=bytes.toString("utf8").replace(/\r\n/g,"\n");
+    if(canonical.includes("\r")||(sha&&createHash("sha256").update(canonical,"utf8").digest("hex")!==sha))
+      deny("DRIFT_"+version);
   }
   const runner=readFileSync(join(root,"scripts/qa-mesh-postgres-local.sh"),"utf8");
   const sql=readFileSync(join(root,"tests/sql/mesh_stage3v_shared_schema_compat.sql"),"utf8");
