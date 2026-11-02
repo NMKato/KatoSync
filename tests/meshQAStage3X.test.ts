@@ -18,7 +18,7 @@ test("Stage3X signed QA installer never overwrites earlier apps",()=>{
  assert.match(build,/codesign --verify --deep --strict "\$BASE"/);
  assert.match(build,/codesign --verify --deep --strict "\$OUT"/);
  assert.match(build,/PlistBuddy.*CFBundleIdentifier/);
- assert.match(build,/--features katoos-auth-qa/);
+ assert.match(build,/--features stage3x-qa/);
  assert.match(build,/VITE_KATOOS_AUTH_QA=1 npm run build/);
 });
 test("Stage3X production schema history explicitly records server-generated migration versions",()=>{
