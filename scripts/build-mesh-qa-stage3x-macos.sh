@@ -25,22 +25,28 @@ codesign --verify --deep --strict "$BASE"
  echo "STAGE3X_BUILD_INPUTS_MISSING" >&2;exit 2;
 }
 ENTITLEMENTS="$(mktemp /tmp/katosync-mesh-stage3x.XXXXXX.plist)"
-cleanup(){ rm -f "$ENTITLEMENTS"; }
+STAGING="$(mktemp -d "$HOME/Applications/.KatoSync-Mesh-Stage3X.XXXXXX")"
+APP="$STAGING/KatoSync Mesh QA Stage3X.app"
+cleanup(){ rm -f "$ENTITLEMENTS"; [[ "$STAGING" == "$HOME/Applications/.KatoSync-Mesh-Stage3X."* ]] && rm -rf -- "$STAGING"; }
 trap cleanup EXIT
 codesign -d --entitlements :- "$BASE" > "$ENTITLEMENTS" 2>/dev/null
 plutil -lint "$ENTITLEMENTS" >/dev/null
 cd "$ROOT"
 VITE_KATOOS_AUTH_QA=1 npm run build
 VITE_KATOOS_AUTH_QA=1 npm exec tauri -- build --debug --no-bundle \
-  --config src-tauri/tauri.mesh-qa-stage3x.conf.json --features katoos-auth-qa
+  --config src-tauri/tauri.mesh-qa-stage3x.conf.json --features stage3x-qa
 BIN="$TARGET/debug/katosync"
 [[ -x "$BIN" ]] || { echo "STAGE3X_NATIVE_BINARY_MISSING" >&2;exit 3; }
-ditto "$BASE" "$OUT"
-cp "$BIN" "$OUT/Contents/MacOS/katosync"
-/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$OUT/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName KatoSync Mesh QA Stage3X' "$OUT/Contents/Info.plist" || true
-codesign --force --deep --timestamp=none --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGN" "$OUT"
+# Never expose a half-signed app at its final name; publish only after verification.
+ditto "$BASE" "$APP"
+cp "$BIN" "$APP/Contents/MacOS/katosync"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName KatoSync Mesh QA Stage3X' "$APP/Contents/Info.plist" || true
+codesign --force --deep --timestamp=none --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGN" "$APP"
+codesign --verify --deep --strict "$APP"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" == "$BUNDLE_ID" ]] || exit 4
+[[ ! -e "$OUT" ]] || { echo "STAGE3X_TARGET_CREATED_DURING_BUILD" >&2; exit 5; }
+mv "$APP" "$OUT"
 codesign --verify --deep --strict "$OUT"
-[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$OUT/Contents/Info.plist")" == "$BUNDLE_ID" ]] || exit 4
 echo "STAGE3X_SIGNED_SEPARATE_APP_READY"
 shasum -a 256 "$OUT/Contents/MacOS/katosync"

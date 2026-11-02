@@ -70,16 +70,20 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
 #[cfg(all(feature = "github-login-qa", not(feature = "katoos-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
-#[cfg(feature = "katoos-auth-qa")]
+#[cfg(all(feature = "katoos-auth-qa", not(feature = "stage3x-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.auth.qa";
+#[cfg(feature = "stage3x-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage3x.qa";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";
 const SUPABASE_SESSION_ACCOUNT: &str = "supabase-refresh-token";
 const USER_AGENT: &str = "KatoSync/1.0.1";
 #[cfg(not(feature = "github-login-qa"))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
-#[cfg(feature = "github-login-qa")]
+#[cfg(all(feature = "github-login-qa", not(feature = "stage3x-qa")))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.github.login.qa.sync";
+#[cfg(feature = "stage3x-qa")]
+const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage3x.sync";
 // KATOOS canonical issuer on explicit, isolated QA feature only. Never silently
 // migrate or reinterpret existing KatoSync tenants/sessions on stable builds.
 #[cfg(feature = "katoos-auth-qa")]
@@ -5191,7 +5195,9 @@ fn app_support_dir() -> Result<PathBuf> {
     let dir = dirs::data_dir()
         .or_else(dirs::home_dir)
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
-        .join(if cfg!(feature = "katoos-auth-qa") {
+        .join(if cfg!(feature = "stage3x-qa") {
+            "KatoSync Mesh QA Stage3X"
+        } else if cfg!(feature = "katoos-auth-qa") {
             "KatoSync KATOOS Auth QA"
         } else if cfg!(feature = "github-login-qa") {
             "KatoSync GitHub Login QA"
@@ -5211,7 +5217,9 @@ fn logs_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
         .join("Library")
         .join("Logs")
-        .join(if cfg!(feature = "katoos-auth-qa") {
+        .join(if cfg!(feature = "stage3x-qa") {
+            "KatoSync Mesh QA Stage3X"
+        } else if cfg!(feature = "katoos-auth-qa") {
             "KatoSync KATOOS Auth QA"
         } else if cfg!(feature = "github-login-qa") {
             "KatoSync GitHub Login QA"
