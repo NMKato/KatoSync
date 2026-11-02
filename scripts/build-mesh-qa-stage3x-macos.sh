@@ -42,7 +42,7 @@ ditto "$BASE" "$APP"
 cp "$BIN" "$APP/Contents/MacOS/katosync"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName KatoSync Mesh QA Stage3X' "$APP/Contents/Info.plist" || true
-codesign --force --deep --timestamp=none --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGN" "$APP"
+codesign --force --deep --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGN" "$APP"
 codesign --verify --deep --strict "$APP"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" == "$BUNDLE_ID" ]] || exit 4
 [[ ! -e "$OUT" ]] || { echo "STAGE3X_TARGET_CREATED_DURING_BUILD" >&2; exit 5; }
