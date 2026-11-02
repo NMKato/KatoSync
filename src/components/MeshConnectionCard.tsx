@@ -45,6 +45,17 @@ type MeshNativeIssuerReadiness = {
   remoteJobsEnabled:false;
 };
 
+type MeshKatoosSharedPreflight = {
+  protocol:"mesh-katoos-shared-preflight-v1";
+  sharedIssuerVerified:true;
+  schemaAccessible:true;
+  membership:"active"|"not_member";
+  discoveryAuthorized:boolean;
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
+
 type MeshPreviewAuthStatus = {
   protocol:"mesh-preview-auth-v1";
   configured:boolean;
@@ -217,6 +228,10 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [snapshot,setSnapshot]=useState<MeshLocalReadiness|null>(null);
   const [issuerSnapshot,setIssuerSnapshot]=useState<MeshNativeIssuerReadiness|null>(null);
   const [previewStatus,setPreviewStatus]=useState<MeshPreviewAuthStatus|null>(null);
+  const [sharedPreflight,setSharedPreflight]=useState<MeshKatoosSharedPreflight|null>(null);
+  const [sharedBusy,setSharedBusy]=useState(false);
+  const [sharedError,setSharedError]=useState(false);
+  const sharedRequest=useRef(0);
   const [previewEmail,setPreviewEmail]=useState("");
   const [previewPassword,setPreviewPassword]=useState("");
   const [previewBusy,setPreviewBusy]=useState(false);
@@ -757,6 +772,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     }catch{setIdentityError(true);}finally{setPairingBusy(false);}
   };
   const refresh=useCallback(async()=>{
+    sharedRequest.current++;
+    setSharedPreflight(null);setSharedError(false);setSharedBusy(false);
     setLoading(true);
     try {
       if(!window.__TAURI_INTERNALS__) {
@@ -819,6 +836,25 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     setDirectoryError(false);
     void refresh();
   },[refresh,refreshEpoch]);
+  const checkSharedKatoos=async()=>{
+    if(sharedBusy||issuerSnapshot?.compiledIssuer!=="katoos_shared_qa")return;
+    const current=++sharedRequest.current;
+    setSharedBusy(true);setSharedError(false);setSharedPreflight(null);
+    try{
+      const result=await invoke<MeshKatoosSharedPreflight>("mesh_katoos_shared_preflight");
+      if(result.protocol!=="mesh-katoos-shared-preflight-v1"||
+        result.sharedIssuerVerified!==true||result.schemaAccessible!==true||
+        !["active","not_member"].includes(result.membership)||
+        result.discoveryAuthorized!==(result.membership==="active")||
+        result.paired!==false||result.transportReady!==false||
+        result.remoteJobsEnabled!==false)throw new Error("invalid_shared_sso_contract");
+      if(current===sharedRequest.current)setSharedPreflight(result);
+    }catch{
+      if(current===sharedRequest.current)setSharedError(true);
+    }finally{
+      if(current===sharedRequest.current)setSharedBusy(false);
+    }
+  };
   const previewAuthAction=async(action:"login"|"verify"|"logout")=>{
     if(previewBusy||!previewStatus?.configured)return;
     setPreviewBusy(true);
@@ -1070,6 +1106,20 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           t(issuerSnapshot.compiledIssuer==="katoos_shared_qa"?"mesh.issuer.shared":
             issuerSnapshot.compiledIssuer==="katosync_legacy"?"mesh.issuer.legacy":"mesh.issuer.unknown"):
           t("mesh.issuer.olderBuild")}</span>
+        {issuerSnapshot?.compiledIssuer==="katoos_shared_qa"?<details className="vision-mesh-reauth">
+          <summary>{t("mesh.shared.title")}</summary>
+          <p>{t("mesh.shared.description")}</p>
+          <p role="status">{sharedError?t("mesh.shared.error"):
+            sharedPreflight?.membership==="active"?t("mesh.shared.active"):
+            sharedPreflight?.membership==="not_member"?t("mesh.shared.notMember"):
+            t("mesh.shared.unchecked")}</p>
+          <button type="button" className="ghost compact-button"
+            onClick={()=>void checkSharedKatoos()} disabled={sharedBusy}>
+            <RefreshCcw size={14} className={sharedBusy?"spin":""}/>
+            {t("mesh.shared.check")}
+          </button>
+          <small>{t("mesh.shared.noTrust")}</small>
+        </details>:null}
         <small>{t("mesh.issuer.separateLogin")}</small>
         <details className="vision-mesh-reauth">
           <summary>{t("mesh.preview.title")}</summary>
