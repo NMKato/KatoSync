@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {readFileSync} from "node:fs";
+import {readFileSync,mkdtempSync,rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {spawnSync} from "node:child_process";
 import {platform} from "node:os";
 const path=new URL("../scripts/verify-mesh-qa-stage3x-macos.sh",import.meta.url);
@@ -28,10 +30,17 @@ test("Verifier is a read-only check and never changes macOS trust",()=>{
 });
 test("On macOS missing Stage3X app fails closed without creating one",()=>{
  if(platform()!=="darwin")return;
- const result=spawnSync("/bin/bash",[new URL(path).pathname],{encoding:"utf8",timeout:3500});
- assert.equal(result.status,2);
- assert.match(result.stderr,/STAGE3Z_APP_MISSING_OR_SYMLINK/);
- assert.doesNotMatch(result.stdout,/STAGE3Z_SIGNED_APP_VERIFIED/);
+ // Isolate the negative test from an actually installed Stage3X app.
+ const emptyHome=mkdtempSync(join(tmpdir(),"katosync-stage3z-missing-home-"));
+ try {
+   const result=spawnSync("/bin/bash",[new URL(path).pathname],{
+     encoding:"utf8",timeout:3500,
+     env:{...process.env,HOME:emptyHome}
+   });
+   assert.equal(result.status,2);
+   assert.match(result.stderr,/STAGE3Z_APP_MISSING_OR_SYMLINK/);
+   assert.doesNotMatch(result.stdout,/STAGE3Z_SIGNED_APP_VERIFIED/);
+ } finally { rmSync(emptyHome,{recursive:true,force:true}); }
 });
 test("New QA Developer-ID signatures request a trusted timestamp for Apple notarization",()=>{
  const builder=readFileSync(new URL("../scripts/build-mesh-qa-stage3x-macos.sh",import.meta.url),"utf8");
