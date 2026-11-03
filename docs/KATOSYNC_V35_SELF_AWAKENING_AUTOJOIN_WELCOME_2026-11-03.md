@@ -37,3 +37,13 @@ Ein Konto-Login allein ist kein kryptografischer Peer-Trust. Der Nutzer kann die
 8. Vor öffentlicher Freigabe App-Abos, Kündigung, Trialablauf, Produktgrenzen und cross-product Rechte getrennt verifizieren.
 
 Eine konditionale Automation kontrolliert die echte 3.5-Abnahme und meldet sich erst nach nachgewiesener Funktionsfähigkeit. Grüne Unit-Tests oder zwei DB-Einträge allein sind keine fertige Mesh-Verbindung.
+
+## Isoliertes macOS-Paket und aktuelle Abnahme
+
+- Neue QA-Variante `stage35-qa` mit eigener App-ID `com.nmkato.katosync.meshqa.stage35`, eigener Keychain-Gruppe, eigenem Anwendungsdatenordner, eigenem Log-Pfad und eigener LaunchAgent-ID. Bestehende Stage3X- und Stable-Identitäten bleiben unverändert.
+- Produktions-Frontend: TypeScript und Vite kompilieren erfolgreich (1902 Module). Kein eingebauter anhaltender setInterval-Timer: Auto-Roster-Refresh ist ein einziger, nicht überlappender setTimeout alle 120 Sekunden.
+- Vollständige lokale Node-Regression mit begrenzter Testparallelität: **620/620 Tests bestanden**. Drei zusätzlich neue Packaging-Isolationsprüfungen ebenfalls bestanden. Feature-spezifischer nativer Keychain-Isolationstest bestanden.
+- Zwei macOS-Stage35-Builds durchgeführt: die erste signierte Zwischenversion wurde als versteckte Rückfallkopie gesichert; die zweite mit Timer-Korrektur neu gebaut und signiert. Aktuelle SHA-256 des nativen Executables: `5eb2330b2d9a1ee4c9108e29fb4da5742f65a7edad980a9e33678d9322c51618`.
+- `codesign --verify --deep --strict` für Haupt-App und verschachtelten SpeechHelper bestanden. **Gatekeeper lehnt die aktuelle Stage35-App jedoch als „Unnotarized Developer ID“ ab.** Die App wurde noch nicht auf M2/M3 gestartet, nicht an Apple hochgeladen und nicht zur Verteilung freigegeben.
+- `scripts/notarize-mesh-qa-stage35-macos.sh` fordert ausdrücklich `KATOSYNC_STAGE35_APPLE_UPLOAD_APPROVED=YES_EXPLICIT_APPLE_SUBMISSION` und ein vorhandenes Keychain-Notarisierungsprofil. Kein Umgehen von Gatekeeper; vor einer Apple-Submission explizite Autorisierung einholen.
+- Nach akzeptierter Apple-Notarisierung und `spctl`-Freigabe: Start auf M2, danach gesicherte Übertragung nach M3, getrennte Anmeldung mit dem KATOOS-Konto auf beiden neuen Stage35-Instanzen und Live-Roster-Test. Erst dann Mutual-Pairing/SAS und Hello.

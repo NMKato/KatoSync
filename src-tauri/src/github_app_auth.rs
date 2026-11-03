@@ -23,8 +23,10 @@ const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
 #[cfg(all(feature = "katoos-auth-qa", not(feature = "stage3x-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.auth.qa";
-#[cfg(feature = "stage3x-qa")]
+#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage3x.qa";
+#[cfg(feature = "stage35-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage35.qa";
 const ACCOUNT_PREFIX: &str = "github-app-user-device-v2:";
 static ACTIVE_USER: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 fn active_user() -> &'static Mutex<Option<String>> {
@@ -908,7 +910,9 @@ mod tests {
     fn github_qa_does_not_share_production_keychain_or_data_directory() {
         assert_eq!(
             KEYCHAIN_SERVICE,
-            if cfg!(feature = "stage3x-qa") {
+            if cfg!(feature = "stage35-qa") {
+                "com.nmkato.katosync.katoos.stage35.qa"
+            } else if cfg!(feature = "stage3x-qa") {
                 "com.nmkato.katosync.katoos.stage3x.qa"
             } else if cfg!(feature = "katoos-auth-qa") {
                 "com.nmkato.katosync.katoos.auth.qa"
@@ -922,14 +926,20 @@ mod tests {
         if cfg!(feature = "stage3x-qa") {
             assert_eq!(
                 crate::LAUNCH_AGENT_ID,
-                "com.nmkato.katosync.meshqa.stage3x.sync"
+                if cfg!(feature = "stage35-qa") {
+                    "com.nmkato.katosync.meshqa.stage35.sync"
+                } else {
+                    "com.nmkato.katosync.meshqa.stage3x.sync"
+                }
             );
             assert_ne!(KEYCHAIN_SERVICE, "com.nmkato.katosync.katoos.auth.qa");
         }
         let qa = crate::app_support_dir().expect("isolated QA data folder");
         assert_eq!(
             qa.file_name().unwrap().to_str(),
-            Some(if cfg!(feature = "stage3x-qa") {
+            Some(if cfg!(feature = "stage35-qa") {
+                "KatoSync Mesh QA Stage35"
+            } else if cfg!(feature = "stage3x-qa") {
                 "KatoSync Mesh QA Stage3X"
             } else if cfg!(feature = "katoos-auth-qa") {
                 "KatoSync KATOOS Auth QA"

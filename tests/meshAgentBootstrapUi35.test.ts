@@ -11,7 +11,7 @@ test("login prepares local identity and reads Mesh roster automatically, never a
  assert.ok(isolated.includes('invoke<{loggedIn:boolean}>("supabase_session_status")'));
  assert.ok(isolated.includes('invoke<MeshAgentBootstrapSnapshot>("mesh_agent_bootstrap_snapshot")'));
  assert.ok(isolated.includes('invoke<MeshAccountDirectory>("mesh_account_devices_list")'));
- assert.ok(isolated.includes("setInterval"));
+ assert.ok(isolated.includes("setTimeout"));
  assert.ok(isolated.includes("120_000"));
  assert.ok(isolated.includes("stillMe.fingerprint!==myAgent.fingerprint"));
  assert.ok(isolated.includes("rosterOperationAtStart!==rosterOperation.current"));

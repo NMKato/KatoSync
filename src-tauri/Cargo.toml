@@ -49,6 +49,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 github-login-qa = [] # Isolated local test app; never include in production builds
 katoos-auth-qa = ["github-login-qa"] # Canonical KATOOS Auth only in isolated QA; legacy KatoSync unchanged
 stage3x-qa = ["katoos-auth-qa"] # Dedicated Stage3X app Keychain/config/logs/LaunchAgent isolation
+stage35-qa = ["stage3x-qa"] # Distinct Stage35 hardware/auto-discovery QA namespace
 mesh-preview-auth-qa = ["github-login-qa"] # Separate QA-only Preview login; requires pinned build config
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

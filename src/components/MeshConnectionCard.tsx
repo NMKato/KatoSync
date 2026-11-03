@@ -557,6 +557,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     if(import.meta.env.VITE_KATOOS_AUTH_QA!=="1")return;
     let active=true;
     let checking=false;
+    let timer:number|undefined;
     const checkColleagues=async()=>{
       if(checking || rosterInFlight.current || inboxInFlight.current ||
          recipientInFlight.current || relayInFlight.current)return;
@@ -595,11 +596,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       }catch{
         // A failed background check is not proof of lost peer trust.
         // Keep any manually verified pairing state; never auto-create access.
-      }finally{checking=false;}
+      }finally{
+        checking=false;
+        // A single future read, never an overlapping interval.
+        if(active)timer=window.setTimeout(()=>void checkColleagues(),120_000);
+      }
     };
     void checkColleagues();
-    const timer=window.setInterval(()=>void checkColleagues(),120_000);
-    return ()=>{active=false;window.clearInterval(timer);};
+    return ()=>{active=false;if(timer!==undefined)window.clearTimeout(timer);};
     // Session checks happen inside the native command, not using a JS token.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[refreshEpoch]);
