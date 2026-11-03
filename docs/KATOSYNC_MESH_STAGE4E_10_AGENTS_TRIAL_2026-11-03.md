@@ -6,7 +6,7 @@ Stand: 03.11.2026. Produktentscheidung und testbarer Entwicklungsstand; kein akt
 
 - KatoSync Free: 0 Euro, lokale App-Nutzung möglich, kein Cloud-Mesh, 0 Mesh-Agenten.
 - KatoSync Pro: Zielpreis 9,90 Euro monatlich, maximal 10 registrierte Geräte mit je einem eigenständigen KI-Agenten. Öffentlichen Bruttopreis, Mehrwertsteuer und tatsächliche Marge vor Verkaufsstart prüfen.
-- Trial: 14 Tage Mesh-Pro-Funktionen, ohne automatische kostenpflichtige Verlängerung. Eigene ChatGPT-/Claude-/API-Zugänge der Nutzer; keine inkludierten kostenpflichtigen Modellkontingente. Ein Trial pro verifiziertem KATOOS-Konto, geschützt durch serverseitige Registrierung.
+- Trial: 14 Tage Mesh-Pro-Funktionen mit obligatorischer Zahlungsmethode. Ohne Kündigung wird nach Ablauf automatisch 9,90 Euro pro Monat berechnet; vor Ablauf ist jederzeit eine Kündigung zum Testende möglich. Eigene ChatGPT-/Claude-/API-Zugänge der Nutzer; keine inkludierten kostenpflichtigen Modellkontingente. Ein Trial pro verifiziertem KATOOS-Konto, geschützt durch serverseitige Registrierung.
 - Zehn einsatzbereite Geräte ergeben zehn parallel verfügbare Agenten-Slots. Nicht erreichbar, nicht ausreichend berechtigt, ausgelastet oder ohne geeigneten Provider bedeutet nicht lauffähig. Der Anbieter garantiert nicht zehn jederzeit verfügbare externe LLM-Sessions.
 
 ## Umgesetzter Entwicklungsstand
@@ -26,12 +26,12 @@ Stand: 03.11.2026. Produktentscheidung und testbarer Entwicklungsstand; kein akt
 3. Einen realen, einzeln genehmigten Remote-Job auf M3 ausführen, Quittung, Audit, Cancel/Reconnect und Lease-Idempotenz prüfen.
 4. Zwei genehmigte Jobs parallel auf M2 und M3 mit getrennten Worktrees ausführen. Danach einen 10-Agenten-E2E-Test über zehn reale oder gleichwertig autorisierte Knoten durchführen.
 5. Auf jedem Relay-, Inbox- und Remote-Job-Endpunkt das Entitlement bei Annahme und Ausführung serverseitig erneut prüfen, auch nach Trial-Ende.
-6. KatoSync-eigenen Stripe-Produkt-/Preiskatalog einrichten, Webhooks idempotent verarbeiten und Pro/Trial/Downgrade unabhängig von der KATOOS-Hauptsubscription provisionieren. Keine automatische Abbuchung nach Gratis-Test.
+6. KatoSync-eigenen Stripe-Produkt-/Preiskatalog einrichten, Webhooks idempotent verarbeiten und Pro/Trial/Downgrade unabhängig von der KATOOS-Hauptsubscription provisionieren. Mit Karte: automatische Abbuchung nach 14 Tagen, sofern nicht vorher gekündigt; verbleibende Trial-Nutzung bei fristgerechter Kündigung bleibt erhalten.
 
 ## Wirtschaftlichkeit und Vertragsgrenzen
 
 9,90 Euro pro Monat ist die beschlossene Positionierung, keine bereits belegte Gewinnmarge. Laufende Kosten für Cloud-Relay, Signaling, Logs, R2, Support, Steuern und Payment-Fees müssen pro Kunde gemessen werden. Lokale Modelle rechnen auf Nutzerhardware. Externe Provider gelten mit deren eigenen Limits, Nutzungsrechten und Kosten. Keine Weitergabe von API-Keys über das Mesh; Routing über freigegebene Jobs, nicht über geteilte Kontositzungen.
 
-Bei Trials ohne hinterlegte Zahlungsmethode unterstützt Stripe unter anderem einen Endstatus cancel oder pause. Wir wählen für den beworbenen Test keine automatische kostenpflichtige Verlängerung; die Abrechnung muss dies vor Freigabe nachvollziehbar sicherstellen.
+Neuer Beschluss vom 03.11.2026: Stripe Checkout erfasst die Zahlungsmethode verpflichtend, ein Trial-Abo geht nach 14 Tagen automatisch in den kostenpflichtigen Monatstarif über, sofern nicht gekündigt. Ein kostenloser Test darf nur einmal pro Konto vergeben werden. Kundinnen und Kunden müssen Preis, automatische Verlängerung, Testende, Kündigungsbutton und Erinnerung vorab transparent sehen.
 
 Aktuelles Fazit: Scheduler und Trial-Guardrails vorbereitet und lokal getestet; Mesh-Job-Ausführung, Datenbankmigrationen, öffentliche Preisabrechnung und Trial-Startfunktion noch nicht freigegeben.
