@@ -19,7 +19,7 @@ Die bereits existierende service-role-verwaltete \`katosync.mesh_owner_policy\` 
 - Fehlerhafte oder nicht erreichbare Policy ist **503 fail-closed**, nie Free- oder Pro-Freigabe.
 - Die native Stage3X-Folgeversion zeigt eine eigene Free/Pro-Meldung. Keine automatischen Upgrades, keine Kauf-Anmeldung und keine Schlüsselmanipulation.
 - Die realen M2/M3 Stage3X-Geräte wurden vorher durch eine explizite Policy mit \`allowed_devices=10\` registriert; alte QA-Einträge wurden nach einer nur lokal gesicherten Archivierung entfernt.
-- Die aktiven Stage3X-Bundles und die produktive Edge-Funktion wurden hier **nicht** aktualisiert.
+- Die installierten Stage3X-Bundles wurden **nicht** verändert. Die Edge-Funktion wurde nach grüner CI gezielt auf Version 4 aktualisiert (siehe Live-Nachweis).
 
 ## Release-/Abrechnungsvoraussetzungen
 
@@ -27,3 +27,13 @@ Die bereits existierende service-role-verwaltete \`katosync.mesh_owner_policy\` 
 2. Paid-Entitlement in **allen** später deployten Inbox/Relay/Remote-Jobs durchsetzen, nicht nur bei neuen Registrierungen.
 3. Vollständige Stub-Tests und Edge-Deployment-Abnahme, dann neue signierte/notarisierte Stage3X-Version; UI-Tests auf M2/M3.
 4. Kein Admin-Schreibrecht oder Service-Role-Schlüssel in der nativen App; keine Remote-Pairing-Automatik allein durch einen Planwechsel.
+
+
+## Live-Nachweis – begrenzter Produktions-Rollout vom 03.11.2026
+
+- Nach dem ersten Push war die GitHub CI zunächst **rot**, da die synthetischen Challenge-Tests noch keinen expliziten Paid-Geräteeintrag bereitstellten. Die Fixtures wurden angepasst; die nächste CI auf `ddf6613` bestand in **Web Build, Windows Node Regression, Rust Format und Attribution**.
+- Der bereits aktive Supabase-Edge-Function-Stand wurde vorher gegen die fünf Git-Quell-Dateien verglichen: alle fünf waren inhaltlich exakt gleich. Nach gezielter Erweiterung auf sechs Dateien wurde die bestehende Funktion `mesh-device-enrollment` im gemeinsamen Projekt `xbnnlyyxiilklsygxcof` auf **Version 4, ACTIVE, verify_jwt=true** gebracht. Deploy-Zeit laut Management-API: 03.11.2026.
+- `device-entitlement.ts` und die aufrufenden Funktionen sind im erneut aus der Cloud gelesenen Deployment enthalten. Ohne explizite Policy `403 MESH_PRO_REQUIRED`; mit serverseitig verwalteter Policy max. 10 Geräte. Die vorhandene aktive Test-Policy bleibt `manual`, `passkey_enrollment_required=true`, `allowed_devices=10`.
+- Positiver M3-Readback: erneuter `Geräte finden`-Lauf aus der signierten Stage3X-App erzeugte am 03.11. um **13:52:32 UTC** eine Enrollment-Challenge, die im gleichen Test **consumed** wurde; die Zahl registrierter Geräte blieb **2**. Damit sind keine überzähligen Einträge entstanden.
+- Vorbereinigte Legacy-Geräte (beide von 28.10.) wurden **erst nach** zwei neuen Stage3X-Registrierungen, FK-/Trust-Referenzkontrollen und einem lokal mode-0600 gesicherten DB-Archiv entfernt; insgesamt 2 alte Einträge gelöscht. Die zwei heute neu registrierten Geräte bleiben `discovered` und **nicht paired**.
+- Keine neue Stripe-Zahlung, kein bezahlter KatoSync-Pro-Tarif im Live-Billingkatalog, keine Deaktivierung von Sicherheitsprüfungen und keine neue Inbox/Relay-Funktion. Der PR bleibt **Draft** bis vollständige Mesh-/SAS-End-to-End-Prüfung und Billing-Entitlement-Wiring.
