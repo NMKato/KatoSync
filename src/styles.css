@@ -11038,3 +11038,25 @@ button.agent-tile:hover {
   .provider-mesh-card .vision-mesh-guide-device{align-items:flex-start;}
   .provider-mesh-card .vision-mesh-guide-target .compact-button{width:100%;}
 }
+
+/* Stage 3.5 roster: distinguish registrations from physical computers. */
+.provider-mesh-card .vision-mesh-registration-summary,
+.provider-mesh-card .vision-mesh-registration-section-label {
+  color:var(--text-muted);font-size:12px;line-height:1.55;
+}
+.provider-mesh-card .vision-mesh-own-registration {
+  display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline;
+  border:1px solid var(--border);border-radius:12px;padding:10px 12px;
+  background:color-mix(in srgb,var(--surface) 88%,transparent);
+}
+.provider-mesh-card .vision-mesh-own-registration small{color:var(--text-muted)}
+.provider-mesh-card .vision-mesh-older-registrations{
+  margin-top:8px;border:1px solid var(--border);border-radius:12px;padding:10px;
+}
+.provider-mesh-card .vision-mesh-older-registrations summary{
+  cursor:pointer;font-size:12px;font-weight:600;
+}
+.provider-mesh-card .vision-mesh-older-registrations p{
+  font-size:11px;color:var(--text-muted);line-height:1.5;
+}
+.provider-mesh-card .vision-mesh-older-registrations .vision-mesh-guide-device{margin-top:8px}

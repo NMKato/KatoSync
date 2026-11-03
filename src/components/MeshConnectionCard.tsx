@@ -8,6 +8,7 @@ import { useT, type TKey } from "../i18n";
 import { classifyMeshIdentityFailure, type MeshIdentityFailure } from "../lib/meshIdentityDiagnosis";
 import { activeMeshInvitations, nextMeshInboxExpiryDelay } from "../lib/meshInboxExpiry";
 import {selectMeshColleague} from "../lib/meshAgentIntroduction35";
+import {meshRegistrationAgentName,presentMeshRegistrations} from "../lib/meshDirectoryPresentation35";
 
 function relativeTime(value: string | null | undefined, lang: string): string | null {
   if (!value) return null;
@@ -710,7 +711,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       relayInFlight.current=false;setRelayBusy(false);
     }}
   };
-  const selectedDevice=directory?.devices.find(d=>d.deviceId===selectedDeviceId)??null;
+  const selectedDevice=directory?.devices.find(d=>d.deviceId===selectedDeviceId &&
+    d.fingerprint!==agentBootstrap?.fingerprint)??null;
   const qaAuthEnabled=import.meta.env.VITE_KATOOS_AUTH_QA==="1";
   const inboxSendEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_SEND_QA==="1";
   const inboxReceiveEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_RECEIVE_QA==="1";
@@ -962,7 +964,13 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       setPreviewBusy(false);
     }
   };
-  const myRosterDevice=directory?.devices.find(d=>d.fingerprint===agentBootstrap?.fingerprint);
+  const presentation=directory&&agentBootstrap?presentMeshRegistrations({
+    devices:directory.devices,
+    localFingerprint:agentBootstrap.fingerprint,
+    nowMs:Date.now()
+  }):null;
+  const myRosterDevice=presentation?.own||
+    directory?.devices.find(d=>d.fingerprint===agentBootstrap?.fingerprint);
   const colleagueRecommendation=agentBootstrap&&myRosterDevice?
     selectMeshColleague({
       accountVerified:true,ownerUserId:myRosterDevice.ownerUserId,
@@ -981,7 +989,25 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     setDetailsOpen(true);
     setReauthOpen(true);
   };
+  const displayRegistrationName=(device:MeshAccountDevice)=>
+    device.personaName||meshRegistrationAgentName(device.fingerprint,device.platformOs)||
+    device.displayName;
   const readiness=snapshot?.localControl??"unknown";
+  const renderRegistration=(device:MeshAccountDevice)=><button type="button"
+    className="vision-mesh-guide-device" key={device.deviceId}
+    aria-pressed={selectedDeviceId===device.deviceId}
+    disabled={directoryBusy||nativeInboxBusy||recipientBusy}
+    onClick={()=>setSelectedDeviceId(device.deviceId)}>
+    <span className="vision-mesh-guide-device-name"><strong>{displayRegistrationName(device)}</strong>
+      <small>{device.displayName}</small>
+      <small>{device.platformOs} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>
+      <small>{device.lastSeenAt?
+        t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
+        t("mesh.directory.notSeen")}</small>
+    </span>
+    <span className="vision-mesh-guide-select">{t(selectedDeviceId===device.deviceId?
+      "mesh.guide.selected":"mesh.guide.choose")}</span>
+  </button>;
   return <section className="vision-mesh-readiness vision-mesh-compact provider-mesh-card glass" aria-label={t("mesh.simple.title")}>
     <div className="vision-mesh-compact-top">
       <div className="vision-mesh-compact-identity">
@@ -1020,9 +1046,11 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         memory:agentBootstrap.hardware.memoryGibBucket??"?",
         platform:agentBootstrap.hardware.chipFamily||agentBootstrap.hardware.platform
       })}</small>
-      <small>{colleagueRecommendation?.peerDeviceId?
+      <small>{colleagueRecommendation?.stage==="ready_for_hello"?
         t("mesh.agent35.colleague",{name:colleagueRecommendation.peerName||"KAI"}):
-        t("mesh.agent35.noColleagues")}</small>
+        presentation?.registeredPeers?
+          t("mesh.agent35.accountRecords",{count:presentation.registeredPeers}):
+          t("mesh.agent35.noColleagues")}</small>
       <small>{t("mesh.agent35.pendingTrust")}</small>
     </div>:null}
     {offer?<div className="vision-mesh-compact-notice" role="status">
@@ -1064,21 +1092,25 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <p>{t("mesh.guide.notLoaded")}</p>:null}
       {directoryBusy?<p role="status">{t("mesh.guide.loading")}</p>:null}
       {directory?.devices.length===0?<p role="status">{t("mesh.directory.empty")}</p>:null}
-      {directory?.devices.map(device=><button type="button"
-        className="vision-mesh-guide-device" key={device.deviceId}
-        aria-pressed={selectedDeviceId===device.deviceId}
-        disabled={directoryBusy||nativeInboxBusy||recipientBusy}
-        onClick={()=>setSelectedDeviceId(device.deviceId)}>
-        <span className="vision-mesh-guide-device-name"><strong>{device.personaName||device.displayName}</strong>
-          {device.personaName?<small>{device.displayName}</small>:null}
-          <small>{device.platformOs} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>
-          <small>{device.lastSeenAt?
-            t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
-            t("mesh.directory.notSeen")}</small>
-        </span>
-        <span className="vision-mesh-guide-select">{t(selectedDeviceId===device.deviceId?
-          "mesh.guide.selected":"mesh.guide.choose")}</span>
-      </button>)}
+      {directory?<p className="vision-mesh-registration-summary" role="status">
+        {t("mesh.directory.identityCount",{count:presentation?.totalIdentities??directory.devices.length})}
+      </p>:null}
+      {presentation?<>
+        {presentation.own?<div className="vision-mesh-own-registration">
+          <strong>{t("mesh.directory.own")}</strong>
+          <small>{displayRegistrationName(presentation.own)} · {t("mesh.directory.registered")}</small>
+        </div>:null}
+        {presentation.recentlyReported.length>0?
+          <p className="vision-mesh-registration-section-label">
+            {t("mesh.directory.recent")}
+          </p>:null}
+        {presentation.recentlyReported.map(renderRegistration)}
+        {presentation.olderEntries.length>0?<details className="vision-mesh-older-registrations">
+          <summary>{t("mesh.directory.older",{count:presentation.olderEntries.length})}</summary>
+          <p>{t("mesh.directory.olderNotice")}</p>
+          {presentation.olderEntries.map(renderRegistration)}
+        </details>:null}
+      </>:directory?.devices.map(renderRegistration)}
       {selectedDevice?<div className="vision-mesh-guide-target" role="group"
         aria-label={t("mesh.guide.target")}>
         <strong>{selectedDevice.personaName||selectedDevice.displayName}</strong>

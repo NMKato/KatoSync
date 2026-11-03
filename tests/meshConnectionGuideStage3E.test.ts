@@ -26,8 +26,12 @@ test("guide is above hidden diagnostics; device selection never auto sends, gran
  const hidden=view.indexOf('<div className="vision-mesh-technical"');
  assert.ok(visible>0&&hidden>visible);
  const guide=view.slice(visible,hidden);
- assert.match(guide,/aria-pressed=\{selectedDeviceId===device\.deviceId\}/);
- assert.match(guide,/onClick=\{\(\)=>setSelectedDeviceId\(device\.deviceId\)\}/);
+ // Stage35c extracts device rendering into a pure component-local helper
+ // so recently reported and older registrations preserve the same click gating.
+ assert.match(guide,/presentation\.recentlyReported\.map\(renderRegistration\)/);
+ assert.match(guide,/presentation\.olderEntries\.map\(renderRegistration\)/);
+ assert.match(view,/aria-pressed=\{selectedDeviceId===device\.deviceId\}/);
+ assert.match(view,/onClick=\{\(\)=>setSelectedDeviceId\(device\.deviceId\)\}/);
  assert.match(guide,/selectedDevice\.membershipState==="discovered"&&qaAuthEnabled/);
  assert.match(guide,/inboxSendEnabled\?/);
  assert.match(guide,/onClick=\{\(\)=>void sendNativeInbox\(selectedDevice\.deviceId\)\}/);
