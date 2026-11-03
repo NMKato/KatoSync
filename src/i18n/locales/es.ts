@@ -1695,6 +1695,8 @@ const es: Record<TKey, string> = {
   "mesh.directory.notice": "Solo registros verificados de esta cuenta. Detectar no significa vincular ni conceder acceso remoto.",
   "mesh.directory.empty": "Aún no hay dispositivos registrados.",
   "mesh.directory.unavailable": "Registro de dispositivos no disponible o sesión KATOOS caducada.",
+  "mesh.directory.quotaReached": "Límite de dispositivos alcanzado. Revisa y sustituye de forma segura los registros antiguos o solicita al administrador ajustar el cupo. No se ha vinculado ningún dispositivo.",
+  "mesh.directory.rateLimited": "Demasiados intentos de registro. Vuelve a intentarlo más tarde; no se ha vinculado ningún dispositivo.",
   "mesh.directory.lastSeen": "Último contacto: {time}",
   "mesh.directory.notSeen": "Sin contacto",
   "mesh.directory.discovered": "Detectado",

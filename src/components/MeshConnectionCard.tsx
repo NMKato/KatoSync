@@ -296,6 +296,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       inboxOperation.current++;inboxInFlight.current=false;
       recipientOperation.current++;recipientInFlight.current=false;
       setDirectory(null);setSelectedDeviceId(null);setGuideOpen(false);
+      setDirectoryError(false);setDirectoryIssue(null);
       setNativeInboxPrepared(null);setNativeInboxSent(null);
       setRecipientInbox(null);setRecipientDecision(null);
       resetRelay();
@@ -451,6 +452,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
 
   const [directoryBusy,setDirectoryBusy]=useState(false);
   const [directoryError,setDirectoryError]=useState(false);
+  const [directoryIssue,setDirectoryIssue]=useState<"quota"|"rate"|null>(null);
   const sendNativeInbox=async(targetDeviceId:string)=>{
     // A separate, explicitly activated QA-only command; no implicit send from discovery.
     if(import.meta.env.VITE_MESH_INBOX_SEND_QA!=="1"||inboxInFlight.current||
@@ -502,7 +504,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     if(rosterInFlight.current)return;
     rosterInFlight.current=true;
     const operation=++rosterOperation.current;
-    setDirectoryBusy(true);setDirectoryError(false);setDirectory(null);
+    setDirectoryBusy(true);setDirectoryError(false);setDirectoryIssue(null);setDirectory(null);
     setSelectedDeviceId(null);
     setNativeInboxPrepared(null);setNativeInboxError(false);setNativeInboxSent(null);setRecipientInbox(null);setRecipientDecision(null);
     resetRelay();
@@ -521,7 +523,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
            !["discovered","pending","trusted","revoked"].includes(d.membershipState)))
         throw new Error("invalid_directory_contract");
       if(operation===rosterOperation.current)setDirectory(roster);
-    }catch{if(operation===rosterOperation.current)setDirectoryError(true);}
+    }catch(cause){
+      if(operation===rosterOperation.current){
+        const code=String(cause);
+        setDirectoryIssue(code.includes("MESH_DISCOVERY_DEVICE_QUOTA")?"quota":
+          code.includes("MESH_DISCOVERY_RATE_LIMIT")?"rate":null);
+        setDirectoryError(true);
+      }
+    }
     finally{if(operation===rosterOperation.current){
       rosterInFlight.current=false;setDirectoryBusy(false);
     }}
@@ -833,7 +842,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     setRecipientInbox(null);setRecipientDecision(null);
     setDirectoryBusy(false);setNativeInboxBusy(false);setRecipientBusy(false);
     setGuideOpen(false);
-    setDirectoryError(false);
+    setDirectoryError(false);setDirectoryIssue(null);
     void refresh();
   },[refresh,refreshEpoch]);
   const checkSharedKatoos=async()=>{
@@ -924,7 +933,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         onClick={()=>void copyPublicMessage(offer)}>{t("mesh.quick.copyPublicInvite")}</button>
     </div>:null}
     {directoryError&&!guideOpen?<p className="vision-mesh-compact-notice" role="status">
-      {t("mesh.simple.discoveryNotReady")}</p>:null}
+      {directoryIssue==="quota"?t("mesh.directory.quotaReached"):
+       directoryIssue==="rate"?t("mesh.directory.rateLimited"):
+       t("mesh.simple.discoveryNotReady")}</p>:null}
     {directory?.devices.length===0&&!guideOpen?<p className="vision-mesh-compact-notice" role="status">
       {t("mesh.directory.empty")}</p>:null}
     {identityError?<p role="alert" className="vision-mesh-compact-notice vision-mesh-error">
@@ -993,7 +1004,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       {nativeInboxError?<p role="alert" className="vision-mesh-error">
         {t("mesh.inbox.failed")}
       </p>:null}
-      {directoryError?<p role="alert">{t("mesh.directory.unavailable")}</p>:null}
+      {directoryError?<p role="alert">{directoryIssue==="quota"?t("mesh.directory.quotaReached"):
+        directoryIssue==="rate"?t("mesh.directory.rateLimited"):
+        t("mesh.directory.unavailable")}</p>:null}
       {inboxReceiveEnabled?<section className="vision-mesh-recipient-inbox"
          aria-label={t("mesh.recipient.heading")}>
         <strong>{t("mesh.recipient.heading")}</strong>

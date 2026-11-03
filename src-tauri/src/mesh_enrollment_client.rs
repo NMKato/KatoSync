@@ -17,6 +17,55 @@ struct DiscoveryReceipt {
     remote_jobs_enabled: bool,
 }
 
+const MAX_ERROR_BODY: usize = 256;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrollmentRejection {
+    error: String,
+}
+
+// Only expected server error codes become user-facing states. Never forward
+// arbitrary remote response bodies or session details to the WebView.
+fn classify_enrollment_rejection(status: reqwest::StatusCode, raw: &[u8]) -> &'static str {
+    if status != reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return "MESH_DISCOVERY_UNAVAILABLE";
+    }
+    let Ok(reply) = serde_json::from_slice::<EnrollmentRejection>(raw) else {
+        return "MESH_DISCOVERY_UNAVAILABLE";
+    };
+    match reply.error.as_str() {
+        "DEVICE_QUOTA" => "MESH_DISCOVERY_DEVICE_QUOTA",
+        "RATE_LIMIT" => "MESH_DISCOVERY_RATE_LIMIT",
+        _ => "MESH_DISCOVERY_UNAVAILABLE",
+    }
+}
+
+async fn limited_enrollment_rejection(mut response: reqwest::Response) -> String {
+    let status = response.status();
+    if status != reqwest::StatusCode::TOO_MANY_REQUESTS
+        || response
+            .content_length()
+            .is_some_and(|len| len > MAX_ERROR_BODY as u64)
+    {
+        return "MESH_DISCOVERY_UNAVAILABLE".into();
+    }
+    let mut body = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if chunk.len() > MAX_ERROR_BODY - body.len() {
+                    return "MESH_DISCOVERY_UNAVAILABLE".into();
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(_) => return "MESH_DISCOVERY_UNAVAILABLE".into(),
+        }
+    }
+    classify_enrollment_rejection(status, &body).into()
+}
+
 #[tauri::command]
 pub async fn mesh_account_device_discover(
 ) -> Result<crate::mesh_directory::MeshDirectoryRead, String> {
@@ -52,7 +101,7 @@ pub async fn mesh_account_device_discover(
         .await
         .map_err(|_| "MESH_DISCOVERY_UNAVAILABLE".to_string())?;
     if !challenge.status().is_success() {
-        return Err("MESH_DISCOVERY_UNAVAILABLE".into());
+        return Err(limited_enrollment_rejection(challenge).await);
     }
     let challenge: crate::mesh_identity::MeshEnrollmentChallenge = challenge
         .json()
@@ -86,7 +135,7 @@ pub async fn mesh_account_device_discover(
         .await
         .map_err(|_| "MESH_DISCOVERY_UNAVAILABLE".to_string())?;
     if !result.status().is_success() {
-        return Err("MESH_DISCOVERY_UNAVAILABLE".into());
+        return Err(limited_enrollment_rejection(result).await);
     }
     let receipt: DiscoveryReceipt = result
         .json()
@@ -103,4 +152,44 @@ pub async fn mesh_account_device_discover(
         .await
         .map_err(|_| "MESH_DISCOVERY_LOGIN_REQUIRED".to_string())?;
     crate::mesh_directory::mesh_account_devices_list().await
+}
+
+#[cfg(test)]
+mod quota_diagnostics_tests {
+    use super::*;
+
+    #[test]
+    fn quota_and_rate_limit_are_distinct_bounded_messages() {
+        let status = reqwest::StatusCode::TOO_MANY_REQUESTS;
+        assert_eq!(
+            classify_enrollment_rejection(status, br#"{"error":"DEVICE_QUOTA"}"#),
+            "MESH_DISCOVERY_DEVICE_QUOTA"
+        );
+        assert_eq!(
+            classify_enrollment_rejection(status, br#"{"error":"RATE_LIMIT"}"#),
+            "MESH_DISCOVERY_RATE_LIMIT"
+        );
+    }
+
+    #[test]
+    fn untrusted_error_payloads_are_never_forwarded() {
+        let denied = reqwest::StatusCode::TOO_MANY_REQUESTS;
+        for raw in [
+            br#"{"error":"PRIVATE_TOKEN"}"#.as_slice(),
+            br#"{"error":"DEVICE_QUOTA","extra":"unexpected"}"#,
+            br#"not json"#,
+        ] {
+            assert_eq!(
+                classify_enrollment_rejection(denied, raw),
+                "MESH_DISCOVERY_UNAVAILABLE"
+            );
+        }
+        assert_eq!(
+            classify_enrollment_rejection(
+                reqwest::StatusCode::UNAUTHORIZED,
+                br#"{"error":"DEVICE_QUOTA"}"#
+            ),
+            "MESH_DISCOVERY_UNAVAILABLE"
+        );
+    }
 }

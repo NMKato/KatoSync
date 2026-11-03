@@ -1716,6 +1716,8 @@ const de = {
   "mesh.directory.notice": "Nur verifizierte Geräteinformationen dieses Kontos. Eine Erkennung bedeutet noch keine sichere Kopplung oder Fernfreigabe.",
   "mesh.directory.empty": "Noch keine Geräte in der Registry registriert.",
   "mesh.directory.unavailable": "Die Geräte-Registry ist noch nicht verfügbar oder die KATOOS-Sitzung muss erneuert werden.",
+  "mesh.directory.quotaReached": "Gerätelimit erreicht. Vor einer weiteren Registrierung alte Geräteeinträge kontrolliert ersetzen oder das Kontingent administrativ anpassen. Keine Kopplung erfolgt.",
+  "mesh.directory.rateLimited": "Zu viele Registrierungsversuche. Später erneut prüfen; keine Kopplung erfolgt.",
   "mesh.directory.lastSeen": "Zuletzt gesehen: {time}",
   "mesh.directory.notSeen": "Noch kein Kontakt",
   "mesh.directory.discovered": "Erkannt",
