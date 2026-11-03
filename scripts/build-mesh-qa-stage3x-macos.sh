@@ -42,6 +42,21 @@ ditto "$BASE" "$APP"
 cp "$BIN" "$APP/Contents/MacOS/katosync"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName KatoSync Mesh QA Stage3X' "$APP/Contents/Info.plist" || true
+# Apple notarization validates every executable, including nested helper apps
+# located under Resources (not all are discovered by codesign --deep).
+HELPER="$APP/Contents/Resources/resources/stt/KatoSyncSpeechHelper.app"
+[[ -d "$HELPER" && -x "$HELPER/Contents/MacOS/katosync-stt" ]] || {
+ echo "STAGE4A_SIGNED_SPEECH_HELPER_MISSING" >&2; exit 6;
+}
+codesign --force --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGN" "$HELPER"
+codesign --verify --strict "$HELPER"
+HELPER_META="$(codesign -dv --verbose=4 "$HELPER" 2>&1)"
+[[ "$HELPER_META" == *"TeamIdentifier=T8SB89JPX7"* &&
+   "$HELPER_META" == *"Timestamp="* &&
+   "$HELPER_META" == *"flags=0x10000(runtime)"* ]] || {
+ echo "STAGE4A_SPEECH_HELPER_SIGNING_INVALID" >&2; exit 6;
+}
+# Sign outer bundle AFTER nested code; an outer signature seals its resources.
 codesign --force --deep --timestamp --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGN" "$APP"
 codesign --verify --deep --strict "$APP"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" == "$BUNDLE_ID" ]] || exit 4
