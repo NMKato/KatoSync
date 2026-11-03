@@ -14,7 +14,7 @@ async function fixture(){
  const signature=b64(new Uint8Array(await crypto.subtle.sign("Ed25519",key.privateKey,new TextEncoder().encode(text))));
  const proof={protocol:"katosync-mesh-enrollment-proof-v1",challengeId,nonce,publicKey,expiresAt,signature,deviceName:"M2 Pro",platformOs:"macos"};
  function request(data:unknown=proof){return new Request("https://local.example/complete",{method:"POST",headers:{authorization:"Bearer "+"a".repeat(65)},body:JSON.stringify(data)});}
- function backend(options:{invalidAuth?:boolean;used?:boolean;existing?:boolean;revoked?:boolean;quota?:boolean}={}){
+ function backend(options:{invalidAuth?:boolean;used?:boolean;existing?:boolean;revoked?:boolean;quota?:boolean;free?:boolean}={}){
   const writes:string[]=[];
   const call=async(input:RequestInfo|URL,init?:RequestInit)=>{
    const url=String(input); assert.ok(url.startsWith(origin));
@@ -32,7 +32,7 @@ async function fixture(){
    if(url.includes("/mesh_enrollment_challenges")&&init?.method==="PATCH"){
     writes.push("consume");return Response.json(options.used?[]:[{challenge_id:challengeId}]);
    }
-   if(url.includes("/mesh_owner_policy"))return Response.json([]);
+   if(url.includes("/mesh_owner_policy"))return Response.json(options.free?[]:[{allowed_devices:2}]);
    if(url.includes("/mesh_devices")&&init?.method!=="POST")
     return Response.json(options.quota?
       [{signing_public_key:"Z".repeat(43),membership_state:"discovered",revoked_at:null},
@@ -94,5 +94,14 @@ test("a revoked device key cannot re-enroll or get a false discovery receipt",as
  const response=await completeMeshDeviceDiscovery(f.request(),env,b.call);
  assert.equal(response.status,403);
  assert.deepEqual(await response.json(),{error:"DEVICE_REVOKED"});
+ assert.deepEqual(b.writes,[]);
+});
+
+
+test("Free without explicit server allowance cannot enroll, even with valid proof",async()=>{
+ const f=await fixture(),b=f.backend({free:true});
+ const result=await completeMeshDeviceDiscovery(f.request(),env,b.call);
+ assert.equal(result.status,403);
+ assert.deepEqual(await result.json(),{error:"MESH_PRO_REQUIRED"});
  assert.deepEqual(b.writes,[]);
 });

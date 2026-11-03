@@ -2,6 +2,7 @@
 // This does NOT pair devices, authorize a peer, enable transport or writers.
 import {inspectEnrollmentRegistry} from "./registry-policy.ts";
 import {requireKatoSyncMembership} from "./membership-gate.ts";
+import {readMeshDeviceAllowance} from "./device-entitlement.ts";
 const ORIGIN="https://xbnnlyyxiilklsygxcof.supabase.co";
 const SCHEMA="katosync";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -75,16 +76,11 @@ export async function completeMeshDeviceDiscovery(req:Request,env:Env,request:ty
     const inspection=inspectEnrollmentRegistry(current,proof.publicKey);
     if(inspection.kind==="invalid")return out(503,"REGISTRY_UNAVAILABLE");
     if(inspection.kind==="revoked")return out(403,"DEVICE_REVOKED");
-    const policyURL=new URL(ORIGIN+"/rest/v1/mesh_owner_policy");
-    policyURL.searchParams.set("select","allowed_devices");
-    policyURL.searchParams.set("owner_user_id","eq."+uid);
-    policyURL.searchParams.set("limit","1");
-    const policy=await request(policyURL,{headers:{...headers,"Accept-Profile":SCHEMA},signal:AbortSignal.timeout(8000)});
-    if(!policy.ok)return out(503,"REGISTRY_UNAVAILABLE");
-    const policies:unknown=await policy.json();
-    if(!Array.isArray(policies)||policies.length>1)return out(503,"REGISTRY_UNAVAILABLE");
-    const max=policies.length===0?2:policies[0]?.allowed_devices;
-    if(!Number.isInteger(max)||max<1||max>10)return out(503,"REGISTRY_UNAVAILABLE");
+    // Deny Free before consuming the signed, single-use challenge.
+    const entitlement=await readMeshDeviceAllowance(uid,headers,request);
+    if(entitlement.kind==="free")return out(403,"MESH_PRO_REQUIRED");
+    if(entitlement.kind!=="assigned")return out(503,"MESH_ENTITLEMENT_UNAVAILABLE");
+    const max=entitlement.max;
     const known=inspection.kind==="known";
     if(!known&&inspection.count>=max)return out(429,"DEVICE_QUOTA");
     // Re-check KatoSync membership near the irreversible single-use consume.

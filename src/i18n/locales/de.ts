@@ -1716,6 +1716,7 @@ const de = {
   "mesh.directory.notice": "Nur verifizierte Geräteinformationen dieses Kontos. Eine Erkennung bedeutet noch keine sichere Kopplung oder Fernfreigabe.",
   "mesh.directory.empty": "Noch keine Geräte in der Registry registriert.",
   "mesh.directory.unavailable": "Die Geräte-Registry ist noch nicht verfügbar oder die KATOOS-Sitzung muss erneuert werden.",
+  "mesh.directory.proRequired": "Mesh ist im Free-Tarif deaktiviert (0 Geräte). Für bis zu 10 Geräte benötigst du KatoSync Pro. Es wurde keine Kopplung erstellt.",
   "mesh.directory.quotaReached": "Gerätelimit erreicht. Vor einer weiteren Registrierung alte Geräteeinträge kontrolliert ersetzen oder das Kontingent administrativ anpassen. Keine Kopplung erfolgt.",
   "mesh.directory.rateLimited": "Zu viele Registrierungsversuche. Später erneut prüfen; keine Kopplung erfolgt.",
   "mesh.directory.lastSeen": "Zuletzt gesehen: {time}",

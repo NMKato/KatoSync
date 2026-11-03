@@ -28,22 +28,25 @@ struct EnrollmentRejection {
 // Only expected server error codes become user-facing states. Never forward
 // arbitrary remote response bodies or session details to the WebView.
 fn classify_enrollment_rejection(status: reqwest::StatusCode, raw: &[u8]) -> &'static str {
-    if status != reqwest::StatusCode::TOO_MANY_REQUESTS {
+    if status != reqwest::StatusCode::TOO_MANY_REQUESTS && status != reqwest::StatusCode::FORBIDDEN
+    {
         return "MESH_DISCOVERY_UNAVAILABLE";
     }
     let Ok(reply) = serde_json::from_slice::<EnrollmentRejection>(raw) else {
         return "MESH_DISCOVERY_UNAVAILABLE";
     };
-    match reply.error.as_str() {
-        "DEVICE_QUOTA" => "MESH_DISCOVERY_DEVICE_QUOTA",
-        "RATE_LIMIT" => "MESH_DISCOVERY_RATE_LIMIT",
+    match (status, reply.error.as_str()) {
+        (reqwest::StatusCode::TOO_MANY_REQUESTS, "DEVICE_QUOTA") => "MESH_DISCOVERY_DEVICE_QUOTA",
+        (reqwest::StatusCode::TOO_MANY_REQUESTS, "RATE_LIMIT") => "MESH_DISCOVERY_RATE_LIMIT",
+        (reqwest::StatusCode::FORBIDDEN, "MESH_PRO_REQUIRED") => "MESH_DISCOVERY_PRO_REQUIRED",
         _ => "MESH_DISCOVERY_UNAVAILABLE",
     }
 }
 
 async fn limited_enrollment_rejection(mut response: reqwest::Response) -> String {
     let status = response.status();
-    if status != reqwest::StatusCode::TOO_MANY_REQUESTS
+    if (status != reqwest::StatusCode::TOO_MANY_REQUESTS
+        && status != reqwest::StatusCode::FORBIDDEN)
         || response
             .content_length()
             .is_some_and(|len| len > MAX_ERROR_BODY as u64)
@@ -168,6 +171,24 @@ mod quota_diagnostics_tests {
         assert_eq!(
             classify_enrollment_rejection(status, br#"{"error":"RATE_LIMIT"}"#),
             "MESH_DISCOVERY_RATE_LIMIT"
+        );
+    }
+
+    #[test]
+    fn free_tier_required_is_a_bounded_403_only() {
+        assert_eq!(
+            classify_enrollment_rejection(
+                reqwest::StatusCode::FORBIDDEN,
+                br#"{"error":"MESH_PRO_REQUIRED"}"#
+            ),
+            "MESH_DISCOVERY_PRO_REQUIRED"
+        );
+        assert_eq!(
+            classify_enrollment_rejection(
+                reqwest::StatusCode::TOO_MANY_REQUESTS,
+                br#"{"error":"MESH_PRO_REQUIRED"}"#
+            ),
+            "MESH_DISCOVERY_UNAVAILABLE"
         );
     }
 
