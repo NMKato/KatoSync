@@ -30,6 +30,7 @@ mod github_app_auth;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
+mod mesh_agent_bootstrap;
 mod mesh_directory;
 mod mesh_enrollment_client;
 // Read-only owner-key registration gate; no direct IPC, listener or job grant.
@@ -434,6 +435,7 @@ pub fn run() {
             mesh_preview_auth::mesh_preview_auth_logout,
             mesh_hub::mesh_hub_preference_get,
             mesh_hub::mesh_hub_preference_set,
+            mesh_agent_bootstrap::mesh_agent_bootstrap_snapshot,
             mesh_directory::mesh_account_devices_list,
             mesh_enrollment_client::mesh_account_device_discover,
             mesh_identity::mesh_device_identity_prepare,
