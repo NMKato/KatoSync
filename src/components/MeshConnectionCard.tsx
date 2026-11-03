@@ -452,7 +452,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
 
   const [directoryBusy,setDirectoryBusy]=useState(false);
   const [directoryError,setDirectoryError]=useState(false);
-  const [directoryIssue,setDirectoryIssue]=useState<"quota"|"rate"|null>(null);
+  const [directoryIssue,setDirectoryIssue]=useState<"quota"|"rate"|"plan"|null>(null);
   const sendNativeInbox=async(targetDeviceId:string)=>{
     // A separate, explicitly activated QA-only command; no implicit send from discovery.
     if(import.meta.env.VITE_MESH_INBOX_SEND_QA!=="1"||inboxInFlight.current||
@@ -527,7 +527,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       if(operation===rosterOperation.current){
         const code=String(cause);
         setDirectoryIssue(code.includes("MESH_DISCOVERY_DEVICE_QUOTA")?"quota":
-          code.includes("MESH_DISCOVERY_RATE_LIMIT")?"rate":null);
+          code.includes("MESH_DISCOVERY_RATE_LIMIT")?"rate":
+          code.includes("MESH_DISCOVERY_PRO_REQUIRED")?"plan":null);
         setDirectoryError(true);
       }
     }
@@ -935,6 +936,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     {directoryError&&!guideOpen?<p className="vision-mesh-compact-notice" role="status">
       {directoryIssue==="quota"?t("mesh.directory.quotaReached"):
        directoryIssue==="rate"?t("mesh.directory.rateLimited"):
+       directoryIssue==="plan"?t("mesh.directory.proRequired"):
        t("mesh.simple.discoveryNotReady")}</p>:null}
     {directory?.devices.length===0&&!guideOpen?<p className="vision-mesh-compact-notice" role="status">
       {t("mesh.directory.empty")}</p>:null}
@@ -1006,6 +1008,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       </p>:null}
       {directoryError?<p role="alert">{directoryIssue==="quota"?t("mesh.directory.quotaReached"):
         directoryIssue==="rate"?t("mesh.directory.rateLimited"):
+        directoryIssue==="plan"?t("mesh.directory.proRequired"):
         t("mesh.directory.unavailable")}</p>:null}
       {inboxReceiveEnabled?<section className="vision-mesh-recipient-inbox"
          aria-label={t("mesh.recipient.heading")}>

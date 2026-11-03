@@ -8,8 +8,8 @@ const ui=read("src/components/MeshConnectionCard.tsx");
 test("Stage4B uses server-owned quota and a bounded, whitelisted diagnostic",()=>{
   assert.match(rust,/MAX_ERROR_BODY:\s*usize\s*=\s*256/);
   assert.match(rust,/classify_enrollment_rejection/);
-  assert.match(rust,/"DEVICE_QUOTA"\s*=>\s*"MESH_DISCOVERY_DEVICE_QUOTA"/);
-  assert.match(rust,/"RATE_LIMIT"\s*=>\s*"MESH_DISCOVERY_RATE_LIMIT"/);
+  assert.match(rust,/DEVICE_QUOTA"\)\s*=>\s*"MESH_DISCOVERY_DEVICE_QUOTA"/);
+  assert.match(rust,/RATE_LIMIT"\)\s*=>\s*"MESH_DISCOVERY_RATE_LIMIT"/);
   assert.match(rust,/deny_unknown_fields/);
   assert.match(rust,/limited_enrollment_rejection\(result\)\.await/);
   assert.match(rust,/limited_enrollment_rejection\(challenge\)\.await/);

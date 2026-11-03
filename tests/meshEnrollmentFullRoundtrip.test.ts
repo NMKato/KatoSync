@@ -44,7 +44,7 @@ function makeDB(){
    const id=u.searchParams.get("challenge_id")?.replace("eq.","");
    return Response.json(challenges.filter(x=>x.challenge_id===id));
   }
-  if(u.pathname.endsWith("/mesh_owner_policy"))return Response.json([]);
+  if(u.pathname.endsWith("/mesh_owner_policy"))return Response.json([{allowed_devices:2}]);
   if(u.pathname.endsWith("/mesh_devices")){
    if(init?.method==="POST"){
     devices.push(body);
