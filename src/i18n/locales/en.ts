@@ -1695,6 +1695,8 @@ const en: Record<TKey, string> = {
   "mesh.directory.notice": "Verified account device records only. Discovery is not pairing, a network connection, or remote access.",
   "mesh.directory.empty": "No devices have been registered yet.",
   "mesh.directory.unavailable": "Device directory unavailable, or your KATOOS session needs renewal.",
+  "mesh.directory.quotaReached": "Device limit reached. Review and safely replace older device entries or have an administrator adjust the allowance before enrolling. No pairing occurred.",
+  "mesh.directory.rateLimited": "Too many enrollment attempts. Try again later; no pairing occurred.",
   "mesh.directory.lastSeen": "Last seen: {time}",
   "mesh.directory.notSeen": "No contact yet",
   "mesh.directory.discovered": "Discovered",
