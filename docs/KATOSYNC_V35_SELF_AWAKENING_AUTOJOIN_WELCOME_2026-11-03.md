@@ -47,3 +47,20 @@ Eine konditionale Automation kontrolliert die echte 3.5-Abnahme und meldet sich 
 - `codesign --verify --deep --strict` für Haupt-App und verschachtelten SpeechHelper bestanden. **Gatekeeper lehnt die aktuelle Stage35-App jedoch als „Unnotarized Developer ID“ ab.** Die App wurde noch nicht auf M2/M3 gestartet, nicht an Apple hochgeladen und nicht zur Verteilung freigegeben.
 - `scripts/notarize-mesh-qa-stage35-macos.sh` fordert ausdrücklich `KATOSYNC_STAGE35_APPLE_UPLOAD_APPROVED=YES_EXPLICIT_APPLE_SUBMISSION` und ein vorhandenes Keychain-Notarisierungsprofil. Kein Umgehen von Gatekeeper; vor einer Apple-Submission explizite Autorisierung einholen.
 - Nach akzeptierter Apple-Notarisierung und `spctl`-Freigabe: Start auf M2, danach gesicherte Übertragung nach M3, getrennte Anmeldung mit dem KATOOS-Konto auf beiden neuen Stage35-Instanzen und Live-Roster-Test. Erst dann Mutual-Pairing/SAS und Hello.
+
+## Stage35b Folgekorrektur – isolierter Agent-Sync-Wiedereinstieg
+
+Der echte M2-Neustart bestätigte stabilen Agentennamen KAI Nexus Mac-AF99
+und idempotente Cloudregistrierung, zeigte jedoch vor dem Workspace erneut
+das Mode-Gateway. Der separate Folgebranch fix/mesh-v35b-autoresume-20261103
+führt nach verifiziertem KATOOS-Login, nach Splash und bereits akzeptierter
+Nutzungsvereinbarung den einmaligen Wiedereinstieg in die zuvor gespeicherte
+Agent-Sync-Oberfläche aus. Der Nutzer kann später weiterhin bewusst
+zum Gateway zurückkehren. Weder eine Registrierung noch ein Peer-Trust noch
+ein Job wird automatisch freigegeben. Feature aktiv nur bei
+VITE_STAGE35_AUTO_RESUME_QA=1 im Stage35-Buildskript, nicht in Stage3X/Stable.
+
+Lokale Abnahme: 627/627 vollständige Node-Tests grün, einschließlich
+neuer AutoResume-Sicherheitstests, TypeScript und Vite-Web-Build grün.
+**Diese Stage35b-Korrektur ist noch nicht als neue App gebaut, signiert
+oder notarisiert.** Die notarisierten Apps auf M2/M3 bleiben unverändert.

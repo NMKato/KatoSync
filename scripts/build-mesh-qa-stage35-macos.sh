@@ -31,8 +31,8 @@ trap cleanup EXIT
 codesign -d --entitlements :- "$BASE" > "$ENTITLEMENTS" 2>/dev/null
 plutil -lint "$ENTITLEMENTS" >/dev/null
 cd "$ROOT"
-VITE_KATOOS_AUTH_QA=1 npm run build
-VITE_KATOOS_AUTH_QA=1 npm exec -- tauri build --debug --no-bundle \
+VITE_KATOOS_AUTH_QA=1 VITE_STAGE35_AUTO_RESUME_QA=1 npm run build
+VITE_KATOOS_AUTH_QA=1 VITE_STAGE35_AUTO_RESUME_QA=1 npm exec -- tauri build --debug --no-bundle \
  --config src-tauri/tauri.mesh-qa-stage35.conf.json --features stage35-qa
 BIN="$TARGET/debug/katosync"
 [[ -x "$BIN" ]] || { echo "STAGE35_NATIVE_BINARY_MISSING";exit 3; }

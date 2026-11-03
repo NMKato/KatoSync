@@ -100,6 +100,7 @@ import {
   modeForStep,
   readRememberedMode,
   rememberMode,
+  shouldAutoResumeAgentWorkspace,
   stepForMode,
   type WorkspaceMode
 } from "./lib/workspaceMode";
@@ -297,6 +298,9 @@ export default function App() {
   // gemerkt und im Gateway vorausgewaehlt.
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | null>(null);
   const [rememberedMode, setRememberedMode] = useState<WorkspaceMode | null>(() => readRememberedMode(localStorage));
+  // The only auto-resume attempt is at authenticated startup, not whenever a
+  // user intentionally switches back to the workspace gateway.
+  const autoResumeAttempted = useRef(false);
   const lastStepByMode = useRef<Partial<Record<WorkspaceMode, StepId>>>({});
   const [licenseOpen, setLicenseOpen] = useState(
     () => localStorage.getItem(acceptedLicenseKey) !== licenseAgreement.version
@@ -376,6 +380,25 @@ export default function App() {
     const timer = window.setTimeout(() => setShowSplash(false), 1200);
     return () => window.clearTimeout(timer);
   }, []);
+
+  // Stage35: one-time, no-side-effect workspace restoration after signed-in boot.
+  // Remote Mesh enrollment, pairing and jobs retain independent user-approval gates.
+  useEffect(()=>{
+    if(import.meta.env.VITE_STAGE35_AUTO_RESUME_QA!=="1"||
+       autoResumeAttempted.current || !vm.sessionStatus.loggedIn ||
+       showSplash || licenseOpen)return;
+    autoResumeAttempted.current=true;
+    if(workspaceMode!==null)return;
+    if(!shouldAutoResumeAgentWorkspace({
+      stage35FeatureEnabled:true,
+      authenticated:vm.sessionStatus.loggedIn,
+      licenseAccepted:!licenseOpen,
+      splashComplete:!showSplash,
+      savedMode:rememberedMode
+    }))return;
+    setWorkspaceMode("agentSync");
+    vm.setActiveStep(defaultStepForMode("agentSync"));
+  },[showSplash,licenseOpen,workspaceMode,rememberedMode,vm.sessionStatus.loggedIn,vm.setActiveStep]);
 
   // Onboarding-Pflicht: nach Splash + Login + Nutzungsbedingungen, solange Setup < 100 %.
   // Die Tour gehoert ausschliesslich zum Mistral Mode (Mistral-Key, Library, Uploadplan).
