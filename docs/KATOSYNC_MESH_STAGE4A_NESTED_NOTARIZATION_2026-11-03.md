@@ -32,10 +32,24 @@ Die bestehende notarization-rejected Stage3X-QA-App auf dem M2 wurde ausschließ
 
 - Apple-Credentials verbleiben im macOS-Schlüsselbund. Keine Passwörter, privaten Signing-Keys oder Tokens wurden ausgegeben/übertragen.
 - Es gibt keine neue Netzwerkfreigabe, keine Gatekeeper-Abschaltung, keine Entfernung von Quarantäne-Attributen.
-- Stage3X ist auf M2 notarisiert. Auf M3 ist noch die signierte Stage2I-App; das Stage3X-Bundle wurde bisher **nicht** übertragen. Der M3 verfügte zuletzt über ca. 11 GiB freien Speicher.
+- Stage3X ist **auf M2 und M3 notarisiert und installiert**. Die vorhandene Stage2I-App bleibt auf beiden Macs erhalten. Der M3 verfügte zuletzt über ca. 11 GiB freien Speicher.
 - M2/M3 Anmeldung über das gleiche KATOOS-Konto und Stage3U Read-Only-Membership-Preflight stehen ebenso noch aus wie Gerätefreigabe, Mesh-Relay und echte Remote-Jobs.
 - Die ursprüngliche First-Fail-Submission bleibt in Apples Notarisierungsverlauf als Diagnose bestehen; der anschließende `Accepted`-Eintrag ist der aktuelle gültige QA-Stand.
 
 ## Reproduzierbarkeit
 
 Nach dem ersten erfolgreichen Build/Signatur-Lauf kann die vorhandene Stage3X-Test-App bei genau diesem nested-helper-Fall unter Wahrung einer Rollback-Kopie mit `bash scripts/repair-mesh-qa-stage3x-helper-macos.sh` korrigiert werden. Für **neue** QA-Builds ist kein Reparaturschritt mehr nötig, weil die verschachtelte Signatur jetzt im regulären `build-mesh-qa-stage3x-macos.sh` enthalten ist. Anschließend muss jeweils die signierte App erneut von Apple notarisiert und Gatekeeper-getestet werden.
+
+
+## M3-Live-Abnahme (03.11.2026)
+
+Nach der Apple-Annahme wurde **dieselbe signierte und mit Ticket versehene** Stage3X-App direkt zwischen zwei bereits autorisierten Macs übertragen. Der SSH-Dienst wurde nicht aktiviert; stattdessen wurde ein **einmaliger, kurzlebiger TLS-Transport mit festgelegtem öffentlichem Zertifikatsschlüssel** und einem zufälligen Einmalpfad genutzt. Die Datei blieb auf dem M2 nur für diesen Transfer freigegeben. Die temporären Serverdateien einschließlich TLS-Schlüssel wurden nach der einzigen Übertragung gelöscht; ein dauerhafter Netzwerkdienst wurde nicht eingerichtet.
+
+- Übertragene ZIP-Datei: SHA-256 `3fffc7b25933004e80e710c50a4903693bbf38532dbb4bde85e5e8529d756af2`; SHA-256 auf M3 vor dem Entpacken geprüft.
+- Native `katosync`-Datei auf M3: SHA-256 `e2419ad8c1a530b1d37be64dde5fb3e3c59fd8b57653418675da4c802849c1c6`; identisch mit M2, vor der Installation geprüft.
+- Auf M3 vor und nach dem Move: `codesign --verify --deep --strict` bestanden, Speech-Helper-Signatur bestanden, Bundle-ID `com.nmkato.katosync.meshqa.stage3x` bestätigt.
+- `xcrun stapler validate` und `spctl --assess --type execute --verbose=2` auf M3 erfolgreich: `accepted / Notarized Developer ID`.
+- `open -n -a` auf M3 erfolgreich; nativer Stage3X-Prozess anschließend nach mehr als einer Minute weiterhin aktiv. Auf M2 war der Stage3X-Prozess nach über 14 Minuten noch aktiv. Das weist den App-Start nach, nicht den vollständigen interaktiven Funktionsumfang.
+- Auf beiden Macs blieb die alte Stage2I-App erhalten. Keine Cloud-Migration, Vertrauensfreigabe, Remote-Aufträge oder temporäre Login-Token-Kopien vorgenommen.
+
+**Noch offen:** Die isolierten Stage3X-Sitzungen erfordern die Anmeldung mit dem bestehenden KATOOS-Konto auf **beiden** Macs. In der Mesh-Oberfläche den Abschnitt `KATOOS-Konto & KatoSync-Schema` aufklappen und `KATOOS-Verbindung prüfen` betätigen. Die gewünschte Meldung lautet `KATOOS und KatoSync-Schema bestätigt – Mitgliedschaft aktiv`. Dieser Read-only-Preflight ist **noch nicht interaktiv verifiziert**. Die getrennte native Mesh-/SAS-Freigabe bleibt danach weiterhin erforderlich.
