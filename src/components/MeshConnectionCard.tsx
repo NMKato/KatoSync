@@ -36,6 +36,11 @@ type MeshAgentBootstrapSnapshot = {
   trustedPeers:0;transportReady:false;remoteJobsEnabled:false;
 };
 
+type MeshPresenceReceipt = {
+  accepted:true;reportedRecently:true;paired:false;transportReady:false;
+  remoteJobsEnabled:false;nextPollSeconds:number;
+};
+
 type MeshLocalReadiness = {
   protocol: string;
   platform: string;
@@ -322,6 +327,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   };
   const [directory,setDirectory]=useState<MeshAccountDirectory|null>(null);
   const [agentBootstrap,setAgentBootstrap]=useState<MeshAgentBootstrapSnapshot|null>(null);
+  const lastPresenceAttempt=useRef(0);
+  const presenceIdentity=useRef("");
   const [nativeInboxBusy,setNativeInboxBusy]=useState(false);
   const [nativeInboxError,setNativeInboxError]=useState(false);
   const [nativeInboxPrepared,setNativeInboxPrepared]=useState<string|null>(null);
@@ -560,8 +567,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     let checking=false;
     let timer:number|undefined;
     const checkColleagues=async()=>{
-      if(checking || rosterInFlight.current || inboxInFlight.current ||
-         recipientInFlight.current || relayInFlight.current)return;
+      if(checking)return;
+      if(rosterInFlight.current || inboxInFlight.current ||
+         recipientInFlight.current || relayInFlight.current){
+        // Retry after a foreground Mesh operation. Never let a busy one-off
+        // leave the background roster/heartbeat scheduler permanently stopped.
+        timer=window.setTimeout(()=>void checkColleagues(),30_000);
+        return;
+      }
       checking=true;
       try{
         const status=await invoke<{loggedIn:boolean}>("supabase_session_status");
@@ -569,6 +582,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         if(status.loggedIn!==true){
           setAgentBootstrap(null);
           setDirectory(null);
+          lastPresenceAttempt.current=0;
+          presenceIdentity.current="";
           return;
         }
         const myAgent=await invoke<MeshAgentBootstrapSnapshot>("mesh_agent_bootstrap_snapshot");
@@ -594,6 +609,28 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           return;
         setAgentBootstrap(myAgent);
         setDirectory(roster);
+        if(presenceIdentity.current!==myAgent.fingerprint){
+          presenceIdentity.current=myAgent.fingerprint;
+          lastPresenceAttempt.current=0;
+        }
+        // Optional signed QA heartbeat; never claims P2P connectivity.
+        // No implicit registration: native refuses unknown/revoked identities.
+        const presenceEnabled=import.meta.env.VITE_STAGE35_HEARTBEAT_QA==="1";
+        const enrolled=roster.devices.some(d=>d.fingerprint===myAgent.fingerprint &&
+          d.membershipState!=="revoked");
+        if(presenceEnabled&&enrolled&&Date.now()-lastPresenceAttempt.current>=600_000){
+          lastPresenceAttempt.current=Date.now();
+          try{
+            const receipt=await invoke<MeshPresenceReceipt>("mesh_device_presence_report");
+            if(!receipt.accepted||!receipt.reportedRecently||receipt.paired||
+               receipt.transportReady||receipt.remoteJobsEnabled||
+               receipt.nextPollSeconds<300||receipt.nextPollSeconds>3600)
+              throw Error("invalid_presence_receipt");
+          }catch{
+            // Network errors do not imply the peer is offline or trusted.
+            // Keep the last verified directory, retry after a bounded pause.
+          }
+        }
       }catch{
         // A failed background check is not proof of lost peer trust.
         // Keep any manually verified pairing state; never auto-create access.
