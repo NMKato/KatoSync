@@ -42,6 +42,23 @@ export function rememberMode(storage: Pick<Storage, "setItem">, mode: WorkspaceM
   }
 }
 
+/**
+ * Stage35-only startup preference: restore an already chosen Agent Sync workspace
+ * after authenticated boot. This never triggers device registration, remote access,
+ * queue execution or implicit pairing. Explicit gateway remains available later.
+ */
+export function shouldAutoResumeAgentWorkspace(args:{
+  stage35FeatureEnabled:boolean;
+  authenticated:boolean;
+  licenseAccepted:boolean;
+  splashComplete:boolean;
+  savedMode:WorkspaceMode|null;
+}):boolean {
+  return args.stage35FeatureEnabled &&
+    args.authenticated && args.licenseAccepted && args.splashComplete &&
+    args.savedMode==="agentSync";
+}
+
 export function defaultStepForMode(mode: WorkspaceMode): StepId {
   return mode === "agentSync" ? "agentDashboard" : "dashboard";
 }

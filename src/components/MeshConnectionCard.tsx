@@ -7,6 +7,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useT, type TKey } from "../i18n";
 import { classifyMeshIdentityFailure, type MeshIdentityFailure } from "../lib/meshIdentityDiagnosis";
 import { activeMeshInvitations, nextMeshInboxExpiryDelay } from "../lib/meshInboxExpiry";
+import {selectMeshColleague} from "../lib/meshAgentIntroduction35";
+import {meshRegistrationAgentName,presentMeshRegistrations} from "../lib/meshDirectoryPresentation35";
 
 function relativeTime(value: string | null | undefined, lang: string): string | null {
   if (!value) return null;
@@ -20,6 +22,24 @@ function relativeTime(value: string | null | undefined, lang: string): string | 
   if (abs < 86_400) return format.format(Math.round(seconds / 3600), "hour");
   return format.format(Math.round(seconds / 86_400), "day");
 }
+
+type MeshAgentBootstrapSnapshot = {
+  protocol:"katosync-mesh-agent-bootstrap-v35";
+  agentName:string;
+  fingerprint:string;
+  hardware:{
+    platform:string;architecture:string;chipFamily:string|null;logicalCpuCores:number;
+    memoryGibBucket:number|null;recommendedRole:string;
+    localModelStatus:"not_verified";
+  };
+  ownerSessionVerified:true;rosterDiscoveryAllowed:true;
+  trustedPeers:0;transportReady:false;remoteJobsEnabled:false;
+};
+
+type MeshPresenceReceipt = {
+  accepted:true;reportedRecently:true;paired:false;transportReady:false;
+  remoteJobsEnabled:false;nextPollSeconds:number;
+};
 
 type MeshLocalReadiness = {
   protocol: string;
@@ -306,6 +326,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     }
   };
   const [directory,setDirectory]=useState<MeshAccountDirectory|null>(null);
+  const [agentBootstrap,setAgentBootstrap]=useState<MeshAgentBootstrapSnapshot|null>(null);
+  const lastPresenceAttempt=useRef(0);
+  const presenceIdentity=useRef("");
   const [nativeInboxBusy,setNativeInboxBusy]=useState(false);
   const [nativeInboxError,setNativeInboxError]=useState(false);
   const [nativeInboxPrepared,setNativeInboxPrepared]=useState<string|null>(null);
@@ -536,6 +559,93 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       rosterInFlight.current=false;setDirectoryBusy(false);
     }}
   };
+  // Stage 3.5: authenticated first-start auto-introduction, read-only roster refresh.
+  // Never enroll silently, accept an invitation, connect TLS or transmit job data.
+  useEffect(()=>{
+    if(import.meta.env.VITE_KATOOS_AUTH_QA!=="1")return;
+    let active=true;
+    let checking=false;
+    let timer:number|undefined;
+    const checkColleagues=async()=>{
+      if(checking)return;
+      if(rosterInFlight.current || inboxInFlight.current ||
+         recipientInFlight.current || relayInFlight.current){
+        // Retry after a foreground Mesh operation. Never let a busy one-off
+        // leave the background roster/heartbeat scheduler permanently stopped.
+        timer=window.setTimeout(()=>void checkColleagues(),30_000);
+        return;
+      }
+      checking=true;
+      try{
+        const status=await invoke<{loggedIn:boolean}>("supabase_session_status");
+        if(!active)return;
+        if(status.loggedIn!==true){
+          setAgentBootstrap(null);
+          setDirectory(null);
+          lastPresenceAttempt.current=0;
+          presenceIdentity.current="";
+          return;
+        }
+        const myAgent=await invoke<MeshAgentBootstrapSnapshot>("mesh_agent_bootstrap_snapshot");
+        if(!active)return;
+        if(myAgent.protocol!=="katosync-mesh-agent-bootstrap-v35"||
+           myAgent.ownerSessionVerified!==true||
+           myAgent.rosterDiscoveryAllowed!==true||
+           myAgent.transportReady!==false||myAgent.remoteJobsEnabled!==false||
+           !myAgent.fingerprint||!myAgent.agentName)throw Error("invalid_bootstrap");
+        const rosterOperationAtStart=rosterOperation.current;
+        const roster=await invoke<MeshAccountDirectory>("mesh_account_devices_list");
+        // A manual discovery or account refresh invalidates this background read.
+        if(rosterOperationAtStart!==rosterOperation.current)return;
+        // Revalidate the identity after I/O to guard against account switching.
+        const stillMe=await invoke<MeshAgentBootstrapSnapshot>("mesh_agent_bootstrap_snapshot");
+        if(!active || rosterOperationAtStart!==rosterOperation.current ||
+           stillMe.fingerprint!==myAgent.fingerprint)return;
+        if(roster.accountVerified!==true || roster.discoveryOnly!==true ||
+           roster.transportReady!==false || roster.remoteJobsEnabled!==false ||
+           !Array.isArray(roster.devices) || roster.devices.length>10 ||
+           roster.devices.some(d=>!d.deviceId||!d.ownerUserId||!d.displayName||
+             !d.fingerprint||!["discovered","pending","trusted","revoked"].includes(d.membershipState)))
+          return;
+        setAgentBootstrap(myAgent);
+        setDirectory(roster);
+        if(presenceIdentity.current!==myAgent.fingerprint){
+          presenceIdentity.current=myAgent.fingerprint;
+          lastPresenceAttempt.current=0;
+        }
+        // Optional signed QA heartbeat; never claims P2P connectivity.
+        // No implicit registration: native refuses unknown/revoked identities.
+        const presenceEnabled=import.meta.env.VITE_STAGE35_HEARTBEAT_QA==="1";
+        const enrolled=roster.devices.some(d=>d.fingerprint===myAgent.fingerprint &&
+          d.membershipState!=="revoked");
+        if(presenceEnabled&&enrolled&&Date.now()-lastPresenceAttempt.current>=600_000){
+          lastPresenceAttempt.current=Date.now();
+          try{
+            const receipt=await invoke<MeshPresenceReceipt>("mesh_device_presence_report");
+            if(!receipt.accepted||!receipt.reportedRecently||receipt.paired||
+               receipt.transportReady||receipt.remoteJobsEnabled||
+               receipt.nextPollSeconds<300||receipt.nextPollSeconds>3600)
+              throw Error("invalid_presence_receipt");
+          }catch{
+            // Network errors do not imply the peer is offline or trusted.
+            // Keep the last verified directory, retry after a bounded pause.
+          }
+        }
+      }catch{
+        // A failed background check is not proof of lost peer trust.
+        // Keep any manually verified pairing state; never auto-create access.
+      }finally{
+        checking=false;
+        // A single future read, never an overlapping interval.
+        if(active)timer=window.setTimeout(()=>void checkColleagues(),120_000);
+      }
+    };
+    void checkColleagues();
+    return ()=>{active=false;if(timer!==undefined)window.clearTimeout(timer);};
+    // Session checks happen inside the native command, not using a JS token.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[refreshEpoch]);
+
   const startConnectionGuide=()=>{
     setGuideOpen(true);
     if(!directory&&!directoryBusy)void loadAccountDirectory("list");
@@ -638,7 +748,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       relayInFlight.current=false;setRelayBusy(false);
     }}
   };
-  const selectedDevice=directory?.devices.find(d=>d.deviceId===selectedDeviceId)??null;
+  const selectedDevice=directory?.devices.find(d=>d.deviceId===selectedDeviceId &&
+    d.fingerprint!==agentBootstrap?.fingerprint)??null;
   const qaAuthEnabled=import.meta.env.VITE_KATOOS_AUTH_QA==="1";
   const inboxSendEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_SEND_QA==="1";
   const inboxReceiveEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_RECEIVE_QA==="1";
@@ -890,13 +1001,50 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       setPreviewBusy(false);
     }
   };
+  const presentation=directory&&agentBootstrap?presentMeshRegistrations({
+    devices:directory.devices,
+    localFingerprint:agentBootstrap.fingerprint,
+    nowMs:Date.now()
+  }):null;
+  const myRosterDevice=presentation?.own||
+    directory?.devices.find(d=>d.fingerprint===agentBootstrap?.fingerprint);
+  const colleagueRecommendation=agentBootstrap&&myRosterDevice?
+    selectMeshColleague({
+      accountVerified:true,ownerUserId:myRosterDevice.ownerUserId,
+      ownDeviceId:myRosterDevice.deviceId,
+      devices:directory?.devices.map(d=>({
+        deviceId:d.deviceId,ownerUserId:d.ownerUserId,displayName:d.displayName,
+        agentName:d.personaName||d.displayName,fingerprint:d.fingerprint,
+        membershipState:d.membershipState,
+        // Only the native Keychain + authenticated SAS proof can authorize trust.
+        locallyPinned:false,peerProofVerified:false,secureTransportReady:false
+      }))||[]
+    }):null;
   const authRejected=identityError&&
     ["account","session","refresh","invalid","changed"].includes(identityFailure??"");
   const revealReauth=()=>{
     setDetailsOpen(true);
     setReauthOpen(true);
   };
+  const displayRegistrationName=(device:MeshAccountDevice)=>
+    device.personaName||meshRegistrationAgentName(device.fingerprint,device.platformOs)||
+    device.displayName;
   const readiness=snapshot?.localControl??"unknown";
+  const renderRegistration=(device:MeshAccountDevice)=><button type="button"
+    className="vision-mesh-guide-device" key={device.deviceId}
+    aria-pressed={selectedDeviceId===device.deviceId}
+    disabled={directoryBusy||nativeInboxBusy||recipientBusy}
+    onClick={()=>setSelectedDeviceId(device.deviceId)}>
+    <span className="vision-mesh-guide-device-name"><strong>{displayRegistrationName(device)}</strong>
+      <small>{device.displayName}</small>
+      <small>{device.platformOs} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>
+      <small>{device.lastSeenAt?
+        t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
+        t("mesh.directory.notSeen")}</small>
+    </span>
+    <span className="vision-mesh-guide-select">{t(selectedDeviceId===device.deviceId?
+      "mesh.guide.selected":"mesh.guide.choose")}</span>
+  </button>;
   return <section className="vision-mesh-readiness vision-mesh-compact provider-mesh-card glass" aria-label={t("mesh.simple.title")}>
     <div className="vision-mesh-compact-top">
       <div className="vision-mesh-compact-identity">
@@ -928,6 +1076,20 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           onClick={()=>setDetailsOpen(value=>!value)}>{t("mesh.simple.details")}</button>
       </div>
     </div>
+    {agentBootstrap?<div className="vision-mesh-compact-notice" role="status">
+      <strong>{t("mesh.agent35.identity",{name:agentBootstrap.agentName})}</strong>
+      <small>{t("mesh.agent35.hardware",{
+        cores:agentBootstrap.hardware.logicalCpuCores,
+        memory:agentBootstrap.hardware.memoryGibBucket??"?",
+        platform:agentBootstrap.hardware.chipFamily||agentBootstrap.hardware.platform
+      })}</small>
+      <small>{colleagueRecommendation?.stage==="ready_for_hello"?
+        t("mesh.agent35.colleague",{name:colleagueRecommendation.peerName||"KAI"}):
+        presentation?.registeredPeers?
+          t("mesh.agent35.accountRecords",{count:presentation.registeredPeers}):
+          t("mesh.agent35.noColleagues")}</small>
+      <small>{t("mesh.agent35.pendingTrust")}</small>
+    </div>:null}
     {offer?<div className="vision-mesh-compact-notice" role="status">
       <span>{t("mesh.simple.offerReady")}</span>
       <button type="button" className="ghost compact-button"
@@ -967,21 +1129,25 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <p>{t("mesh.guide.notLoaded")}</p>:null}
       {directoryBusy?<p role="status">{t("mesh.guide.loading")}</p>:null}
       {directory?.devices.length===0?<p role="status">{t("mesh.directory.empty")}</p>:null}
-      {directory?.devices.map(device=><button type="button"
-        className="vision-mesh-guide-device" key={device.deviceId}
-        aria-pressed={selectedDeviceId===device.deviceId}
-        disabled={directoryBusy||nativeInboxBusy||recipientBusy}
-        onClick={()=>setSelectedDeviceId(device.deviceId)}>
-        <span className="vision-mesh-guide-device-name"><strong>{device.personaName||device.displayName}</strong>
-          {device.personaName?<small>{device.displayName}</small>:null}
-          <small>{device.platformOs} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>
-          <small>{device.lastSeenAt?
-            t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
-            t("mesh.directory.notSeen")}</small>
-        </span>
-        <span className="vision-mesh-guide-select">{t(selectedDeviceId===device.deviceId?
-          "mesh.guide.selected":"mesh.guide.choose")}</span>
-      </button>)}
+      {directory?<p className="vision-mesh-registration-summary" role="status">
+        {t("mesh.directory.identityCount",{count:presentation?.totalIdentities??directory.devices.length})}
+      </p>:null}
+      {presentation?<>
+        {presentation.own?<div className="vision-mesh-own-registration">
+          <strong>{t("mesh.directory.own")}</strong>
+          <small>{displayRegistrationName(presentation.own)} · {t("mesh.directory.registered")}</small>
+        </div>:null}
+        {presentation.recentlyReported.length>0?
+          <p className="vision-mesh-registration-section-label">
+            {t("mesh.directory.recent")}
+          </p>:null}
+        {presentation.recentlyReported.map(renderRegistration)}
+        {presentation.olderEntries.length>0?<details className="vision-mesh-older-registrations">
+          <summary>{t("mesh.directory.older",{count:presentation.olderEntries.length})}</summary>
+          <p>{t("mesh.directory.olderNotice")}</p>
+          {presentation.olderEntries.map(renderRegistration)}
+        </details>:null}
+      </>:directory?.devices.map(renderRegistration)}
       {selectedDevice?<div className="vision-mesh-guide-target" role="group"
         aria-label={t("mesh.guide.target")}>
         <strong>{selectedDevice.personaName||selectedDevice.displayName}</strong>

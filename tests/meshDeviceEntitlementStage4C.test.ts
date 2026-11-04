@@ -12,13 +12,27 @@ const env={SUPABASE_URL:origin,SUPABASE_ANON_KEY:"test-anon",
 
 test("Free has zero Mesh devices; explicit Pro allowance is at most 10",()=>{
  assert.deepEqual(parseMeshDeviceAllowance([]),{kind:"free",max:0});
- assert.deepEqual(parseMeshDeviceAllowance([{allowed_devices:10}]),{kind:"assigned",max:10});
- assert.deepEqual(parseMeshDeviceAllowance([{allowed_devices:5}]),{kind:"assigned",max:5});
+ assert.deepEqual(parseMeshDeviceAllowance([{allowed_devices:10,policy_expires_at:null}]),{kind:"assigned",max:10});
+ assert.deepEqual(parseMeshDeviceAllowance([{allowed_devices:5,policy_expires_at:null}]),{kind:"assigned",max:5});
  for(const bad of [[{allowed_devices:0}],[{allowed_devices:11}],
-    [{allowed_devices:"10"}],[{allowed_devices:2}, {allowed_devices:10}],
+    [{allowed_devices:"10"}],[{allowed_devices:2,policy_expires_at:null}, {allowed_devices:10,policy_expires_at:null}],
     [{allowed_devices:10,secret:"extra"}],null,{}]){
   assert.deepEqual(parseMeshDeviceAllowance(bad),{kind:"unavailable",max:0});
  }
+});
+
+test("time-bounded 14-day Mesh trial expires server-side without re-enrollment",()=>{
+ const start=Date.parse("2026-11-03T15:00:00Z");
+ const expiry=new Date(start+14*24*60*60*1000).toISOString();
+ const grant={allowed_devices:10,policy_expires_at:expiry};
+ assert.deepEqual(parseMeshDeviceAllowance([grant],start),{kind:"assigned",max:10});
+ assert.deepEqual(parseMeshDeviceAllowance([grant],start+13*86400_000),{kind:"assigned",max:10});
+ assert.deepEqual(parseMeshDeviceAllowance([grant],start+14*86400_000),{kind:"free",max:0});
+ assert.deepEqual(parseMeshDeviceAllowance([grant],start+15*86400_000),{kind:"free",max:0});
+ assert.deepEqual(parseMeshDeviceAllowance([{allowed_devices:10,policy_expires_at:"invalid"}],start),
+  {kind:"unavailable",max:0});
+ assert.deepEqual(parseMeshDeviceAllowance([{allowed_devices:10}],start),
+  {kind:"unavailable",max:0});
 });
 
 test("server reads only owner-scoped policy; error never becomes a Free success",async()=>{
@@ -29,8 +43,9 @@ test("server reads only owner-scoped policy; error never becomes a Free success"
   assert.equal(url.pathname,"/rest/v1/mesh_owner_policy");
   assert.equal(url.searchParams.get("owner_user_id"),"eq."+owner);
   assert.equal(url.searchParams.get("limit"),"2");
+  assert.equal(url.searchParams.get("select"),"allowed_devices,policy_expires_at");
   assert.equal((init?.headers as Record<string,string>)["Accept-Profile"],"katosync");
-  return Response.json([{allowed_devices:10}]);
+  return Response.json([{allowed_devices:10,policy_expires_at:null}]);
  };
  const headers={apikey:"test-service",Authorization:"Bearer test-service"};
  assert.deepEqual(await readMeshDeviceAllowance(owner,headers,requester as typeof fetch),

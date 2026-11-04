@@ -12,13 +12,20 @@ const MAX_ROSTER: usize = 10;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MeshDirectoryDevice {
+    #[serde(alias = "device_id")]
     pub device_id: Uuid,
+    #[serde(alias = "owner_user_id")]
     pub owner_user_id: Uuid,
+    #[serde(alias = "display_name")]
     pub display_name: String,
+    #[serde(alias = "persona_name")]
     pub persona_name: Option<String>,
+    #[serde(alias = "platform_os")]
     pub platform_os: String,
+    #[serde(alias = "membership_state")]
     pub membership_state: String,
     pub fingerprint: String,
+    #[serde(alias = "last_seen_at")]
     pub last_seen_at: Option<String>,
 }
 
@@ -142,6 +149,55 @@ pub async fn mesh_account_devices_list() -> Result<MeshDirectoryRead, String> {
 #[cfg(test)]
 mod mesh_directory_tests {
     use super::*;
+
+    #[test]
+    fn postgrest_snake_case_records_become_camel_case_frontend_contract() {
+        let owner = "11111111-1111-4111-8111-111111111111";
+        let device = "22222222-2222-4222-8222-222222222222";
+        let fpr = format!("{}BB", "AA-".repeat(15));
+        let response = serde_json::json!([{
+            "device_id":device,
+            "owner_user_id":owner,
+            "display_name":"KatoSync macos M3",
+            "persona_name":null,
+            "platform_os":"macos",
+            "membership_state":"discovered",
+            "fingerprint":fpr,
+            "last_seen_at":"2026-11-03T13:52:32.383084+00:00"
+        }]);
+        let devices: Vec<MeshDirectoryDevice> =
+            serde_json::from_value(response).expect("PostgREST snake_case must deserialize");
+        assert_eq!(devices.len(), 1);
+        assert!(validate_roster(&devices, owner).is_ok());
+        let message = serde_json::to_value(MeshDirectoryRead {
+            devices,
+            account_verified: true,
+            discovery_only: true,
+            transport_ready: false,
+            remote_jobs_enabled: false,
+        })
+        .expect("UI contract must serialize");
+        assert_eq!(message["devices"][0]["deviceId"], device);
+        assert_eq!(message["devices"][0]["ownerUserId"], owner);
+        assert_eq!(message["devices"][0]["membershipState"], "discovered");
+        assert!(message["devices"][0].get("device_id").is_none());
+        assert_eq!(message["transportReady"], false);
+        assert_eq!(message["remoteJobsEnabled"], false);
+    }
+
+    #[test]
+    fn duplicated_wire_alias_and_unknown_records_fail_closed() {
+        let old = serde_json::json!([{
+            "device_id":"22222222-2222-4222-8222-222222222222",
+            "deviceId":"22222222-2222-4222-8222-222222222222",
+            "owner_user_id":"11111111-1111-4111-8111-111111111111",
+            "display_name":"M2","persona_name":null,"platform_os":"macos",
+            "membership_state":"discovered","fingerprint":format!("{}BB","AA-".repeat(15)),
+            "last_seen_at":null
+        }]);
+        assert!(serde_json::from_value::<Vec<MeshDirectoryDevice>>(old).is_err());
+    }
+
     const A: &str = "11111111-1111-4111-8111-111111111111";
     fn entry(owner: &str) -> MeshDirectoryDevice {
         MeshDirectoryDevice {

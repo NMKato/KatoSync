@@ -32,7 +32,7 @@ async function fixture(){
    if(url.includes("/mesh_enrollment_challenges")&&init?.method==="PATCH"){
     writes.push("consume");return Response.json(options.used?[]:[{challenge_id:challengeId}]);
    }
-   if(url.includes("/mesh_owner_policy"))return Response.json(options.free?[]:[{allowed_devices:2}]);
+   if(url.includes("/mesh_owner_policy"))return Response.json(options.free?[]:[{allowed_devices:2,policy_expires_at:null}]);
    if(url.includes("/mesh_devices")&&init?.method!=="POST")
     return Response.json(options.quota?
       [{signing_public_key:"Z".repeat(43),membership_state:"discovered",revoked_at:null},

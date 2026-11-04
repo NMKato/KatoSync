@@ -30,7 +30,7 @@ function fakeRemote(recentCount=0,authOk=true,insertOk=true){
    assert.equal(init?.headers && (init.headers as Record<string,string>).Authorization?.startsWith("Bearer "),true);
    return Response.json(authOk?{id:uid,is_anonymous:false}:{error:"bad"},{status:authOk?200:401});
   }
-  if(url.includes("/mesh_owner_policy"))return Response.json([{allowed_devices:10}]);
+  if(url.includes("/mesh_owner_policy"))return Response.json([{allowed_devices:10,policy_expires_at:null}]);
   if(url.includes("select=challenge_id")){
    queries++;
    assert.ok(url.includes("owner_user_id=eq."));
@@ -99,7 +99,7 @@ test("concurrent DB challenge rate rejection maps to 429 without leaking DB erro
     user_id:uid,access_state:"active",authorized_at:"2026-10-28T12:00:00Z",revoked_at:null
    }]);
    if(url.endsWith("/auth/v1/user"))return Response.json({id:"11111111-1111-4111-8111-111111111111"});
-   if(url.includes("/mesh_owner_policy"))return Response.json([{allowed_devices:10}]);
+   if(url.includes("/mesh_owner_policy"))return Response.json([{allowed_devices:10,policy_expires_at:null}]);
    if(url.includes("select=challenge_id"))return Response.json([]);
    if(init?.method==="POST"){dbCalls++;return Response.json({code:"23514",message:"KATOSYNC_MESH_CHALLENGE_RATE_LIMIT"},{status:409});}
    throw Error("Unexpected call");

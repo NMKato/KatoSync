@@ -30,6 +30,8 @@ mod github_app_auth;
 mod local_brain;
 mod local_control;
 mod memory_fabric;
+mod mesh_agent_bootstrap;
+mod mesh_device_presence;
 mod mesh_directory;
 mod mesh_enrollment_client;
 // Read-only owner-key registration gate; no direct IPC, listener or job grant.
@@ -72,8 +74,10 @@ const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
 #[cfg(all(feature = "katoos-auth-qa", not(feature = "stage3x-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.auth.qa";
-#[cfg(feature = "stage3x-qa")]
+#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage3x.qa";
+#[cfg(feature = "stage35-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage35.qa";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";
 const SUPABASE_SESSION_ACCOUNT: &str = "supabase-refresh-token";
@@ -82,8 +86,10 @@ const USER_AGENT: &str = "KatoSync/1.0.1";
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
 #[cfg(all(feature = "github-login-qa", not(feature = "stage3x-qa")))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.github.login.qa.sync";
-#[cfg(feature = "stage3x-qa")]
+#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa")))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage3x.sync";
+#[cfg(feature = "stage35-qa")]
+const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage35.sync";
 // KATOOS canonical issuer on explicit, isolated QA feature only. Never silently
 // migrate or reinterpret existing KatoSync tenants/sessions on stable builds.
 #[cfg(feature = "katoos-auth-qa")]
@@ -434,6 +440,8 @@ pub fn run() {
             mesh_preview_auth::mesh_preview_auth_logout,
             mesh_hub::mesh_hub_preference_get,
             mesh_hub::mesh_hub_preference_set,
+            mesh_agent_bootstrap::mesh_agent_bootstrap_snapshot,
+            mesh_device_presence::mesh_device_presence_report,
             mesh_directory::mesh_account_devices_list,
             mesh_enrollment_client::mesh_account_device_discover,
             mesh_identity::mesh_device_identity_prepare,
@@ -5195,7 +5203,9 @@ fn app_support_dir() -> Result<PathBuf> {
     let dir = dirs::data_dir()
         .or_else(dirs::home_dir)
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
-        .join(if cfg!(feature = "stage3x-qa") {
+        .join(if cfg!(feature = "stage35-qa") {
+            "KatoSync Mesh QA Stage35"
+        } else if cfg!(feature = "stage3x-qa") {
             "KatoSync Mesh QA Stage3X"
         } else if cfg!(feature = "katoos-auth-qa") {
             "KatoSync KATOOS Auth QA"
@@ -5217,7 +5227,9 @@ fn logs_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
         .join("Library")
         .join("Logs")
-        .join(if cfg!(feature = "stage3x-qa") {
+        .join(if cfg!(feature = "stage35-qa") {
+            "KatoSync Mesh QA Stage35"
+        } else if cfg!(feature = "stage3x-qa") {
             "KatoSync Mesh QA Stage3X"
         } else if cfg!(feature = "katoos-auth-qa") {
             "KatoSync KATOOS Auth QA"
