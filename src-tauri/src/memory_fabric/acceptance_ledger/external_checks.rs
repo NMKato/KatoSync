@@ -362,6 +362,50 @@ pub(super) async fn corroborate_latest_pending(
     .await
 }
 
+/// Internally hosted authority path, not exposed to Tauri/IPC.
+/// A freshly verified KATOOS UID is mandatory, but login alone gives no grant.
+/// The native issuer key and the online-fetched signed grant MUST be
+/// provisioned independently; no issuer pin is configured for production yet.
+#[allow(dead_code)]
+pub(super) async fn corroborate_latest_pending_with_owner_authority(
+    store: &MemoryStore,
+    project_id: &str,
+    plan_sequence: i64,
+    scope_digest: &str,
+    signed_grant: &super::owner_authority::SignedOwnerGrant,
+    pinned_katoos_issuer: &VerifyingKey,
+    registered_root: &Path,
+    expected_repo: &str,
+) -> Result<PendingExternalCheck, String> {
+    let uid = crate::github_app_auth::verified_katosync_user()
+        .await
+        .map_err(|_| "ACCEPTANCE_KATOOS_LOGIN_REQUIRED")?;
+    let (receipt, _) = read_latest_pending(store, project_id, plan_sequence, scope_digest)?;
+    let authority = super::owner_authority::validate_owner_grant(
+        signed_grant,
+        &receipt,
+        &uid,
+        project_id,
+        pinned_katoos_issuer,
+        chrono::Utc::now().timestamp_millis(),
+    )?;
+    let outcome = corroborate_latest_pending(
+        store,
+        project_id,
+        plan_sequence,
+        scope_digest,
+        &authority.owner_key,
+        &authority.signer_key_id,
+        registered_root,
+        expected_repo,
+    )
+    .await?;
+    crate::mesh_identity::same_account_still_verified(&uid)
+        .await
+        .map_err(|_| "ACCEPTANCE_KATOOS_ACCOUNT_CHANGED")?;
+    Ok(outcome)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
