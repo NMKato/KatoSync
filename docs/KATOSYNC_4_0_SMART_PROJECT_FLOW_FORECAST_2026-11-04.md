@@ -60,3 +60,21 @@ Die reine Funktion `forecastAcceptedRoadmap40` besitzt jetzt einen konservativen
 - Weiterhin separate 4.0-P0-Gates: Gemma/OpenClaw-Agent-Birth, ownerbestätigter SAS/mTLS-Mesh-Transport, Remote-Job-E2E, Billing und Release-Polish.
 
 **Nutzungseinschätzung 04.11.2026:** vorhandene signierte Stage35e-Apps auf M2/M3 eignen sich für **beaufsichtigte Projektübersicht, read-only Repository-Prüfung und QA-Jobstatus**. Der neue Smart-Flow-Slice ist noch nur Quellcode/Frontend-Build und nicht auf beiden Macs notarisiert ausgerollt. Vollautonome Schreib-/Deploy-/Remote-Aufträge noch nicht produktionsreif.
+
+
+## Ergänzung 04.11.2026 — Acceptance-Ledger Trust Gate 1 (separater Draft)
+
+Der isolierte Folgebranch `feat/katosync-v40-acceptance-ledger-20261104`
+enthält den ersten unabhängig testbaren, **noch nicht live angebundenen**
+Ledger-Verifikationskern. Strukturierte, hashverkettete Abnahme-Snapshots
+sind an den SHA-256-Scope-Digest (Gewichte, Kriterien, CI-Jobs),
+Projekt/Journal-Sequenz und exakten Git-HEAD gebunden. Verifikation
+benötigt verpflichtend externe Owner-Ed25519-, GitHub-CI- und
+Git-Ancestry-Prüfer. Stale/invalid/fehlende Receipts bleiben
+`verifiedPercent = null` ohne Prognose.
+
+Nächster P0-Block: native Vertrauensinstanz + persistentes lokales
+SQLite-Acceptance-Ledger + echte Owner-/CI-E2E-Abnahme; bis dahin
+bleiben alle 4.0-UI-Anzeigen und realen Abschlussprognosen bewusst
+unverändert. Technisches Dokument:
+`docs/KATOSYNC_4_0_FEATURE_ACCEPTANCE_LEDGER_2026-11-04.md`.
