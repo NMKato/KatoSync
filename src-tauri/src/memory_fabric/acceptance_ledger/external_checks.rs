@@ -406,6 +406,98 @@ pub(super) async fn corroborate_latest_pending_with_owner_authority(
     Ok(outcome)
 }
 
+/// Live-only, fail-closed QA bridge. It never accepts an issuer URL, user UID,
+/// service-role key or approver grant from the WebView.
+#[allow(dead_code)]
+async fn fetch_current_qa_signed_owner_grant(
+    project_id: &str,
+) -> Result<super::owner_authority::SignedOwnerGrant, String> {
+    const CANONICAL_KATOOS: &str = "https://xbnnlyyxiilklsygxcof.supabase.co";
+    const MAX_BODY: usize = 4096;
+    if !cfg!(feature = "katoos-auth-qa") || crate::KATOSYNC_AUTH_URL != CANONICAL_KATOOS {
+        return Err("ACCEPTANCE_ISSUER_NOT_CONFIGURED".into());
+    }
+    let id = validate_project_id(project_id)?;
+    if id.len() > 80
+        || !id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b':'))
+    {
+        return Err("ACCEPTANCE_ISSUER_PROJECT_INVALID".into());
+    }
+    let token = zeroize::Zeroizing::new(
+        crate::ensure_supabase_access_token()
+            .await
+            .map_err(|_| "ACCEPTANCE_KATOOS_LOGIN_REQUIRED".to_string())?,
+    );
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "ACCEPTANCE_ISSUER_UNAVAILABLE".to_string())?;
+    let mut response = client
+        .get(format!(
+            "{CANONICAL_KATOOS}/functions/v1/feature-approver-grant-qa"
+        ))
+        .query(&[("projectId", id)])
+        .header("apikey", crate::KATOSYNC_AUTH_ANON_KEY)
+        .header("Cache-Control", "no-store")
+        .bearer_auth(token.as_str())
+        .send()
+        .await
+        .map_err(|_| "ACCEPTANCE_ISSUER_UNAVAILABLE".to_string())?;
+    if response.status() != reqwest::StatusCode::OK
+        || response
+            .content_length()
+            .is_some_and(|n| n > MAX_BODY as u64)
+    {
+        return Err("ACCEPTANCE_ISSUER_DENIED".into());
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| "ACCEPTANCE_ISSUER_UNAVAILABLE".to_string())?
+    {
+        if chunk.len() > MAX_BODY - bytes.len() {
+            return Err("ACCEPTANCE_ISSUER_INVALID_RESPONSE".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    super::owner_authority::parse_signed_owner_grant(&bytes)
+}
+
+/// Every call obtains a NEW server-authorized, short-lived project grant.
+/// A reusable / user-supplied grant cannot bypass this network gate. The
+/// issuer key must be a native trusted pin, never a JSON response field.
+/// No production key pin or frontend IPC is enabled yet.
+#[allow(dead_code)]
+pub(super) async fn corroborate_latest_pending_via_qa_issuer(
+    store: &MemoryStore,
+    project_id: &str,
+    plan_sequence: i64,
+    scope_digest: &str,
+    pinned_katoos_issuer: &VerifyingKey,
+    registered_root: &Path,
+    expected_repo: &str,
+) -> Result<PendingExternalCheck, String> {
+    crate::github_app_auth::verified_katosync_user()
+        .await
+        .map_err(|_| "ACCEPTANCE_KATOOS_LOGIN_REQUIRED")?;
+    let fresh = fetch_current_qa_signed_owner_grant(project_id).await?;
+    corroborate_latest_pending_with_owner_authority(
+        store,
+        project_id,
+        plan_sequence,
+        scope_digest,
+        &fresh,
+        pinned_katoos_issuer,
+        registered_root,
+        expected_repo,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

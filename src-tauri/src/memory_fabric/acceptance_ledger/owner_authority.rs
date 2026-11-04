@@ -228,6 +228,31 @@ mod tests {
             URL_SAFE_NO_PAD.encode(authority.sign(&grant_signing_bytes(grant)).to_bytes());
     }
     #[test]
+    fn edge_and_rust_issuer_domain_and_array_bytes_have_one_fixed_sha256() {
+        // SHA vector calculated independently by TypeScript/WebCrypto Edge QA.
+        let g = SignedOwnerGrant {
+            protocol: GRANT_PROTOCOL.into(),
+            subject_uid: UID.into(),
+            project_id: "project-a".into(),
+            role: "project_owner".into(),
+            permission: "approve_feature_acceptance".into(),
+            key_id: format!("ed25519-sha256:{}", "f".repeat(64)),
+            signing_public_key: "A".repeat(43),
+            grant_revision: 3,
+            state: "active".into(),
+            issued_at_ms: 1_793_829_600_000,
+            expires_at_ms: 1_793_829_660_000,
+            revoked_at_ms: None,
+            issuer_signature: String::new(),
+        };
+        let bytes = grant_signing_bytes(&g);
+        assert_eq!(bytes.len(), 347);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&bytes)),
+            "1f874636616a22ee30ff57ce3f355f92dfedb59ffc437c4c302af6a3a1466561"
+        );
+    }
+    #[test]
     fn fresh_independent_issuer_and_owner_signatures_required() {
         let owner = SigningKey::from_bytes(&[11; 32]);
         let issuer = SigningKey::from_bytes(&[12; 32]);
