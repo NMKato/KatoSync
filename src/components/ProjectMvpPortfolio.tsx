@@ -1,15 +1,23 @@
 // Created by NMKato Solutions
 // Progressive disclosure: top 3 project MVP bars + scroll-limited overflow + one scoped dossier.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, FolderGit2, ListChecks, X } from "lucide-react";
 import { useT } from "../i18n";
 import { partitionMvpDashboard } from "../lib/mvpDashboardLayout.ts";
-import type { RegistryProject } from "../types";
+import type { AgentJob, RegistryProject } from "../types";
+import {ProjectProgressIntelligence40} from "./ProjectProgressIntelligence40";
 import { ProjectMvpIndicator } from "./ProjectMvpIndicator";
 import { ProjectGithubCiEvidence } from "./ProjectGithubCiEvidence";
 
-export function ProjectMvpPortfolio({projects}: {projects:readonly RegistryProject[]}) {
+export function ProjectMvpPortfolio({
+  projects,jobs
+}: {projects:readonly RegistryProject[];jobs:readonly AgentJob[]}) {
   const {t}=useT();
+  const [nowMs,setNowMs]=useState(()=>Date.now());
+  useEffect(()=>{
+    const interval=window.setInterval(()=>setNowMs(Date.now()),30_000);
+    return()=>window.clearInterval(interval);
+  },[]);
   const [more,setMore]=useState(false);
   const [opened,setOpened]=useState<string|null>(null);
   const {top,rest}=partitionMvpDashboard(projects);
@@ -37,6 +45,17 @@ export function ProjectMvpPortfolio({projects}: {projects:readonly RegistryProje
           <small>{project.focus.priority}</small>
         </div>
         <ProjectMvpIndicator projectId={project.id} compact />
+        {(()=> {
+          const candidates=jobs.filter(job=>job.projectId===project.id&&job.status==="running");
+          const fresh=candidates.find(job=>job.lastActivityAt&&
+            nowMs-Date.parse(job.lastActivityAt)>=0&&
+            nowMs-Date.parse(job.lastActivityAt)<=180_000);
+          return <small className={fresh?"smart-project-live-hint":"smart-project-idle-hint"}>
+            {fresh?`● Aktiv: ${fresh.owner??"unbekannte Lane"} · ${fresh.phase||"in Arbeit"}`:
+              candidates.length?"○ Laufzeit nicht aktuell bestätigt":"○ Kein aktueller Job nachgewiesen"}
+          </small>;
+        })()}
+
         {project.verification?.findings.filter(f => !f.resolved && (f.severity === "warn" || f.severity === "danger")).length ? (
           <small className="tone-warn mvp-attention-hint">{t("mvp.openFindings", {
             count: project.verification.findings.filter(f => !f.resolved && (f.severity === "warn" || f.severity === "danger")).length
@@ -91,6 +110,7 @@ export function ProjectMvpPortfolio({projects}: {projects:readonly RegistryProje
       </div>
 
       <ProjectMvpIndicator key={selected.id} projectId={selected.id} defaultExpanded />
+      <ProjectProgressIntelligence40 key={"smart:"+selected.id} project={selected} jobs={jobs}/>
 
       <details className="mvp-dossier-section">
         <summary>{t("mvp.flowDetails")}</summary>

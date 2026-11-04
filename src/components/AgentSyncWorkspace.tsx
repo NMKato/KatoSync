@@ -263,7 +263,7 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
         </div>
       </section>
 
-      <ProjectMvpPortfolio projects={vm.projects.portfolio} />
+      <ProjectMvpPortfolio projects={vm.projects.portfolio} jobs={vm.agentSync.jobs} />
 
       <AutoQStarter vm={vm} onOpenProjects={() => onNavigate("agentProjects")} />
 

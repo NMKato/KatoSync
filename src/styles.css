@@ -11060,3 +11060,70 @@ button.agent-tile:hover {
   font-size:11px;color:var(--text-muted);line-height:1.5;
 }
 .provider-mesh-card .vision-mesh-older-registrations .vision-mesh-guide-device{margin-top:8px}
+
+/* KatoSync 4.0 Smart Project Flow — evidence != completion. */
+.smart-project-status{display:grid;gap:12px;padding:15px;border-radius:16px;border:1px solid var(--line);min-width:0}
+.smart-project-status-top,.smart-project-status-title,.smart-project-meter-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0
+}
+.smart-project-status-top>div{display:grid;gap:4px}
+.smart-project-status-top>div>small,.smart-project-meter-head small{font-size:11px;color:var(--text-muted)}
+.smart-project-status-title{justify-content:flex-start;gap:8px}
+.smart-project-status-title svg{color:var(--accent,var(--text-muted))}
+.smart-project-status-title h4{font-size:14px;margin:0}
+.smart-project-progress-meter{display:grid;gap:7px;padding:11px 12px;border-radius:12px;background:var(--surface-2)}
+.smart-project-meter-head strong{font-size:13px}
+.smart-project-progress-track{height:10px;border-radius:99px;background:var(--surface-1,var(--surface));border:1px solid var(--line);overflow:hidden}
+.smart-project-progress-track>span{height:100%;display:block;border-radius:99px;
+  background:linear-gradient(90deg,#de8a49,#ffd38f);transition:width .15s;max-width:100%}
+.smart-project-data-caveat{font-size:10px;color:var(--text-muted)}
+.smart-project-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.smart-project-facts>div{display:flex;gap:9px;align-items:flex-start;min-width:0;
+  border:1px solid var(--line);border-radius:12px;padding:9px;background:var(--surface-2)}
+.smart-project-facts>div>svg{flex-shrink:0;color:var(--accent,var(--text-muted));margin-top:2px}
+.smart-project-facts>div>span{display:grid;gap:5px;min-width:0}
+.smart-project-facts strong{font-size:11px}
+.smart-project-facts small,.smart-project-facts code{font-size:10px;line-height:1.4;overflow-wrap:anywhere;color:var(--text-muted)}
+.smart-project-forecast{display:grid;gap:6px;padding:10px 12px;border-radius:12px;
+  border:1px solid rgba(225,163,109,.24);background:color-mix(in srgb,var(--surface-2) 84%,#c18041 16%)}
+.smart-project-forecast>div{display:flex;align-items:center;gap:7px;font-size:11px}
+.smart-project-forecast>div svg{color:#e8a66d}
+.smart-project-forecast>strong{font-size:13px}
+.smart-project-forecast>strong.smart-project-forecast-pending{color:var(--text-muted);font-size:12px;font-weight:590}
+.smart-project-forecast>small{color:var(--text-muted);font-size:10px}
+.smart-project-job-list{display:grid;gap:8px}
+.smart-project-job-list>strong{font-size:12px}
+.smart-project-job-list ul{list-style:none;padding:0;margin:0;display:grid;gap:6px}
+.smart-project-job-list li{display:flex;gap:8px;border-radius:9px;padding:8px;background:var(--surface-2)}
+.smart-project-job-list li>div{display:grid;gap:3px;min-width:0}
+.smart-project-job-list li strong{font-size:11px}
+.smart-project-job-list li small{color:var(--text-muted);font-size:10px}
+.smart-project-job-list li>div>span{font-size:11px;line-height:1.35;overflow-wrap:anywhere}
+.smart-project-live-dot,.smart-project-idle-dot{width:7px;height:7px;flex-shrink:0;border-radius:50%;margin-top:4px;background:#69d5ae}
+.smart-project-idle-dot{background:#a9a9ad}
+.smart-project-empty,.smart-project-idle-hint{color:var(--text-muted);font-size:11px}
+.smart-project-live-hint{color:#74cbaa;font-size:11px}
+.smart-project-evidence{border-top:1px solid var(--line);padding-top:10px}
+.smart-project-evidence>summary{display:flex;align-items:center;gap:7px;font-size:11px;cursor:pointer;color:var(--text-muted)}
+.smart-project-evidence>summary svg:last-child{margin-left:auto}
+.smart-project-evidence>ul{margin:8px 0;padding-left:18px}
+.smart-project-evidence li,.smart-project-evidence p{font-size:11px;color:var(--text-muted);line-height:1.5}
+@media(max-width:760px){
+  .smart-project-facts{grid-template-columns:1fr}
+  .smart-project-meter-head{flex-wrap:wrap}
+}
+@media(prefers-reduced-motion:reduce){.smart-project-progress-track>span{transition:none}}
+
+.smart-project-current-wave{display:grid;gap:4px;padding:9px 12px;border:1px solid var(--line);
+  border-radius:11px;background:var(--surface-2);min-width:0}
+.smart-project-current-wave strong{font-size:11px}
+.smart-project-current-wave span{font-size:12px;overflow-wrap:anywhere;line-height:1.4}
+.smart-project-current-wave small{font-size:10px;color:var(--text-muted)}
+
+.smart-project-next-milestones{display:grid;gap:7px;padding:10px 12px;border-radius:12px;
+  background:var(--surface-2);border:1px solid var(--line)}
+.smart-project-next-milestones>strong{font-size:12px}
+.smart-project-next-milestones ol{margin:0;padding:0 0 0 21px;display:grid;gap:7px}
+.smart-project-next-milestones li{font-size:11px;line-height:1.4}
+.smart-project-next-milestones li>span{display:block;overflow-wrap:anywhere}
+.smart-project-next-milestones li>small{display:block;font-size:10px;color:var(--text-muted)}
