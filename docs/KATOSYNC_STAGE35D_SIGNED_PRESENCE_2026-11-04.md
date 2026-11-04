@@ -35,3 +35,18 @@ Noch kein erfolgreicher 200-Heartbeat auf den echten Macs: Die dort installierte
 Weitere Release-Gates: sicher bestätigte gegenseitige SAS-/Ed25519-/mTLS-Verbindung, einmalige signierte Hello-Nachricht, freigegebene Projekt-Kurzstatistik, echter M2-M3-Remotejob mit Acknowledgement, sowie automatischer Hintergrundbetrieb und korrekte Geräteplatzverwaltung. Die ältere QA-Installation bleibt erhalten.
 
 Wirtschaftlichkeit: Das Cloud-Heartbeat-Intervall ist absichtlich grob. Für zehntausende Nutzer ist später P2P-First-Presence mit seltener Cloud-Synchronisation vorgesehen, um Edge-Aufrufe und Datenbankkosten zu begrenzen.
+
+## Abnahme auf beiden echten Macs – 04.11.2026
+
+**Apple-Releaseprüfung:** Stage35d wurde aus dem gemeinsamen Cargo-Target des M2 neu kompiliert, unter der bestehenden QA-Bundle-ID mit Developer ID signiert, von Apple erfolgreich notarisiert und mit Stapler/CodeSign/Gatekeeper bestätigt. SHA-256 des Executables auf beiden Macs: `fad1176ded92aab4d83b773632ed5c5341a5f7bb10ee3572600d9ae80c77ee01`. Die vorherigen Stage35-Bundles liegen auf jedem Gerät unter `~/Applications/.KatoSync-Mesh-Stage35-Pre35d-20261104.app`, Stage3X bleibt separat.
+
+**Übertragung M2 → M3:** Ein einmaliger HTTPS-LAN-Server mit selbstsigniertem, kurzlebigem TLS-Zertifikat, Zertifikat-SHA-Pinning sowie Archiv- und Binary-SHA-256-Validierung wurde ausschließlich für das notarisierten QA-Paket verwendet. M3 bestätigte dieselbe App-Signatur und Gatekeeper-Akzeptanz. Der Transfer-Server wurde nach einer Abholung geschlossen und alle temporären ZIP-/Schlüssel-/Zertifikatsdateien wurden gelöscht. Kein SSH aktiviert.
+
+**Echter Heartbeat:**
+- M2 Pro / KAI Nexus / bestehende Registration `lHjPv`: neue serverbestätigte `last_seen_at = 2026-11-04 08:24:47.143+00`.
+- M3 / KAI Nika / bestehende Registration `Pqna2`: neue serverbestätigte `last_seen_at = 2026-11-04 08:31:04.744+00`.
+- UTC+1: 09:24:47 und 09:31:04 MEZ. Die Werte wurden durch eine anschließende **direkte Supabase-SQL-Abfrage** bestätigt. Keine zusätzlichen Geräte-IDs, weiterhin vier App-Identitäten auf zwei physischen Rechnern.
+
+**Interpretation:** Der signierte Agent-zu-Cloud-Meldeweg hat auf beiden echten Macs funktioniert. Er beweist keinen gegenseitigen Agententrust, keine echte P2P-Online-Sitzung, keine mTLS-Verbindung und keine Remote-Jobs. Aktuell 0 vertraute Devices, 0 Einladungen, 0 Relay-Nachrichten.
+
+**Nächster harter Blocker:** Native Einladungs-, Empfangs- und Relay-Funktionen sind im Code vorbereitet. Die Endpunkte `mesh-inbox-send`, `mesh-inbox-receive` und `mesh-pairing-relay` sind in diesem Projekt bisher **nicht** als aktive Edge Functions gelistet und die getrennten QA-Flags sind deaktiviert. Vor der Freischaltung zuerst isolierte Serverdeployment-Sicherheitsprüfung, Owner-Opt-in und echte signierte SAS-/mTLS-Kopplung auf beiden Macs. Keine automatische Peer-Freigabe nur aufgrund gemeinsamer KATOOS-Anmeldung.
