@@ -1,4 +1,5 @@
 // NMKato Solutions — KatoSync 4.0: signed, append-only PENDING acceptance receipts.
+mod external_checks;
 // NEVER treat this table as approved features. GitHub CI and ancestry are not yet
 // independently verified here. There is intentionally NO Tauri write/approval IPC.
 use super::{store::MemoryStore, validate_project_id};
