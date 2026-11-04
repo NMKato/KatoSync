@@ -370,6 +370,7 @@ pub fn run() {
             desktop_widget::desktop_widget_publish,
             desktop_widget::desktop_widget_snapshot,
             desktop_widget::desktop_widget_save_position,
+            desktop_widget::desktop_widget_set_expanded,
             desktop_widget::desktop_widget_open_main,
             project_registry::project_registry_discover,
             project_registry::project_registry_smart_roots,

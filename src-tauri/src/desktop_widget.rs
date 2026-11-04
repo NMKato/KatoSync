@@ -9,6 +9,10 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Window};
 
 const WIDGET_LABEL: &str = "desktop-widget";
+const COMPACT_WIDTH: f64 = 396.0;
+const COMPACT_HEIGHT: f64 = 330.0;
+const EXPANDED_WIDTH: f64 = 520.0;
+const EXPANDED_HEIGHT: f64 = 580.0;
 const WIDGET_STALE_MS: i64 = 90_000;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -141,19 +145,40 @@ fn restore_position(window: &tauri::WebviewWindow, app: &AppHandle) {
     let Ok(pos) = serde_json::from_slice::<WidgetPosition>(&raw) else {
         return;
     };
-    let Ok(Some(monitor)) = app.primary_monitor() else {
+    // Preserve the user's preferred monitor. Only fall back to the primary
+    // display if the saved monitor was disconnected or has moved.
+    let chosen = window.available_monitors().ok().and_then(|items| {
+        items.into_iter().find(|monitor| {
+            let origin = monitor.position();
+            let size = monitor.size();
+            pos.x >= origin.x
+                && pos.y >= origin.y
+                && pos.x < origin.x.saturating_add(size.width as i32)
+                && pos.y < origin.y.saturating_add(size.height as i32)
+        })
+    });
+    let Some(monitor) = chosen.or_else(|| app.primary_monitor().ok().flatten()) else {
         return;
     };
     let origin = monitor.position();
     let size = monitor.size();
+    let window_size = window.outer_size().ok();
+    let width = window_size
+        .as_ref()
+        .map(|value| value.width as i32)
+        .unwrap_or(COMPACT_WIDTH as i32);
+    let height = window_size
+        .as_ref()
+        .map(|value| value.height as i32)
+        .unwrap_or(COMPACT_HEIGHT as i32);
     let max_x = origin
         .x
         .saturating_add(size.width as i32)
-        .saturating_sub(344);
+        .saturating_sub(width);
     let max_y = origin
         .y
         .saturating_add(size.height as i32)
-        .saturating_sub(234);
+        .saturating_sub(height);
     let x = pos.x.clamp(origin.x, max_x.max(origin.x));
     let y = pos.y.clamp(origin.y, max_y.max(origin.y));
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
@@ -207,13 +232,59 @@ pub fn desktop_widget_show(window: Window, app: AppHandle) -> Result<(), String>
     let new_widget =
         WebviewWindowBuilder::new(&app, WIDGET_LABEL, WebviewUrl::App("widget.html".into()))
             .title("KatoSync · Desktop Widget")
-            .inner_size(344.0, 234.0)
-            .min_inner_size(300.0, 212.0)
+            .inner_size(COMPACT_WIDTH, COMPACT_HEIGHT)
+            .min_inner_size(360.0, 300.0)
             .resizable(false)
             .decorations(false)
             .build()
             .map_err(|_| "WIDGET_CREATE_FAILED".to_owned())?;
     restore_position(&new_widget, &app);
+    Ok(())
+}
+/// Expand only this isolated preview window. Never touch or execute tasks.
+#[tauri::command]
+pub fn desktop_widget_set_expanded(
+    window: Window,
+    app: AppHandle,
+    expanded: bool,
+) -> Result<(), String> {
+    require_window(&window, WIDGET_LABEL)?;
+    let (width, height) = if expanded {
+        (EXPANDED_WIDTH, EXPANDED_HEIGHT)
+    } else {
+        (COMPACT_WIDTH, COMPACT_HEIGHT)
+    };
+    window
+        .set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|_| "WIDGET_RESIZE_FAILED".to_owned())?;
+    // When expanding near an edge, keep the window on its current monitor.
+    // Do not overwrite the user's saved drag position.
+    let chosen = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| app.primary_monitor().ok().flatten());
+    if let (Some(monitor), Ok(position), Ok(size)) =
+        (chosen, window.outer_position(), window.outer_size())
+    {
+        let bounds = monitor.position();
+        let monitor_size = monitor.size();
+        let max_x = bounds
+            .x
+            .saturating_add(monitor_size.width as i32)
+            .saturating_sub(size.width as i32);
+        let max_y = bounds
+            .y
+            .saturating_add(monitor_size.height as i32)
+            .saturating_sub(size.height as i32);
+        let safe_x = position.x.clamp(bounds.x, max_x.max(bounds.x));
+        let safe_y = position.y.clamp(bounds.y, max_y.max(bounds.y));
+        if safe_x != position.x || safe_y != position.y {
+            window
+                .set_position(tauri::PhysicalPosition::new(safe_x, safe_y))
+                .map_err(|_| "WIDGET_POSITION_FAILED".to_owned())?;
+        }
+    }
     Ok(())
 }
 #[tauri::command]
