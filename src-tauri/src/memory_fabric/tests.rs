@@ -1481,7 +1481,7 @@ fn journal_migrates_v1_store_transactionally_without_losing_memory() {
             .unwrap();
         store
             .conn
-            .execute_batch("DROP TABLE continuity_events; DROP TABLE continuity_chat_turns; PRAGMA user_version=1;")
+            .execute_batch("DROP TABLE continuity_events; DROP TABLE continuity_chat_turns; DROP TRIGGER acceptance_pending_no_update; DROP TRIGGER acceptance_pending_no_delete; DROP TABLE acceptance_pending_receipts; PRAGMA user_version=1;")
             .unwrap();
     }
     // Read-only overview accepts the previous version without changing it.
@@ -1497,7 +1497,7 @@ fn journal_migrates_v1_store_transactionally_without_losing_memory() {
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -1676,7 +1676,7 @@ fn durable_chat_migrates_v2_without_overwriting_journal() {
             .unwrap();
         store
             .conn
-            .execute_batch("DROP TABLE continuity_chat_turns; PRAGMA user_version=2;")
+            .execute_batch("DROP TABLE continuity_chat_turns; DROP TRIGGER acceptance_pending_no_update; DROP TRIGGER acceptance_pending_no_delete; DROP TABLE acceptance_pending_receipts; PRAGMA user_version=2;")
             .unwrap();
     }
     assert!(MemoryStore::open_read_only(&path).unwrap().is_some());
@@ -1690,7 +1690,7 @@ fn durable_chat_migrates_v2_without_overwriting_journal() {
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -1974,7 +1974,7 @@ fn feature_index_v3_migration_backfills_existing_blueprints_transactionally() {
              DROP TRIGGER IF EXISTS bp_section_au;
              DROP TABLE blueprint_sections_fts;
              DROP TABLE blueprint_sections;
-             PRAGMA user_version=3;",
+             DROP TRIGGER acceptance_pending_no_update; DROP TRIGGER acceptance_pending_no_delete; DROP TABLE acceptance_pending_receipts; PRAGMA user_version=3;",
             )
             .unwrap();
     }
@@ -1994,7 +1994,7 @@ fn feature_index_v3_migration_backfills_existing_blueprints_transactionally() {
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(schema, 4);
+        assert_eq!(schema, 5);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -2387,6 +2387,56 @@ fn mvp_ci_requirements_survive_local_journal_roundtrip_without_granting_approval
             .unwrap()
             .tasks
             .is_empty());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn acceptance_v4_to_v5_migration_preserves_existing_project_and_never_claims_completion() {
+    let dir = temp_dir("acceptance-v4-to-v5");
+    let path = dir.join("memory.sqlite3");
+    {
+        let mut store = MemoryStore::open(&path).unwrap();
+        store
+            .ingest(batch(
+                "alpha",
+                Some(HEAD),
+                vec![source(
+                    "STATUS.md",
+                    "status",
+                    "# Existing data\nDo not erase",
+                    true,
+                )],
+            ))
+            .unwrap();
+        store
+            .conn
+            .execute_batch(
+                "DROP TRIGGER acceptance_pending_no_update;
+             DROP TRIGGER acceptance_pending_no_delete;
+             DROP TABLE acceptance_pending_receipts;
+             PRAGMA user_version=4;",
+            )
+            .unwrap();
+    }
+    // Old schema stays readable without a silent write/migration.
+    assert!(MemoryStore::open_read_only(&path).unwrap().is_some());
+    {
+        let store = MemoryStore::open(&path).unwrap();
+        assert_eq!(store.snapshot("alpha").unwrap().sources.len(), 1);
+        let version: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 5);
+        assert_eq!(store.pending_acceptance_count("alpha").unwrap(), 0);
+        assert_eq!(
+            store
+                .project_mvp_progress("alpha", HEAD)
+                .unwrap()
+                .verified_percent,
+            None
+        );
     }
     fs::remove_dir_all(dir).unwrap();
 }
