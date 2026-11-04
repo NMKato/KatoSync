@@ -1,5 +1,6 @@
 // NMKato Solutions — KatoSync 4.0: signed, append-only PENDING acceptance receipts.
 mod external_checks;
+mod scope_policy;
 // NEVER treat this table as approved features. GitHub CI and ancestry are not yet
 // independently verified here. There is intentionally NO Tauri write/approval IPC.
 use super::{store::MemoryStore, validate_project_id};
@@ -332,6 +333,50 @@ mod tests {
         r.owner.signature = URL_SAFE_NO_PAD.encode(key.sign(&signing_bytes(&r)).to_bytes());
         r.hash = receipt_hash(&r);
         r
+    }
+    #[test]
+    fn typescript_rust_receipt_hash_and_owner_domain_separator_match() {
+        // Fixed vector from native Node TypeScript WebCrypto, not Rust itself.
+        let r = SignedAcceptanceReceipt {
+            schema_version: "katosync.feature-acceptance/v1".into(),
+            project_id: "project-a".into(),
+            plan_journal_sequence: 17,
+            scope_digest: "ff4e2eded09670c7d20ea1d61f020dd2c36b914c5de2916980c5176eefcf4f7d".into(),
+            head_sha: "a".repeat(40),
+            accepted_at: "2026-11-04T12:00:00.000Z".into(),
+            accepted_feature_ids: vec!["feat-a".into()],
+            ci: vec![
+                CiReceipt {
+                    workflow: "CI".into(),
+                    job: "test Linux".into(),
+                    run_id: 17,
+                    head_sha: "a".repeat(40),
+                },
+                CiReceipt {
+                    workflow: "CI".into(),
+                    job: "test macOS".into(),
+                    run_id: 18,
+                    head_sha: "a".repeat(40),
+                },
+            ],
+            owner: OwnerApproval {
+                decision_id: "owner-decision-1".into(),
+                signer_key_id: "pinned-1".into(),
+                signature: "qa-sig-placeholder".into(),
+            },
+            previous_hash: None,
+            hash: String::new(),
+        };
+        assert_eq!(
+            receipt_hash(&r),
+            "73748b81107e4ea7ad8ccc98309d144216a6b248f35234922c81d060f61ae0bc"
+        );
+        let message = signing_bytes(&r);
+        assert_eq!(message.len(), 397);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(message)),
+            "b449465a3ce1a183067cccc4dc9e27d364e0372485bcb6360cb80d78a24599b5"
+        );
     }
     #[test]
     fn cryptographic_owner_signature_not_flag_and_pending_never_verified() {

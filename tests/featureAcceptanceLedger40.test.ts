@@ -179,3 +179,24 @@ test("owner signature payload uses native-compatible newline domain separation a
   assert.ok(message.includes(receipt.scopeDigest));
   assert.ok(message.includes(receipt.owner.signerKeyId));
 });
+
+test("locale-independent scoped digest matches a fixed native Rust vector",async()=>{
+ const shuffled:AcceptanceScope40={
+  projectId:"project-a",planJournalSequence:17,
+  tasks:[
+   {featureId:"feat_z",lane:"side",weight:5,acceptanceCriteria:"side only",ciChecks:[]},
+   {featureId:"feat-a",lane:"mvp",weight:2,acceptanceCriteria:"Demo success",
+    ciChecks:[{workflow:"CI",job:"test macOS"},{workflow:"CI",job:"test Linux"}]},
+   {featureId:"feat.z",lane:"mvp",weight:1,acceptanceCriteria:"passed QA",
+    ciChecks:[{workflow:"ci-gate",job:"lint"}]}
+  ]
+ };
+ const digest=await acceptanceScopeDigest40(shuffled);
+ assert.equal(digest,"ff4e2eded09670c7d20ea1d61f020dd2c36b914c5de2916980c5176eefcf4f7d");
+ const reversed={...shuffled,tasks:[...shuffled.tasks].reverse().map(t=>({
+  ...t,ciChecks:[...t.ciChecks].reverse()}))};
+ assert.equal(await acceptanceScopeDigest40(reversed),digest);
+ const changed={...shuffled,tasks:shuffled.tasks.map((t,i)=>
+  i===1?{...t,acceptanceCriteria:"different acceptance"}:t)};
+ assert.notEqual(await acceptanceScopeDigest40(changed),digest);
+});

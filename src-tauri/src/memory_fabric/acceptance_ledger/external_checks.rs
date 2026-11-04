@@ -345,6 +345,12 @@ pub(super) async fn corroborate_latest_pending(
 ) -> Result<PendingExternalCheck, String> {
     let (latest, previous_head) =
         read_latest_pending(store, project_id, plan_sequence, expected_scope_digest)?;
+    // Reconstruct the actual local Blueprint scope from the project-bound
+    // Memory Fabric rather than trusting the caller's supplied scope digest.
+    // This is documentary corroboration only; owner-reviewed plan acceptance
+    // must remain a separate gate before any verified percentage.
+    let progress = store.project_mvp_progress(project_id, &latest.head_sha)?;
+    super::scope_policy::audit_pending_feature_scope(&progress, &latest)?;
     corroborate_pending_external(
         &latest,
         pinned_owner,
