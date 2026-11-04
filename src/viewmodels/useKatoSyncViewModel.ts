@@ -850,8 +850,9 @@ export function useKatoSyncViewModel() {
       setLocalBrainBusy("start");
       const started = await startLocalBrain();
       setLocalBrainStatus(started);
+      if(!started.running)throw Error("Lokales Modell ist installiert, aber der Health-Check ist noch nicht bereit.");
       await registerLocalBrainProvider(started);
-      show("ok", "Kato Local Brain ist installiert, gestartet und als lokale Lane registriert.");
+      show("ok", "Setup abgeschlossen: Kato Local Brain läuft. Für die Agenten-Geburt fehlen noch Persona und sichere Agentenlaufzeit.");
     } catch (error) {
       show("error", getMessage(error));
     } finally {

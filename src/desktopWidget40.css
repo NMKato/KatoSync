@@ -1,0 +1,31 @@
+:root{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;color-scheme:dark;background:#141925;color:#eaf2ff}
+*{box-sizing:border-box}body{margin:0;overflow:hidden}
+.ks-widget{height:100vh;width:100vw;padding:13px 15px 12px;border:1px solid rgba(180,211,245,.24);border-radius:17px;
+background:linear-gradient(145deg,rgba(32,43,64,.98),rgba(13,18,33,.99));box-shadow:0 14px 36px rgba(0,0,0,.27);display:flex;flex-direction:column;gap:8px}
+.ks-widget-header{display:flex;align-items:center;gap:9px;cursor:move;user-select:none;min-height:28px}
+.ks-widget-mark{width:27px;height:27px;display:grid;place-items:center;background:linear-gradient(140deg,#6f9aff,#5c6bff);border-radius:9px;color:#fff}
+.ks-widget-heading{display:flex;flex-direction:column;flex:1;line-height:1.2}
+.ks-widget-heading strong{font-size:12px;font-weight:750;letter-spacing:.01em}
+.ks-widget-heading small{font-size:10px;letter-spacing:.08em;color:#a0b0cf;text-transform:uppercase}
+.ks-widget-drag{color:#7386a5;padding:3px}.ks-widget-close{background:transparent;color:#a6b6d8;border:0;padding:6px;cursor:pointer}
+.ks-widget-body{display:flex;flex-direction:column;gap:8px;flex:1;min-height:70px}
+.ks-widget-indicator{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:690}
+.ks-widget-indicator.current svg{color:#57dab5}.ks-widget-indicator.stale svg{color:#ffc180}
+.ks-widget-metrics{display:flex;align-items:center;gap:9px;font-size:11px;color:#9fb2d6}
+.ks-widget-metrics span{display:flex;align-items:center;gap:4px}
+.ks-widget-metrics strong{font-size:14px;color:#f2f6ff}
+.ks-widget-metrics .model-ready{color:#64d0b6}
+.ks-widget-metrics .model-rest{color:#aabbd5}
+.ks-widget-note{font-size:11px;color:#b0bdd3;margin:2px 0}
+.ks-widget-task{display:flex;justify-content:space-between;gap:6px;font-size:10px;color:#cad7f1}
+.ks-widget-task>span{white-space:nowrap;text-overflow:ellipsis;overflow:hidden;max-width:205px}
+button{font:inherit;border-radius:9px;cursor:pointer}
+.ks-widget-task button{background:#394562;border:0;color:#e1ebff;padding:3px 8px;font-size:10px}
+.ks-widget-footer{display:flex;gap:8px;margin-top:auto}
+.ks-widget-footer button{border:1px solid rgba(132,160,202,.30);min-height:31px;display:flex;align-items:center;justify-content:center;gap:7px;font-size:11px;font-weight:700}
+.ks-widget-secondary{background:#293752;color:#d6e7ff;flex:1}
+.ks-widget-primary{background:linear-gradient(140deg,#6e8cff,#6061d9);color:#fff;flex:0 0 87px}
+.ks-widget-quick{display:flex;gap:5px}
+.ks-widget-quick button{flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:6px 2px;border:1px solid #33435d;background:#1c2a45;color:#d4e2ff;font-size:10px}
+button:focus-visible{outline:2px solid #98bfff;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}

@@ -99,3 +99,19 @@ Quellen im Repo: `src-tauri/src/mesh_agent_bootstrap.rs`, `src-tauri/src/local_b
 5. Sobald A–C nachgewiesen sind: UI-Polish, Release-Kandidaten, vollständige Sicherheits-/Billing-/Plattformabnahme, 4.0-Freigabe.
 
 **Dateien/Referenzen:** private operator `PROJECT_STATUS_FLOW.md` / `MEMORY.md` werden lokal weitergeführt und bleiben ausdrücklich **gitignored**; diese Datei enthält nur veröffentlichungsfähige technische Roadmap-Informationen. Memory-Vorgaben: `docs/MEMORY_FABRIC.md`. Niemals Secrets, private Projektinhalte oder personenbezogene lokale Pfade in öffentliche PRs übernehmen.
+
+## Ergänzung vom 04.11.2026: Runtime out-of-box, One-Click-Setup und Desktop-Widget
+
+**Tracking:** https://github.com/NMKato/KatoSync/issues/226.
+
+**Verbindliche Produktanforderung:** Der KatoSync-4.0-Installer soll eine für das Zielgerät verifizierte llama.cpp-Runtime **inklusive der dynamischen Bibliotheken und zugehörigen Lizenz-/NOTICE-Dateien** bereits enthalten. Nur die großen, auswählbaren lokalen Modellgewichte werden nach einem ausdrücklichen Klick auf **„Setup starten“** bezogen. Bereits vorhandene, hashverifizierte Modelle sollen ohne unnötiges erneutes Herunterladen wiederverwendbar sein.
+
+**Onboarding-Flow:** `hardware_and_disk_checked` → `explicit_download_approved` → `download_resumable` → `sha_verified` → `model_installed` → `local_alias_health_verified` → `ready_for_agent_birth`. Eine echte Agenten-Persona mit eigenem Namen gibt es **erst nach** erfolgreicher lokaler Modell-/Tool-Inferenz sowie Owner-Bestätigung. Ein fehlgeschlagener Start darf keine Erfolgsmeldung erzeugen. Der Installer muss Abbruch, Netzwerkverlust und Rechnerneustart wiederaufnehmbar behandeln.
+
+**Hintergrundbetrieb:** Nach bestätigtem Setup kann der Nutzer das Hauptfenster ausblenden. Ein leichter Controller und das Widget bleiben erreichbar; das große Modell wird nur bei Bedarf geladen. Erst ein verlässlich funktionierender Wiederöffnungsweg (Widget, Tray/Menüleiste oder Dock) erlaubt automatisches Minimieren. Keine versteckte permanente RAM-/Batterielast.
+
+**Desktop-Widget ist P0 für 4.0**, nicht nur optionaler UI-Polish: frei beweglich, lokal positionstreu, im Hintergrund anklickbar, aktuelle verifizierte Job-/Warteschlangen-/Agenten- und Modellzustände, Schnellauswahl Jobs/Chat/Agenten, „Mehr“ öffnet die passende KatoSync-Seite. Bei fehlender/alter Berichterstattung `stale` statt falschem `online`. Jobtitel und private Projektinformationen standardmäßig ausgeblendet, nutzerbestätigte Detailfreigabe; opt-in bei Login/Always-on-top und Barrierefreiheit.
+
+**QA-Slice:** eigener Branch `feat/katosync-v40-setup-widget-20261104`. Tauri-Fenster und gebundene read-only Statusprojektion mit Tests implementiert; opt-in Schalter `VITE_KATOSYNC_DESKTOP_WIDGET_QA=1`. Der Bundle-Runtime-Resolver und ein offline prüfender, per Lizenzfreigabe gesperrter Release-Packager sind vorbereitet. **Noch nicht** als installierte/neusignierte 4.0-App auf M2/M3 abgenommen; Runtime noch nicht als reguläres App-Resource-Paket ausgeliefert. Weitere Release-Gates: vollständiger notarisiert signierter Bundle-Build, Windows-Variante, Status im echten Hintergrund und Position nach Monitorwechsel, offene OpenClaw-Integrierung, UI/UX-Polish.
+
+Details: `docs/KATOSYNC_4_0_SETUP_RUNTIME_DESKTOP_WIDGET_2026-11-04.md`.

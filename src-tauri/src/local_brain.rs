@@ -324,6 +324,99 @@ fn runtime_dir(app: &AppHandle, manifest: &Manifest) -> Result<PathBuf> {
     Ok(root(app)?.join("runtime").join(&manifest.runtime.version))
 }
 
+/// A release may bundle the exact pinned llama.cpp runtime; model GGUF remains
+/// separately downloaded with owner consent. Signed app resources are immutable.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BundledRuntimeLock {
+    schema_version: u32,
+    runtime_version: String,
+    target: String,
+    upstream_archive_sha256: String,
+    binary_sha256: String,
+}
+fn validate_bundled_runtime(
+    dir: &Path,
+    manifest: &Manifest,
+    target: &RuntimeTarget,
+) -> Result<PathBuf> {
+    let meta = fs::symlink_metadata(dir)?;
+    if !meta.is_dir() || meta.file_type().is_symlink() {
+        return Err(anyhow!("Bundled llama.cpp Runtime-Pfad ist unsicher"));
+    }
+    let raw = fs::read(dir.join("runtime-lock.json"))
+        .context("Bundled llama.cpp Runtime-Hash-Lock fehlt")?;
+    if raw.len() > 2048 {
+        return Err(anyhow!("Runtime-Lock ist ungueltig"));
+    }
+    let lock: BundledRuntimeLock =
+        serde_json::from_slice(&raw).context("Bundled llama.cpp Runtime-Lock ist ungueltig")?;
+    if lock.schema_version != 1
+        || lock.runtime_version != manifest.runtime.version
+        || lock.target != target_key()
+        || lock.upstream_archive_sha256 != target.sha256
+        || dist::validate_sha256(&lock.binary_sha256).is_err()
+    {
+        return Err(anyhow!(
+            "Bundled llama.cpp Runtime stimmt nicht mit Manifest ueberein"
+        ));
+    }
+    let binary = find_runtime_binary(dir, &target.executable)
+        .context("Bundled llama.cpp hat keinen ausfuehrbaren Modellserver")?;
+    if fs::symlink_metadata(&binary)?.file_type().is_symlink() {
+        return Err(anyhow!("Bundled llama.cpp enthaelt einen unsicheren Link"));
+    }
+    let license = binary
+        .parent()
+        .context("Runtime-Pfad fehlt")?
+        .join("LICENSE");
+    if !license.is_file() || fs::metadata(&license)?.len() > 80_000 {
+        return Err(anyhow!("Bundled llama.cpp Lizenzhinweis fehlt"));
+    }
+    let mut file = File::open(&binary)?;
+    let mut sha = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        sha.update(&buffer[..n]);
+    }
+    if format!("{:x}", sha.finalize()) != lock.binary_sha256 {
+        return Err(anyhow!("Bundled llama.cpp Hash stimmt nicht"));
+    }
+    Ok(binary)
+}
+fn bundled_runtime_binary(
+    app: &AppHandle,
+    manifest: &Manifest,
+    target: &RuntimeTarget,
+) -> Result<Option<PathBuf>> {
+    let path = app
+        .path()
+        .resource_dir()?
+        .join("resources/local-brain-runtime")
+        .join(&manifest.runtime.version);
+    if !path.exists() {
+        return Ok(None);
+    }
+    validate_bundled_runtime(&path, manifest, target).map(Some)
+}
+fn resolved_runtime_binary(
+    app: &AppHandle,
+    manifest: &Manifest,
+    target: &RuntimeTarget,
+) -> Result<Option<PathBuf>> {
+    if let Some(binary) = bundled_runtime_binary(app, manifest, target)? {
+        return Ok(Some(binary));
+    }
+    Ok(find_runtime_binary(
+        &runtime_dir(app, manifest)?,
+        &target.executable,
+    ))
+}
+
 fn package_store(app: &AppHandle) -> Result<PackageStore> {
     Ok(PackageStore::new(root(app)?))
 }
@@ -444,9 +537,9 @@ fn snapshot(app: &AppHandle) -> Result<LocalBrainStatus> {
         .filter(|_| package.supports(&key, &manifest.runtime.version));
     let runtime_installed = target
         .and_then(|target| {
-            runtime_dir(app, &manifest)
+            resolved_runtime_binary(app, &manifest, target)
                 .ok()
-                .and_then(|dir| find_runtime_binary(&dir, &target.executable))
+                .flatten()
         })
         .is_some();
     let local_root = root(app)?;
@@ -910,7 +1003,7 @@ pub async fn install(app: &AppHandle) -> Result<LocalBrainStatus> {
     let store = PackageStore::new(local_root.clone());
 
     let runtime_dir = runtime_dir(app, &manifest)?;
-    if find_runtime_binary(&runtime_dir, &target.executable).is_none() {
+    if resolved_runtime_binary(app, &manifest, target)?.is_none() {
         let label = "llama.cpp Runtime";
         emit_progress(app, "runtime", label, 0, None);
         let archive = dist::fetch_verified(
@@ -1045,8 +1138,7 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
         .targets
         .get(&key)
         .ok_or_else(|| anyhow!("Local Brain wird auf {key} noch nicht unterstuetzt"))?;
-    let runtime = runtime_dir(app, &manifest)?;
-    let binary = find_runtime_binary(&runtime, &target.executable)
+    let binary = resolved_runtime_binary(app, &manifest, target)?
         .ok_or_else(|| anyhow!("llama.cpp Runtime ist nicht installiert"))?;
     if owned_child_alive() || serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
         return status(app).await;
@@ -1364,6 +1456,40 @@ mod tests {
 
     const KATO_MODELS: &str =
         r#"{"object":"list","data":[{"id":"kato-local-brain","object":"model"}]}"#;
+
+    #[test]
+    fn validated_bundled_runtime_requires_matching_manifest_and_binary_sha() {
+        let manifest = manifest().unwrap();
+        let target = manifest.runtime.targets.get(&target_key()).unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("katosync-bundle-native-{}", uuid::Uuid::new_v4()));
+        let runtime = dir.join("llama-test");
+        fs::create_dir_all(&runtime).unwrap();
+        let bytes = b"reproducible test-only local runtime";
+        let bin = runtime.join(&target.executable);
+        fs::write(&bin, bytes).unwrap();
+        fs::write(runtime.join("LICENSE"), "MIT License").unwrap();
+        let digest = format!("{:x}", Sha256::digest(bytes));
+        let mut lock = serde_json::json!({
+            "schemaVersion": 1,
+            "runtimeVersion": manifest.runtime.version,
+            "target": target_key(),
+            "upstreamArchiveSha256": target.sha256,
+            "binarySha256": digest
+        });
+        fs::write(dir.join("runtime-lock.json"), lock.to_string()).unwrap();
+        assert_eq!(
+            validate_bundled_runtime(&dir, &manifest, target).unwrap(),
+            bin
+        );
+        fs::write(&bin, b"modified by attacker").unwrap();
+        assert!(validate_bundled_runtime(&dir, &manifest, target).is_err());
+        fs::write(&bin, bytes).unwrap();
+        lock["target"] = serde_json::Value::from("different-os");
+        fs::write(dir.join("runtime-lock.json"), lock.to_string()).unwrap();
+        assert!(validate_bundled_runtime(&dir, &manifest, target).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[tokio::test]
     async fn healthy_loopback_runtime_with_pinned_alias_counts_as_running() {
