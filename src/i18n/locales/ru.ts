@@ -178,7 +178,7 @@ const ru: Record<TKey, string> = {
   "providers.localBrain.fit.supported": " поддерживается",
   "providers.localBrain.fit.unsupported": " недостаточно RAM",
   "providers.localBrain.fit.unknown": " RAM",
-  "providers.localBrain.install": "Запустить настройку",
+  "providers.localBrain.install": "Начать настройку",
   "providers.localBrain.advanced": "Расширенные локальные провайдеры · Ollama / LM Studio / OpenAI-compatible",
   "providers.localBrain.start": "Запустить",
   "providers.localBrain.stop": "Остановить",

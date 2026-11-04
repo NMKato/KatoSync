@@ -52,6 +52,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import {listen} from "@tauri-apps/api/event";
+import {projectDesktopWidget} from "./lib/desktopWidgetState40";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -314,6 +316,11 @@ export default function App() {
   const visibleStep = toVisibleStep(vm.activeStep);
   const page = pageCopy(visibleStep, t);
   const isAgentSync = workspaceMode === "agentSync";
+  const widgetPreviewEnabled=import.meta.env.VITE_KATOSYNC_DESKTOP_WIDGET_QA==="1";
+  const [widgetError,setWidgetError]=useState(false);
+  const widgetReport=useMemo(()=>projectDesktopWidget(
+    vm.agentSync,vm.sessionStatus.loggedIn,vm.localBrainStatus?.running===true
+  ),[vm.agentSync,vm.sessionStatus.loggedIn,vm.localBrainStatus?.running]);
   const issueCount = getIssueCount(vm);
   const hints = buildHints(vm, t);
   const hintSignature = useMemo(() => buildHintSignature(hints), [hints]);
@@ -374,6 +381,32 @@ export default function App() {
     }
     wasLoggedInRef.current = vm.sessionStatus.loggedIn;
   }, [vm.sessionStatus.loggedIn]);
+
+  // Stage4.0 Widget QA: publish only bounded, read-only state to native RAM.
+  // No backend job execution, cloud I/O or credentials in this channel.
+  useEffect(()=>{
+    if(!widgetPreviewEnabled)return;
+    const publish=()=>void invoke("desktop_widget_publish",{input:widgetReport}).catch(()=>setWidgetError(true));
+    publish();
+    const timer=window.setInterval(publish,30_000);
+    return ()=>window.clearInterval(timer);
+  },[widgetPreviewEnabled,widgetReport]);
+  useEffect(()=>{
+    if(!widgetPreviewEnabled)return;
+    let released=false;
+    let unsubscribe:(()=>void)|undefined;
+    void listen<string>("katosync-widget-navigate",({payload})=>{
+      if(released||!vm.sessionStatus.loggedIn||licenseOpen)return;
+      const to=payload==="jobs"?"agentJobs":
+        payload==="chat"?"agentMasterChat":
+        payload==="agent"?"agentProviders":"agentDashboard";
+      rememberMode(localStorage,"agentSync");
+      setRememberedMode("agentSync");
+      setWorkspaceMode("agentSync");
+      vm.setActiveStep(to);
+    }).then(un=>{if(released)un();else unsubscribe=un;}).catch(()=>setWidgetError(true));
+    return()=>{released=true;unsubscribe?.();};
+  },[widgetPreviewEnabled,vm.sessionStatus.loggedIn,vm.setActiveStep,licenseOpen]);
 
   // Splash: animiertes Logo bei JEDEM Start, dann ausblenden.
   useEffect(() => {
@@ -770,6 +803,14 @@ export default function App() {
           </div>
           )}
           <div className="top-actions">
+            {widgetPreviewEnabled?<>
+              <button className="ghost" type="button" title="Desktop-Widget anzeigen"
+                onClick={()=>void invoke("desktop_widget_show")
+                  .then(()=>setWidgetError(false)).catch(()=>setWidgetError(true))}>
+                <LayoutGrid size={15}/><span>Widget</span>
+              </button>
+              {widgetError?<span role="alert" className="provider-field-error">Widget derzeit nicht verfügbar</span>:null}
+            </>:null}
             <button
               aria-label={theme === "dark" ? t("topbar.themeLight") : t("topbar.themeDark")}
               aria-pressed={theme === "light"}

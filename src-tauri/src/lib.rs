@@ -26,6 +26,7 @@ use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
 mod context_pack;
+mod desktop_widget;
 mod github_app_auth;
 mod local_brain;
 mod local_control;
@@ -335,6 +336,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                // The lightweight widget closes silently; only the main app
+                // displays the existing background-mode confirmation.
+                if window.label() == "desktop-widget" {
+                    api.prevent_close();
+                    if let Some(main)=window.app_handle().get_webview_window("main"){
+                        let _=main.show();
+                    }
+                    let _=window.hide();
+                    return;
+                }
+                if window.label() != "main" { return; }
                 api.prevent_close();
                 let _ = window
                     .dialog()
@@ -352,6 +364,13 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            desktop_widget::desktop_widget_show,
+            desktop_widget::desktop_widget_hide,
+            desktop_widget::desktop_widget_drag,
+            desktop_widget::desktop_widget_publish,
+            desktop_widget::desktop_widget_snapshot,
+            desktop_widget::desktop_widget_save_position,
+            desktop_widget::desktop_widget_open_main,
             project_registry::project_registry_discover,
             project_registry::project_registry_smart_roots,
             project_registry::project_registry_scan,
