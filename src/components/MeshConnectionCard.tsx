@@ -9,6 +9,7 @@ import { classifyMeshIdentityFailure, type MeshIdentityFailure } from "../lib/me
 import { activeMeshInvitations, nextMeshInboxExpiryDelay } from "../lib/meshInboxExpiry";
 import {selectMeshColleague} from "../lib/meshAgentIntroduction35";
 import {meshRegistrationAgentName,presentMeshRegistrations} from "../lib/meshDirectoryPresentation35";
+import {canConfirmRelayPeerLocally} from "../lib/meshRelayLocalApproval35F";
 
 function relativeTime(value: string | null | undefined, lang: string): string | null {
   if (!value) return null;
@@ -353,6 +354,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     relayOperation.current++;relayInFlight.current=false;
     setSentRequest(null);setChallengeRelayWork(null);setResponseRelayWork(null);
     setRelayMessages(null);setRelayReceipt(null);setRelayProof(null);
+    setConfirmedCode("");
     setRelayBusy(false);setRelayError(false);
   };
   const [challengeError,setChallengeError]=useState(false);
@@ -740,6 +742,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         !/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(proof.comparisonCode))
         throw new Error("invalid_relay_proof");
       if(operation===relayOperation.current){
+        setConfirmedCode("");
         setRelayProof(proof);
         setRelayMessages(null);
       }
@@ -750,6 +753,13 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   };
   const selectedDevice=directory?.devices.find(d=>d.deviceId===selectedDeviceId &&
     d.fingerprint!==agentBootstrap?.fingerprint)??null;
+  // Relay proof alone never grants trust. Selected target and independently
+  // entered OTHER device's SAS must match the locally verified public key.
+  const relayApprovalEligible=canConfirmRelayPeerLocally({
+    proof:relayProof,selectedPeer:selectedDevice,
+    codeFromOtherDevice:confirmedCode.trim().toUpperCase(),
+    busy:pairingBusy||relayBusy||directoryBusy
+  });
   const qaAuthEnabled=import.meta.env.VITE_KATOOS_AUTH_QA==="1";
   const inboxSendEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_SEND_QA==="1";
   const inboxReceiveEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_RECEIVE_QA==="1";
@@ -823,7 +833,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       checkInventory(await invoke<MeshPeerInventory>("mesh_local_approve_peer",
         {confirmedCode:confirmedCode.toUpperCase().trim()}));
       setConfirmedCode("");
-      setPairingProof(null);setPairingVerified(null);
+      setPairingProof(null);setPairingVerified(null);setRelayProof(null);
     }catch{setApprovalError(true);}
     finally{setPairingBusy(false);}
   };
@@ -1255,10 +1265,28 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           <small>{t("mesh.recipient.notConnected")}</small>
         </div>:null}
         {relayReceipt?<p role="status">{t("mesh.relay.delivered")} {t("mesh.recipient.notConnected")}</p>:null}
-        {relayProof?<div className="vision-mesh-guide-target" role="status">
-          <strong>{t("mesh.relay.sas")}: {relayProof.comparisonCode}</strong>
+        {relayProof?<div className="vision-mesh-guide-target vision-mesh-sas-approval">
+          <strong>{t("mesh.relay.sas")}</strong>
+          <code className="vision-mesh-sas-approval-code" aria-label={t("mesh.relay.sas")}>
+            {relayProof.comparisonCode}
+          </code>
           <small>{t("mesh.relay.compare")}</small>
-          <small>{t("mesh.recipient.notConnected")}</small>
+          {selectedDevice&&selectedDevice.fingerprint===relayProof.fingerprint?
+            <small>{t("mesh.relay.target")}: {selectedDevice.personaName||selectedDevice.displayName}</small>:
+            <p role="alert" className="vision-mesh-warning">{t("mesh.relay.selectVerifiedPeer")}</p>}
+          <label className="vision-mesh-field">{t("mesh.v3.confirmCode")}
+            <input value={confirmedCode} maxLength={14} autoComplete="off"
+              placeholder="AB12-34CD-EF09"
+              onChange={e=>setConfirmedCode(e.target.value.toUpperCase())}/>
+          </label>
+          <button type="button" className="primary compact-button"
+            disabled={!relayApprovalEligible}
+            onClick={()=>void approvePeer()}>
+              {t("mesh.v3.confirmButton")}
+          </button>
+          <small>{t("mesh.relay.localOnly")}</small>
+          {approvalError?<p role="alert" className="vision-mesh-error">
+            {t("mesh.v3.error")}</p>:null}
         </div>:null}
         {relayError?<p role="alert" className="vision-mesh-error">{t("mesh.relay.failed")}</p>:null}
       </section>:null}
