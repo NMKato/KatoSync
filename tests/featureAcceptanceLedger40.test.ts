@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {
- acceptanceReceiptDigest40,acceptanceScopeDigest40,verifyFeatureAcceptanceLedger40,
+ acceptanceReceiptDigest40,acceptanceOwnerSigningPayload40,acceptanceScopeDigest40,verifyFeatureAcceptanceLedger40,
  type AcceptanceAuthority40,type AcceptanceSnapshot40,type AcceptanceScope40
 } from "../src/lib/featureAcceptanceLedger40.ts";
 import {forecastAcceptedRoadmap40} from "../src/lib/smartProjectProgress40.ts";
@@ -169,4 +169,13 @@ test("future, nondeterministic timestamps and unsafe scope cannot pass",async()=
   fails(await check(old),"future_or_unordered");
   const other=await history();
   fails(await check(other,{scope:{...scope,tasks:[scope.tasks[0],scope.tasks[0]]}}),"invalid_scope");
+});
+
+test("owner signature payload uses native-compatible newline domain separation and excludes signature",async()=>{
+  const [receipt]=await history();
+  const message=new TextDecoder().decode(acceptanceOwnerSigningPayload40(receipt));
+  assert.ok(message.startsWith("KatoSync feature-acceptance v1\n["));
+  assert.ok(!message.includes(receipt.owner.signature));
+  assert.ok(message.includes(receipt.scopeDigest));
+  assert.ok(message.includes(receipt.owner.signerKeyId));
 });

@@ -147,7 +147,7 @@ export async function acceptanceScopeDigest40(scope:AcceptanceScope40):Promise<s
 // Exact bytes to sign and verify with a pinned owner Ed25519 public key.
 // Signature and hash are intentionally EXCLUDED from the signing payload.
 export function acceptanceOwnerSigningPayload40(receipt:Omit<AcceptanceSnapshot40,"hash">):Uint8Array{
-  return new TextEncoder().encode("KatoSync feature-acceptance v1\\n"+JSON.stringify([
+  return new TextEncoder().encode("KatoSync feature-acceptance v1\n"+JSON.stringify([
     receipt.schemaVersion,receipt.projectId,receipt.planJournalSequence,
     receipt.scopeDigest,receipt.headSha,receipt.acceptedAt,
     receipt.acceptedFeatureIds,
