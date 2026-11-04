@@ -22,7 +22,7 @@ Die „Geburt“ bezeichnet einen **persistenten Software-Agenten mit Modellfäh
 | Präsenz | Beide vorhandenen Stage35-Geräte haben signierte Cloud-Heartbeats bestätigt | Heartbeat ist kein LAN-Peer-Tunnel |
 | Einladungen/Relay | Zwei angenommene QA-Einladungen; Challenge und Response über QA-Cloud übermittelt | 0 Server-Trusted; kein realer SAS/mTLS-/Remotejob-E2E |
 | SAS-Freigabe | Stage35f-UI-Fix in Draft PR #223, Sicherheitsregeln getestet | Nicht in den installierten Stage35e-Bundles enthalten |
-| Local Brain | Gemma-4-E4B-manifest und llama.cpp-Installer/Status vorhanden; ältere App-Installation auf M2 enthält Modell, Projektor und Runtime | Der Stage35e-Agent nutzt dies **noch nicht**; Integrität/Version vor Wiederverwendung prüfen |
+| Local Brain | Gemma-4-E4B-Manifest und llama.cpp-Installer vorhanden; M2-Modell GGUF und Vision-Projektor am 04.11. **SHA-256 und Größe exakt manifestkonform** geprüft | Stage35e nutzt diese Dateien **nicht**; Runtime-Binärdatei, Paketlizenz und sichere Import-/Startpfade noch abnehmen |
 | OpenClaw | **Keine aktive/verpackte OpenClaw-Laufzeit im aktuellen Source-/Installationsstand nachgewiesen** | Integration, Prozesslebenszyklus und Rechte fehlen |
 | M3-Installation | 16 GiB RAM/Apple M3 vorhanden | Wenig freier Speicher (ca. 8 GiB am Kontrollpunkt); vor Modellinstallation Speicherbudget prüfen |
 | Kosten/Billing | Separater KatoSync-Pro-Produktentwurf (9,90 EUR/Monat, 14 Tage Karten-Trial, bis 10 Agenten) | Kein freigegebener Live-Billing-Checkout; Product-/Tenant-Isolation und Rechtstexte prüfen |
@@ -93,7 +93,7 @@ Quellen im Repo: `src-tauri/src/mesh_agent_bootstrap.rs`, `src-tauri/src/local_b
 ## Unmittelbare Reihenfolge und Übergabe
 
 1. Stage35e/f kontrolliert integrieren und echten SAS-Trust abnehmen; bestehendes **Issue #152** und Draft-PRs #222/#223 weiterführen.
-2. **Agent Birth & Activation als eigenes P0-Epic** mit Lifecycle-, Persona-, Modell-/Runtime- und Memory-Subtasks anlegen; erste technische Prüfung: auf M2 vorhandene Gemma-Dateien gegen Manifest-Hashes validieren, ohne das Stage35e-Worktree oder Dateien zu verschieben.
+2. **Epic #224 Agent Birth & Activation angelegt.** Die erste technische Prüfung ist **bestanden**: M2-Bestandsmodell 4.590.807.392 B und Vision-Projektor 559.874.816 B stimmen in SHA-256 und Größe exakt mit dem Manifest überein. Nächste Aktion ist die sichere, nur lesende Runtime-/Lizenz-Prüfung und eine isolierte Wiederverwendung ohne Manipulation der vorhandenen Dateien.
 3. Für M3 freien Speicher vor Modellpaket sicherstellen (mindestens Modell + Runtime + Staging + Betriebssystemreserve). Keine Installation, bis der Platz nachgewiesen ist.
 4. Danach die OpenClaw-Laufzeit als separaten, austauschbaren, versionsgepinnten und sicher eingeschränkten Adapter mit einem einzigen echten lokalen Tool-Call abnehmen.
 5. Sobald A–C nachgewiesen sind: UI-Polish, Release-Kandidaten, vollständige Sicherheits-/Billing-/Plattformabnahme, 4.0-Freigabe.
