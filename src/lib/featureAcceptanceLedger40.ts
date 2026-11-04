@@ -133,10 +133,13 @@ function shapeValid(snapshot:AcceptanceSnapshot40):boolean{
 // A stable scope fingerprint catches changes to weight, CI or acceptance criteria
 // even when an external plan journal sequence is accidentally reused.
 export async function acceptanceScopeDigest40(scope:AcceptanceScope40):Promise<string>{
-  const tasks=[...scope.tasks].sort((a,b)=>a.featureId.localeCompare(b.featureId))
+  // Ordinal UTF-16 ordering is stable across locales and can be reproduced by Rust.
+  // localeCompare depends on machine locale and is unsafe for signed scope digests.
+  const ordinal=(a:string,b:string)=>a===b?0:(a<b?-1:1);
+  const tasks=[...scope.tasks].sort((a,b)=>ordinal(a.featureId,b.featureId))
     .map(t=>[t.featureId,t.lane,t.weight,t.acceptanceCriteria,
       [...t.ciChecks].map(c=>[c.workflow,c.job]).sort((a,b)=>
-        JSON.stringify(a).localeCompare(JSON.stringify(b)))]);
+        ordinal(JSON.stringify(a),JSON.stringify(b)))]);
   const bytes=new TextEncoder().encode(JSON.stringify([
     "katosync-acceptance-scope/v1",scope.projectId,scope.planJournalSequence,tasks
   ]));
