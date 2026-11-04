@@ -87,3 +87,19 @@ Obsidian/Markdown is a generated human view of structured memory.
 7. R2-distributed Local Brain package/update channel.
 
 (Created by NMKato Solutions)
+
+## KatoSync 4.0 — Agent Birth memory contract (planned, 2026-11-04)
+
+The mesh device cryptographic identity and a model-backed **agent persona** are distinct entities. The fingerprint-derived KAI device display names currently used by Stage 3.5 are temporary technical aliases, **not LLM-selected names or evidence of an awake agent**. A local persona is activated only after a verified local model/runtime inference, an owner-confirmed initial name and durable local persistence. Names are never authorization or identity credentials.
+
+The existing **REX** name remains reserved for the established main Local Brain. New agents may choose unique short names after activation; stable persona IDs and the pinned device public keys do not change when the displayed name is edited. A model's self-description must never silently rewrite canonical project memory.
+
+Memory ownership is layered:
+- **Per-device:** OS-keychain Ed25519 identity, current capability evidence, runtime/model versions and revocation metadata; never share private keys.
+- **Per-agent:** owner-approved persona name, role, lifecycle state, approved tool permissions and bounded local episodic history. Dormant agents remain identifiable without a running LLM.
+- **Per-project:** existing SQLite/FTS5 Memory Fabric with verified/canonical evidence, explicit source provenance, stale-HEAD checks and owner-controlled project scope.
+- **Per-mesh:** transport only minimal public capabilities and explicitly approved project summaries after mutual SAS/key pin and authenticated TLS. No automatic chat history, credentials, filesystem paths, system prompts or private memory replication.
+
+The **Birth transaction** must be idempotent after crashes, reversible before approval, testable offline and recoverable across upgrades. Tool results are untrusted observations until confirmed and scoped to a project. Security gates, consent and server-side entitlement remain mandatory independently of any model-generated text. Auto-introductions are allowed only after verified mutual trust and secure transport, with replay/expiry and single-delivery protection.
+
+**Release status:** This contract is a KatoSync **4.0 target**, not implemented behavior of the current Stage 3.5 QA apps. See `docs/KATOSYNC_4_0_AGENT_BIRTH_RELEASE_ROADMAP_2026-11-04.md` for acceptance gates, M2/M3 local-model prerequisites, OpenClaw adapter review and real two-device testing.
