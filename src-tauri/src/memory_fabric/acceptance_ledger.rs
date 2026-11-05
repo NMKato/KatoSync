@@ -2,6 +2,7 @@
 mod external_checks;
 mod owner_authority;
 mod scope_policy;
+pub(super) mod verified_ledger;
 // NEVER treat this table as approved features. GitHub CI and ancestry are not yet
 // independently verified here. There is intentionally NO Tauri write/approval IPC.
 use super::{store::MemoryStore, validate_project_id};

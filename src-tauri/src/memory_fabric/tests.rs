@@ -1497,7 +1497,7 @@ fn journal_migrates_v1_store_transactionally_without_losing_memory() {
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -1690,7 +1690,7 @@ fn durable_chat_migrates_v2_without_overwriting_journal() {
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -1994,7 +1994,7 @@ fn feature_index_v3_migration_backfills_existing_blueprints_transactionally() {
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(schema, 5);
+        assert_eq!(schema, 6);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -2428,7 +2428,7 @@ fn acceptance_v4_to_v5_migration_preserves_existing_project_and_never_claims_com
             .conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         assert_eq!(store.pending_acceptance_count("alpha").unwrap(), 0);
         assert_eq!(
             store

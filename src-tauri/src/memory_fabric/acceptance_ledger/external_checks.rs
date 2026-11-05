@@ -7,6 +7,7 @@ use ed25519_dalek::VerifyingKey;
 use rusqlite::params;
 use serde::Serialize;
 use serde_json::Value;
+use sha2::Digest;
 use std::{path::Path, process::Stdio};
 use tokio::{
     process::Command,
@@ -520,7 +521,56 @@ pub(super) async fn corroborate_latest_pending_via_qa_issuer(
     crate::mesh_identity::same_account_still_verified(&uid)
         .await
         .map_err(|_| "ACCEPTANCE_KATOOS_ACCOUNT_CHANGED")?;
+    // Guard against HEAD moving after the original CI/Git corroboration.
+    // The final authority grant and the local repository MUST refer to the
+    // same immutable head immediately before any verified-ledger promotion.
+    check_git(registered_root, expected_repo, &receipt.head_sha, None).await?;
     Ok(checked)
+}
+
+/// Private, QA-only accepted-ledger promotion. No WebView/Tauri command.
+/// A receipt is persisted only after the full live chain has completed:
+/// KATOOS identity → independent issuer → signed owner decision → roadmap
+/// scope → Git ancestry → exact GitHub CI jobs → refreshed issuer/revocation
+/// check → final local Git HEAD check. Each step fails closed.
+#[allow(dead_code)]
+pub(super) async fn accept_latest_pending_via_qa_issuer(
+    store: &mut MemoryStore,
+    project_id: &str,
+    plan_sequence: i64,
+    scope_digest: &str,
+    registered_root: &Path,
+    expected_repo: &str,
+) -> Result<super::verified_ledger::VerifiedAcceptanceCheckpoint, String> {
+    if !cfg!(feature = "katoos-auth-qa") {
+        return Err("ACCEPTANCE_QA_ONLY".into());
+    }
+    let checked = corroborate_latest_pending_via_qa_issuer(
+        store,
+        project_id,
+        plan_sequence,
+        scope_digest,
+        registered_root,
+        expected_repo,
+    )
+    .await?;
+    let (receipt, _) = read_latest_pending(store, project_id, plan_sequence, scope_digest)?;
+    if checked.receipt_hash != receipt.hash
+        || checked.ci_jobs_checked != receipt.ci.len()
+        || checked.status != "corroborated_but_not_accepted"
+    {
+        return Err("ACCEPTANCE_EVIDENCE_CHANGED".into());
+    }
+    let progress = store.project_mvp_progress(project_id, &receipt.head_sha)?;
+    let issuer_pin = super::owner_authority::trusted_qa_issuer_key()?;
+    let issuer_fingerprint = format!("{:x}", sha2::Sha256::digest(issuer_pin.as_bytes()));
+    store.append_qa_verified_acceptance(
+        &receipt,
+        &progress,
+        &checked.receipt_hash,
+        checked.ci_jobs_checked,
+        &issuer_fingerprint,
+    )
 }
 
 #[cfg(test)]
