@@ -12,8 +12,6 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 PROJECT_REF = "xbnnlyyxiilklsygxcof"
 ENV_SECRET = "KATOSYNC_APPROVER_ISSUER_PKCS8_B64"
@@ -26,6 +24,10 @@ def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
 def provision(output_path: Path, *, apply: bool) -> dict[str, str]:
     if not apply:
         raise RuntimeError("QA_ISSUER_REQUIRES_EXPLICIT_APPLY")
+    # Import crypto only after the explicit --apply safety gate: dry-run must
+    # fail closed even on Windows CI without optional cryptography installed.
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     # Refuse to overwrite/rotate a previously installed key accidentally.
     current = json.loads(_run([
         "supabase", "secrets", "list",
