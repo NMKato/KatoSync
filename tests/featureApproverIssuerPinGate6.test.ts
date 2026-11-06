@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {readFileSync} from "node:fs";
 import {spawnSync} from "node:child_process";
+import {fileURLToPath} from "node:url";
 
 const publicMeta=JSON.parse(readFileSync(
   new URL("../docs/katosync-qa-issuer-public-key-v1.json",import.meta.url),"utf8"));
@@ -39,8 +40,8 @@ test("issuer bootstrap requires explicit --apply, never prints or commits PKCS8"
  assert.match(bootstrap,/tempfile\.mkstemp\(/);
  assert.match(bootstrap,/os\.unlink\(temp_path\)/);
  assert.match(bootstrap,/PRIVATE_KEY_EXPORTED=false/);
- const result=spawnSync("python3",[
-  new URL("../scripts/qa-bootstrap-owner-issuer.py",import.meta.url).pathname
+ const result=spawnSync(process.platform === "win32" ? "python" : "python3",[
+  fileURLToPath(new URL("../scripts/qa-bootstrap-owner-issuer.py",import.meta.url))
  ],{encoding:"utf8",timeout:5000});
  assert.equal(result.status,1);
  assert.match(result.stderr,/QA_ISSUER_REQUIRES_EXPLICIT_APPLY/);
