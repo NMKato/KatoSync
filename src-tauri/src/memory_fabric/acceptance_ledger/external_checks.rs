@@ -477,25 +477,50 @@ pub(super) async fn corroborate_latest_pending_via_qa_issuer(
     project_id: &str,
     plan_sequence: i64,
     scope_digest: &str,
-    pinned_katoos_issuer: &VerifyingKey,
     registered_root: &Path,
     expected_repo: &str,
 ) -> Result<PendingExternalCheck, String> {
+    let pinned_katoos_issuer = super::owner_authority::trusted_qa_issuer_key()?;
     crate::github_app_auth::verified_katosync_user()
         .await
         .map_err(|_| "ACCEPTANCE_KATOOS_LOGIN_REQUIRED")?;
     let fresh = fetch_current_qa_signed_owner_grant(project_id).await?;
-    corroborate_latest_pending_with_owner_authority(
+    let checked = corroborate_latest_pending_with_owner_authority(
         store,
         project_id,
         plan_sequence,
         scope_digest,
         &fresh,
-        pinned_katoos_issuer,
+        &pinned_katoos_issuer,
         registered_root,
         expected_repo,
     )
-    .await
+    .await?;
+    // A grant issued before GitHub CI/network checks is not proof it remains
+    // authorized now. Refetch from server and revalidate the same receipt/key.
+    // Suspensions, revocations, account switches, and key rotations fail closed.
+    let uid = crate::github_app_auth::verified_katosync_user()
+        .await
+        .map_err(|_| "ACCEPTANCE_KATOOS_LOGIN_REQUIRED")?;
+    let (receipt, _) = read_latest_pending(store, project_id, plan_sequence, scope_digest)?;
+    let current = fetch_current_qa_signed_owner_grant(project_id).await?;
+    let current_approver = super::owner_authority::validate_owner_grant(
+        &current,
+        &receipt,
+        &uid,
+        project_id,
+        &pinned_katoos_issuer,
+        chrono::Utc::now().timestamp_millis(),
+    )?;
+    if !fresh.same_admin_authority(&current)
+        || current_approver.signer_key_id != receipt.owner.signer_key_id
+    {
+        return Err("ACCEPTANCE_ADMIN_AUTHORITY_CHANGED".into());
+    }
+    crate::mesh_identity::same_account_still_verified(&uid)
+        .await
+        .map_err(|_| "ACCEPTANCE_KATOOS_ACCOUNT_CHANGED")?;
+    Ok(checked)
 }
 
 #[cfg(test)]

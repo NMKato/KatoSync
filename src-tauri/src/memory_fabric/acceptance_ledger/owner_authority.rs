@@ -12,6 +12,11 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+// Gate 6: checked-in PUBLIC QA trust anchor for the dedicated KATOOS issuer.
+// No secret, Keychain token, server-role credential or user-supplied pin.
+const QA_ISSUER_PUBLIC_KEY_B64URL: &str = "0YMIKm_iKp1TxRFSpVJ5PG5o1ooFZcGosZyInUY_wy8";
+const QA_ISSUER_FINGERPRINT_SHA256: &str =
+    "c87f5292dc37eddc0fc67f6d085b7b0c87ed31c44c54830f6cd4de66bf6f544b";
 const GRANT_PROTOCOL: &str = "katosync-project-feature-approver-grant/v1";
 const MAX_AGE_MS: i64 = 90_000;
 const MAX_LIFETIME_MS: i64 = 300_000;
@@ -33,6 +38,25 @@ pub(super) struct SignedOwnerGrant {
     expires_at_ms: i64,
     revoked_at_ms: Option<i64>,
     issuer_signature: String,
+}
+impl SignedOwnerGrant {
+    /// Two independently fetched grants may have different timestamps and
+    /// signatures, but must describe the SAME admin authorization revision.
+    /// An interim role change or key rotation forces a new explicit review.
+    pub(super) fn same_admin_authority(&self, next: &Self) -> bool {
+        self.protocol == next.protocol
+            && self.subject_uid == next.subject_uid
+            && self.project_id == next.project_id
+            && self.role == next.role
+            && self.permission == next.permission
+            && self.key_id == next.key_id
+            && self.signing_public_key == next.signing_public_key
+            && self.grant_revision == next.grant_revision
+            && self.state == "active"
+            && next.state == "active"
+            && self.revoked_at_ms.is_none()
+            && next.revoked_at_ms.is_none()
+    }
 }
 /// Independent domain separator: this signature MUST be created by the
 /// trustworthy KATOOS approver-authority, not the account / WebView.
@@ -83,6 +107,17 @@ fn key_id(key: &VerifyingKey) -> String {
 }
 fn hex_sha(raw: &[u8]) -> String {
     format!("{:x}", Sha256::digest(raw))
+}
+/// Trusted key embedded in the reviewed native QA build, not derived from a
+/// Supabase response, user-provided config, or WebView state. Any rotation
+/// requires a new signed QA binary with an independently reviewed pin.
+#[allow(dead_code)]
+pub(super) fn trusted_qa_issuer_key() -> Result<VerifyingKey, String> {
+    let bytes = decode_canonical::<32>(QA_ISSUER_PUBLIC_KEY_B64URL)?;
+    if hex_sha(&bytes) != QA_ISSUER_FINGERPRINT_SHA256 {
+        return Err("OWNER_ISSUER_PIN_INVALID".into());
+    }
+    VerifyingKey::from_bytes(&bytes).map_err(|_| "OWNER_ISSUER_PIN_INVALID".to_string())
 }
 #[derive(Debug, Clone)]
 pub(super) struct AuthorizedFeatureApprover {
@@ -251,6 +286,39 @@ mod tests {
             format!("{:x}", Sha256::digest(&bytes)),
             "1f874636616a22ee30ff57ce3f355f92dfedb59ffc437c4c302af6a3a1466561"
         );
+    }
+    #[test]
+    fn refetch_requires_same_admin_revision_not_merely_a_new_valid_signature() {
+        let owner = SigningKey::from_bytes(&[11; 32]);
+        let issuer = SigningKey::from_bytes(&[12; 32]);
+        let grant = signed_grant(&owner, &issuer);
+        let mut renewed = grant.clone();
+        renewed.issued_at_ms += 5000;
+        renewed.expires_at_ms += 5000;
+        resign(&mut renewed, &issuer);
+        assert!(grant.same_admin_authority(&renewed));
+        renewed.grant_revision = grant.grant_revision + 1;
+        resign(&mut renewed, &issuer);
+        assert!(!grant.same_admin_authority(&renewed));
+        renewed = grant.clone();
+        renewed.role = "feature_approver".into();
+        resign(&mut renewed, &issuer);
+        assert!(!grant.same_admin_authority(&renewed));
+        renewed = grant.clone();
+        renewed.state = "revoked".into();
+        resign(&mut renewed, &issuer);
+        assert!(!grant.same_admin_authority(&renewed));
+    }
+    #[test]
+    fn qa_issuer_public_key_is_exact_compiled_fingerprint_no_untrusted_fetch() {
+        let pin = trusted_qa_issuer_key().unwrap();
+        assert_eq!(hex_sha(pin.as_bytes()), QA_ISSUER_FINGERPRINT_SHA256);
+        assert_eq!(
+            URL_SAFE_NO_PAD.encode(pin.as_bytes()),
+            QA_ISSUER_PUBLIC_KEY_B64URL
+        );
+        let foreign = SigningKey::from_bytes(&[22; 32]);
+        assert_ne!(pin, foreign.verifying_key());
     }
     #[test]
     fn fresh_independent_issuer_and_owner_signatures_required() {
