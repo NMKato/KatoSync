@@ -3,14 +3,19 @@ on:
   push:
     branches:
       - feat/rc11-remote-usage-empty-state-20261108
+      - feat/rc12-remote-usage-session-client-20261108
+      - chore/rc12-remote-usage-main-20261108
   pull_request:
     paths:
       - "src/components/RemoteCommanderUsagePanel.tsx"
       - "src/lib/remoteUsage.ts"
+      - "src/lib/remoteUsageClient.ts"
       - "src/App.tsx"
       - "src/styles.css"
       - "tests/remoteUsageContract.test.mjs"
+      - "tests/remoteUsageClient.test.mjs"
       - "package.json"
+      - "tsconfig.json"
       - ".github/workflows/rc11-remote-usage-ui.yml"
 permissions:
   contents: read
