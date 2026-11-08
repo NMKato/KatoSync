@@ -57,6 +57,7 @@ import {
   Toggle
 } from "./components/Primitives";
 import { RichMarkdown } from "./components/RichMarkdown";
+import { RemoteCommanderUsagePanel } from "./components/RemoteCommanderUsagePanel";
 import { Bars, Donut, KpiTiles, StatusList, Timeline } from "./components/DiagramComponents";
 import {
   codexTimeline,
@@ -958,6 +959,9 @@ export default function App() {
             <p className="field-hint">{t("settings.quota.hint")}</p>
           </Panel>
           ) : null}
+
+          {/* RC-11: separate Remote MCP statistics, never substitute API quotas or demo counts. */}
+          {visibleStep === "settings" ? <RemoteCommanderUsagePanel /> : null}
 
           {visibleStep === "settings" ? (
           <Panel

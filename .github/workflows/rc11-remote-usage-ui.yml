@@ -1,0 +1,27 @@
+name: RC11 Remote Usage UI QA (no deploy)
+on:
+  push:
+    branches:
+      - feat/rc11-remote-usage-empty-state-20261108
+  pull_request:
+    paths:
+      - "src/components/RemoteCommanderUsagePanel.tsx"
+      - "src/lib/remoteUsage.ts"
+      - "src/App.tsx"
+      - "src/styles.css"
+      - "tests/remoteUsageContract.test.mjs"
+      - "package.json"
+      - ".github/workflows/rc11-remote-usage-ui.yml"
+permissions:
+  contents: read
+jobs:
+  remote-usage-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci --ignore-scripts --no-audit
+      - run: npm run test:remote-usage
+      - run: npm run build
