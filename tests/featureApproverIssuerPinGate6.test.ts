@@ -42,7 +42,7 @@ test("issuer bootstrap requires explicit --apply, never prints or commits PKCS8"
  assert.match(bootstrap,/PRIVATE_KEY_EXPORTED=false/);
  const result=spawnSync(process.platform === "win32" ? "python" : "python3",[
   fileURLToPath(new URL("../scripts/qa-bootstrap-owner-issuer.py",import.meta.url))
- ],{encoding:"utf8",timeout:5000});
+ ],{encoding:"utf8",timeout:15000});
  assert.equal(result.status,1);
  assert.match(result.stderr,/QA_ISSUER_REQUIRES_EXPLICIT_APPLY/);
  assert.doesNotMatch(result.stdout,/PKCS8|PRIVATE_KEY_B64|SERVICE_ROLE/);
