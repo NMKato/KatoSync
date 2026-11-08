@@ -1,12 +1,9 @@
 name: KatoSync PR Fast Gate
 
 on:
+  # Review stacked PRs targeting feature branches as well as dev/main.
+  # Otherwise the current Mesh/Auth PR stack silently skips this gate.
   pull_request:
-    branches:
-      - dev
-      - main
-      - "security/**"
-      - "integration/**"
     paths-ignore:
       - "**/*.md"
       - "docs/**"
@@ -38,14 +35,27 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Audit dependency advisories (high and critical)
+        run: npm audit --audit-level=high
+
       - name: Node regression suite (including KUAS and MCP/CLI)
-        run: npm run test --if-present
+        run: npm test
 
       - name: Server TypeScript security contract (if configured)
         run: npm run typecheck:server --if-present
 
       - name: TypeScript + Vite production build
         run: npm run build
+
+  rust-format:
+    name: Rust Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Check native Rust source formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
   windows-node-regression:
     name: Windows Node Regression
@@ -64,11 +74,11 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Windows Node regression suite (if configured)
-        run: npm run test --if-present
+      - name: Windows Node and MCP integration tests
+        run: npm test
 
       - name: Windows server TypeScript security contract (if configured)
         run: npm run typecheck:server --if-present
 
       - name: Windows TypeScript
-        run: npm run typecheck --if-present
+        run: npm run typecheck

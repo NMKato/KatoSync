@@ -5,10 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:mesh-postgres-local": "bash scripts/qa-mesh-postgres-local.sh",
+    "test:katosync-schema-local": "bash scripts/qa-mesh-postgres-local.sh katosync",
+    "test:autoq-acceptance": "node --experimental-strip-types --test tests/autoQRuntimeAcceptance.test.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
     "build": "tsc && vite build",
     "test:remote-usage": "node --experimental-strip-types --test tests/remoteUsageContract.test.mjs tests/remoteUsageClient.test.mjs",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:stt": "node scripts/build-stt-macos.mjs",
+    "release:check": "node scripts/check-release-resources.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",

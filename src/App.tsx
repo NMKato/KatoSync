@@ -4,6 +4,7 @@ import {
   Archive,
   ArrowLeft,
   BookOpenText,
+  Bot,
   CalendarClock,
   Check,
   CheckCircle2,
@@ -16,7 +17,10 @@ import {
   EyeOff,
   FileCheck2,
   FileText,
+  History,
   FolderOpen,
+  MessageSquareText,
+  Gauge,
   ChevronDown,
   ChevronUp,
   CheckSquare,
@@ -29,6 +33,7 @@ import {
   Loader2,
   LogOut,
   Moon,
+  Orbit,
   Power,
   PlayCircle,
   RefreshCcw,
@@ -42,9 +47,13 @@ import {
   TerminalSquare,
   Trash2,
   UploadCloud,
+  Workflow,
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import {listen} from "@tauri-apps/api/event";
+import {projectDesktopWidget} from "./lib/desktopWidgetState40";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -58,6 +67,20 @@ import {
 } from "./components/Primitives";
 import { RichMarkdown } from "./components/RichMarkdown";
 import { RemoteCommanderUsagePanel } from "./components/RemoteCommanderUsagePanel";
+import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
+import { AgentLiveMonitor } from "./components/AgentJobViews";
+import { ProviderManager } from "./components/ProviderManager";
+import { ProjectRegistryWorkspace } from "./components/ProjectRegistryWorkspace";
+import { MasterChatWorkspace } from "./components/MasterChatWorkspace";
+import type { GithubIssueHandoff } from "./lib/githubChatHandoff";
+import { ModeGateway, ModeSwitch } from "./components/ModeGateway";
+import { VisionWorkspace } from "./components/VisionWorkspace";
+import {
+  AgentReadinessStrip,
+  AgentSyncDashboard,
+  AgentSyncHistory,
+  AgentSyncJobs
+} from "./components/AgentSyncWorkspace";
 import { Bars, Donut, KpiTiles, StatusList, Timeline } from "./components/DiagramComponents";
 import {
   codexTimeline,
@@ -75,6 +98,15 @@ import {
 import { historyBars, loadRunHistory, recordRun, type RunRecord } from "./lib/runHistory";
 import { buildSkillPrompt, knownProjectIds, mcpEndpoint, SKILL_CONTRACT_VERSION } from "./lib/skillTemplate";
 import { copyText } from "./lib/clipboard";
+import {
+  defaultStepForMode,
+  modeForStep,
+  readRememberedMode,
+  rememberMode,
+  shouldAutoResumeAgentWorkspace,
+  stepForMode,
+  type WorkspaceMode
+} from "./lib/workspaceMode";
 import { briefingToMarkdown } from "./lib/briefingExport";
 import { safeHttpUrl } from "./lib/url";
 import { useT, type Lang, type TFunc, type TKey } from "./i18n";
@@ -88,14 +120,27 @@ import {
 import { NO_PROJECT_ID } from "./repositories/katoSyncRepository";
 import type { ActionPlan, ActionTaskStatus, Briefing, BriefingStatus, FileFinding, Weekday } from "./types";
 
-const steps: Array<{ id: StepId; label: string; icon: typeof Activity }> = [
-  { id: "dashboard", label: "Dashboard", icon: Database },
+// Getrennte Navigationsbaeume je Workspace (Root-Gateway waehlt den Modus, siehe lib/workspaceMode.ts).
+const mistralSteps: Array<{ id: StepId; icon: typeof Activity }> = [
+  { id: "dashboard", icon: Database },
   // Konsolidiert: "Action Queue" + "Projekt-Board" -> EIN Aufgaben-Surface (das Board ist die
   // reichere Task-Ansicht mit Ausfuehren/Reihenfolge/Entfernen). Interne id bleibt "projectBoard".
-  { id: "projectBoard", label: "Aufgaben", icon: ClipboardList },
-  { id: "briefings", label: "Briefings", icon: BookOpenText },
-  { id: "settings", label: "Einstellungen", icon: Settings },
-  { id: "logs", label: "Aktivitäten", icon: TerminalSquare }
+  { id: "projectBoard", icon: ClipboardList },
+  { id: "briefings", icon: BookOpenText },
+  { id: "settings", icon: Settings },
+  { id: "logs", icon: TerminalSquare }
+];
+
+const agentSyncSteps: Array<{ id: StepId; icon: typeof Activity }> = [
+  { id: "agentDashboard", icon: Gauge },
+  { id: "agentVision", icon: Orbit },
+  { id: "agentJobs", icon: Workflow },
+  { id: "agentMasterChat", icon: MessageSquareText },
+  { id: "agentProviders", icon: Bot },
+  { id: "agentMonitor", icon: Activity },
+  { id: "agentProjects", icon: FolderOpen },
+  { id: "agentHistory", icon: History },
+  { id: "agentSettings", icon: Settings }
 ];
 
 const weekdays = Object.keys(weekdayLabels) as Weekday[];
@@ -116,7 +161,16 @@ const sectionByStep: Record<StepId, string> = {
   projectBoard: "section-project-board",
   briefings: "section-briefings",
   settings: "section-api",
-  logs: "section-activities"
+  logs: "section-activities",
+  agentDashboard: "section-agent-dashboard",
+  agentVision: "section-agent-vision",
+  agentJobs: "section-agent-jobs",
+  agentMasterChat: "section-agent-master-chat",
+  agentProviders: "section-agent-sync",
+  agentMonitor: "section-agent-monitor",
+  agentProjects: "section-agent-projects",
+  agentHistory: "section-agent-history",
+  agentSettings: "section-agent-settings"
 };
 
 const onboardingSteps: Array<{
@@ -180,6 +234,7 @@ function toVisibleStep(step: StepId): StepId {
 function pageCopy(step: StepId, t: TFunc) {
   const visible = toVisibleStep(step);
   const key =
+    modeForStep(visible) === "agentSync" ||
     visible === "actionQueue" ||
     visible === "projectBoard" ||
     visible === "briefings" ||
@@ -200,6 +255,23 @@ interface OnboardingPosition {
 
 export default function App() {
   const vm = useKatoSyncViewModel();
+  const [katoosBadgeVerified,setKatoosBadgeVerified]=useState(false);
+  useEffect(()=>{
+    let current=true;
+    if(!vm.sessionStatus.loggedIn){
+      setKatoosBadgeVerified(false);
+      return;
+    }
+    // Only issuer-verified KATOOS accounts get the Family badge.
+    // Never use this visual marker to authorize future KAI Desktop features.
+    void invoke<{issuerVerified:boolean;katoosAccount:boolean;grantsExtraCapabilities:false}>(
+      "verified_katoos_identity_badge"
+    ).then(status=>{
+      if(current)setKatoosBadgeVerified(status.issuerVerified&&status.katoosAccount&&
+        !status.grantsExtraCapabilities);
+    }).catch(()=>{if(current)setKatoosBadgeVerified(false);});
+    return ()=>{current=false;};
+  },[vm.sessionStatus.loggedIn,vm.sessionStatus.email]);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const stored = localStorage.getItem("katosync.theme");
     return stored === "light" ? "light" : "dark";
@@ -223,6 +295,16 @@ export default function App() {
   const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [onboardingPosition, setOnboardingPosition] = useState<OnboardingPosition | null>(null);
   const [quitConfirmOpen, setQuitConfirmOpen] = useState(false);
+  const [chatHandoff, setChatHandoff] = useState<GithubIssueHandoff|null>(null);
+  const handoffSequence = useRef(0);
+  // Root-Modus: pro Sitzung erst ueber das Gateway gewaehlt; der zuletzt genutzte Modus ist lokal
+  // gemerkt und im Gateway vorausgewaehlt.
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | null>(null);
+  const [rememberedMode, setRememberedMode] = useState<WorkspaceMode | null>(() => readRememberedMode(localStorage));
+  // The only auto-resume attempt is at authenticated startup, not whenever a
+  // user intentionally switches back to the workspace gateway.
+  const autoResumeAttempted = useRef(false);
+  const lastStepByMode = useRef<Partial<Record<WorkspaceMode, StepId>>>({});
   const [licenseOpen, setLicenseOpen] = useState(
     () => localStorage.getItem(acceptedLicenseKey) !== licenseAgreement.version
   );
@@ -234,6 +316,12 @@ export default function App() {
   const activities = buildActivities(vm, t);
   const visibleStep = toVisibleStep(vm.activeStep);
   const page = pageCopy(visibleStep, t);
+  const isAgentSync = workspaceMode === "agentSync";
+  const widgetPreviewEnabled=import.meta.env.VITE_KATOSYNC_DESKTOP_WIDGET_QA==="1";
+  const [widgetError,setWidgetError]=useState(false);
+  const widgetReport=useMemo(()=>projectDesktopWidget(
+    vm.agentSync,vm.sessionStatus.loggedIn,vm.localBrainStatus?.running===true
+  ),[vm.agentSync,vm.sessionStatus.loggedIn,vm.localBrainStatus?.running]);
   const issueCount = getIssueCount(vm);
   const hints = buildHints(vm, t);
   const hintSignature = useMemo(() => buildHintSignature(hints), [hints]);
@@ -279,10 +367,47 @@ export default function App() {
   // loadRunHistory() wiederhergestellte Verlauf bei jedem Start verloren. localStorage raeumt
   // clearLocalTenantCaches separat.
   const wasLoggedInRef = useRef(false);
+  const previousSessionEmailRef = useRef<string|null>(null);
   useEffect(() => {
-    if (wasLoggedInRef.current && !vm.sessionStatus.loggedIn) setRunHistory([]);
+    const current = vm.sessionStatus.loggedIn ? (vm.sessionStatus.email ?? null) : null;
+    if (current && previousSessionEmailRef.current && current !== previousSessionEmailRef.current) {
+      setChatHandoff(null); // session account changed without a visible logout transition
+    }
+    if (current) previousSessionEmailRef.current = current;
+  }, [vm.sessionStatus.loggedIn,vm.sessionStatus.email]);
+  useEffect(() => {
+    if (wasLoggedInRef.current && !vm.sessionStatus.loggedIn) {
+      setRunHistory([]);
+      setChatHandoff(null); // never replay previous user's GitHub issue into a new session
+    }
     wasLoggedInRef.current = vm.sessionStatus.loggedIn;
   }, [vm.sessionStatus.loggedIn]);
+
+  // Stage4.0 Widget QA: publish only bounded, read-only state to native RAM.
+  // No backend job execution, cloud I/O or credentials in this channel.
+  useEffect(()=>{
+    if(!widgetPreviewEnabled)return;
+    const publish=()=>void invoke("desktop_widget_publish",{input:widgetReport}).catch(()=>setWidgetError(true));
+    publish();
+    const timer=window.setInterval(publish,30_000);
+    return ()=>window.clearInterval(timer);
+  },[widgetPreviewEnabled,widgetReport]);
+  useEffect(()=>{
+    if(!widgetPreviewEnabled)return;
+    let released=false;
+    let unsubscribe:(()=>void)|undefined;
+    void listen<string>("katosync-widget-navigate",({payload})=>{
+      if(released||!vm.sessionStatus.loggedIn||licenseOpen)return;
+      const to=payload==="jobs"?"agentJobs":
+        payload==="chat"?"agentMasterChat":
+        payload==="agent"?"agentProviders":"agentDashboard";
+      rememberMode(localStorage,"agentSync");
+      setRememberedMode("agentSync");
+      setWorkspaceMode("agentSync");
+      vm.setActiveStep(to);
+    }).then(un=>{if(released)un();else unsubscribe=un;}).catch(()=>setWidgetError(true));
+    return()=>{released=true;unsubscribe?.();};
+  },[widgetPreviewEnabled,vm.sessionStatus.loggedIn,vm.setActiveStep,licenseOpen]);
 
   // Splash: animiertes Logo bei JEDEM Start, dann ausblenden.
   useEffect(() => {
@@ -290,11 +415,32 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  // Stage35: one-time, no-side-effect workspace restoration after signed-in boot.
+  // Remote Mesh enrollment, pairing and jobs retain independent user-approval gates.
+  useEffect(()=>{
+    if(import.meta.env.VITE_STAGE35_AUTO_RESUME_QA!=="1"||
+       autoResumeAttempted.current || !vm.sessionStatus.loggedIn ||
+       showSplash || licenseOpen)return;
+    autoResumeAttempted.current=true;
+    if(workspaceMode!==null)return;
+    if(!shouldAutoResumeAgentWorkspace({
+      stage35FeatureEnabled:true,
+      authenticated:vm.sessionStatus.loggedIn,
+      licenseAccepted:!licenseOpen,
+      splashComplete:!showSplash,
+      savedMode:rememberedMode
+    }))return;
+    setWorkspaceMode("agentSync");
+    vm.setActiveStep(defaultStepForMode("agentSync"));
+  },[showSplash,licenseOpen,workspaceMode,rememberedMode,vm.sessionStatus.loggedIn,vm.setActiveStep]);
+
   // Onboarding-Pflicht: nach Splash + Login + Nutzungsbedingungen, solange Setup < 100 %.
+  // Die Tour gehoert ausschliesslich zum Mistral Mode (Mistral-Key, Library, Uploadplan).
   useEffect(() => {
     if (!config || showSplash) return;
     if (!vm.sessionStatus.loggedIn) return;
     if (licenseOpen) return;
+    if (workspaceMode !== "mistral") return;
     const firstOpenStep = getNextOnboardingIndex(0);
     if (firstOpenStep === -1) {
       localStorage.setItem(onboardingDoneKey, "true");
@@ -312,13 +458,48 @@ export default function App() {
     onboardingOpen,
     onboardingSnoozed,
     showSplash,
-    vm.sessionStatus.loggedIn
+    vm.sessionStatus.loggedIn,
+    workspaceMode
   ]);
+
+  // Navigation bleibt im aktiven Workspace; die letzte Seite je Modus wird fuer den Wechsel gemerkt.
+  useEffect(() => {
+    if (!workspaceMode) return;
+    if (modeForStep(vm.activeStep) !== workspaceMode) {
+      vm.setActiveStep(stepForMode(vm.activeStep, workspaceMode));
+      return;
+    }
+    lastStepByMode.current[workspaceMode] = vm.activeStep;
+  }, [vm.activeStep, vm.setActiveStep, workspaceMode]);
+
+  const enterMode = (mode: WorkspaceMode) => {
+    rememberMode(localStorage, mode);
+    setRememberedMode(mode);
+    setWorkspaceMode(mode);
+    setHintsOpen(false);
+    if (mode !== "mistral") {
+      setOnboardingOpen(false);
+      setSpotlightId(null);
+      setOnboardingPosition(null);
+    }
+    vm.setActiveStep(lastStepByMode.current[mode] ?? defaultStepForMode(mode));
+  };
+
+  const enterModeAt = (mode: WorkspaceMode, step: StepId) => {
+    lastStepByMode.current[mode] = step;
+    enterMode(mode);
+  };
 
   const acceptLicense = () => {
     localStorage.setItem(acceptedLicenseKey, licenseAgreement.version);
     setLicenseChecked(false);
     setLicenseOpen(false);
+  };
+
+  const handleGithubChatHandoff = (draft:Omit<GithubIssueHandoff,"revision">) => {
+    if (!vm.sessionStatus.loggedIn) return;
+    setChatHandoff({...draft,revision:++handoffSequence.current});
+    vm.setActiveStep("agentMasterChat");
   };
 
   const handleStepSelect = (step: StepId) => {
@@ -443,7 +624,7 @@ export default function App() {
   if (showSplash) {
     return (
       <div className="startup-splash" aria-label={t("shell.preparing")}>
-        <img alt="" src="/katoos_icon_logo_trans.png" />
+        <img alt="" src="/katosync_logo_centered.png" />
         <strong>KatoSync</strong>
         <span className="startup-tagline">Project Memory Uploader</span>
       </div>
@@ -463,21 +644,52 @@ export default function App() {
     return <LoginGate vm={vm} />;
   }
 
+  const licenseDialog = licenseOpen ? (
+    <LicenseDialog
+      accepted={localStorage.getItem(acceptedLicenseKey) === licenseAgreement.version}
+      checked={licenseChecked}
+      onAccept={acceptLicense}
+      onCheckedChange={setLicenseChecked}
+      onClose={() => {
+        if (localStorage.getItem(acceptedLicenseKey) === licenseAgreement.version) {
+          setLicenseChecked(false);
+          setLicenseOpen(false);
+        }
+      }}
+      onQuit={vm.handleQuitApp}
+    />
+  ) : null;
+
+  if (!workspaceMode) {
+    return (
+      <>
+        <ModeGateway onChoose={enterMode} remembered={rememberedMode} />
+        {licenseDialog}
+        {vm.logoutFlow ? <LogoutDialog vm={vm} /> : null}
+        {vm.cloudPasswordPrompt ? <CloudPasswordDialog vm={vm} /> : null}
+      </>
+    );
+  }
+
+  const navSteps = isAgentSync ? agentSyncSteps : mistralSteps;
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell mode-${workspaceMode}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <img alt="" src="/katoos_icon_logo_trans.png" />
+            <img alt="" src="/katosync_logo_centered.png" />
           </div>
           <div className="brand-copy">
             <strong>KatoSync</strong>
-            <span>Project Memory Uploader</span>
+            <span>{isAgentSync ? t("mode.agentSyncTagline") : "Project Memory Uploader"}</span>
           </div>
         </div>
 
-        <nav className="steps">
-          {steps.map((step) => (
+        <ModeSwitch mode={workspaceMode} onChange={enterMode} />
+
+        <nav className="steps" aria-label={isAgentSync ? t("mode.agentSyncNav") : t("mode.mistralNav")}>
+          {navSteps.map((step) => (
             <StepButton
               active={visibleStep === step.id}
               description={t(`nav.${step.id}.desc` as TKey)}
@@ -529,6 +741,9 @@ export default function App() {
                   ? maskEmail(vm.sessionStatus.email)
                   : vm.sessionStatus.email || t("settings.api.accountFallback")}
               </span>
+              {katoosBadgeVerified?<span className="sidebar-katoos-family-badge" title={t("auth.katoosFamilyHint")}>
+                <ShieldCheck size={12}/>{t("auth.katoosFamily")}
+              </span>:null}
               <HoverTip description={t("sidebar.logoutDesc")} title={t("sidebar.logout")}>
                 <button className="ghost license-link" onClick={vm.requestLogout} type="button">
                   <LogOut size={16} />
@@ -548,11 +763,14 @@ export default function App() {
       </aside>
 
       <main className="workspace">
-        <header className="topbar">
+        <header className={`topbar${isAgentSync ? " agent-sync-topbar" : ""}`}>
           <div>
             <h1>{page.title}</h1>
             <p>{page.text}</p>
           </div>
+          {isAgentSync ? (
+            <AgentReadinessStrip vm={vm} onNavigate={handleStepSelect} />
+          ) : (
           <div className="setup-strip" aria-label={t("setup.progressAria")}>
             <div className="completion-head">
               <span>{t("setup.title")}</span>
@@ -584,7 +802,16 @@ export default function App() {
               </button>
             ) : null}
           </div>
+          )}
           <div className="top-actions">
+            {widgetPreviewEnabled?<>
+              <button className="ghost" type="button" title="Desktop-Widget anzeigen"
+                onClick={()=>void invoke("desktop_widget_show")
+                  .then(()=>setWidgetError(false)).catch(()=>setWidgetError(true))}>
+                <LayoutGrid size={15}/><span>Widget</span>
+              </button>
+              {widgetError?<span role="alert" className="provider-field-error">Widget derzeit nicht verfügbar</span>:null}
+            </>:null}
             <button
               aria-label={theme === "dark" ? t("topbar.themeLight") : t("topbar.themeDark")}
               aria-pressed={theme === "light"}
@@ -692,8 +919,42 @@ export default function App() {
           </div>
         ) : null}
 
-        <section className={`dashboard-grid overview-grid page-${visibleStep}`}>
+        <section className={`dashboard-grid overview-grid page-${visibleStep}${isAgentSync ? " agent-page" : ""}`}>
           {visibleStep === "dashboard" ? <CockpitPanel vm={vm} runHistory={runHistory} /> : null}
+
+          {visibleStep === "agentDashboard" ? (
+            <AgentSyncDashboard vm={vm} onNavigate={handleStepSelect} />
+          ) : null}
+          {visibleStep === "agentVision" ? <VisionWorkspace vm={vm} /> : null}
+          {visibleStep === "agentJobs" ? (
+            <AgentSyncJobs vm={vm} onOpenMistralTasks={() => enterModeAt("mistral", "projectBoard")} />
+          ) : null}
+          {visibleStep === "agentProviders" ? <>
+            <ProviderManager vm={vm} onChatHandoff={handleGithubChatHandoff} />
+          </> : null}
+          {visibleStep === "agentMasterChat" ? <MasterChatWorkspace
+            projects={vm.projects.registry.projects}
+            handoff={chatHandoff}
+            onProjects={() => handleStepSelect("agentProjects")}
+            onClearHandoff={() => setChatHandoff(null)}
+          /> : null}
+          {visibleStep === "agentMonitor" ? (
+            <section className="agent-monitor-page" id="section-agent-monitor">
+              <AgentLiveMonitor state={vm.agentSync} />
+              <LocalControlLiveMonitor
+                snapshot={vm.localControlMonitor}
+                error={vm.localControlMonitorError}
+                onRefresh={() => void vm.refreshLocalControlMonitor()}
+              />
+            </section>
+          ) : null}
+          {visibleStep === "agentProjects" ? <ProjectRegistryWorkspace vm={vm} /> : null}
+          {visibleStep === "agentHistory" ? <AgentSyncHistory vm={vm} /> : null}
+          {visibleStep === "agentSettings" ? (
+            <section className="agent-settings-page" id="section-agent-settings">
+              <CodexBridgePanel vm={vm} />
+            </section>
+          ) : null}
 
           {visibleStep === "settings" ? (
           <Panel className="settings-main-panel" id="section-api" title={t("settings.api.title")} icon={<KeyRound size={18} />}>
@@ -1290,21 +1551,7 @@ export default function App() {
         />
       ) : null}
 
-      {licenseOpen ? (
-        <LicenseDialog
-          accepted={localStorage.getItem(acceptedLicenseKey) === licenseAgreement.version}
-          checked={licenseChecked}
-          onAccept={acceptLicense}
-          onCheckedChange={setLicenseChecked}
-          onClose={() => {
-            if (localStorage.getItem(acceptedLicenseKey) === licenseAgreement.version) {
-              setLicenseChecked(false);
-              setLicenseOpen(false);
-            }
-          }}
-          onQuit={vm.handleQuitApp}
-        />
-      ) : null}
+      {licenseDialog}
 
       {quitConfirmOpen ? (
         <div
@@ -2784,10 +3031,11 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
     <div className="login-gate">
       <div className="login-card">
         <div className="login-brand">
-          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <img alt="" src="/katosync_logo_centered.png" />
           <div>
             <strong>KatoSync</strong>
-            <span>{t("login.subtitle")}</span>
+            <span>{import.meta.env.VITE_KATOOS_AUTH_QA==="1"?
+              t("auth.katoosLoginSubtitle"):t("login.subtitle")}</span>
           </div>
         </div>
         <div className="login-tabs">
@@ -2798,13 +3046,13 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
           >
             {t("login.signIn")}
           </button>
-          <button
+          {import.meta.env.VITE_KATOOS_AUTH_QA!=="1"?<button
             className={mode === "register" ? "active" : ""}
             onClick={() => setMode("register")}
             type="button"
           >
             {t("login.signUp")}
-          </button>
+          </button>:null}
         </div>
         {vm.notice ? <NoticeBar notice={vm.notice} onClose={() => vm.setNotice(null)} /> : null}
         <label>
@@ -2839,7 +3087,7 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
           {busy ? <Loader2 className="spin" size={16} /> : null}
           {mode === "login" ? t("login.signIn") : t("login.signUp")}
         </button>
-        {mode === "login" ? (
+        {mode === "login" && import.meta.env.VITE_KATOOS_AUTH_QA!=="1" ? (
           <button
             className="ghost login-forgot"
             disabled={busy || !vm.loginEmail}
@@ -2849,7 +3097,8 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
             {t("login.forgot")}
           </button>
         ) : null}
-        <p className="login-hint">{t("login.hint")}</p>
+        <p className="login-hint">{import.meta.env.VITE_KATOOS_AUTH_QA==="1"?
+          t("auth.katoosQaHint"):t("login.hint")}</p>
       </div>
     </div>
   );
@@ -2882,7 +3131,7 @@ function LicenseDialog({
           </button>
         ) : null}
         <header>
-          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <img alt="" src="/katosync_logo_centered.png" />
           <div>
             <span className="section-label">KatoSync</span>
             <h2 id="license-title">{license.title}</h2>
@@ -3191,7 +3440,7 @@ function OnboardingDialog({
           <X size={17} />
         </button>
         <div className="onboarding-brand">
-          <img alt="" src="/katoos_icon_logo_trans.png" />
+          <img alt="" src="/katosync_logo_centered.png" />
           <span>{t("onboarding.brand")}</span>
         </div>
         <div

@@ -1,0 +1,14 @@
+{
+  "productName": "KatoSync Mesh QA Stage35",
+  "identifier": "com.nmkato.katosync.meshqa.stage35",
+  "build": {"beforeBuildCommand": ""},
+  "app": {"windows": [{
+    "title": "KatoSync 3.5 · Mesh QA (isoliert)",
+    "width": 1240,
+    "height": 820,
+    "minWidth": 1040,
+    "minHeight": 720,
+    "resizable": true,
+    "center": true
+  }]}
+}
