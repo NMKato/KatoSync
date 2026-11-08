@@ -4,7 +4,8 @@
 
 This branch merges current main (including Remote Commander Usage RC11/12
 and the 151-PR audit) with the latest KatoSync 4.0 Gate-9 draft
-d0d15b97c1eb07e44ee2b6b2e6b0e4428c5f7f60.
+d0d15b97c1eb07e44ee2b6b2e6b0e4428c5f7f60, plus the separate
+Stage35f SAS local-approval fix from PR #223 (QA only).
 
 Source PR #240 explicitly requires an independent signed reviewer attestation
 and forbids merging/releasing as 4.0 Beta without it. Those requirements remain.
@@ -21,7 +22,7 @@ The initial complete Node test showed 729 pass/1 fail due to a two-second
 child-process startup deadline under parallel load. Isolated denied-start
 security tests passed 3/3. A bounded 10-second deadline now retains the
 required MESH_E2E_BLOCKED denial assertion without false timeout failures.
-Full rerun: **730/730 Node**, **16/16 Remote Usage**, and TypeScript/Vite
+Full rerun: **736/736 Node**, **16/16 Remote Usage**, and TypeScript/Vite
 1,910-module build all PASS (arm64 isolated QA, Node 22).
 
 ## Still blocked for main
@@ -32,7 +33,7 @@ Full rerun: **730/730 Node**, **16/16 Remote Usage**, and TypeScript/Vite
 - Final macOS/Windows/KatoOS OAuth login, UI and permission acceptance.
 - GitHub PR Fast Gate, Windows CI, native Rust formatting and npm audit must
   pass on this exact integration candidate commit.
-- Independent branches (#88 security, #223 SAS fix and some dev-root PRs)
+- Independent branches (#88 security and some dev-root PRs)
   must be reconciled separately, not silently assumed merged.
 - No terminal/device access, Remote MCP activation or production deployment.
 

@@ -11167,3 +11167,17 @@ button.agent-tile:hover {
 .smart-project-next-milestones li{font-size:11px;line-height:1.4}
 .smart-project-next-milestones li>span{display:block;overflow-wrap:anywhere}
 .smart-project-next-milestones li>small{display:block;font-size:10px;color:var(--text-muted)}
+/* Stage35f signed-relay confirmation: clear code, explicit local pin only. */
+.provider-mesh-card .vision-mesh-sas-approval{
+  border-color:color-mix(in srgb,var(--brand) 42%,var(--line));
+  background:color-mix(in srgb,var(--brand) 6%,var(--surface-raised));
+}
+.provider-mesh-card .vision-mesh-sas-approval-code{
+  display:block;align-self:flex-start;font-size:clamp(17px,2.3vw,23px);
+  line-height:1.4;font-weight:750;letter-spacing:.12em;
+  font-variant-numeric:tabular-nums;padding:6px 0;user-select:text;
+}
+.provider-mesh-card .vision-mesh-sas-approval .vision-mesh-field{margin:4px 0;}
+.provider-mesh-card .vision-mesh-sas-approval button:disabled{
+  opacity:.45;cursor:not-allowed;
+}
