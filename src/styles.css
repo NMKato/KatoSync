@@ -4180,3 +4180,45 @@ pre {
   opacity: 0.75;
   letter-spacing: 0.02em;
 }
+
+/* RC-11 Remote Commander usage, separate from existing API quota. */
+.remote-usage-panel { grid-column: span 8; min-height: 0; }
+.remote-usage-offline {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 17px; background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.remote-usage-offline svg { flex: 0 0 auto; color: var(--text-muted); }
+.remote-usage-offline strong { display: block; color: var(--text); font-size: 14px; }
+.remote-usage-offline p { margin: 7px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.remote-usage-meta { display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+.remote-usage-meta span, .remote-usage-muted { color: var(--text-muted); font-size: 12px; }
+.remote-usage-meta strong { color: var(--text); font-size: 12px; letter-spacing: .08em; }
+.remote-usage-stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-top: 12px; }
+.remote-usage-stats>div { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 13px; min-width: 0; }
+.remote-usage-stats small { display: block; color: var(--text-muted); line-height: 1.5; font-size: 11px; }
+.remote-usage-stats strong { display: block; color: var(--text); font-size: 25px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.remote-usage-quota { margin-top: 15px; }
+.remote-usage-bar { height: 9px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.remote-usage-bar span { display: block; height: 100%; background: var(--brand); border-radius: inherit; }
+.remote-usage-quota small { display: block; margin-top: 7px; font-size: 11px; color: var(--text-muted); }
+.remote-usage-panel h4 { margin: 20px 0 12px; font-size: 13px; color: var(--text); }
+.remote-usage-chart { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 10px; padding: 12px 0 0; min-height: 165px; }
+.remote-usage-month { display: flex; flex-direction: column; align-items: center; gap: 7px; min-width: 0; }
+.remote-usage-month strong { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.remote-usage-track { flex: 1; width: min(100%,70px); min-height: 90px; display: flex; align-items: flex-end; background: var(--surface-2); border-radius: 7px 7px 0 0; overflow: hidden; }
+.remote-usage-track span { width: 100%; min-height: 0; background: var(--brand); border-radius: inherit; }
+.remote-usage-month small { font-size: 10px; color: var(--text-muted); text-align: center; white-space: nowrap; }
+.remote-usage-breakdown { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-top: 18px; }
+.remote-usage-breakdown>div { background: var(--surface-2); padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); min-width: 0; }
+.remote-usage-breakdown h5 { margin: 0 0 8px; color: var(--text); font-size: 12px; }
+.remote-usage-breakdown p { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin: 6px 0; }
+.remote-usage-breakdown p span { color: var(--text-muted); overflow-wrap: anywhere; }
+.remote-usage-breakdown p strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.remote-usage-breakdown small { color: var(--text-muted); font-size: 11px; }
+@media(max-width:760px){
+  .remote-usage-panel { grid-column: 1 / -1; }
+  .remote-usage-stats { grid-template-columns: 1fr; }
+  .remote-usage-breakdown { grid-template-columns: 1fr; }
+  .remote-usage-chart { gap: 5px; }
+}
