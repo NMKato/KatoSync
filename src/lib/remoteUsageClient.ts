@@ -75,7 +75,9 @@ export function createRemoteUsageSessionClient(config: RemoteUsageClientConfig) 
         typeof next.getAccessToken !== "function") {
       throw new TypeError("INVALID_REMOTE_USAGE_SESSION");
     }
-    invalidate();
+    generation++;
+    pending?.abort();
+    pending = null;
     // Store only the trusted ephemeral token provider, not a bearer token.
     session = { sessionKey: next.sessionKey, getAccessToken: next.getAccessToken };
     publish(empty("unavailable"));
@@ -157,7 +159,7 @@ export function createRemoteUsageSessionClient(config: RemoteUsageClientConfig) 
   function subscribe(listener: (value: RemoteUsageSnapshot) => void): () => void {
     if (typeof listener !== "function") throw new TypeError("INVALID_LISTENER");
     listeners.add(listener);
-    listener(snapshot);
+    try { listener(snapshot); } catch { /* UI observers cannot weaken auth. */ }
     return () => { listeners.delete(listener); };
   }
 
