@@ -201,6 +201,72 @@ pub(super) fn verify_reviewer_decision_readback(
     })
 }
 
+/// HTTP payload parser for owner-scoped READ-ONLY server review. It MUST
+/// NEVER treat the service's own assertion as a reviewer trust anchor.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReviewerReadbackEnvelope {
+    protocol: String,
+    state: String,
+    subject_uid: String,
+    decision_id: String,
+    readback_at_ms: i64,
+    attestation: SignedReviewerDecision,
+    reviewer_signature: String,
+    authority_evidence_source: String,
+    grants_rights: bool,
+    verified_percent: serde_json::Value,
+}
+
+/// Native QA-only second readback: caller must independently provide both
+/// a FRESH verified KATOOS UID and independently trusted reviewer authority.
+///
+/// Never changes permissions, Tauri state, DB rows, or verified completion.
+#[allow(dead_code)]
+pub(super) fn verify_owner_readback_envelope(
+    bytes: &[u8],
+    expected_decision_id: &str,
+    verified_owner_uid: &str,
+    current: &CurrentReviewerAuthority<'_>,
+    now_ms: i64,
+) -> Result<VerifiedReviewerVerdict, String> {
+    if bytes.is_empty() || bytes.len() > 8192 {
+        return Err("READBACK_RESPONSE_INVALID".into());
+    }
+    // Direct typed deserialization rejects missing, DUPLICATE and unknown
+    // fields. Do not deserialize through serde_json::Value first: that would
+    // collapse duplicate JSON keys before strict serde can reject them.
+    let payload: ReviewerReadbackEnvelope =
+        serde_json::from_slice(bytes).map_err(|_| "READBACK_RESPONSE_INVALID")?;
+    if payload.protocol != "katosync.owner-review-readback/v1"
+        || payload.state != "server_signed_review_readback_not_native_authorization"
+        || payload.authority_evidence_source != "server_read_only_untrusted_until_native_recheck"
+        || payload.grants_rights
+        || !payload.verified_percent.is_null()
+        || !uuid(&payload.decision_id)
+        || payload.decision_id != expected_decision_id
+        || payload.subject_uid != verified_owner_uid
+        || verified_owner_uid != current.subject_uid
+        || payload.attestation.subject_uid != verified_owner_uid
+    {
+        return Err("READBACK_OWNER_OR_SCOPE_INVALID".into());
+    }
+    let now = i128::from(now_ms);
+    let at = i128::from(payload.readback_at_ms);
+    if at > now + 5000 || at < now - 15_000 {
+        return Err("READBACK_NOT_FRESH".into());
+    }
+    // A signed rejection is a typed rejection, not a successful approval.
+    // reviewer_public_key in payload is verified against current independently
+    // trusted key by verify_reviewer_decision_readback(), not adopted as truth.
+    verify_reviewer_decision_readback(
+        &serde_json::to_vec(&payload.attestation).map_err(|_| "READBACK_RESPONSE_INVALID")?,
+        &payload.reviewer_signature,
+        current,
+        now_ms,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,5 +455,107 @@ mod tests {
             NOW
         )
         .is_err());
+    }
+    #[test]
+    fn owner_scoped_readback_is_not_an_authority_grant() {
+        let (key, signed) = setup();
+        let trusted = key.verifying_key();
+        let current = authority(&trusted, &signed);
+        let envelope = serde_json::json!({
+            "protocol":"katosync.owner-review-readback/v1",
+            "state":"server_signed_review_readback_not_native_authorization",
+            "subjectUid":OWNER,
+            "decisionId":"55555555-5555-4555-8555-555555555555",
+            "readbackAtMs":NOW,
+            "attestation":signed,
+            "reviewerSignature":sign(&key, &signed),
+            "authorityEvidenceSource":"server_read_only_untrusted_until_native_recheck",
+            "grantsRights":false,
+            "verifiedPercent":null
+        });
+        let good = |v: &serde_json::Value, now: i64| {
+            verify_owner_readback_envelope(
+                &serde_json::to_vec(v).unwrap(),
+                "55555555-5555-4555-8555-555555555555",
+                OWNER,
+                &current,
+                now,
+            )
+        };
+        assert_eq!(
+            good(&envelope, NOW).unwrap(),
+            VerifiedReviewerVerdict::Approved
+        );
+        let mut elevated = envelope.clone();
+        elevated["grantsRights"] = serde_json::json!(true);
+        assert!(good(&elevated, NOW).is_err());
+        let mut percent = envelope.clone();
+        percent["verifiedPercent"] = serde_json::json!(100);
+        assert!(good(&percent, NOW).is_err());
+        let mut forged = envelope.clone();
+        forged["subjectUid"] = serde_json::json!(REVIEWER);
+        assert!(good(&forged, NOW).is_err());
+        let mut injected = envelope.clone();
+        injected["automerge"] = serde_json::json!(true);
+        assert!(good(&injected, NOW).is_err());
+        let mut missing = envelope.clone();
+        missing.as_object_mut().unwrap().remove("verifiedPercent");
+        assert!(good(&missing, NOW).is_err());
+        let raw = serde_json::to_string(&envelope).unwrap();
+        let repeated = raw.replacen(
+            "\"grantsRights\":false",
+            "\"grantsRights\":false,\"grantsRights\":false",
+            1,
+        );
+        assert_ne!(repeated, raw);
+        assert!(verify_owner_readback_envelope(
+            repeated.as_bytes(),
+            "55555555-5555-4555-8555-555555555555",
+            OWNER,
+            &current,
+            NOW
+        )
+        .is_err());
+        let mut delayed = envelope.clone();
+        delayed["readbackAtMs"] = serde_json::json!(NOW - 16_000);
+        assert!(good(&delayed, NOW).is_err());
+        assert!(good(&envelope, NOW + 70_000).is_err());
+        assert!(verify_owner_readback_envelope(
+            &serde_json::to_vec(&envelope).unwrap(),
+            "66666666-6666-4666-8666-666666666666",
+            OWNER,
+            &current,
+            NOW
+        )
+        .is_err());
+    }
+    #[test]
+    fn signed_rejection_from_katoos_stays_native_rejection() {
+        let (key, mut decision) = setup();
+        decision.decision = "rejected".into();
+        let trusted = key.verifying_key();
+        let current = authority(&trusted, &decision);
+        let envelope = serde_json::json!({
+            "protocol":"katosync.owner-review-readback/v1",
+            "state":"server_signed_review_readback_not_native_authorization",
+            "subjectUid":OWNER,
+            "decisionId":"55555555-5555-4555-8555-555555555555",
+            "readbackAtMs":NOW,
+            "attestation":decision,
+            "reviewerSignature":sign(&key,&decision),
+            "authorityEvidenceSource":"server_read_only_untrusted_until_native_recheck",
+            "grantsRights":false,"verifiedPercent":null
+        });
+        assert_eq!(
+            verify_owner_readback_envelope(
+                &serde_json::to_vec(&envelope).unwrap(),
+                "55555555-5555-4555-8555-555555555555",
+                OWNER,
+                &current,
+                NOW
+            )
+            .unwrap(),
+            VerifiedReviewerVerdict::Rejected
+        );
     }
 }

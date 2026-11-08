@@ -37,6 +37,22 @@ adds a separate **READ-ONLY** server endpoint and an offline mock test.
 - **No** database writes, DDL, owner activation, enrollments, reviewer
   provisioning, CORS, arbitrary URL/redirect, or secret output.
 
+## Native constrained envelope verification
+
+The existing standalone native Rust module
+`reviewer_attestation.rs` now also accepts the **exact** ten-field
+KATOOS readback envelope via `verify_owner_readback_envelope`.
+It rejects unknown, missing or **duplicate** JSON fields, oversized
+responses, stale readback timestamps, a mismatched caller UID or decision ID,
+`grantsRights:true`, any non-null `verifiedPercent`, or a reply that fails
+independent authority and Ed25519 verification. A valid signed `rejected`
+remains a typed rejection rather than an approval.
+
+Native inputs `verified_owner_uid` and `CurrentReviewerAuthority` MUST come
+from separate fresh authenticated/trusted checks; the envelope cannot itself
+provide either one as trusted. This is a **pure QA parser only**: no native
+HTTP wiring, no Tauri IPC, no accepted ledger update and no remote rights.
+
 ## Tests and limitations
 
 `tests/featureOwnerReviewReadbackGate10.test.ts` exercises signed
