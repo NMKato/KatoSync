@@ -22,6 +22,8 @@ test("normal Supabase migrations directory contains only seven installed version
  assert.deepEqual(files,live);
 });
 test("eight historical/NOT APPLIED SQL files are immutable QA fixtures",()=>{
+ const attrs=readFileSync(join(root,".gitattributes"),"utf8");
+ assert.match(attrs,/tests\/fixtures\/migrations\/\*\.sql text eol=lf/);
  const names=readdirSync(join(root,"tests/fixtures/migrations")).filter(x=>x.endsWith(".sql")).sort();
  assert.deepEqual(names,Object.keys(fixtures).sort());
  for(const [name,expected] of Object.entries(fixtures)){
