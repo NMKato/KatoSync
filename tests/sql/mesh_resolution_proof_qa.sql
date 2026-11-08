@@ -2,7 +2,7 @@
 -- Executes previous stack's real assertions, then new additive hardening.
 \set ON_ERROR_STOP on
 \ir mesh_inbox_receive_qa.sql
-\ir ../../supabase/migrations/20261030074910_mesh_resolution_proof_binding.sql
+\ir ../fixtures/migrations/20261030074910_mesh_resolution_proof_binding.sql
 
 -- Existing 'accepted' rows predating this additive migration remain readable
 -- because the new consistency constraint is NOT VALID. All new writes must

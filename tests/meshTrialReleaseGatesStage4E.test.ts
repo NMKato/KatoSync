@@ -2,8 +2,8 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 const read=(file:string)=>readFileSync(new URL("../"+file,import.meta.url),"utf8");
-const claims=read("supabase/migrations/20261103162300_mesh_one_time_trial_claims.sql");
-const guard=read("supabase/migrations/20261103162500_mesh_entitlement_expiry_guard.sql");
+const claims=read("tests/fixtures/migrations/20261103162300_mesh_one_time_trial_claims.sql");
+const guard=read("tests/fixtures/migrations/20261103162500_mesh_entitlement_expiry_guard.sql");
 const edge=read("supabase/functions/mesh-device-enrollment/device-entitlement.ts");
 test("unique trial claim and no authenticated client writes",()=>{
  assert.ok(claims.includes("owner_user_id uuid PRIMARY KEY"));

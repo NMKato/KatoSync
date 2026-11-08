@@ -68,7 +68,7 @@ test("Canonical migration hash accepts Windows CRLF but rejects tampered SQL",as
  const source=new URL("../",import.meta.url);
  try{
   for(const [version,name] of [...expectedMigrations.base,...expectedMigrations.pending]){
-   const relative="supabase/migrations/"+version+"_"+name+".sql";
+   const relative=(expectedMigrations.pending.some(x=>x[0]===version)?"tests/fixtures/migrations/":"supabase/migrations/")+version+"_"+name+".sql";
    const target=path.join(root,relative);
    fs.mkdirSync(path.dirname(target),{recursive:true});
    const original=fs.readFileSync(new URL("../"+relative,import.meta.url),"utf8");
@@ -82,7 +82,7 @@ test("Canonical migration hash accepts Windows CRLF but rejects tampered SQL",as
   }
   assert.equal(checkPinnedFiles(root),true);
   const [version,name]=expectedMigrations.pending[4];
-  const file=path.join(root,"supabase/migrations/"+version+"_"+name+".sql");
+  const file=path.join(root,"tests/fixtures/migrations/"+version+"_"+name+".sql");
   fs.appendFileSync(file,"\r\n-- unauthorized change\r\n");
   assert.throws(()=>checkPinnedFiles(root),/STAGE3V_ROLLOUT_BLOCKED:DRIFT_/);
  }finally{fs.rmSync(root,{recursive:true,force:true});}

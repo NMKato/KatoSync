@@ -1,7 +1,7 @@
 -- NMKato Solutions — disposable PostgreSQL 17 only, never on live DB.
 \set ON_ERROR_STOP on
 \ir mesh_resolution_proof_qa.sql
-\ir ../../supabase/migrations/20261030093323_mesh_inbox_recipient_key_continuity.sql
+\ir ../fixtures/migrations/20261030093323_mesh_inbox_recipient_key_continuity.sql
 
 DO $$
 BEGIN

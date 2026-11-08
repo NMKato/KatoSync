@@ -35,7 +35,7 @@ function fail(code){throw new Error("MESH_ROLLOUT_BLOCKED: "+code);}
 function isNonnegativeSafeInt(n){return Number.isSafeInteger(n)&&n>=0;}
 export function verifyLocalContract(root=ROOT){
   for(const item of MIGRATIONS){
-    const filename=join(root,"supabase","migrations",item.version+"_"+item.name+".sql");
+    const filename=join(root,...(item.kind==="inbox"?["tests","fixtures","migrations"]:["supabase","migrations"]),item.version+"_"+item.name+".sql");
     let data;
     try{data=readFileSync(filename);}catch{fail("MISSING_MIGRATION_"+item.version);}
     if(item.sha256&&createHash("sha256").update(data).digest("hex")!==item.sha256)

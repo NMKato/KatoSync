@@ -6,7 +6,7 @@ const load=(p:string)=>readFileSync(new URL(p,import.meta.url),"utf8");
 const edge=load("../supabase/functions/mesh-pairing-relay/relay.ts");
 const entry=load("../supabase/functions/mesh-pairing-relay/index.ts");
 const originGate=load("../supabase/functions/mesh-pairing-relay/origin-gate.ts");
-const sql=load("../supabase/migrations/20261031213900_mesh_pairing_relay_staged.sql");
+const sql=load("../tests/fixtures/migrations/20261031213900_mesh_pairing_relay_staged.sql");
 const runner=load("../scripts/qa-mesh-postgres-local.sh");
 const fixture=load("sql/mesh_pairing_relay_qa.sql");
 const inboxRollout=load("../scripts/qa-mesh-inbox-rollout-gate.mjs");

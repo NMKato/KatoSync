@@ -12,7 +12,7 @@ INSERT INTO auth.users(id) VALUES
  ('11111111-1111-4111-8111-111111111111'),
  ('22222222-2222-4222-8222-222222222222');
 \ir ../../supabase/migrations/20261028202403_katosync_mesh_owned_schema.sql
-\ir ../../supabase/migrations/20261029211243_mesh_inbox_signed_send_guard.sql
+\ir ../fixtures/migrations/20261029211243_mesh_inbox_signed_send_guard.sql
 INSERT INTO katosync.mesh_devices(owner_user_id,signing_public_key,fingerprint,display_name,platform_os) VALUES
  ('11111111-1111-4111-8111-111111111111',repeat('A',43),repeat('AA-',15)||'AA','m2','macos'),
  ('11111111-1111-4111-8111-111111111111',repeat('B',43),repeat('BB-',15)||'BB','m3','macos'),

@@ -9,7 +9,7 @@ test("all four reviewed inbox migrations retain byte-identical LF endings on Win
  const attrs=read("../.gitattributes");
  const lines=attrs.split(/\r?\n/).filter(x=>!x.startsWith("#")&&x.trim());
  for(const migration of MIGRATIONS.filter(x=>x.kind==="inbox")){
-  const name="supabase/migrations/"+migration.version+"_"+migration.name+".sql";
+  const name="tests/fixtures/migrations/"+migration.version+"_"+migration.name+".sql";
   assert.ok(lines.includes(name+" text eol=lf"),"Missing immutable SQL LF rule: "+name);
   const data=read("../"+name);
   assert.ok(!data.includes("\r"),"Reviewed source contains CR (not LF): "+name);

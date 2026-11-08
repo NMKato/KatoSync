@@ -13,7 +13,7 @@ const fixture=()=>({
  fixture:readFileSync(join(root,"tests/sql/mesh_inbox_edge_e2e_setup.sql"),"utf8"),
  restore:readFileSync(join(root,"scripts/qa-mesh-postgres-recovery-drill.sh"),"utf8"),
  migrations:MIGRATIONS.filter(x=>x.kind==="inbox").map(x=>readFileSync(
-  join(root,"supabase/migrations",x.version+"_"+x.name+".sql"),"utf8"))
+  join(root,"tests/fixtures/migrations",x.version+"_"+x.name+".sql"),"utf8"))
 });
 test("actual pinned source tree produces a non-deployable, synthetic-only QA manifest",async()=>{
  const x=await createPlan();

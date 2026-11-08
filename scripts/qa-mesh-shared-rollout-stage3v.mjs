@@ -23,7 +23,7 @@ export const expectedMigrations=Object.freeze({base:BASE,pending:PENDING});
 const deny=reason=>{throw new Error("STAGE3V_ROLLOUT_BLOCKED:"+reason)};
 export function checkPinnedFiles(root=ROOT){
   for(const [version,name,sha] of [...BASE,...PENDING]){
-    const path=join(root,"supabase","migrations",version+"_"+name+".sql");
+    const path=join(root,...(PENDING.some(x=>x[0]===version)?["tests","fixtures","migrations"]:["supabase","migrations"]),version+"_"+name+".sql");
     let bytes;
     try{bytes=readFileSync(path)}catch{deny("MISSING_"+version)}
     // Windows checkout may convert LF to CRLF; pin canonical SQL contents,

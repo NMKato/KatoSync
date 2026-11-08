@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 
 const file=(path:string)=>readFileSync(new URL(path,import.meta.url),"utf8");
-const migration=file("../supabase/migrations/20261030093323_mesh_inbox_recipient_key_continuity.sql");
+const migration=file("../tests/fixtures/migrations/20261030093323_mesh_inbox_recipient_key_continuity.sql");
 const edge=file("../supabase/functions/mesh-inbox-receive/receive.ts");
 const sql=file("sql/mesh_inbox_key_continuity_qa.sql");
 const gate=file("../scripts/qa-mesh-inbox-rollout-gate.mjs");

@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-const sql=readFileSync(new URL("../supabase/migrations/20261103164548_katosync_billing_product_scoped.sql",import.meta.url),"utf8");
+const sql=readFileSync(new URL("../tests/fixtures/migrations/20261103164548_katosync_billing_product_scoped.sql",import.meta.url),"utf8");
 test("new billing state has independent schema and exact KatoSync price binding",()=>{
  assert.ok(sql.includes("CREATE TABLE IF NOT EXISTS katosync.billing_subscriptions"));
  assert.ok(sql.includes("CREATE TABLE IF NOT EXISTS katosync.billing_webhook_events"));

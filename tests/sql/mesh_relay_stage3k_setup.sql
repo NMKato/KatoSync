@@ -2,7 +2,7 @@
 -- No production database, no TCP listener, no online auth.
 \set ON_ERROR_STOP on
 \ir mesh_inbox_edge_e2e_setup.sql
-\ir ../../supabase/migrations/20261031213900_mesh_pairing_relay_staged.sql
+\ir ../fixtures/migrations/20261031213900_mesh_pairing_relay_staged.sql
 DO $$
 BEGIN
  IF has_table_privilege('authenticated','katosync.mesh_pairing_relay_messages','SELECT')

@@ -20,7 +20,7 @@ export function validateIsolation({fixture,restore,migrations}){
    fail("INCOMPLETE_FIXTURE");
  const refs=[...fixture.matchAll(/^\\ir\s+(.+)$/gm)].map(x=>x[1].trim());
  const expected=[MIGRATIONS[0],...REPLAY].map(x=>
-  "../../supabase/migrations/"+x.version+"_"+x.name+".sql");
+  (x.kind==="inbox"?"../fixtures/migrations/":"../../supabase/migrations/")+x.version+"_"+x.name+".sql");
  if(JSON.stringify(refs)!==JSON.stringify(expected))
    fail("UNREVIEWED_MIGRATION_INCLUDE");
  if(!fixture.includes("CREATE SCHEMA auth;")||
@@ -50,7 +50,7 @@ export async function createPlan(root=ROOT){
  const verified=await buildReview(root); // SHA pin BOTH SQL and Edge source
  const fixture=readFileSync(join(root,FIXTURE),"utf8");
  const restore=readFileSync(join(root,RESTORE),"utf8");
- const sql=REPLAY.map(x=>readFileSync(join(root,"supabase/migrations",
+ const sql=REPLAY.map(x=>readFileSync(join(root,"tests/fixtures/migrations",
    x.version+"_"+x.name+".sql"),"utf8"));
  validateIsolation({fixture,restore,migrations:sql});
  return Object.freeze({

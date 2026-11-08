@@ -24,7 +24,7 @@ const baseline=()=>({
 });
 const files=[
  ...MIGRATIONS
- .map(x=>"supabase/migrations/"+x.version+"_"+x.name+".sql"),
+ .map(x=>(x.kind==="inbox"?"tests/fixtures/migrations/":"supabase/migrations/")+x.version+"_"+x.name+".sql"),
  ...["mesh-inbox-send/index.ts","mesh-inbox-send/send.ts","mesh-inbox-receive/index.ts",
     "mesh-inbox-receive/receive.ts","mesh-device-enrollment/membership-gate.ts"]
     .map(x=>"supabase/functions/"+x),
@@ -76,7 +76,7 @@ test("reviewer rejects any changed Edge source rather than silently updating a f
 });
 test("reviewer rejects a changed SQL migration, preserving exact Windows/macOS bytes",async()=>{
  await withMirror(async dir=>{
-  const p=join(dir,"supabase/migrations/20261029211243_mesh_inbox_signed_send_guard.sql");
+  const p=join(dir,"tests/fixtures/migrations/20261029211243_mesh_inbox_signed_send_guard.sql");
   writeFileSync(p,readFileSync(p,"utf8").replaceAll("\n","\r\n"));
   await assert.rejects(buildReview(dir,baseline()),
    /MESH_ROLLOUT_BLOCKED: MIGRATION_HASH_CHANGED_20261029211243/);

@@ -1,7 +1,7 @@
 -- NMKato Solutions — hermetic PostgreSQL 17 socket-only QA; never on production.
 \set ON_ERROR_STOP on
 \ir mesh_inbox_edge_e2e_setup.sql
-\ir ../../supabase/migrations/20261031213900_mesh_pairing_relay_staged.sql
+\ir ../fixtures/migrations/20261031213900_mesh_pairing_relay_staged.sql
 
 INSERT INTO katosync.mesh_devices(owner_user_id,signing_public_key,fingerprint,display_name,platform_os)
 VALUES

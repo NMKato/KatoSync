@@ -40,3 +40,11 @@ Full rerun: **736/736 Node**, **16/16 Remote Usage**, and TypeScript/Vite
 The new integration branch is for **review and tests only**. It does not
 authorize a 4.0 release. The original working directory is unchanged.
 Details: docs/PR-BACKLOG-INTEGRATION-AUDIT-2026-11-08.md.
+
+## Verified live migration reconciliation (2026-11-08)
+
+See docs/KATOSYNC_LIVE_MIGRATION_RECONCILIATION_2026-11-08.md.
+Five live-executed old-version Mesh SQL files and three unapplied
+Trial/Billing proposals are now immutable QA fixtures only, outside
+normal Supabase migration discovery. Seven installed exact-version
+files remain in supabase/migrations. No SQL bytes were changed.

@@ -125,7 +125,7 @@ test("DB replay, queue contention, rate and outage cannot produce a success rece
  }
 });
 test("database gate enforces owner-serialized rate, same pair and no direct client write",()=>{
- const sql=readFileSync(new URL("../supabase/migrations/20261029211243_mesh_inbox_signed_send_guard.sql",import.meta.url),"utf8");
+ const sql=readFileSync(new URL("../tests/fixtures/migrations/20261029211243_mesh_inbox_signed_send_guard.sql",import.meta.url),"utf8");
  assert.match(sql,/pg_advisory_xact_lock/);
  assert.match(sql,/recent_count >= 3/);
  assert.match(sql,/pending_pair_count > 0/);

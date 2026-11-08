@@ -3,7 +3,7 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 const read=(file:string)=>readFileSync(new URL(file,import.meta.url),"utf8");
-const migration=read("../supabase/migrations/20261030074910_mesh_resolution_proof_binding.sql");
+const migration=read("../tests/fixtures/migrations/20261030074910_mesh_resolution_proof_binding.sql");
 const receive=read("../supabase/functions/mesh-inbox-receive/receive.ts");
 const postgreSQL=read("../tests/sql/mesh_resolution_proof_qa.sql");
 test("recipient decision requires a server-registered device-attested proof",()=>{
