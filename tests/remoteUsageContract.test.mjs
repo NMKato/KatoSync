@@ -57,3 +57,9 @@ test("history has six ordered verified UTC months, not arbitrary annotations",()
   assert.equal(parseUsageHistory({version:1,live:true,timezone:"UTC",months:[...months].reverse()}),null);
   assert.equal(parseUsageHistory({version:1,live:true,timezone:"Europe/Berlin",months}),null);
 });
+
+test("Free downgrade overage remains visible while quota is exhausted",()=>{
+  const high={...valid,toolCalls:10005,remaining:0,usagePercent:100};
+  assert.equal(parseUsageOverview(high)?.toolCalls,10005);
+  assert.equal(parseUsageOverview({...high,remaining:1}),null);
+});
