@@ -1,8 +1,8 @@
 // RC-12: Prepared read-only Remote Commander usage client.
 // Not mounted in App.tsx or enabled in production. No token persistence.
 // Session changes, logout and late responses MUST clear previous account data.
-import { parseUsageOverview, parseUsageHistory } from "./remoteUsage";
-import type { RemoteUsageOverview, RemoteUsageHistory } from "./remoteUsage";
+import { parseUsageOverview, parseUsageHistory } from "./remoteUsage.ts";
+import type { RemoteUsageOverview, RemoteUsageHistory } from "./remoteUsage.ts";
 
 export type RemoteUsageStatus =
   | "disconnected" | "loading" | "ready" | "unauthorized" | "unavailable";
