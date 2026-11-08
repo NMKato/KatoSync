@@ -1,6 +1,7 @@
 // NMKato Solutions — KatoSync 4.0: signed, append-only PENDING acceptance receipts.
 mod external_checks;
 mod owner_authority;
+mod reviewer_attestation;
 mod scope_policy;
 pub(super) mod verified_ledger;
 // NEVER treat this table as approved features. GitHub CI and ancestry are not yet
