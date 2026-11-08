@@ -37,6 +37,7 @@ echo "MESH_QA_EPHEMERAL_CLUSTER_ONLY"
 case "${1:-legacy}" in
   legacy) TEST_FILE="$ROOT/tests/sql/mesh_registry_backend_qa.sql" ;;
   katosync) TEST_FILE="$ROOT/tests/sql/katosync_owned_schema_qa.sql" ;;
+  quota-stage4e) TEST_FILE="$ROOT/tests/sql/mesh_quota_stage4e_disposable_qa.sql" ;;
   inbox) TEST_FILE="$ROOT/tests/sql/mesh_inbox_send_qa.sql" ;;
   inbox-receiver) TEST_FILE="$ROOT/tests/sql/mesh_inbox_receive_qa.sql" ;;
   inbox-proof) TEST_FILE="$ROOT/tests/sql/mesh_resolution_proof_qa.sql" ;;
