@@ -45,7 +45,7 @@ export function parseUsageOverview(input: unknown): RemoteUsageOverview | null {
   if (v.plan === "free") {
     if (v.monthlyLimit !== 10000 || !number(v.remaining) ||
         !number(v.usagePercent) || v.usagePercent > 100 ||
-        v.remaining > v.monthlyLimit || v.toolCalls + v.remaining !== v.monthlyLimit) {
+        v.remaining !== Math.max(0, v.monthlyLimit - v.toolCalls)) {
       return null;
     }
   } else if (v.monthlyLimit !== null || v.remaining !== null ||
