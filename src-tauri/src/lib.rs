@@ -45,6 +45,7 @@ mod mesh_inbox;
 mod mesh_inbox_receiver;
 mod mesh_katoos_shared_preflight;
 mod mesh_native_issuer;
+mod mesh_owner_review_readback;
 mod mesh_preview_auth;
 mod mesh_readiness;
 mod mesh_relay_client;
@@ -454,6 +455,7 @@ pub fn run() {
             mesh_readiness::mesh_local_readiness,
             mesh_native_issuer::mesh_native_issuer_readiness,
             mesh_katoos_shared_preflight::mesh_katoos_shared_preflight,
+            mesh_owner_review_readback::mesh_owner_review_readback_qa,
             mesh_preview_auth::mesh_preview_auth_status,
             mesh_preview_auth::mesh_preview_auth_login,
             mesh_preview_auth::mesh_preview_auth_verify_session,
