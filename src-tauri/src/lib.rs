@@ -25,22 +25,94 @@ use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
+mod context_pack;
+mod desktop_widget;
+mod github_app_auth;
+mod local_brain;
 mod local_control;
+mod memory_fabric;
+mod mesh_agent_bootstrap;
+mod mesh_device_presence;
+mod mesh_directory;
+mod mesh_enrollment_client;
+// Read-only owner-key registration gate; no direct IPC, listener or job grant.
+#[allow(dead_code)]
+mod mesh_enrollment_gate;
+mod mesh_handshake;
+mod mesh_hub;
+mod mesh_identity;
+mod mesh_inbox;
+mod mesh_inbox_receiver;
+mod mesh_katoos_shared_preflight;
+mod mesh_native_issuer;
+mod mesh_owner_review_readback;
+mod mesh_preview_auth;
+mod mesh_readiness;
+mod mesh_relay_client;
+// Stage 2D: native-only owner + pin admission. Deliberately no runtime
+// caller/IPC until real enrollment, session revocation and user consent.
+#[allow(dead_code)]
+mod mesh_admission;
+mod mesh_tls;
+// Explicit staging boundary: no IPC/runtime listener. The Stage 2D native
+// admission service may reference this module; it remains deliberately unused
+// by app runtime until revocation/session enforcement is released.
+#[allow(dead_code)]
+mod mesh_transport;
+mod mesh_trust;
+mod model_distribution;
+mod offline_stt;
+mod orchestration;
+mod project_registry;
+mod provider_manager;
+mod provider_warmup;
+mod read_only_dispatch;
 
 // Immer aus Cargo.toml ableiten -> kein Drift mehr (war faelschlich hartkodiert "1.0.1").
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+#[cfg(not(feature = "github-login-qa"))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
+#[cfg(all(feature = "github-login-qa", not(feature = "katoos-auth-qa")))]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
+#[cfg(all(feature = "katoos-auth-qa", not(feature = "stage3x-qa")))]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.auth.qa";
+#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa")))]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage3x.qa";
+#[cfg(feature = "stage35-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage35.qa";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";
 const SUPABASE_SESSION_ACCOUNT: &str = "supabase-refresh-token";
 const USER_AGENT: &str = "KatoSync/1.0.1";
+#[cfg(not(feature = "github-login-qa"))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
-// KatoSync-eigenes Supabase-Projekt (oeffentlicher Anon-Key, bewusst client-seitig). Getrennt von KatoOS.
+#[cfg(all(feature = "github-login-qa", not(feature = "stage3x-qa")))]
+const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.github.login.qa.sync";
+#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa")))]
+const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage3x.sync";
+#[cfg(feature = "stage35-qa")]
+const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage35.sync";
+// KATOOS canonical issuer on explicit, isolated QA feature only. Never silently
+// migrate or reinterpret existing KatoSync tenants/sessions on stable builds.
+#[cfg(feature = "katoos-auth-qa")]
+const KATOSYNC_AUTH_URL: &str = "https://xbnnlyyxiilklsygxcof.supabase.co";
+#[cfg(not(feature = "katoos-auth-qa"))]
 const KATOSYNC_AUTH_URL: &str = "https://wspcuiylctlrvvpnwufk.supabase.co";
+#[cfg(feature = "katoos-auth-qa")]
+const KATOSYNC_AUTH_ANON_KEY: &str = "sb_publishable_7hgIrdED0Pwg_Mb-Mh4ZCw_uTf00k0X";
+#[cfg(not(feature = "katoos-auth-qa"))]
 const KATOSYNC_AUTH_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndzcGN1aXlsY3RscnZ2cG53dWZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzNzMwODMsImV4cCI6MjA5Nzk0OTA4M30.HJu_FxIFWoFDooVLE9TVOD10dgxJwLcpFZrUKK2_bv4";
 static API_KEY_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static MCP_CONNECTOR_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static SUPABASE_ACCESS_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+// Serialize EVERY refresh-token rotation and explicit password reauthentication
+// inside this process. GoTrue refresh grants are single-use, so two concurrent
+// requests must never exchange or overwrite different rotated refresh tokens.
+static SUPABASE_SESSION_TRANSITION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+fn supabase_session_transition_lock() -> &'static tokio::sync::Mutex<()> {
+    SUPABASE_SESSION_TRANSITION_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 // Cloud-Profil (Zero-Knowledge): der aus dem Passwort abgeleitete 32-Byte-Schluessel + das zugehoerige
 // kdf_salt liegen NUR im RAM (nie auf Platte/Keychain) und nur fuer die laufende Sitzung. Wird beim Login
 // gesetzt und beim Logout geraeumt. Ohne ihn kann das Cloud-Profil weder ent- noch verschluesselt werden.
@@ -92,6 +164,20 @@ pub struct AppConfig {
     // Codex-Bridge: gemerkter lokaler Repo-Ordner pro Projekt (projectExternalId -> Pfad).
     #[serde(default)]
     project_repos: std::collections::HashMap<String, String>,
+    // Agent Sync: Reihenfolge und KatoSync-seitige Aktivierung. Provider-eigene Credentials
+    // gehoeren weiterhin ausschliesslich der jeweiligen CLI.
+    #[serde(default = "default_provider_priority")]
+    provider_priority: Vec<provider_manager::ProviderId>,
+    #[serde(default)]
+    disabled_providers: Vec<provider_manager::ProviderId>,
+    // Nur nicht-geheime Endpoint-Metadaten; API-Keys werden in diesem Slice nicht angenommen.
+    #[serde(default)]
+    local_provider: provider_manager::LocalProviderConfig,
+    // Begrenzter Warm-up fuer Abo-CLIs (Codex/ChatGPT, Claude/claude.ai): ein winziger READY-Prompt
+    // je Provider und ~5-h-Fenster. Standard AN (auch fuer Alt-Configs); API-Key-Logins, Local
+    // Brain und Local Control werden unabhaengig davon nie aufgewaermt.
+    #[serde(default = "default_true")]
+    provider_warmup_enabled: bool,
 }
 
 fn default_true() -> bool {
@@ -251,6 +337,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                // The lightweight widget closes silently; only the main app
+                // displays the existing background-mode confirmation.
+                if window.label() == "desktop-widget" {
+                    api.prevent_close();
+                    if let Some(main)=window.app_handle().get_webview_window("main"){
+                        let _=main.show();
+                    }
+                    let _=window.hide();
+                    return;
+                }
+                if window.label() != "main" { return; }
                 api.prevent_close();
                 let _ = window
                     .dialog()
@@ -268,6 +365,50 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            desktop_widget::desktop_widget_show,
+            desktop_widget::desktop_widget_hide,
+            desktop_widget::desktop_widget_drag,
+            desktop_widget::desktop_widget_publish,
+            desktop_widget::desktop_widget_snapshot,
+            desktop_widget::desktop_widget_save_position,
+            desktop_widget::desktop_widget_set_expanded,
+            desktop_widget::desktop_widget_open_main,
+            project_registry::project_registry_discover,
+            project_registry::project_registry_smart_roots,
+            project_registry::project_registry_scan,
+            project_registry::project_registry_load,
+            project_registry::project_registry_save,
+            project_registry::project_registry_open,
+            memory_fabric::memory_fabric_overview,
+            memory_fabric::memory_fabric_identity_get,
+            memory_fabric::memory_fabric_identity_set_rex,
+            memory_fabric::memory_fabric_identity_set_named,
+            memory_fabric::memory_fabric_index,
+            memory_fabric::memory_fabric_query,
+            memory_fabric::memory_fabric_context,
+            memory_fabric::memory_fabric_answer,
+            memory_fabric::memory_fabric_promote,
+            memory_fabric::memory_fabric_export,
+            memory_fabric::continuity_bridge::continuity_preflight,
+            memory_fabric::continuity_bridge::continuity_timeline,
+            memory_fabric::continuity_bridge::continuity_local_answer,
+            memory_fabric::continuity_bridge::continuity_chat_diagnostics,
+            memory_fabric::continuity_bridge::continuity_chat_repair_project,
+            memory_fabric::continuity_bridge::continuity_chat_history,
+            memory_fabric::continuity_bridge::continuity_chat_send,
+            memory_fabric::continuity_bridge::continuity_search_blueprint,
+            memory_fabric::continuity_bridge::continuity_feature_trace,
+            memory_fabric::continuity_bridge::continuity_mvp_progress,
+            memory_fabric::continuity_bridge::continuity_github_ci,
+            memory_fabric::continuity_bridge::continuity_github_kickoff_discover,
+            github_app_auth::github_app_connection_status,
+            github_app_auth::github_app_device_begin,
+            github_app_auth::github_app_device_poll,
+            github_app_auth::github_app_device_cancel,
+            github_app_auth::github_app_disconnect,
+            github_app_auth::inventory::github_app_repository_inventory,
+            github_app_auth::inventory::github_app_repo_issues,
+            memory_fabric::continuity_bridge::continuity_save_blueprint,
             load_config,
             save_config,
             save_api_key,
@@ -284,9 +425,11 @@ pub fn run() {
             archive_remote_briefing,
             delete_remote_briefing,
             login_supabase,
+            renew_katoos_qa_session,
             signup_supabase,
             recover_supabase,
             supabase_session_status,
+            verified_katoos_identity_badge,
             logout_supabase,
             mint_connector_token,
             cloud_profile_sync_after_login,
@@ -295,6 +438,9 @@ pub fn run() {
             cloud_profile_key_present,
             cloud_profile_logout,
             run_codex_task,
+            read_only_dispatch::readonly_dispatch_probe,
+            read_only_dispatch::readonly_probe_preflight,
+            read_only_dispatch::readonly_probe_history,
             dir_exists,
             check_codex_task,
             test_mistral_connection,
@@ -305,8 +451,64 @@ pub fn run() {
             remove_launch_agent,
             launch_agent_status,
             read_logs,
+            local_control_snapshot,
+            mesh_readiness::mesh_local_readiness,
+            mesh_native_issuer::mesh_native_issuer_readiness,
+            mesh_admission::mesh_native_peer_preflight,
+            mesh_katoos_shared_preflight::mesh_katoos_shared_preflight,
+            mesh_owner_review_readback::mesh_owner_review_readback_qa,
+            mesh_preview_auth::mesh_preview_auth_status,
+            mesh_preview_auth::mesh_preview_auth_login,
+            mesh_preview_auth::mesh_preview_auth_verify_session,
+            mesh_preview_auth::mesh_preview_auth_logout,
+            mesh_hub::mesh_hub_preference_get,
+            mesh_hub::mesh_hub_preference_set,
+            mesh_agent_bootstrap::mesh_agent_bootstrap_snapshot,
+            mesh_device_presence::mesh_device_presence_report,
+            mesh_directory::mesh_account_devices_list,
+            mesh_enrollment_client::mesh_account_device_discover,
+            mesh_identity::mesh_device_identity_prepare,
+            mesh_identity::mesh_device_enrollment_proof,
+            mesh_identity::mesh_pairing_offer_create,
+            mesh_inbox::mesh_inbox_invite_prepare,
+            mesh_inbox::mesh_inbox_invite_send,
+            mesh_inbox_receiver::mesh_inbox_recipient_list,
+            mesh_inbox_receiver::mesh_inbox_recipient_decide,
+            mesh_relay_client::mesh_pairing_relay_send,
+            mesh_relay_client::mesh_pairing_relay_list,
+            mesh_identity::mesh_pairing_offer_inspect,
+            mesh_handshake::mesh_pairing_challenge_create,
+            mesh_handshake::mesh_pairing_response_create,
+            mesh_handshake::mesh_pairing_response_verify,
+            mesh_trust::mesh_local_approved_peers,
+            mesh_trust::mesh_local_approve_peer,
+            mesh_trust::mesh_local_revoke_peer,
             open_output_dir,
             resume_runner_session,
+            provider_statuses,
+            provider_warmup_state,
+            warm_up_provider,
+            connect_provider,
+            open_provider_login_url,
+            cancel_provider_login,
+            submit_provider_login_code,
+            disconnect_provider,
+            save_local_provider_key,
+            discover_local_providers,
+            local_brain_status,
+            offline_stt::local_stt_available,
+            offline_stt::local_stt_preflight,
+            offline_stt::local_stt_start,
+            offline_stt::local_stt_stop,
+            offline_stt::local_stt_open_settings,
+            install_local_brain,
+            start_local_brain,
+            stop_local_brain,
+            remove_local_brain,
+            rollback_local_brain_model,
+            set_local_brain_model_pin,
+            remove_local_brain_model_version,
+            test_provider,
             quit_app
         ])
         .setup(|app| {
@@ -333,8 +535,235 @@ fn reopen_main_window(app_handle: &AppHandle) {
 }
 
 #[tauri::command]
+fn local_control_snapshot() -> Result<local_control::LocalControlMonitorSnapshot, String> {
+    local_control::monitor_snapshot()
+}
+
+#[tauri::command]
 fn load_config() -> Result<AppConfig, String> {
     load_config_inner().map_err(error_to_string)
+}
+
+/// Liefert normalisierte, redigierte Provider-Zustaende. READY-Tests laufen nur explizit.
+#[tauri::command]
+async fn provider_statuses(
+    settings: provider_manager::ProviderSettings,
+    run_smoke: bool,
+) -> Vec<provider_manager::ProviderStatus> {
+    provider_manager::statuses(&settings, run_smoke).await
+}
+
+fn open_provider_login_url_inner(
+    provider: provider_manager::ProviderId,
+    raw_url: &str,
+) -> Result<(), String> {
+    let url = provider_manager::official_login_url(provider, raw_url)
+        .ok_or_else(|| "Keine gültige offizielle Provider-Anmelde-URL.".to_string())?;
+
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open").arg(&url).status();
+    #[cfg(target_os = "windows")]
+    let status = Command::new("explorer.exe").arg(&url).status();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = Command::new("xdg-open").arg(&url).status();
+
+    let status =
+        status.map_err(|e| format!("Standardbrowser konnte nicht gestartet werden: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Standardbrowser konnte die Anmeldeseite nicht öffnen.".to_string())
+    }
+}
+
+/// Öffnet nur eine bereits validierte offizielle Login-URL im Betriebssystem-Browser.
+#[tauri::command]
+fn open_provider_login_url(
+    provider: provider_manager::ProviderId,
+    url: String,
+) -> Result<(), String> {
+    open_provider_login_url_inner(provider, &url)
+}
+
+/// Startet ausschliesslich den offiziellen Provider-Login und prueft danach Auth + READY.
+/// Sobald die CLI ihre offizielle HTTPS-Login-URL ausgibt, wird sie an die UI gemeldet;
+/// die UI öffnet sie über open_provider_login_url im nativen OS-Browser.
+#[tauri::command]
+async fn connect_provider(
+    provider: provider_manager::ProviderId,
+    force_login: bool,
+    app: AppHandle,
+) -> Result<provider_manager::ProviderStatus, String> {
+    if !matches!(
+        provider,
+        provider_manager::ProviderId::Codex | provider_manager::ProviderId::Claude
+    ) {
+        return Err("Nur Codex und Claude Code nutzen einen Browser-Login.".to_string());
+    }
+    let status = provider_manager::connect(provider, force_login, move |url| {
+        let _ = app.emit(
+            "provider-login-url",
+            serde_json::json!({ "provider": provider, "url": url }),
+        );
+    })
+    .await;
+    Ok(status)
+}
+
+/// Bricht einen laufenden, von KatoSync gestarteten Login-Prozess ab.
+#[tauri::command]
+fn cancel_provider_login(provider: provider_manager::ProviderId) -> bool {
+    provider_manager::cancel_login(provider)
+}
+
+/// Übergibt einen flüchtigen OAuth-Einmalcode an den aktuell laufenden Provider-Login.
+/// Der Code wird weder geloggt noch gespeichert und unmittelbar nach Übergabe aus dem
+/// Command-Speicher überschrieben.
+#[tauri::command]
+async fn submit_provider_login_code(
+    provider: provider_manager::ProviderId,
+    code: String,
+) -> Result<(), String> {
+    let mut code = code;
+    let accepted = provider_manager::submit_login_code(provider, &code).await;
+    zeroize::Zeroize::zeroize(&mut code);
+    if accepted {
+        Ok(())
+    } else {
+        Err("Kein passender Login wartet auf einen gültigen Einmalcode.".to_string())
+    }
+}
+
+/// Trennt einen Provider KatoSync-seitig. Loescht nur KatoSync-eigene Secrets (lokaler
+/// Endpoint-API-Key); CLI-Anmeldungen von Codex/Claude bleiben unangetastet.
+#[tauri::command]
+fn disconnect_provider(
+    provider: provider_manager::ProviderId,
+) -> Result<(), provider_manager::ProviderReason> {
+    provider_manager::disconnect(provider)
+}
+
+/// Speichert einen optionalen Endpoint-API-Key im OS-Schluesselbund (nie in der Config).
+#[tauri::command]
+fn save_local_provider_key(
+    base_url: String,
+    api_key: String,
+) -> Result<(), provider_manager::ProviderReason> {
+    let mut api_key = api_key;
+    let result = provider_manager::save_local_key(&base_url, &api_key);
+    zeroize::Zeroize::zeroize(&mut api_key);
+    result
+}
+
+/// Sucht ausschliesslich auf Loopback nach Ollama/LM Studio auf Standardports.
+#[tauri::command]
+async fn discover_local_providers() -> Vec<provider_manager::DiscoveredLocalProvider> {
+    provider_manager::discover_local().await
+}
+
+#[tauri::command]
+async fn local_brain_status(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::status(&app).await.map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn install_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::install(&app).await.map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn start_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::start(&app).await.map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn stop_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::stop(&app).await.map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn remove_local_brain(app: AppHandle) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::remove(&app).await.map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn rollback_local_brain_model(
+    app: AppHandle,
+) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::rollback_model(&app)
+        .await
+        .map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn set_local_brain_model_pin(
+    app: AppHandle,
+    version: Option<String>,
+) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::set_model_pin(&app, version)
+        .await
+        .map_err(error_to_string)
+}
+
+#[tauri::command]
+async fn remove_local_brain_model_version(
+    app: AppHandle,
+    version: String,
+) -> Result<local_brain::LocalBrainStatus, String> {
+    local_brain::remove_model_version(&app, version)
+        .await
+        .map_err(error_to_string)
+}
+
+fn provider_warmup_path() -> Result<PathBuf> {
+    Ok(app_support_dir()?.join("provider-warmup.json"))
+}
+
+/// Persistierte Warm-up-Zeitstempel (nur Zeiten + Ergebnis-Codes), damit das Frontend plant.
+#[tauri::command]
+fn provider_warmup_state() -> Result<provider_warmup::ProviderWarmupState, String> {
+    let path = provider_warmup_path().map_err(error_to_string)?;
+    Ok(provider_warmup::load_state(&path))
+}
+
+/// Begrenzter Warm-up eines Abo-Providers. Config, Runner-Aktivitaet und Cooldown werden hier
+/// unabhaengig vom Frontend erneut geprueft; das Ergebnis aendert keine Provider-Karte.
+#[tauri::command]
+async fn warm_up_provider(
+    provider: provider_manager::ProviderId,
+) -> Result<provider_warmup::WarmupReport, String> {
+    let config = load_config_inner().map_err(error_to_string)?;
+    let path = provider_warmup_path().map_err(error_to_string)?;
+    let external_work_active = tauri::async_runtime::spawn_blocking(local_control::work_active)
+        .await
+        // Kann die Sperre nicht geprueft werden, gilt Arbeit als aktiv (kein Warm-up).
+        .unwrap_or(true);
+    let settings = provider_warmup::WarmupSettings {
+        feature_enabled: config.provider_warmup_enabled,
+        provider_enabled: !config.disabled_providers.contains(&provider),
+        external_work_active,
+    };
+    let report = provider_warmup::run(provider, &path, settings).await;
+    if matches!(
+        report.outcome,
+        provider_warmup::WarmupOutcome::Warmed | provider_warmup::WarmupOutcome::Failed
+    ) {
+        // Nur Provider + Ergebnis-Code; nie Prompt-Antworten, Tokens oder Account-Daten.
+        let _ = write_log(
+            "info",
+            &format!("Provider-Warm-up {provider:?}: {:?}", report.outcome),
+        );
+    }
+    Ok(report)
+}
+
+/// Fuehrt einen begrenzten Einzeltest aus, ohne einen Login zu starten.
+#[tauri::command]
+async fn test_provider(
+    provider: provider_manager::ProviderId,
+    settings: provider_manager::ProviderSettings,
+) -> provider_manager::ProviderStatus {
+    provider_manager::test_provider(provider, &settings).await
 }
 
 #[tauri::command]
@@ -437,9 +866,23 @@ async fn login_supabase(email: String, password: String) -> Result<SupabaseSessi
     if email_trim.is_empty() || password.trim().is_empty() {
         return Err("E-Mail und Passwort dürfen nicht leer sein.".to_string());
     }
+    // Preserve current GitHub and session data if credential validation fails.
+    // A QA user must never silently switch identities via the regular login.
+    let existing_email = read_supabase_session_email();
+    if cfg!(feature = "katoos-auth-qa")
+        && existing_email
+            .as_deref()
+            .is_some_and(|known| !qa_reauth_matches_account(known, email_trim))
+    {
+        return Err("KATOOS_QA_REAUTH_ACCOUNT_MISMATCH".into());
+    }
+    let _session_guard = supabase_session_transition_lock().lock().await;
     let session = supabase_password_login(email_trim, &password)
         .await
         .map_err(error_to_string)?;
+    if !cfg!(feature = "katoos-auth-qa") || existing_email.is_none() {
+        github_app_auth::on_katosync_account_switch();
+    }
     save_supabase_refresh_token(&session.refresh_token).map_err(error_to_string)?;
     cache_supabase_access_token(Some(session.access_token.clone()));
     let user_email = session
@@ -453,8 +896,117 @@ async fn login_supabase(email: String, password: String) -> Result<SupabaseSessi
     })
 }
 
+/// Normalized continuity check only; verified issuer identity is a separate gate.
+fn qa_reauth_matches_account(stored: &str, presented: &str) -> bool {
+    !stored.trim().is_empty()
+        && !presented.trim().is_empty()
+        && stored.trim().eq_ignore_ascii_case(presented.trim())
+}
+
+#[cfg(test)]
+mod qa_reauth_account_tests {
+    use super::qa_reauth_matches_account;
+    #[test]
+    fn same_account_email_allows_case_changes_but_not_other_users() {
+        assert!(qa_reauth_matches_account(
+            "Owner@Example.com",
+            "owner@example.com"
+        ));
+        assert!(qa_reauth_matches_account(
+            " Owner@Example.com ",
+            "owner@example.com"
+        ));
+        assert!(!qa_reauth_matches_account(
+            "owner@example.com",
+            "attacker@example.com"
+        ));
+        assert!(!qa_reauth_matches_account("", "owner@example.com"));
+        assert!(!qa_reauth_matches_account("owner@example.com", " "));
+    }
+}
+
+/// Explicit password step-up for the isolated Mesh QA account, never logout.
+/// Preserve GitHub authorization and previous keychain material on failure.
+/// The old locally saved account email is only a continuity gate, not auth proof;
+/// the new token must be validated directly against the canonical issuer.
+#[tauri::command]
+async fn renew_katoos_qa_session(
+    email: String,
+    password: String,
+) -> Result<SupabaseSessionStatus, String> {
+    if !cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS_QA_REAUTH_DISABLED".into());
+    }
+    let remembered = read_supabase_session_email()
+        .filter(|x| !x.trim().is_empty())
+        .ok_or_else(|| "KATOOS_QA_REAUTH_NO_EXISTING_ACCOUNT".to_string())?;
+    let entered = email.trim();
+    if entered.is_empty() || !qa_reauth_matches_account(&remembered, entered) || password.is_empty()
+    {
+        return Err("KATOOS_QA_REAUTH_ACCOUNT_MISMATCH".into());
+    }
+    let pass = zeroize::Zeroizing::new(password);
+    // Reauthentication takes the same lock as refresh. Otherwise a refresh
+    // started earlier may overwrite the newly signed-in device session.
+    let _session_guard = supabase_session_transition_lock().lock().await;
+    let session = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        supabase_password_login(entered, &pass),
+    )
+    .await
+    .map_err(|_| "KATOOS_QA_REAUTH_UNAVAILABLE".to_string())?
+    .map_err(|_| "KATOOS_QA_REAUTH_REJECTED".to_string())?;
+    let new_access = zeroize::Zeroizing::new(session.access_token);
+    let new_refresh = zeroize::Zeroizing::new(session.refresh_token);
+    // An Auth server response is not enough: online identity MUST match the previous
+    // local account marker; never use a stale local marker as authorization.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|_| "KATOOS_QA_REAUTH_UNAVAILABLE".to_string())?;
+    let result = client
+        .get(format!("{KATOSYNC_AUTH_URL}/auth/v1/user"))
+        .header("apikey", KATOSYNC_AUTH_ANON_KEY)
+        .bearer_auth(new_access.as_str())
+        .send()
+        .await
+        .map_err(|_| "KATOOS_QA_REAUTH_UNAVAILABLE".to_string())?;
+    if !result.status().is_success() {
+        return Err("KATOOS_QA_REAUTH_REJECTED".into());
+    }
+    #[derive(serde::Deserialize)]
+    struct CurrentIssuerIdentity {
+        id: uuid::Uuid,
+        email: Option<String>,
+    }
+    let account: CurrentIssuerIdentity = result
+        .json()
+        .await
+        .map_err(|_| "KATOOS_QA_REAUTH_REJECTED".to_string())?;
+    if !account
+        .email
+        .as_deref()
+        .is_some_and(|v| v.eq_ignore_ascii_case(&remembered))
+        || !github_app_auth::is_same_cached_katosync_user(&account.id.to_string())
+    {
+        return Err("KATOOS_QA_REAUTH_ACCOUNT_MISMATCH".into());
+    }
+    // Store only AFTER live issuer verification. No GitHub logout/purge and no
+    // token sent back to the frontend. Failed logins preserve the existing session.
+    save_supabase_refresh_token(&new_refresh)
+        .map_err(|_| "KATOOS_QA_REAUTH_KEYCHAIN_FAILED".to_string())?;
+    cache_supabase_access_token(Some(new_access.to_string()));
+    Ok(SupabaseSessionStatus {
+        logged_in: true,
+        email: Some(remembered),
+    })
+}
+
 #[tauri::command]
 async fn recover_supabase(email: String) -> Result<(), String> {
+    if cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS-Test: Passwort-Reset nur auf der offiziellen KATOOS-Seite.".into());
+    }
     let email_trim = email.trim();
     if email_trim.is_empty() {
         return Err("Bitte E-Mail-Adresse eingeben.".to_string());
@@ -464,10 +1016,14 @@ async fn recover_supabase(email: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn signup_supabase(email: String, password: String) -> Result<SupabaseSessionStatus, String> {
+    if cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS-Test: neue Konten nur auf der offiziellen KATOOS-Seite.".into());
+    }
     let email_trim = email.trim();
     if email_trim.is_empty() || password.trim().len() < 6 {
         return Err("Bitte E-Mail und ein Passwort mit mindestens 6 Zeichen angeben.".to_string());
     }
+    github_app_auth::on_katosync_account_switch();
     let result = supabase_signup(email_trim, &password)
         .await
         .map_err(error_to_string)?;
@@ -495,17 +1051,65 @@ async fn signup_supabase(email: String, password: String) -> Result<SupabaseSess
     }
 }
 
+// A persisted email is a display marker, not an authenticated session.
+// This is only the OFFLINE/local resume preflight; GitHub credentials and
+// account binding still require a fresh issuer-pinned /auth/v1/user proof.
+fn locally_resumable_session(email: Option<&str>, refresh_token: Option<&str>) -> bool {
+    email.is_some_and(|value| !value.trim().is_empty())
+        && refresh_token.is_some_and(|value| !value.trim().is_empty())
+}
+
 #[tauri::command]
 fn supabase_session_status() -> Result<SupabaseSessionStatus, String> {
     let email = read_supabase_session_email();
+    // Keep an existing offline-capable cached login usable, but never accept
+    // a stale email marker when the corresponding keychain token is absent.
+    // Never log or return the credential to the frontend.
+    let mut refresh = load_supabase_refresh_token().ok();
+    let logged_in = locally_resumable_session(email.as_deref(), refresh.as_deref());
+    if let Some(ref mut token) = refresh {
+        zeroize::Zeroize::zeroize(token);
+    }
     Ok(SupabaseSessionStatus {
-        logged_in: email.is_some(),
-        email,
+        logged_in,
+        email: if logged_in { email } else { None },
+    })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KatoosIdentityBadge {
+    issuer_verified: bool,
+    katoos_account: bool,
+    /// Never an entitlement or product-permission claim.
+    grants_extra_capabilities: bool,
+}
+
+/// Online issuer verification; a persisted email marker alone does not earn a badge.
+/// An active KATOOS account is not proof of a paid tier or KAI Desktop permission.
+#[tauri::command]
+async fn verified_katoos_identity_badge() -> Result<KatoosIdentityBadge, String> {
+    if !cfg!(feature = "katoos-auth-qa") {
+        return Ok(KatoosIdentityBadge {
+            issuer_verified: false,
+            katoos_account: false,
+            grants_extra_capabilities: false,
+        });
+    }
+    let uid = github_app_auth::verified_katosync_user().await?;
+    if uuid::Uuid::parse_str(&uid).is_err() {
+        return Err("KATOOS-Konto nicht verifiziert.".into());
+    }
+    Ok(KatoosIdentityBadge {
+        issuer_verified: true,
+        katoos_account: true,
+        grants_extra_capabilities: false,
     })
 }
 
 #[tauri::command]
 fn logout_supabase() -> Result<SupabaseSessionStatus, String> {
+    github_app_auth::purge_local_credentials();
     if let Ok(entry) = supabase_session_keychain_entry() {
         let _ = entry.delete_credential();
     }
@@ -519,7 +1123,12 @@ fn logout_supabase() -> Result<SupabaseSessionStatus, String> {
 
 #[tauri::command]
 async fn mint_connector_token(base_url: String) -> Result<serde_json::Value, String> {
-    let access_token = ensure_supabase_access_token().await.map_err(error_to_string)?;
+    if cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS-Test: Connector-Ausgabe deaktiviert.".into());
+    }
+    let access_token = ensure_supabase_access_token()
+        .await
+        .map_err(error_to_string)?;
     let url = format!("{}/api/me/connector", normalize_base_url(&base_url));
     let response = reqwest::Client::new()
         .post(url)
@@ -533,13 +1142,15 @@ async fn mint_connector_token(base_url: String) -> Result<serde_json::Value, Str
     let status = response.status();
     let text = response.text().await.map_err(error_to_string)?;
     if !status.is_success() {
-        return Err(format!("Token-Generierung fehlgeschlagen ({status}): {text}"));
+        return Err(format!(
+            "Token-Generierung fehlgeschlagen ({status}): {text}"
+        ));
     }
     serde_json::from_str(&text).map_err(error_to_string)
 }
 
 // ============================================================================
-// Cloud-Profil (Zero-Knowledge): Zugangsdaten folgen dem KatoOS-Konto.
+// Cloud-Profil (Zero-Knowledge): derzeit an die separate KatoSync-Auth-Sitzung gebunden.
 //
 // Beim Login wird aus Passwort + kdf_salt via Argon2id ein 32-Byte-Schluessel abgeleitet
 // (nur im RAM, siehe CLOUD_PROFILE_KEY). Damit wird EIN Blob {apiKey, connectorToken} per
@@ -791,7 +1402,7 @@ fn profile_salt_usable(salt_b64: &str) -> bool {
     b64_decode(salt_b64).map(|s| s.len() >= 8).unwrap_or(false)
 }
 
-// Passwort gegen das KatoOS-Konto verifizieren (GoTrue-Re-Login). Genutzt, wenn KEIN entschluesselbares
+// Passwort im bisherigen KatoSync-Auth-Projekt verifizieren (GoTrue-Re-Login). Genutzt, wenn KEIN entschluesselbares
 // Profil zum Gegenpruefen existiert -> verhindert, dass ein falsch getipptes Passwort ein Cloud-Profil
 // unter falschem Schluessel anlegt (sonst waere der spaetere Login mit dem RICHTIGEN Passwort dauerhaft
 // "unreadable" und die Zugangsdaten verloren).
@@ -823,10 +1434,10 @@ async fn cloud_profile_unlock_and_push_inner(base_url: &str, password: &str) -> 
         return Err(anyhow!("Bitte Passwort eingeben."));
     }
     let settings = fetch_user_settings(base_url).await?;
-    let has_profile = settings.as_ref().map_or(false, |s| {
+    let has_profile = settings.as_ref().is_some_and(|s| {
         s.secret_cipher
             .as_deref()
-            .map_or(false, |c| !c.trim().is_empty())
+            .is_some_and(|c| !c.trim().is_empty())
     });
     let material = if has_profile {
         let s = settings.unwrap();
@@ -855,6 +1466,7 @@ async fn cloud_profile_unlock_and_push_inner(base_url: &str, password: &str) -> 
 // Tenant-Isolierung: alle konto-/tenant-bezogenen lokalen Daten loeschen. Geraete-Identitaet
 // (device_id/name), Server-URL und reine App-Praeferenzen (Scan-Regeln/Codex) bleiben erhalten.
 fn wipe_local_account_data() -> Result<()> {
+    github_app_auth::purge_local_credentials();
     // 1) Zugangsdaten aus der Keychain.
     if let Ok(entry) = keychain_entry() {
         let _ = entry.delete_credential();
@@ -904,14 +1516,23 @@ async fn cloud_profile_sync_after_login(
     base_url: String,
     password: String,
 ) -> Result<CloudProfileSyncResult, String> {
+    // Never create/update the real KATOOS cloud profile from the isolated QA app.
+    if cfg!(feature = "katoos-auth-qa") {
+        return Ok(CloudProfileSyncResult {
+            status: "empty".into(),
+            library_id: None,
+        });
+    }
     if password.trim().is_empty() {
         return Err("Passwort fehlt für die Cloud-Profil-Synchronisierung.".to_string());
     }
-    let settings = fetch_user_settings(&base_url).await.map_err(error_to_string)?;
-    let has_profile = settings.as_ref().map_or(false, |s| {
+    let settings = fetch_user_settings(&base_url)
+        .await
+        .map_err(error_to_string)?;
+    let has_profile = settings.as_ref().is_some_and(|s| {
         s.secret_cipher
             .as_deref()
-            .map_or(false, |c| !c.trim().is_empty())
+            .is_some_and(|c| !c.trim().is_empty())
     });
 
     if has_profile {
@@ -978,6 +1599,10 @@ struct CloudProfilePushResult {
 // Sonst -> needs_password (die UI fragt einmalig nach). Ohne Sitzung: stillschweigend nichts tun.
 #[tauri::command]
 async fn cloud_profile_push(base_url: String) -> Result<CloudProfilePushResult, String> {
+    if cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS-Test: Cloud-Profil-Änderungen deaktiviert.".into());
+    }
+
     if load_supabase_refresh_token().is_err() {
         return Ok(CloudProfilePushResult {
             pushed: false,
@@ -1004,6 +1629,10 @@ async fn cloud_profile_push(base_url: String) -> Result<CloudProfilePushResult, 
 // Einmalige Passwort-Abfrage (still-wieder-eingeloggte Sitzung): Schluessel ableiten + pushen.
 #[tauri::command]
 async fn cloud_profile_unlock_and_push(base_url: String, password: String) -> Result<(), String> {
+    if cfg!(feature = "katoos-auth-qa") {
+        return Err("KATOOS-Test: Cloud-Profil-Änderungen deaktiviert.".into());
+    }
+
     cloud_profile_unlock_and_push_inner(&base_url, &password)
         .await
         .map_err(error_to_string)
@@ -1079,7 +1708,9 @@ async fn load_remote_action_plans(base_url: String) -> Result<serde_json::Value,
     let status = response.status();
     let text = response.text().await.map_err(error_to_string)?;
     if !status.is_success() {
-        return Err(format!("MCP Action Queue nicht erreichbar ({status}): {text}"));
+        return Err(format!(
+            "MCP Action Queue nicht erreichbar ({status}): {text}"
+        ));
     }
     serde_json::from_str(&text).map_err(error_to_string)
 }
@@ -1371,7 +2002,26 @@ fn gh_bin() -> String {
     "gh".to_string()
 }
 
+// Windows Tauri resources are next to the installed executable, unlike
+// macOS .app/Contents/Resources. Do not assume Unix executable filenames.
+#[cfg(target_os = "windows")]
+fn windows_bundled_tool(group: &str, exe_name: &str) -> Option<String> {
+    let executable = std::env::current_exe().ok()?;
+    let install_dir = executable.parent()?;
+    for relative in ["resources", "resources/resources", "."] {
+        let candidate = install_dir.join(relative).join(group).join(exe_name);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
 fn pdftotext_bin() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    if let Some(path) = windows_bundled_tool("poppler", "pdftotext.exe") {
+        return Some(path);
+    }
     // 1) Gebuendelte poppler-Binary (self-contained, Contents/Resources/poppler/pdftotext) ->
     //    PDF->Text funktioniert IMMER, auch ohne System-Installation. Pfad relativ zur laufenden
     //    Executable (Contents/MacOS/<app> -> ../Resources/poppler/pdftotext).
@@ -1401,6 +2051,10 @@ fn pdftotext_bin() -> Option<String> {
 
 // Gebuendelte typst-Binary finden (fuer PDF-Erzeugung im Datei-Modus). Analog zu pdftotext_bin.
 fn typst_bin() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    if let Some(path) = windows_bundled_tool("typst", "typst.exe") {
+        return Some(path);
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(contents) = exe.parent().and_then(Path::parent) {
             let res = contents.join("Resources");
@@ -1438,7 +2092,14 @@ fn strip_trailing_blank_pages(pdf: &Path, pdftotext: &str) {
     let mut last_with_content = 0u32;
     for pageno in 1..=total {
         let has_text = std::process::Command::new(pdftotext)
-            .args(["-f", &pageno.to_string(), "-l", &pageno.to_string(), pdf_str, "-"])
+            .args([
+                "-f",
+                &pageno.to_string(),
+                "-l",
+                &pageno.to_string(),
+                pdf_str,
+                "-",
+            ])
             .output()
             .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
             .unwrap_or(true);
@@ -1534,7 +2195,10 @@ async fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usiz
         let target = format!("{dst}/{name}");
         if let Err(e) = fs::copy(&path, &target) {
             // Nicht still verschlucken: der Runner behandelt KatoContext als verbindliche Faktenbasis.
-            let _ = write_log("codex", &format!("KatoContext: Datei uebersprungen ({name}): {e}"));
+            let _ = write_log(
+                "codex",
+                &format!("KatoContext: Datei uebersprungen ({name}): {e}"),
+            );
             continue;
         }
         count += 1;
@@ -1542,7 +2206,10 @@ async fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usiz
             if let Some(ref bin) = pdftotext {
                 // Kollisionsschutz: hat der Nutzer im Referenzordner bereits eine kuratierte "<name>.txt",
                 // den maschinellen Extrakt als "<name>.extracted.txt" ablegen statt sie zu ueberschreiben.
-                let twin = if Path::new(reference_root).join(format!("{name}.txt")).exists() {
+                let twin = if Path::new(reference_root)
+                    .join(format!("{name}.txt"))
+                    .exists()
+                {
                     format!("{dst}/{name}.extracted.txt")
                 } else {
                     format!("{dst}/{name}.txt")
@@ -1560,7 +2227,10 @@ async fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usiz
                 )
                 .await;
                 if extract.is_err() {
-                    let _ = write_log("codex", &format!("KatoContext: pdftotext-Timeout fuer {name}."));
+                    let _ = write_log(
+                        "codex",
+                        &format!("KatoContext: pdftotext-Timeout fuer {name}."),
+                    );
                 }
             }
         }
@@ -1570,10 +2240,20 @@ async fn materialize_kato_context(repo_path: &str, reference_root: &str) -> usiz
 
 // Default-Branch offline ermitteln (origin/HEAD ist oft nicht gesetzt): main -> master -> aktueller.
 fn detect_default_branch(repo: &str) -> String {
-    if git_capture(repo, &["show-ref", "--verify", "--quiet", "refs/heads/main"]).is_ok() {
+    if git_capture(
+        repo,
+        &["show-ref", "--verify", "--quiet", "refs/heads/main"],
+    )
+    .is_ok()
+    {
         return "main".to_string();
     }
-    if git_capture(repo, &["show-ref", "--verify", "--quiet", "refs/heads/master"]).is_ok() {
+    if git_capture(
+        repo,
+        &["show-ref", "--verify", "--quiet", "refs/heads/master"],
+    )
+    .is_ok()
+    {
         return "master".to_string();
     }
     git_capture(repo, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|_| "main".to_string())
@@ -1590,7 +2270,11 @@ fn git_remote_https_url(repo: &str) -> Option<String> {
     } else {
         raw.to_string()
     };
-    Some(url.trim_end_matches(".git").trim_end_matches('/').to_string())
+    Some(
+        url.trim_end_matches(".git")
+            .trim_end_matches('/')
+            .to_string(),
+    )
 }
 
 // Entfernt den Shell-Wrapper (`/bin/zsh -lc '…'`) aus einem Codex-Befehl, damit der Live-Feed
@@ -1744,14 +2428,10 @@ fn summarize_claude_event(line: &str) -> (String, String) {
                                         .and_then(|i| i.get("command"))
                                         .and_then(|a| a.as_str());
                                     let path = input
-                                        .and_then(|i| {
-                                            i.get("file_path").or_else(|| i.get("path"))
-                                        })
+                                        .and_then(|i| i.get("file_path").or_else(|| i.get("path")))
                                         .and_then(|a| a.as_str());
                                     let other = input
-                                        .and_then(|i| {
-                                            i.get("pattern").or_else(|| i.get("url"))
-                                        })
+                                        .and_then(|i| i.get("pattern").or_else(|| i.get("url")))
                                         .and_then(|a| a.as_str());
                                     out = if let Some(c) = cmd {
                                         format!("{n}: {}", clean_shell_command(c))
@@ -1975,7 +2655,11 @@ fn dir_exists(path: String) -> bool {
 //  2) lokaler Merge-Check (Fallback ohne PR): Branch in den Default-Branch gemerged?
 //     Hinweis: erkennt nur Merge-Commits, nicht Squash/Rebase (andere SHAs); dafuer ist der gh-Pfad zustaendig.
 #[tauri::command]
-async fn check_codex_task(repo_path: String, branch: String, pr_url: String) -> Result<String, String> {
+async fn check_codex_task(
+    repo_path: String,
+    branch: String,
+    pr_url: String,
+) -> Result<String, String> {
     let pr = pr_url.trim();
     if pr.contains("/pull/") && !pr.contains("/pull/new/") {
         let mut cmd = Command::new(gh_bin());
@@ -1986,7 +2670,11 @@ async fn check_codex_task(repo_path: String, branch: String, pr_url: String) -> 
         }
         if let Ok(out) = cmd.output() {
             if out.status.success() {
-                match String::from_utf8_lossy(&out.stdout).trim().to_uppercase().as_str() {
+                match String::from_utf8_lossy(&out.stdout)
+                    .trim()
+                    .to_uppercase()
+                    .as_str()
+                {
                     "MERGED" => return Ok("merged".to_string()),
                     "CLOSED" => return Ok("closed".to_string()),
                     "OPEN" => return Ok("open".to_string()),
@@ -2018,8 +2706,13 @@ async fn check_codex_task(repo_path: String, branch: String, pr_url: String) -> 
 }
 
 #[tauri::command]
-async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<CodexRunResult, String> {
+async fn run_codex_task(
+    req: CodexRunRequest,
+    app: tauri::AppHandle,
+) -> Result<CodexRunResult, String> {
     let started = std::time::Instant::now();
+    // Solange ein echter Runner-Job lebt, startet kein Provider-Warm-up.
+    let _runner_activity = provider_warmup::RunnerActivity::begin();
     let run_stamp = Local::now().format("%Y%m%d%H%M%S").to_string();
     let repo_path = req.repo_path.trim().to_string();
 
@@ -2066,7 +2759,8 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             return Err("Bitte zuerst in Codex per ChatGPT einloggen (codex login).".to_string());
         }
     }
-    let is_git = git_capture(&repo_path, &["rev-parse", "--is-inside-work-tree"]).unwrap_or_default()
+    let is_git = git_capture(&repo_path, &["rev-parse", "--is-inside-work-tree"])
+        .unwrap_or_default()
         == "true";
     if !is_git {
         if file_mode {
@@ -2092,7 +2786,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     if file_mode && !is_git {
         // NUR ein frisch angelegtes Repo: aktuellen Inhalt als Ausgangszustand committen, damit
         // ein HEAD existiert und der spaetere Diff nur Codex' neue Dateien zeigt. Lokal, ohne Push.
-        let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync", ":!KatoContext"]);
+        let _ = git_capture(
+            &repo_path,
+            &["add", "-A", "--", ":!.katosync", ":!KatoContext"],
+        );
         git_capture(
             &repo_path,
             &["commit", "-m", "katosync: Ausgangszustand", "--allow-empty"],
@@ -2101,25 +2798,45 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
             format!("Git-Baseline im Datei-Modus fehlgeschlagen (fehlt eine git-Identitaet?): {e}")
         })?;
     } else if !file_mode
-        && !git_capture(&repo_path, &["status", "--porcelain", "--", ":!.katosync", ":!KatoContext", ":!KatoResults"])?
-            .is_empty()
+        && !git_capture(
+            &repo_path,
+            &[
+                "status",
+                "--porcelain",
+                "--",
+                ":!.katosync",
+                ":!KatoContext",
+                ":!KatoResults",
+            ],
+        )?
+        .is_empty()
     {
         // NUR Coding-Modus: dort passieren Branch/Commit/Push/PR -> keine fremden Aenderungen
         // mitcommitten. Datei-Modus schreibt nur nach KatoResults (kein Push) -> ein "unsauberer"
         // Arbeitsbaum blockiert dort NICHT (das war unnoetige Reibung).
-        return Err("Der Arbeitsbaum ist nicht sauber. Bitte erst committen oder stashen.".to_string());
+        return Err(
+            "Der Arbeitsbaum ist nicht sauber. Bitte erst committen oder stashen.".to_string(),
+        );
     }
 
     // ---- Branch + Run-Ordner ----
     let date = Local::now().format("%Y-%m-%d").to_string();
     let project_slug = {
         let s = slugify(&req.project_id);
-        if s.is_empty() { "projekt".to_string() } else { s }
+        if s.is_empty() {
+            "projekt".to_string()
+        } else {
+            s
+        }
     };
     let title_slug = {
         let s: String = slugify(&req.title).chars().take(40).collect();
         let s = s.trim_matches('-').to_string();
-        if s.is_empty() { "aufgabe".to_string() } else { s }
+        if s.is_empty() {
+            "aufgabe".to_string()
+        } else {
+            s
+        }
     };
     // Prefix-Fix: bei generischem Projekt ("katosync"/leer) das Projekt-Segment weglassen
     // -> kein doppeltes "katosync/katosync/".
@@ -2140,7 +2857,11 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         .unwrap_or_else(|| run_stamp.clone());
     let task_slug = {
         let s = slugify(&task_id);
-        if s.is_empty() { "run".to_string() } else { s }
+        if s.is_empty() {
+            "run".to_string()
+        } else {
+            s
+        }
     };
     let run_dir = format!("{}/.katosync/runs/{}/task-{}", repo_path, date, task_slug);
     fs::create_dir_all(&run_dir).map_err(error_to_string)?;
@@ -2149,7 +2870,8 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         serde_json::to_string_pretty(&req.input_plan).unwrap_or_else(|_| "{}".to_string()),
     )
     .map_err(error_to_string)?;
-    fs::write(format!("{run_dir}/prompt.md"), sanitize_log(&req.prompt)).map_err(error_to_string)?;
+    fs::write(format!("{run_dir}/prompt.md"), sanitize_log(&req.prompt))
+        .map_err(error_to_string)?;
 
     // Wahrheit: den Referenzordner IMMER als Faktenbasis materialisieren (beide Modi), wenn gesetzt
     // -> der Runner prueft gegen echte Daten. Die Git-Leak-Guards (.git/info/exclude + Pre-Cleanup,
@@ -2165,9 +2887,19 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 other => other,
             })
             .collect();
-        let capped: String = cleaned.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(70).collect();
+        let capped: String = cleaned
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(70)
+            .collect();
         let name = capped.trim().trim_end_matches('.').trim().to_string();
-        if name.is_empty() { format!("task-{task_slug}") } else { name }
+        if name.is_empty() {
+            format!("task-{task_slug}")
+        } else {
+            name
+        }
     };
     let result_rel = format!("KatoResults/{result_folder}");
     let context_files = if !config.reference_root.trim().is_empty()
@@ -2203,19 +2935,36 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         .map_err(|e| format!("Branch konnte nicht angelegt werden ({branch}): {e}"))?;
     let _ = write_log(
         "codex",
-        &format!("{runner_label}-Lauf gestartet: {} (Branch {branch} von {default_branch})", sanitize_log(&req.title)),
+        &format!(
+            "{runner_label}-Lauf gestartet: {} (Branch {branch} von {default_branch})",
+            sanitize_log(&req.title)
+        ),
     );
     // Datei-Modus erlaubt einen unsauberen Baum -> pre-existierende fremde Aenderungen merken,
     // damit der spaetere "ausserhalb geschrieben"-Check sie NICHT als Codex-Verstoss wertet.
     let pre_dirty: std::collections::HashSet<String> = if file_mode {
         git_capture_raw(
             &repo_path,
-            &["-c", "core.quotepath=false", "status", "--porcelain", "-z", "--", ":!.katosync", ":!KatoContext"],
+            &[
+                "-c",
+                "core.quotepath=false",
+                "status",
+                "--porcelain",
+                "-z",
+                "--",
+                ":!.katosync",
+                ":!KatoContext",
+            ],
         )
         .unwrap_or_default()
         .split(|b| *b == 0)
         .filter(|s| !s.is_empty())
-        .map(|s| String::from_utf8_lossy(s).chars().skip(3).collect::<String>())
+        .map(|s| {
+            String::from_utf8_lossy(s)
+                .chars()
+                .skip(3)
+                .collect::<String>()
+        })
         .collect()
     } else {
         std::collections::HashSet::new()
@@ -2223,17 +2972,29 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
 
     if let Some(plan_id) = &req.action_plan_id {
         if let Err(e) = patch_action_plan_status_inner(&req.base_url, plan_id, "running").await {
-            let _ = write_log("codex", &format!("Warnung: Status running fehlgeschlagen: {e}"));
+            let _ = write_log(
+                "codex",
+                &format!("Warnung: Status running fehlgeschlagen: {e}"),
+            );
         }
     }
     if let Some(task_id) = &req.action_task_id {
-        if let Err(e) = patch_action_task_status_inner(&req.base_url, task_id, "running", None, None).await {
-            let _ = write_log("codex", &format!("Warnung: Task-Status running fehlgeschlagen: {e}"));
+        if let Err(e) =
+            patch_action_task_status_inner(&req.base_url, task_id, "running", None, None).await
+        {
+            let _ = write_log(
+                "codex",
+                &format!("Warnung: Task-Status running fehlgeschlagen: {e}"),
+            );
         }
     }
 
     // ---- codex exec (Sandbox + Timeout) ----
-    let sandbox = if req.dry_run { "read-only" } else { "workspace-write" };
+    let sandbox = if req.dry_run {
+        "read-only"
+    } else {
+        "workspace-write"
+    };
     let timeout_secs = req.timeout_secs.unwrap_or(900);
     let output_path = format!("{run_dir}/output.txt");
     let events_path = format!("{run_dir}/execution_log.jsonl");
@@ -2295,13 +3056,15 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         }
         if config.runner_connector_mode {
             // Connector-Modus (opt-in): Netzzugriff im Sandbox erlauben -> Connectoren erreichbar.
-            c.arg("-c").arg("sandbox_workspace_write.network_access=true");
+            c.arg("-c")
+                .arg("sandbox_workspace_write.network_access=true");
         }
         c
     };
-    command.stdout(Stdio::piped()).stderr(Stdio::from(stderr_file));
-    match command.spawn()
-    {
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(stderr_file));
+    match command.spawn() {
         Ok(mut child) => {
             // Live-Feed: codex-stdout (JSONL) zeilenweise -> in execution_log.jsonl schreiben
             // UND als Tauri-Event "codex-event" ans Frontend streamen.
@@ -2363,7 +3126,12 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 }
             }
         }
-        Err(e) => codex_error = Some(format!("{runner_label}-Start fehlgeschlagen: {}", error_to_string(e))),
+        Err(e) => {
+            codex_error = Some(format!(
+                "{runner_label}-Start fehlgeschlagen: {}",
+                error_to_string(e)
+            ))
+        }
     }
 
     // Bei Fehler: aussagekraeftige Meldung aus den JSONL-Events ziehen (z.B. Usage-Limit).
@@ -2451,11 +3219,18 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                             Ok(o) => {
                                 let _ = write_log(
                                     "codex",
-                                    &format!("typst: {} -> PDF fehlgeschlagen: {}", p.display(), String::from_utf8_lossy(&o.stderr).trim()),
+                                    &format!(
+                                        "typst: {} -> PDF fehlgeschlagen: {}",
+                                        p.display(),
+                                        String::from_utf8_lossy(&o.stderr).trim()
+                                    ),
                                 );
                             }
                             Err(e) => {
-                                let _ = write_log("codex", &format!("typst-Aufruf fehlgeschlagen: {e}"));
+                                let _ = write_log(
+                                    "codex",
+                                    &format!("typst-Aufruf fehlgeschlagen: {e}"),
+                                );
                             }
                         }
                     }
@@ -2474,7 +3249,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 }
             }
         } else {
-            let _ = write_log("codex", "typst nicht gefunden -> nur .typ-Dateien, kein PDF");
+            let _ = write_log(
+                "codex",
+                "typst nicht gefunden -> nur .typ-Dateien, kein PDF",
+            );
         }
     }
 
@@ -2486,13 +3264,23 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     }
     // Run-Ordner (.katosync) bewusst NICHT mitcommitten -> bleibt lokaler Audit-Trail,
     // die "geaenderte Dateien"-Liste zeigt nur die echten Aenderungen.
-    let _ = git_capture(&repo_path, &["add", "-A", "--", ":!.katosync", ":!KatoContext"]);
+    let _ = git_capture(
+        &repo_path,
+        &["add", "-A", "--", ":!.katosync", ":!KatoContext"],
+    );
     // -z + core.quotepath=false: NUL-getrennte, UNescapte UTF-8-Pfade. Ohne das quotet git
     // Umlaut-Namen (z.B. "Lebenslauf_Mueller.md" mit Ue) mit fuehrendem '"' -> der starts_with-
     // Scope-Check unten wuerde sie faelschlich als "ausserhalb" werten und den Lauf verwerfen.
     let changed_files: Vec<String> = git_capture_raw(
         &repo_path,
-        &["-c", "core.quotepath=false", "diff", "--cached", "-z", "--name-only"],
+        &[
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--cached",
+            "-z",
+            "--name-only",
+        ],
     )
     .unwrap_or_default()
     .split(|b| *b == 0)
@@ -2517,7 +3305,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                 out_of_scope.join(", ")
             ));
             let _ = git_capture(&repo_path, &["reset", "--hard"]);
-            let _ = git_capture(&repo_path, &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"]);
+            let _ = git_capture(
+                &repo_path,
+                &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"],
+            );
         }
     }
 
@@ -2529,10 +3320,17 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     // Defensiv: KatoContext/.katosync NIE mitcommitten (auch im Coding-Modus, der keinen Scope-Check
     // hat) - selbst wenn ein autonomer Runner sie vorab gestaged hat; der ":!"-add oben entfernt
     // bereits Gestagetes nicht.
-    let _ = git_capture(&repo_path, &["reset", "-q", "--", "KatoContext", ".katosync"]);
+    let _ = git_capture(
+        &repo_path,
+        &["reset", "-q", "--", "KatoContext", ".katosync"],
+    );
     let mut commit: Option<String> = None;
     if codex_error.is_none() && !changed_files.is_empty() {
-        let msg = format!("katosync: {} (task {})", req.title.replace('\n', " "), task_id);
+        let msg = format!(
+            "katosync: {} (task {})",
+            req.title.replace('\n', " "),
+            task_id
+        );
         match git_capture(&repo_path, &["commit", "-m", &msg]) {
             Ok(_) => commit = git_capture(&repo_path, &["rev-parse", "HEAD"]).ok(),
             Err(e) => codex_error = Some(format!("Commit fehlgeschlagen: {e}")),
@@ -2540,9 +3338,15 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     }
     // Datei-Modus: ohne erzeugte Ergebnisdatei (kein Commit) gilt der Lauf nicht als erfolgreich.
     if file_mode && codex_error.is_none() && commit.is_none() {
-        codex_error = Some(format!("Datei-Modus: {runner_label} hat keine Ergebnisdatei erzeugt."));
+        codex_error = Some(format!(
+            "Datei-Modus: {runner_label} hat keine Ergebnisdatei erzeugt."
+        ));
     }
-    let final_status = if codex_error.is_none() { "completed" } else { "failed" };
+    let final_status = if codex_error.is_none() {
+        "completed"
+    } else {
+        "failed"
+    };
 
     let _ = fs::write(
         format!("{run_dir}/changed_files.json"),
@@ -2601,7 +3405,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
                         Ok(o) => {
                             let _ = write_log(
                                 "codex",
-                                &format!("gh pr create Hinweis: {}", String::from_utf8_lossy(&o.stderr).trim()),
+                                &format!(
+                                    "gh pr create Hinweis: {}",
+                                    String::from_utf8_lossy(&o.stderr).trim()
+                                ),
                             );
                         }
                         Err(e) => {
@@ -2651,26 +3458,44 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
         body["briefingId"] = json!(id);
     }
     if let Err(e) = post_execution_result(&req.base_url, &body).await {
-        let _ = write_log("codex", &format!("Warnung: execution-results POST fehlgeschlagen: {e}"));
+        let _ = write_log(
+            "codex",
+            &format!("Warnung: execution-results POST fehlgeschlagen: {e}"),
+        );
     }
     if let Some(plan_id) = &req.action_plan_id {
         if let Err(e) = patch_action_plan_status_inner(&req.base_url, plan_id, final_status).await {
-            let _ = write_log("codex", &format!("Warnung: Status {final_status} fehlgeschlagen: {e}"));
+            let _ = write_log(
+                "codex",
+                &format!("Warnung: Status {final_status} fehlgeschlagen: {e}"),
+            );
         }
     }
     // Task-Status: Erfolg = 'executed' (ausgefuehrt, wartet auf Merge/Verifikation), inkl. PR/Branch.
     if let Some(task_id) = &req.action_task_id {
         // Datei-Modus: kein PR/Merge-Check -> Task direkt als erledigt. Sonst "executed" (wartet auf Merge).
         let task_status = if final_status == "completed" {
-            if file_mode { "completed" } else { "executed" }
+            if file_mode {
+                "completed"
+            } else {
+                "executed"
+            }
         } else {
             final_status
         };
-        if let Err(e) =
-            patch_action_task_status_inner(&req.base_url, task_id, task_status, pr_url.as_deref(), Some(&branch))
-                .await
+        if let Err(e) = patch_action_task_status_inner(
+            &req.base_url,
+            task_id,
+            task_status,
+            pr_url.as_deref(),
+            Some(&branch),
+        )
+        .await
         {
-            let _ = write_log("codex", &format!("Warnung: Task-Status {task_status} fehlgeschlagen: {e}"));
+            let _ = write_log(
+                "codex",
+                &format!("Warnung: Task-Status {task_status} fehlgeschlagen: {e}"),
+            );
         }
     }
 
@@ -2679,7 +3504,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     // jeder weitere Lauf scheiterte am sauberer-Baum-Check. Auf den Ausgangszustand zuruecksetzen.
     if file_mode && commit.is_none() {
         let _ = git_capture(&repo_path, &["reset", "--hard"]);
-        let _ = git_capture(&repo_path, &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"]);
+        let _ = git_capture(
+            &repo_path,
+            &["clean", "-fd", "-e", ".katosync", "-e", "KatoContext"],
+        );
     }
     // Zurueck auf den Default-Branch -> Arbeitskopie bleibt sauber; Codex-Aenderungen leben auf dem Branch.
     let _ = git_capture(&repo_path, &["checkout", &default_branch]);
@@ -2705,7 +3533,10 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
 
     let _ = write_log(
         "codex",
-        &format!("{runner_label}-Lauf {final_status}: {} (Branch {branch})", sanitize_log(&req.title)),
+        &format!(
+            "{runner_label}-Lauf {final_status}: {} (Branch {branch})",
+            sanitize_log(&req.title)
+        ),
     );
 
     // Session-ID des Laufs aus dem Event-Log ziehen (Codex: thread_id, Claude: session_id) —
@@ -2735,6 +3566,7 @@ async fn run_codex_task(req: CodexRunRequest, app: tauri::AppHandle) -> Result<C
     })
 }
 
+#[cfg(target_os = "macos")]
 /// Setzt einen Runner-Lauf als interaktive Terminal-Session fort (Human-in-the-Loop):
 /// schreibt eine ausfuehrbare `.command`-Datei (cd ins Repo + `claude --resume <id>` bzw.
 /// `codex resume <id>`) und oeffnet sie mit `open` → Terminal.app startet die Session mit
@@ -2781,7 +3613,11 @@ fn resume_runner_session(
 
     // Eindeutiger, kollisionsarmer Dateiname: aus der Session-ID (falls vorhanden) sonst Zeitstempel.
     let stamp = sid
-        .map(|s| s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>())
+        .map(|s| {
+            s.chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect::<String>()
+        })
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
             std::time::SystemTime::now()
@@ -2808,6 +3644,16 @@ fn resume_runner_session(
         return Err("Terminal konnte die Session nicht starten.".to_string());
     }
     Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn resume_runner_session(
+    _repo_path: String,
+    _runner: String,
+    _session_id: Option<String>,
+) -> Result<(), String> {
+    Err("RESUME_UNSUPPORTED_PLATFORM".to_string())
 }
 
 #[tauri::command]
@@ -2880,9 +3726,20 @@ async fn scan_project(config: AppConfig) -> Result<ScanSummary, String> {
 }
 
 #[tauri::command]
-async fn run_sync(config: AppConfig, dry_run: Option<bool>, app: tauri::AppHandle) -> Result<SyncReport, String> {
+async fn run_sync(
+    config: AppConfig,
+    dry_run: Option<bool>,
+    app: tauri::AppHandle,
+) -> Result<SyncReport, String> {
     let effective_dry_run = dry_run.unwrap_or(config.safety.dry_run_default);
-    if config.source_roots.iter().all(|root| root.trim().is_empty()) {
+    if cfg!(feature = "github-login-qa") {
+        return Err("GitHub Login QA: Synchronisation deaktiviert.".into());
+    }
+    if config
+        .source_roots
+        .iter()
+        .all(|root| root.trim().is_empty())
+    {
         return Err(
             "Kein Quellordner verbunden. Bitte zuerst in den Einstellungen einen Ordner hinzufuegen."
                 .to_string(),
@@ -2896,6 +3753,9 @@ async fn run_sync(config: AppConfig, dry_run: Option<bool>, app: tauri::AppHandl
 
 #[tauri::command]
 fn install_launch_agent(config: AppConfig) -> Result<LaunchAgentStatus, String> {
+    if cfg!(feature = "github-login-qa") {
+        return Err("GitHub Login QA: LaunchAgents deaktiviert.".into());
+    }
     save_config_inner(&config).map_err(error_to_string)?;
     let plist_path = launch_agent_path().map_err(error_to_string)?;
     let app_binary = current_exe_for_launch_agent().map_err(error_to_string)?;
@@ -2991,6 +3851,9 @@ fn open_output_dir() -> Result<String, String> {
 
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
+    // Fenster-Schließen lässt KatoSync absichtlich weiterlaufen. Nur der explizite
+    // "Programm beenden"-Pfad beendet auch die von KatoSync verwaltete Local-Brain-Runtime.
+    let _ = local_brain::stop_owned();
     app.exit(0);
 }
 
@@ -3007,7 +3870,11 @@ async fn run_headless_sync() -> Result<()> {
     Ok(())
 }
 
-async fn sync_once(config: &AppConfig, dry_run: bool, app: Option<&AppHandle>) -> Result<SyncReport> {
+async fn sync_once(
+    config: &AppConfig,
+    dry_run: bool,
+    app: Option<&AppHandle>,
+) -> Result<SyncReport> {
     let started_at = now_string();
     write_log("sync", &format!("Sync gestartet dry_run={dry_run}"))?;
     let scan = scan_roots(config)?;
@@ -3254,6 +4121,13 @@ fn write_current_files(
         .filter(|finding| !finding.skipped && finding.category != "ignore")
         .collect();
     let areas = project_areas(&relevant);
+    // Context Pack vor allen Schreibzugriffen vollständig im Speicher erzeugen. Eine secret-
+    // markierte Status-/Roadmap-/Memory-Quelle hinterlässt dadurch weder JSON noch Markdown.
+    // Der Fehler bleibt auf den Pack begrenzt: Aggregate, Briefing und Upload laufen wie bisher.
+    let context_pack = render_context_pack(config, scan, &chrono::Utc::now());
+    if let Err(error) = &context_pack {
+        warnings.push(error_to_string(error));
+    }
 
     for finding in &relevant {
         let src = PathBuf::from(&finding.path);
@@ -3285,6 +4159,8 @@ fn write_current_files(
         "CURRENT_MISTRAL_BRIEFING_SOURCE",
         "txt",
     ));
+    let context_json = output_dir.join(current_file_name(config, "CURRENT_CONTEXT_PACK", "json"));
+    let context_md = output_dir.join(current_file_name(config, "CURRENT_CONTEXT_PACK", "md"));
 
     fs::write(&manifest, render_manifest(config, scan, &date, warnings))?;
     fs::write(&index, render_index(config, scan, &date, &areas))?;
@@ -3300,11 +4176,113 @@ fn write_current_files(
     fs::write(&brief_md, &briefing)?;
     fs::write(&brief_txt, &briefing)?;
 
-    let files = vec![brief_md, brief_txt, status_all, memory_all, index, manifest]
+    let mut files = vec![brief_md, brief_txt, status_all, memory_all, index, manifest];
+    match context_pack {
+        Ok((json, markdown)) => {
+            fs::write(&context_json, json)?;
+            fs::write(&context_md, markdown)?;
+            files.extend([context_json, context_md]);
+        }
+        Err(_) => {
+            // Fail-closed: ein alter Pack darf nicht als aktueller Stand weitergereicht werden.
+            for stale in [&context_json, &context_md] {
+                if stale.exists() {
+                    fs::remove_file(stale)?;
+                }
+            }
+        }
+    }
+
+    Ok(files
         .into_iter()
         .map(|path| path.to_string_lossy().to_string())
-        .collect();
-    Ok(files)
+        .collect())
+}
+
+/// Erzeugt kanonisches JSON und die daraus abgeleitete Markdown-Ansicht als Paar.
+fn render_context_pack(
+    config: &AppConfig,
+    scan: &ScanSummary,
+    generated_at: &chrono::DateTime<chrono::Utc>,
+) -> Result<(String, String)> {
+    let pack = context_pack::ContextPack::generate(
+        &context_pack_project(config),
+        &generated_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        context_pack_sources(scan)?,
+    )?;
+    Ok((pack.to_canonical_json()?, pack.to_markdown()))
+}
+
+fn context_pack_project(config: &AppConfig) -> String {
+    let names = config
+        .source_roots
+        .iter()
+        .filter_map(|root| {
+            Path::new(root)
+                .file_name()
+                .and_then(OsStr::to_str)
+                .filter(|name| !name.trim().is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .collect::<BTreeSet<_>>();
+    if names.is_empty() {
+        "KatoSync Project".to_string()
+    } else {
+        names.into_iter().collect::<Vec<_>>().join(" + ")
+    }
+}
+
+/// Übergibt ausschließlich die bereits klassifizierten Context-Kategorien an den Pack-Generator.
+/// Der erneute Secret-Check derselben Dateien schließt auch Konfigurationen mit deaktiviertem
+/// allgemeinem Secret-Scan sicher aus, ohne zusätzliche Verzeichnisse zu durchsuchen.
+fn context_pack_sources(scan: &ScanSummary) -> Result<Vec<context_pack::ContextSourceInput>> {
+    let mut sources = Vec::new();
+    for finding in scan
+        .findings
+        .iter()
+        .filter(|finding| matches!(finding.category.as_str(), "status" | "roadmap" | "memory"))
+    {
+        let path = PathBuf::from(&finding.path);
+        let skipped_for_secret = finding.skipped
+            && finding
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("secret");
+
+        if finding.skipped {
+            if skipped_for_secret || file_name_has_secret_marker(&path) {
+                sources.push(context_pack::ContextSourceInput {
+                    relative_path: finding.relative_path.clone(),
+                    category: finding.category.clone(),
+                    modified_at: finding.modified_at.clone(),
+                    size_bytes: finding.size_bytes,
+                    content: String::new(),
+                    secret_detected: true,
+                });
+            }
+            continue;
+        }
+
+        let content = fs::read_to_string(&path).with_context(|| {
+            format!(
+                "Context-Quelle konnte nicht gelesen werden: {}",
+                finding.relative_path
+            )
+        })?;
+        let secret_detected =
+            file_name_has_secret_marker(&path) || secret_regex().is_match(&content);
+        sources.push(context_pack::ContextSourceInput {
+            relative_path: finding.relative_path.clone(),
+            category: finding.category.clone(),
+            modified_at: finding.modified_at.clone(),
+            size_bytes: finding.size_bytes,
+            content,
+            secret_detected,
+        });
+    }
+    Ok(sources)
 }
 
 fn render_manifest(
@@ -4118,6 +5096,43 @@ fn normalize_config(config: &mut AppConfig) {
     if !config.codex_model.trim().is_empty() {
         config.codex_model = String::new();
     }
+    // Fehlende/alte Reihenfolgen selbstheilend auf den sicheren Standard ergaenzen.
+    let mut priority = Vec::new();
+    for provider in config
+        .provider_priority
+        .iter()
+        .copied()
+        .chain(default_provider_priority())
+    {
+        if !priority.contains(&provider) {
+            priority.push(provider);
+        }
+    }
+    // Der deterministische Local-Control-Pfad bleibt immer letzter Fallback.
+    priority.retain(|provider| *provider != provider_manager::ProviderId::LocalControl);
+    priority.push(provider_manager::ProviderId::LocalControl);
+    config.provider_priority = priority;
+    config
+        .disabled_providers
+        .retain(|provider| *provider != provider_manager::ProviderId::LocalControl);
+    config
+        .disabled_providers
+        .sort_by_key(|provider| match provider {
+            provider_manager::ProviderId::Codex => 0,
+            provider_manager::ProviderId::Claude => 1,
+            provider_manager::ProviderId::Local => 2,
+            provider_manager::ProviderId::LocalControl => 3,
+        });
+    config.disabled_providers.dedup();
+}
+
+fn default_provider_priority() -> Vec<provider_manager::ProviderId> {
+    vec![
+        provider_manager::ProviderId::Codex,
+        provider_manager::ProviderId::Claude,
+        provider_manager::ProviderId::Local,
+        provider_manager::ProviderId::LocalControl,
+    ]
 }
 
 fn default_config() -> Result<AppConfig> {
@@ -4167,6 +5182,10 @@ fn default_config() -> Result<AppConfig> {
         runner_connector_mode: false,
         reference_root: String::new(),
         project_repos: std::collections::HashMap::new(),
+        provider_priority: default_provider_priority(),
+        disabled_providers: Vec::new(),
+        local_provider: provider_manager::LocalProviderConfig::default(),
+        provider_warmup_enabled: true,
     })
 }
 
@@ -4207,7 +5226,17 @@ fn app_support_dir() -> Result<PathBuf> {
     let dir = dirs::data_dir()
         .or_else(dirs::home_dir)
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
-        .join("KatoSync");
+        .join(if cfg!(feature = "stage35-qa") {
+            "KatoSync Mesh QA Stage35"
+        } else if cfg!(feature = "stage3x-qa") {
+            "KatoSync Mesh QA Stage3X"
+        } else if cfg!(feature = "katoos-auth-qa") {
+            "KatoSync KATOOS Auth QA"
+        } else if cfg!(feature = "github-login-qa") {
+            "KatoSync GitHub Login QA"
+        } else {
+            "KatoSync"
+        });
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -4221,7 +5250,17 @@ fn logs_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
         .join("Library")
         .join("Logs")
-        .join("KatoSync");
+        .join(if cfg!(feature = "stage35-qa") {
+            "KatoSync Mesh QA Stage35"
+        } else if cfg!(feature = "stage3x-qa") {
+            "KatoSync Mesh QA Stage3X"
+        } else if cfg!(feature = "katoos-auth-qa") {
+            "KatoSync KATOOS Auth QA"
+        } else if cfg!(feature = "github-login-qa") {
+            "KatoSync GitHub Login QA"
+        } else {
+            "KatoSync"
+        });
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -4440,6 +5479,24 @@ fn cache_supabase_access_token(value: Option<String>) {
     }
 }
 
+// Invalidate ONLY the access token that the authenticated request just rejected.
+// A concurrent logout or account switch must not clear a different user's token.
+fn clear_rejected_access_token(slot: &mut Option<String>, rejected: &str) -> bool {
+    if slot.as_deref() != Some(rejected) {
+        return false;
+    }
+    if let Some(mut stale) = slot.take() {
+        zeroize::Zeroize::zeroize(&mut stale);
+    }
+    true
+}
+fn invalidate_rejected_supabase_access_token(rejected: &str) -> bool {
+    let Ok(mut guard) = supabase_access_token_cache().lock() else {
+        return false;
+    };
+    clear_rejected_access_token(&mut guard, rejected)
+}
+
 fn save_supabase_refresh_token(token: &str) -> Result<()> {
     supabase_session_keychain_entry()?.set_password(token)?;
     Ok(())
@@ -4448,7 +5505,7 @@ fn save_supabase_refresh_token(token: &str) -> Result<()> {
 fn load_supabase_refresh_token() -> Result<String> {
     supabase_session_keychain_entry()?
         .get_password()
-        .context("Keine aktive KatoOS-Sitzung gefunden")
+        .context("Keine lokal gespeicherte KatoSync-Sitzung gefunden")
 }
 
 fn supabase_session_email_path() -> Result<PathBuf> {
@@ -4549,21 +5606,115 @@ async fn supabase_refresh_session(refresh_token: &str) -> Result<SupabaseTokenRe
     let status = response.status();
     let text = response.text().await?;
     if !status.is_success() {
-        return Err(anyhow!("KatoOS-Sitzung abgelaufen ({status}). Bitte neu anmelden."));
+        return Err(anyhow!(
+            "KatoOS-Sitzung abgelaufen ({status}). Bitte neu anmelden."
+        ));
     }
     serde_json::from_str(&text).map_err(Into::into)
 }
 
 // Liefert ein gueltiges Access-Token: aus dem Cache, sonst per Refresh-Token erneuern.
+// Caller MUST hold SUPABASE_SESSION_TRANSITION_LOCK. Persist the new refresh
+// grant before exposing the access token. A failed Keychain write is NOT success.
+async fn refresh_supabase_session_under_lock() -> Result<String> {
+    let refresh = zeroize::Zeroizing::new(load_supabase_refresh_token()?);
+    let session = supabase_refresh_session(refresh.as_str()).await?;
+    let access = zeroize::Zeroizing::new(session.access_token);
+    let rotated = zeroize::Zeroizing::new(session.refresh_token);
+    save_supabase_refresh_token(rotated.as_str())
+        .context("Erneuerte KATOOS-Sitzung konnte nicht im Schlüsselbund gespeichert werden.")?;
+    cache_supabase_access_token(Some(access.to_string()));
+    Ok(access.to_string())
+}
+
+// Read-after-lock avoids repeated or concurrent refresh calls against a
+// single-use token, and ensures an explicit account login wins over old refreshes.
 async fn ensure_supabase_access_token() -> Result<String> {
     if let Some(token) = cached_supabase_access_token() {
         return Ok(token);
     }
-    let refresh = load_supabase_refresh_token()?;
-    let session = supabase_refresh_session(&refresh).await?;
-    let _ = save_supabase_refresh_token(&session.refresh_token);
-    cache_supabase_access_token(Some(session.access_token.clone()));
-    Ok(session.access_token)
+    let _session_guard = supabase_session_transition_lock().lock().await;
+    if let Some(token) = cached_supabase_access_token() {
+        return Ok(token);
+    }
+    refresh_supabase_session_under_lock().await
+}
+
+#[cfg(test)]
+mod mesh_session_rotation_tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[test]
+    fn a_rejected_old_access_token_does_not_clear_a_newer_session() {
+        let mut current = Some("newer-device-session-access".to_string());
+        assert!(!clear_rejected_access_token(
+            &mut current,
+            "obsolete-session"
+        ));
+        assert_eq!(current.as_deref(), Some("newer-device-session-access"));
+        assert!(clear_rejected_access_token(
+            &mut current,
+            "newer-device-session-access"
+        ));
+        assert!(current.is_none());
+    }
+
+    #[tokio::test]
+    async fn concurrent_rotation_gate_serializes_single_use_refresh() {
+        // No real tokens, Keychain or network access in this deterministic test.
+        let gate = Arc::new(tokio::sync::Mutex::new(None::<String>));
+        let refresh_count = Arc::new(AtomicUsize::new(0));
+        let tasks = (0..20).map(|_| {
+            let gate = Arc::clone(&gate);
+            let count = Arc::clone(&refresh_count);
+            tokio::spawn(async move {
+                let mut current = gate.lock().await;
+                if current.is_none() {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    *current = Some("fresh-verified-token".to_string());
+                }
+                current.clone().unwrap()
+            })
+        });
+        for task in tasks {
+            assert_eq!(task.await.unwrap(), "fresh-verified-token");
+        }
+        assert_eq!(refresh_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn account_login_guard_keeps_existing_user_bound_to_same_email() {
+        assert!(qa_reauth_matches_account(
+            "existing@example.invalid",
+            "EXISTING@example.invalid"
+        ));
+        assert!(!qa_reauth_matches_account(
+            "existing@example.invalid",
+            "other@example.invalid"
+        ));
+    }
+}
+
+// After issuer 401: only replace a rejected token if it is STILL the active
+// cache value. A second caller may already have refreshed it while we waited.
+// Never wipe a newer token; also never use a revoked grant twice concurrently.
+async fn replace_rejected_supabase_access_token(rejected: &str) -> Result<String> {
+    let _session_guard = supabase_session_transition_lock().lock().await;
+    if let Some(current) = cached_supabase_access_token() {
+        if current != rejected {
+            return Ok(current);
+        }
+        if !invalidate_rejected_supabase_access_token(rejected) {
+            return Err(anyhow!(
+                "KATOOS-Sitzung wurde während der Prüfung gewechselt."
+            ));
+        }
+    }
+    refresh_supabase_session_under_lock().await
 }
 
 const DEFAULT_BASE_URL: &str = "https://mcp.katoos.de";
@@ -4589,10 +5740,6 @@ fn extract_allowed_host(url: &str) -> Option<String> {
     } else {
         None
     }
-}
-
-fn base_url_host_allowed(url: &str) -> bool {
-    extract_allowed_host(url).is_some()
 }
 
 // REST-Basis: IMMER nur scheme://host (Pfad/Query/Port verworfen). Sonst landet ein in der base_url
@@ -4746,4 +5893,204 @@ fn xml_escape(value: &str) -> String {
 
 fn error_to_string(error: impl std::fmt::Display) -> String {
     sanitize_log(&error.to_string())
+}
+
+#[cfg(test)]
+mod local_katosync_session_tests {
+    use super::*;
+
+    #[test]
+    fn email_marker_is_not_authentication_without_local_keychain_credential() {
+        assert!(!locally_resumable_session(
+            Some("stale@example.invalid"),
+            None
+        ));
+        assert!(!locally_resumable_session(
+            Some("stale@example.invalid"),
+            Some("")
+        ));
+        assert!(!locally_resumable_session(None, Some("opaque-refresh")));
+        assert!(!locally_resumable_session(
+            Some("  "),
+            Some("opaque-refresh")
+        ));
+        assert!(locally_resumable_session(
+            Some("user@example.invalid"),
+            Some("opaque-refresh")
+        ));
+    }
+
+    #[test]
+    fn rejected_token_cleanup_never_removes_another_accounts_session() {
+        let mut slot = Some("new-account-token".to_string());
+        assert!(!clear_rejected_access_token(&mut slot, "old-account-token"));
+        assert_eq!(slot.as_deref(), Some("new-account-token"));
+        assert!(clear_rejected_access_token(&mut slot, "new-account-token"));
+        assert!(slot.is_none());
+        assert!(!clear_rejected_access_token(&mut slot, "new-account-token"));
+    }
+}
+
+#[cfg(test)]
+mod context_pack_pipeline_tests {
+    use super::*;
+
+    #[test]
+    fn context_source_secret_is_detected_even_if_scan_marked_it_relevant() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("katosync-context-pack-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let source_path = temp_dir.join("PROJECT_STATUS.md");
+        let secret = "OPENAI_API_KEY=sk-never-serialize-this-value";
+        fs::write(&source_path, format!("# Status\n{secret}\n")).unwrap();
+        let scan = ScanSummary {
+            scanned_files: 1,
+            relevant_files: 1,
+            skipped_files: 0,
+            secret_warnings: 0,
+            findings: vec![FileFinding {
+                path: source_path.to_string_lossy().to_string(),
+                relative_path: "PROJECT_STATUS.md".to_string(),
+                category: "status".to_string(),
+                size_bytes: fs::metadata(&source_path).unwrap().len(),
+                modified_at: "2026-10-04 20:00".to_string(),
+                skipped: false,
+                reason: None,
+            }],
+        };
+
+        let sources = context_pack_sources(&scan).unwrap();
+        assert!(sources[0].secret_detected);
+        let error =
+            context_pack::ContextPack::generate("KatoSync", "2026-10-04T20:00:00Z", sources)
+                .unwrap_err()
+                .to_string();
+        assert!(!error.contains(secret));
+        assert!(!error.contains("sk-never-serialize-this-value"));
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn existing_scan_pipeline_writes_local_pack_but_does_not_upload_it() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("katosync-context-pack-{}", Uuid::new_v4()));
+        let source_root = temp_dir.join("sample-project");
+        let output_dir = temp_dir.join("current");
+        let snapshot_dir = output_dir.join("snapshots").join("2026-10-04");
+        fs::create_dir_all(&source_root).unwrap();
+        fs::create_dir_all(&snapshot_dir).unwrap();
+        fs::write(
+            source_root.join("PROJECT_STATUS.md"),
+            "# Current State\n- Context pipeline selected\n# Evidence\n- Architecture reviewed\n",
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("roadmap.md"),
+            "# Goal\nShared local handoff\n# Next Safe Steps\n- Run tests\n",
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("MEMORY.md"),
+            "# Learned Rules\n- JSON remains canonical\n",
+        )
+        .unwrap();
+
+        let mut config = default_config().unwrap();
+        config.device = DeviceConfig {
+            device_id: "device-test-12345678".to_string(),
+            device_name: "Test Mac".to_string(),
+        };
+        config.source_roots = vec![source_root.to_string_lossy().to_string()];
+        config.output_dir = output_dir.to_string_lossy().to_string();
+
+        let scan = scan_roots(&config).unwrap();
+        let mut warnings = Vec::new();
+        let current_files =
+            write_current_files(&config, &scan, &output_dir, &snapshot_dir, &mut warnings).unwrap();
+        let json_path = output_dir.join(current_file_name(&config, "CURRENT_CONTEXT_PACK", "json"));
+        let markdown_path =
+            output_dir.join(current_file_name(&config, "CURRENT_CONTEXT_PACK", "md"));
+        assert!(current_files.contains(&json_path.to_string_lossy().to_string()));
+        assert!(current_files.contains(&markdown_path.to_string_lossy().to_string()));
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&json_path).unwrap()).unwrap();
+        assert_eq!(json["schemaVersion"], "katosync.context-pack/v1");
+        assert_eq!(json["project"], "sample-project");
+        assert_eq!(json["provenance"]["sources"].as_array().unwrap().len(), 3);
+        assert!(fs::read_to_string(markdown_path)
+            .unwrap()
+            .contains("# Context Pack — sample-project"));
+        assert!(upload_order(&output_dir, &config, &scan)
+            .iter()
+            .all(|path| !path.to_string_lossy().contains("CURRENT_CONTEXT_PACK")));
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn secret_skipped_context_source_blocks_only_the_pack_and_removes_stale_pack() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("katosync-context-pack-{}", Uuid::new_v4()));
+        let source_root = temp_dir.join("sample-project");
+        let output_dir = temp_dir.join("current");
+        let snapshot_dir = output_dir.join("snapshots").join("2026-10-04");
+        fs::create_dir_all(&source_root).unwrap();
+        fs::create_dir_all(&snapshot_dir).unwrap();
+        let secret_value = "sk-never-leak-into-pack-1234567890";
+        fs::write(
+            source_root.join("PROJECT_STATUS.md"),
+            format!("# Current State\n- ok\nOPENAI_API_KEY={secret_value}\n"),
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("MEMORY.md"),
+            "# Learned Rules\n- JSON remains canonical\n",
+        )
+        .unwrap();
+
+        let mut config = default_config().unwrap();
+        config.device = DeviceConfig {
+            device_id: "device-test-12345678".to_string(),
+            device_name: "Test Mac".to_string(),
+        };
+        config.safety.secret_scan_enabled = true;
+        config.source_roots = vec![source_root.to_string_lossy().to_string()];
+        config.output_dir = output_dir.to_string_lossy().to_string();
+        let json_path = output_dir.join(current_file_name(&config, "CURRENT_CONTEXT_PACK", "json"));
+        let markdown_path =
+            output_dir.join(current_file_name(&config, "CURRENT_CONTEXT_PACK", "md"));
+        fs::write(&json_path, "{\"stale\":true}").unwrap();
+        fs::write(&markdown_path, "stale").unwrap();
+
+        let scan = scan_roots(&config).unwrap();
+        assert!(scan
+            .findings
+            .iter()
+            .any(|finding| finding.category == "status" && finding.skipped));
+        let mut warnings = Vec::new();
+        let current_files =
+            write_current_files(&config, &scan, &output_dir, &snapshot_dir, &mut warnings).unwrap();
+
+        assert!(!json_path.exists());
+        assert!(!markdown_path.exists());
+        assert!(current_files
+            .iter()
+            .all(|path| !path.contains("CURRENT_CONTEXT_PACK")));
+        assert!(output_dir
+            .join(current_file_name(
+                &config,
+                "CURRENT_MISTRAL_BRIEFING_SOURCE",
+                "md"
+            ))
+            .exists());
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.starts_with("Context Pack nicht erzeugt")));
+        assert!(warnings
+            .iter()
+            .all(|warning| !warning.contains(secret_value)));
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
 }

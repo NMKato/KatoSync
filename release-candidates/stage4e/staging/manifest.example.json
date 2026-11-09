@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "intended_use": "KatoSync Stage4E isolated staging — NO DEPLOY",
+  "organization_id": "ltlrzbposrcooqjnmcrg",
+  "project_ref": "REPLACE_WITH_NEW_STAGING_REF",
+  "project_url": "REPLACE_WITH_SEPARATELY_VERIFIED_STAGING_URL",
+  "region": "eu-central-1",
+  "endpoint": "mesh-inbox-terminal-owner-qa",
+  "auth_policy": "gateway_verify_jwt_required",
+  "database_access": "dedicated_nonprod_only",
+  "production_data_access": false,
+  "deployment_requested": false
+}

@@ -1,0 +1,6 @@
+# KatoSync Stage4E staging-only configuration *template*.
+# Does not activate any function: this file is outside supabase/config.toml.
+# An independent release reviewer must verify platform gateway rules on
+# a separately approved non-production project before deploy.
+[functions.mesh-inbox-terminal-owner-qa]
+verify_jwt = true

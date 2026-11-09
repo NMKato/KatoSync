@@ -1,12 +1,9 @@
 name: KatoSync PR Fast Gate
 
 on:
+  # Review stacked PRs targeting feature branches as well as dev/main.
+  # Otherwise the current Mesh/Auth PR stack silently skips this gate.
   pull_request:
-    branches:
-      - dev
-      - main
-      - "security/**"
-      - "integration/**"
     paths-ignore:
       - "**/*.md"
       - "docs/**"
@@ -38,14 +35,27 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Audit dependency advisories (high and critical)
+        run: npm audit --audit-level=high
+
       - name: Node regression suite (including KUAS and MCP/CLI)
-        run: npm run test --if-present
+        run: npm test
 
       - name: Server TypeScript security contract (if configured)
         run: npm run typecheck:server --if-present
 
       - name: TypeScript + Vite production build
         run: npm run build
+
+  rust-format:
+    name: Rust Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Check native Rust source formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
   windows-node-regression:
     name: Windows Node Regression
@@ -64,11 +74,59 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Windows Node regression suite (if configured)
-        run: npm run test --if-present
+      - name: Windows Node and MCP integration tests
+        run: npm test
 
       - name: Windows server TypeScript security contract (if configured)
         run: npm run typecheck:server --if-present
 
       - name: Windows TypeScript
-        run: npm run typecheck --if-present
+        run: npm run typecheck
+
+  deno-mesh-stage4e-qa:
+    name: Deno Mesh Stage4E QA (no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+
+      - name: Setup independent Deno test runtime
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.6
+
+      - name: Setup Node for isolated SHA-pinned crypto parity QA
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run native Deno and original-vs-shadow Ed25519 parity (no deploy)
+        run: bash scripts/qa-deno-mesh-stage4e.sh
+
+      - name: Build disposable PostgreSQL17 and Node22 integration test image
+        run: docker build -f tests/qa/pg17-node22-localstack.Dockerfile -t katosync-stage4e-qa:local .
+
+      - name: Local signed ES256 Auth to real PostgreSQL17 cancellation E2E (no deploy)
+        run: |
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --user postgres \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/src,readonly" \
+            --workdir /src --entrypoint /bin/bash \
+            -e KATOSYNC_PG_BIN=/usr/local/bin \
+            katosync-stage4e-qa:local \
+            scripts/qa-mesh-postgres-local.sh inbox-lifecycle-localstack
+
+      - name: Free0/Pro10 private K2S quota migration QA (offline, no deploy)
+        run: |
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --user postgres \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/src,readonly" \
+            --workdir /src --entrypoint /bin/bash \
+            -e KATOSYNC_PG_BIN=/usr/local/bin \
+            katosync-stage4e-qa:local \
+            scripts/qa-mesh-postgres-local.sh shared-beta-failclose
