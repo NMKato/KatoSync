@@ -44,6 +44,7 @@ case "${1:-legacy}" in
   inbox) TEST_FILE="$ROOT/tests/sql/mesh_inbox_send_qa.sql" ;;
   inbox-receiver) TEST_FILE="$ROOT/tests/sql/mesh_inbox_receive_qa.sql" ;;
   inbox-proof) TEST_FILE="$ROOT/tests/sql/mesh_resolution_proof_qa.sql" ;;
+  inbox-lifecycle) TEST_FILE="$ROOT/tests/sql/mesh_inbox_terminal_lifecycle_disposable_qa.sql" ;;
   inbox-continuity) TEST_FILE="$ROOT/tests/sql/mesh_inbox_key_continuity_qa.sql" ;;
   inbox-edge-e2e) TEST_FILE="$ROOT/tests/sql/mesh_inbox_edge_e2e_setup.sql" ;;
   inbox-relay) TEST_FILE="$ROOT/tests/sql/mesh_pairing_relay_qa.sql" ;;
@@ -51,9 +52,25 @@ case "${1:-legacy}" in
   inbox-relay-rust-e2e) TEST_FILE="$ROOT/tests/sql/mesh_relay_stage3k_setup.sql" ;;
   *) echo "MESH_QA_UNKNOWN_TEST_SELECTION" >&2; exit 2 ;;
 esac
-"$PG_BIN/psql" -h "$DIR" -p "$PORT" -U postgres -d postgres -X -v ON_ERROR_STOP=1 \
-  -f "$TEST_FILE"
-if test "${1:-legacy}" = "quota-stage4e-atomic-writes"; then
+if test "${1:-legacy}" = "inbox-lifecycle"; then
+  # Only a fresh local 0700 disposable Unix-socket PG17 can consume this
+  # generated, SHA-pinned QA override. Never pass a remote connection string.
+  KATOSYNC_INBOX_LIFECYCLE_QA_ONLY=LOCAL_DISPOSABLE_PG17 \
+    node "$ROOT/scripts/qa-mesh-inbox-lifecycle-overlay.mjs" \
+      "$DIR/inbox_lifecycle_overlay.sql"
+  "$PG_BIN/psql" -h "$DIR" -p "$PORT" -U postgres -d postgres -X \
+    -v ON_ERROR_STOP=1 -v inbox_lifecycle_overlay="$DIR/inbox_lifecycle_overlay.sql" \
+    -f "$TEST_FILE"
+else
+  "$PG_BIN/psql" -h "$DIR" -p "$PORT" -U postgres -d postgres -X -v ON_ERROR_STOP=1 \
+    -f "$TEST_FILE"
+fi
+if test "${1:-legacy}" = "inbox-lifecycle"; then
+  KATOSYNC_INBOX_LIFECYCLE_RACE_ALLOW=LOCAL_DISPOSABLE_PG17 \
+  KATOSYNC_MESH_E2E_SOCKET="$DIR" KATOSYNC_MESH_E2E_PORT="$PORT" \
+  KATOSYNC_PG_BIN="$PG_BIN" \
+    node "$ROOT/tests/qa/meshInboxLifecycleRaceStage4E.mjs"
+elif test "${1:-legacy}" = "quota-stage4e-atomic-writes"; then
   KATOSYNC_MESH_ATOMIC_RACE_ALLOW=EPHEMERAL_UNIX_SOCKET_ONLY \
   KATOSYNC_MESH_E2E_SOCKET="$DIR" KATOSYNC_MESH_E2E_PORT="$PORT" \
   KATOSYNC_PG_BIN="$PG_BIN" \
