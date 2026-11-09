@@ -39,6 +39,7 @@ case "${1:-legacy}" in
   katosync) TEST_FILE="$ROOT/tests/sql/katosync_owned_schema_qa.sql" ;;
   quota-stage4e) TEST_FILE="$ROOT/tests/sql/mesh_quota_stage4e_disposable_qa.sql" ;;
   quota-stage4e-identity) TEST_FILE="$ROOT/tests/sql/mesh_quota_stage4e_identity_disposable_qa.sql" ;;
+  quota-stage4e-release-candidate) TEST_FILE="$ROOT/tests/sql/mesh_stage4e_release_candidate_disposable_qa.sql" ;;
   inbox) TEST_FILE="$ROOT/tests/sql/mesh_inbox_send_qa.sql" ;;
   inbox-receiver) TEST_FILE="$ROOT/tests/sql/mesh_inbox_receive_qa.sql" ;;
   inbox-proof) TEST_FILE="$ROOT/tests/sql/mesh_resolution_proof_qa.sql" ;;
