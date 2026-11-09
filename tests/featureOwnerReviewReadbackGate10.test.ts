@@ -159,6 +159,7 @@ test("revoked reviewer, rotated key, inactive project and missing consumed owner
  for(const mode of [{reviewer:"revoked"},{reviewerMember:"suspended"},
   {key:"revoked"},{keyMismatch:true},{project:"pending"},
   {challenge:"missing"},{challenge:"canceled"},{grant:"revoked"},
+  {grant:"active"},
   {tamperSignature:true},{missingDecision:true},{selfReviewer:true}]){
   const f=await setup(mode);
   const r=await handleOwnerReviewReadback(req(payload),env,f.cfg);

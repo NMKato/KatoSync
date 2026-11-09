@@ -93,7 +93,9 @@ export async function handleOwnerReviewReadback(req:Request,e:Env,cfg:Config={})
    select:"grant_id,subject_uid,project_id,owner_key_id,grant_revision,state,revoked_at",
    grant_id:"eq."+grantId,subject_uid:"eq."+uid,limit:"2"});
   if(!grant||grant.grant_id!==grantId||grant.subject_uid!==uid||
-     !["pending","active"].includes(String(grant.state))||
+     // Native Gate10 attests only an independently reviewed PENDING grant.
+     // An active grant requires a different current-authority protocol.
+     grant.state!=="pending"||
      grant.revoked_at!==null||typeof grant.project_id!=="string"||
      typeof grant.owner_key_id!=="string"||!keyId.test(grant.owner_key_id)||
      !Number.isSafeInteger(grant.grant_revision)||

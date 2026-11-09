@@ -9,6 +9,7 @@
 // - Jeder Lese-/Schreibzugriff ist an eine Projekt-ID gebunden (keine projektuebergreifenden Treffer).
 // Kein zweites Context-System: Context Pack bleibt der Handoff-Vertrag; die Fabric ist Retrieval darunter.
 mod acceptance_ledger;
+pub(crate) use acceptance_ledger::verify_gate10_native_review;
 mod assemble;
 mod blueprint_index;
 pub(crate) mod continuity_bridge;

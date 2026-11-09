@@ -2,6 +2,7 @@
 mod external_checks;
 mod owner_authority;
 mod reviewer_attestation;
+pub(crate) use reviewer_attestation::verify_gate10_native_review;
 mod scope_policy;
 pub(super) mod verified_ledger;
 // NEVER treat this table as approved features. GitHub CI and ancestry are not yet

@@ -250,14 +250,24 @@ pub async fn mesh_owner_review_readback_qa(
         }
         bytes.extend_from_slice(&chunk);
     }
-    verify_untrusted_readback_shape(
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    verify_untrusted_readback_shape(&bytes, &owner, &decision_id, &grant_id, now_ms)
+        .map_err(str::to_string)?;
+    // The same server response CANNOT certify its own reviewer signing key.
+    // The separate native release-reviewed pin registry is empty until real,
+    // independent human key enrollment. Missing pin => unverified evidence,
+    // a mismatched/forged proof => hard error, signed rejection => DENY.
+    let independent = crate::memory_fabric::verify_gate10_native_review(
         &bytes,
-        &owner,
         &decision_id,
+        &owner,
         &grant_id,
-        chrono::Utc::now().timestamp_millis(),
+        now_ms,
     )
-    .map_err(str::to_string)?;
+    .map_err(|_| "GATE10_NATIVE_REVIEW_INVALID".to_string())?;
+    if independent == Some(false) {
+        return Err("GATE10_NATIVE_REVIEW_REJECTED".into());
+    }
     // Abort if any concurrent login/logout switched the account.
     crate::mesh_identity::same_account_still_verified(&owner)
         .await

@@ -56,6 +56,21 @@ pub(super) struct CurrentReviewerAuthority<'a> {
     pub project_active: bool,
 }
 
+/// Explicitly release-reviewed native QA trust anchors. They are NEVER read
+/// from the Edge response, WebView, environment, user settings, or a mutable
+/// runtime file. Enrolling a real reviewer requires an independently approved
+/// source change and new signed QA binary. Empty by design until that review.
+#[derive(Debug)]
+struct ReviewerReleasePin<'a> {
+    project_id: &'a str,
+    reviewer_uid: &'a str,
+    reviewer_key_id: &'a str,
+    reviewer_key_revision: u64,
+    reviewer_public_key: &'a str,
+}
+
+const RELEASE_REVIEWED_PINS: &[ReviewerReleasePin<'static>] = &[];
+
 /// Domain-separated 14-field canonical JSON array, identical to the KATOOS
 /// Edge verifier's reviewerSigningBytes40(). Does NOT grant owner rights.
 fn signing_bytes(v: &SignedReviewerDecision) -> Vec<u8> {
@@ -264,6 +279,110 @@ pub(super) fn verify_owner_readback_envelope(
         &payload.reviewer_signature,
         current,
         now_ms,
+    )
+}
+
+/// QA-only bridge from a freshly received KATOOS readback to the existing
+/// native Ed25519 verifier. The live KATOOS endpoint attests CURRENT role,
+/// project, challenge consumption and pending grant; the REVIEWER public key
+/// must ALSO match a separate release-reviewed native pin. Neither side
+/// alone confers trust. No pin => None (never a positive native approval).
+fn verify_with_reviewed_pins(
+    bytes: &[u8],
+    expected_decision_id: &str,
+    verified_owner_uid: &str,
+    expected_grant_id: &str,
+    now_ms: i64,
+    pins: &[ReviewerReleasePin<'_>],
+) -> Result<Option<bool>, String> {
+    if bytes.is_empty() || bytes.len() > 8192 {
+        return Err("READBACK_RESPONSE_INVALID".into());
+    }
+    let payload: ReviewerReadbackEnvelope =
+        serde_json::from_slice(bytes).map_err(|_| "READBACK_RESPONSE_INVALID")?;
+    // Scope is checked BEFORE any missing-pin fallback. Never allow a
+    // malformed/cross-tenant readback to look like ordinary missing authority.
+    if payload.decision_id != expected_decision_id
+        || payload.subject_uid != verified_owner_uid
+        || payload.attestation.subject_uid != verified_owner_uid
+        || payload.attestation.grant_id != expected_grant_id
+        || payload.attestation.reviewer_uid == verified_owner_uid
+    {
+        return Err("READBACK_OWNER_OR_SCOPE_INVALID".into());
+    }
+    // This native pin supplements (does NOT replace) the server's live role,
+    // key revocation, consumed challenge and pending-grant checks.
+    let mut matches = pins.iter().filter(|p| {
+        p.reviewer_uid == payload.attestation.reviewer_uid
+            && p.project_id == payload.attestation.project_id
+    });
+    let Some(pin) = matches.next() else {
+        return Ok(None);
+    };
+    // Ambiguous release policy, including two historical key revisions,
+    // fails closed until explicitly reconciled by human review.
+    if matches.next().is_some()
+        || !uuid(pin.reviewer_uid)
+        || !project_id(pin.project_id)
+        || !key_id(pin.reviewer_key_id)
+        || pin.reviewer_key_revision == 0
+        || pin.reviewer_key_id != payload.attestation.reviewer_key_id
+        || pin.reviewer_key_revision != payload.attestation.reviewer_key_revision
+        || pin.reviewer_uid != payload.attestation.reviewer_uid
+    {
+        return Err("READBACK_REVIEWER_PIN_MISMATCH".into());
+    }
+    let public_bytes = canonical::<32>(pin.reviewer_public_key)?;
+    if format!("ed25519-sha256:{:x}", Sha256::digest(public_bytes)) != pin.reviewer_key_id {
+        return Err("READBACK_REVIEWER_PIN_INVALID".into());
+    }
+    let trusted =
+        VerifyingKey::from_bytes(&public_bytes).map_err(|_| "READBACK_REVIEWER_PIN_INVALID")?;
+    let current = CurrentReviewerAuthority {
+        grant_id: expected_grant_id,
+        challenge_id: &payload.attestation.challenge_id,
+        project_id: pin.project_id,
+        subject_uid: verified_owner_uid,
+        owner_key_id: &payload.attestation.owner_key_id,
+        grant_revision: payload.attestation.grant_revision,
+        reviewer_uid: pin.reviewer_uid,
+        reviewer_key_id: pin.reviewer_key_id,
+        reviewer_key_revision: pin.reviewer_key_revision,
+        reviewer_public_key: &trusted,
+        // These are asserted by the separately authenticated, strict, live
+        // owner-scoped KATOOS Edge check; not by the signed review itself.
+        reviewer_active: true,
+        owner_proof_consumed: true,
+        grant_pending: true,
+        project_active: true,
+    };
+    let verdict = verify_owner_readback_envelope(
+        bytes,
+        expected_decision_id,
+        verified_owner_uid,
+        &current,
+        now_ms,
+    )?;
+    Ok(Some(matches!(verdict, VerifiedReviewerVerdict::Approved)))
+}
+
+/// No dynamic reviewer trust-anchor injection in the native production path.
+/// Only an independently reviewed new signed QA binary can add pins.
+#[allow(dead_code)]
+pub(crate) fn verify_gate10_native_review(
+    bytes: &[u8],
+    decision_id: &str,
+    owner_uid: &str,
+    grant_id: &str,
+    now_ms: i64,
+) -> Result<Option<bool>, String> {
+    verify_with_reviewed_pins(
+        bytes,
+        decision_id,
+        owner_uid,
+        grant_id,
+        now_ms,
+        RELEASE_REVIEWED_PINS,
     )
 }
 
@@ -529,6 +648,106 @@ mod tests {
         )
         .is_err());
     }
+    #[test]
+    fn gate10_release_pins_verify_synthetic_proof_but_never_grant_rights() {
+        const DECISION: &str = "55555555-5555-4555-8555-555555555555";
+        let (key, signed) = setup();
+        let envelope = |decision: &SignedReviewerDecision, signature: String| {
+            serde_json::to_vec(&serde_json::json!({
+                "protocol": "katosync.owner-review-readback/v1",
+                "state": "server_signed_review_readback_not_native_authorization",
+                "subjectUid": OWNER,
+                "decisionId": DECISION,
+                "readbackAtMs": NOW,
+                "attestation": decision,
+                "reviewerSignature": signature,
+                "authorityEvidenceSource": "server_read_only_untrusted_until_native_recheck",
+                "grantsRights": false,
+                "verifiedPercent": null
+            }))
+            .unwrap()
+        };
+        let bytes = envelope(&signed, sign(&key, &signed));
+        let pin = ReviewerReleasePin {
+            project_id: "katosync",
+            reviewer_uid: REVIEWER,
+            reviewer_key_id: &signed.reviewer_key_id,
+            reviewer_key_revision: signed.reviewer_key_revision,
+            reviewer_public_key: &signed.reviewer_public_key,
+        };
+        let check = |raw: &[u8], pins: &[ReviewerReleasePin<'_>], now: i64| {
+            verify_with_reviewed_pins(raw, DECISION, OWNER, GRANT, now, pins)
+        };
+        // No human-approved pin exists in the compiled QA binary.
+        assert_eq!(check(&bytes, &[], NOW).unwrap(), None);
+        assert_eq!(
+            verify_gate10_native_review(&bytes, DECISION, OWNER, GRANT, NOW).unwrap(),
+            None
+        );
+        assert_eq!(check(&bytes, &[pin], NOW).unwrap(), Some(true));
+        let invalid_pin = ReviewerReleasePin {
+            project_id: "katosync",
+            reviewer_uid: REVIEWER,
+            reviewer_key_id: &signed.reviewer_key_id,
+            reviewer_key_revision: 3,
+            reviewer_public_key: &signed.reviewer_public_key,
+        };
+        assert!(check(&bytes, &[invalid_pin], NOW).is_err());
+        let pin = ReviewerReleasePin {
+            project_id: "katosync",
+            reviewer_uid: REVIEWER,
+            reviewer_key_id: &signed.reviewer_key_id,
+            reviewer_key_revision: 2,
+            reviewer_public_key: &signed.reviewer_public_key,
+        };
+        let wrong = SigningKey::from_bytes(&[42; 32]);
+        assert!(check(&envelope(&signed, sign(&wrong, &signed)), &[pin], NOW).is_err());
+        let pin = ReviewerReleasePin {
+            project_id: "katosync",
+            reviewer_uid: REVIEWER,
+            reviewer_key_id: &signed.reviewer_key_id,
+            reviewer_key_revision: 2,
+            reviewer_public_key: &signed.reviewer_public_key,
+        };
+        assert!(check(&bytes, &[pin], NOW + 70_000).is_err());
+        let pin = ReviewerReleasePin {
+            project_id: "katosync",
+            reviewer_uid: REVIEWER,
+            reviewer_key_id: &signed.reviewer_key_id,
+            reviewer_key_revision: 2,
+            reviewer_public_key: &signed.reviewer_public_key,
+        };
+        assert!(verify_with_reviewed_pins(&bytes, DECISION, REVIEWER, GRANT, NOW, &[pin]).is_err());
+        let pin = ReviewerReleasePin {
+            project_id: "katosync",
+            reviewer_uid: REVIEWER,
+            reviewer_key_id: &signed.reviewer_key_id,
+            reviewer_key_revision: 2,
+            reviewer_public_key: &signed.reviewer_public_key,
+        };
+        let mut rejected = signed.clone();
+        rejected.decision = "rejected".into();
+        assert_eq!(
+            check(&envelope(&rejected, sign(&key, &rejected)), &[pin], NOW).unwrap(),
+            Some(false)
+        );
+        let pin1 = ReviewerReleasePin {
+            project_id: "katosync",
+            reviewer_uid: REVIEWER,
+            reviewer_key_id: &signed.reviewer_key_id,
+            reviewer_key_revision: 2,
+            reviewer_public_key: &signed.reviewer_public_key,
+        };
+        let pin2 = ReviewerReleasePin {
+            project_id: "katosync",
+            reviewer_uid: REVIEWER,
+            reviewer_key_id: &signed.reviewer_key_id,
+            reviewer_key_revision: 2,
+            reviewer_public_key: &signed.reviewer_public_key,
+        };
+        assert!(check(&bytes, &[pin1, pin2], NOW).is_err());
+    }
+
     #[test]
     fn signed_rejection_from_katoos_stays_native_rejection() {
         let (key, mut decision) = setup();
