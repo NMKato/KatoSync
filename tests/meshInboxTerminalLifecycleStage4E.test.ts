@@ -7,7 +7,13 @@ import {createHash} from "node:crypto";
 import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
 const get=(name:string)=>readFileSync(new URL("../"+name,import.meta.url),"utf8");
-const hash=(name:string)=>createHash("sha256").update(get(name)).digest("hex");
+const hash=(name:string)=>{
+ const raw=get(name);
+ assert.equal(/\r(?!\n)/.test(raw),false,"noncanonical lone CR in "+name);
+ // Git's canonical LF blob is the SHA-pinned object on all OSes, even when
+ // Git-for-Windows materializes a CRLF working tree.
+ return createHash("sha256").update(raw.replace(/\r\n/g,"\n")).digest("hex");
+};
 const generator=get("scripts/qa-mesh-inbox-lifecycle-overlay.mjs");
 const fixture=get("tests/sql/mesh_inbox_terminal_lifecycle_disposable_qa.sql");
 const runner=get("scripts/qa-mesh-postgres-local.sh");
@@ -24,6 +30,19 @@ test("all original historic inbox and Stage4E SQL acceptance guards remain immut
  assert.match(historic,/mesh_inbox_recipient_key_resolution_guard/);
  assert.match(historic,/p\.signing_public_key=d\.signing_public_key/);
 });
+test("Windows CRLF changes checkout bytes, but never the SHA-pinned canonical Git source",()=>{
+ const original=get("tests/sql/mesh_stage4e_atomic_write_overlay_qa.sql");
+ const lf=original.replace(/\r\n/g,"\n");
+ const crlf=lf.replace(/\n/g,"\r\n");
+ const expected="a1afad3bb0327456155774b2393d921366733c4abb915e7f5e88457052ef085b";
+ const checksum=(value:string)=>createHash("sha256").update(value).digest("hex");
+ assert.equal(checksum(lf),expected);
+ assert.notEqual(checksum(crlf),expected,"Windows materialization must be distinguishable");
+ assert.equal(checksum(crlf.replace(/\r\n/g,"\n")),expected);
+ assert.notEqual(checksum(crlf.replace(/\r\n/g,"\n").replace(
+  "KATOSYNC_MESH_ENTITLEMENT_REQUIRED","ALTERED_ENTITLEMENT_GUARD")),expected);
+});
+
 test("QA synthesis validates pinned baseline, patches only exact terminal branch and cleans up",()=>{
  for(const name of ["mesh_inbox_resolution_guard","mesh_inbox_resolution_proof_guard",
   "mesh_atomic_write_entitlement_qa"])

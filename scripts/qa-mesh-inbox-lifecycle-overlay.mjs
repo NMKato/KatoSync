@@ -189,7 +189,12 @@ const branches={
 const pieces=[base.preflight,base.helper];
 for(const [relative,expected,name,term] of sources){
  const file=join(root,relative);
- const original=readFileSync(file,"utf8");
+ const raw=readFileSync(file,"utf8");
+ // Git-for-Windows may check out a source as CRLF. Validate the immutable
+ // canonical Git-blob SHA, not the platform-specific working-tree EOL bytes.
+ // Never permit a stray CR or normalize any other source character.
+ assert.equal(/\r(?!\n)/.test(raw),false,"noncanonical lone CR in "+relative);
+ const original=raw.replace(/\r\n/g,"\n");
  assert.equal(createHash("sha256").update(original).digest("hex"),expected,
    "historical source changed; must obtain independent review: "+relative);
  const start="CREATE FUNCTION katosync."+name+"()";

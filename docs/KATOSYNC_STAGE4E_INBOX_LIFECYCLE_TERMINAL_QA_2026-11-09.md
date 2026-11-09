@@ -115,7 +115,7 @@ Audit und endgültiger Status bleiben genau einmal
 - `KATOSYNC_INBOX_LIFECYCLE_IDEMPOTENT_AUDIT_NO_DUPLICATE_PASS`
 - `MESH_QA_ALL_SQL_ASSERTIONS_PASSED`
 
-Zusätzlich liegen sieben statische und negative Node-Vertragstests
+Zusätzlich liegen acht statische und negative Node-Vertragstests
 in `tests/meshInboxTerminalLifecycleStage4E.test.ts`.
 
 **Gesamte M2-Lokalabnahme, 09.11.2026:** alle drei
@@ -124,11 +124,24 @@ zweier paralleler realer psql-Sessions), `inbox-proof`
 (historischer signierter Empfängerbeweis) und
 `quota-stage4e-atomic-writes` (inklusive parallelem Policy-
 Widerruf) bestanden. Die vollständige Node-Regression
-**788/788**, Remote Usage **16/16**, TypeScript/Vite Build,
+**789/789**, Remote Usage **16/16**, TypeScript/Vite Build,
 Rust-Format, Bash-Syntax und Git-Diff-Prüfung sind ebenfalls
 grün. Deno-Edge-Deploy, produktives KatoOS und echte
 Besitzerzustimmung wurden NICHT getestet oder verändert.
-GitHub-CI ist unabhängig auf dem finalen Commit zu prüfen.
+Die erste unabhängige GitHub-CI auf `feea1a4`
+(Lauf 42621447042) meldete drei grüne Jobs
+(Deno QA/Web Build/Rust Format), aber einen
+**Windows-Node-Regressionstestfehler**, weil der Windows-
+Checkout die Stage4E-Atomic-QA-Datei als CRLF statt als
+kanonische Git-Blob-Fassung mit LF materialisiert hatte.
+Die historische SHA-256-Referenz wurde **nicht verändert**:
+Stattdessen wird ausschließlich die Zeilenendung
+für die Git-Blob-Prüfung auf LF normalisiert;
+alle übrigen Zeichen werden unverändert geprüft
+und ein isolierter Negativtest beweist, dass
+echte Änderungen weiterhin abgewiesen werden.
+Die erfolgreiche zweite CI muss separat
+auf dem neuen Fix-Commit verifiziert werden.
 
 ## Klar abgegrenzte Sicherheitsgrenzen
 
