@@ -3,6 +3,8 @@
 // Only freshly generated synthetic Ed25519 keys + one-off TLS certificate.
 // This script DOES NOT connect to Supabase, Keychain, Rust Mesh or Remote Jobs.
 import tls from "node:tls";
+import {canonicalRecipientKey,sameApprovedRecipientKey,readPrivateRecipientFixture}
+ from "./qa-mesh-synthetic-recipient-pin.mjs";
 import {readFileSync} from "node:fs";
 import {createHash,generateKeyPairSync,createPublicKey,sign,verify,randomBytes,
  randomUUID,X509Certificate} from "node:crypto";
@@ -63,6 +65,11 @@ function trustNever(obj){
 async function run(){
  const isServer=ROLE==="server";
  if(isServer){
+  const approvedRecipientPin=vars.KATOSYNC_MESH_LAN_QA_EXPECTED_RECIPIENT_KEY??"";
+  if(!canonicalRecipientKey(approvedRecipientPin)){
+   die("RECIPIENT_PUBLIC_KEY_PIN_REQUIRED");return;
+  }
+  const expectReject=vars.KATOSYNC_MESH_LAN_QA_EXPECT_RECIPIENT_REJECT==="YES";
   const certPath=vars.KATOSYNC_MESH_LAN_QA_CERT??"";
   const keyPath=vars.KATOSYNC_MESH_LAN_QA_KEY??"";
   if(!certPath.startsWith("/tmp/ksmesh2u.")||!keyPath.startsWith("/tmp/ksmesh2u.")){
@@ -93,8 +100,18 @@ async function run(){
        !validSig(recipientPublic,proof.signature,
         [RECEIVE,OWNER,TARGET,"accept",requestId,proof.nonce,String(proof.expiresAt)].join("|"))
        ||Buffer.from(proof.nonce??"","base64url").length!==32||!trustNever(obj)){
-       console.error("MESH_TWO_HOST_BAD_DEVICE_SIGNATURE");socket.destroy();return;
+       console.error("MESH_TWO_HOST_BAD_DEVICE_SIGNATURE");
+       process.exitCode=8;socket.destroy();server.close();return;
       }
+      // An independently signed ACK alone is NOT authorization:
+      // bind the Ed25519 signer to an out-of-band approved recipient key.
+      if(!sameApprovedRecipientKey(recipientPublic,approvedRecipientPin)){
+       if(expectReject)console.log("MESH_TWO_HOST_UNAPPROVED_RECIPIENT_PIN_REJECTED");
+       else {console.error("MESH_TWO_HOST_UNAPPROVED_RECIPIENT_PIN");process.exitCode=6;}
+       socket.destroy();server.close();return;
+      }
+      if(expectReject){console.error("MESH_TWO_HOST_UNEXPECTED_RECIPIENT_ACCEPT");
+       process.exitCode=7;socket.destroy();server.close();return;}
       sendJson(socket,{kind:"qa-verified",requestId,
         paired:false,transportReady:false,remoteJobsEnabled:false});
       console.log("MESH_TWO_HOST_SYNTHETIC_ED25519_ACK_VERIFIED");
@@ -114,8 +131,10 @@ async function run(){
    die("WRONG_PIN_EXPLICIT_OPT_IN_REQUIRED");return;
   }
   const expect=negative?("0"===pin[0]?"1":"0")+pin.slice(1):pin;
-  const recipient=generateKeyPairSync("ed25519");
-  const recipientPublic=b64(publicRaw(recipient.publicKey));
+  let recipient;
+  try{recipient=readPrivateRecipientFixture(vars.KATOSYNC_MESH_LAN_QA_RECIPIENT_KEY_PATH??"");}
+  catch{die("RECIPIENT_LOCAL_DISPOSABLE_IDENTITY_REQUIRED");return;}
+  const recipientPublic=recipient.publicRaw;
   const socket=tls.connect({host:PEER,port:PORT,minVersion:"TLSv1.3",maxVersion:"TLSv1.3",
     rejectUnauthorized:false,serverName:"synthetic-mesh.invalid"});
   socket.setTimeout(12000,()=>socket.destroy(Error("QA_TIMEOUT")));
