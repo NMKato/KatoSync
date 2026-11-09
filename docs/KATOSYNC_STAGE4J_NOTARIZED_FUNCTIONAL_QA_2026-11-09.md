@@ -41,3 +41,5 @@ The test files were deleted on completion. No customer data, microphone input, s
 **Decision:** `INTERNAL_NOTARIZED_QA_CANDIDATE_READY`. Not a public release or proof of operational Mesh pairing.
 
 Created by NMKato Solutions
+
+**Further physical M3 checks (separate, still no app launch):** [Stage4J two-Mac notarized resource QA](KATOSYNC_STAGE4J_TWO_MAC_STAPLED_RESOURCE_QA_2026-11-09.md).
