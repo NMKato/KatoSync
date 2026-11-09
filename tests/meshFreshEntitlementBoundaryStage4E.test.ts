@@ -3,6 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
+import {fileURLToPath} from "node:url";
 import {createHash} from "node:crypto";
 import {build} from "esbuild";
 import {withFreshMeshEntitlement,MESH_ENTITLEMENT_QA_ORIGIN} from
@@ -210,7 +211,7 @@ test("all five isolated QA entrypoints compile in neutral esbuild without deploy
  for(const name of ["mesh-device-enrollment","mesh-device-presence-qa",
   "mesh-inbox-send","mesh-inbox-receive","mesh-pairing-relay"]){
   const file=new URL("../supabase/functions/"+name+"-entitled-qa/index.ts",import.meta.url);
-  const bundle=await build({entryPoints:[file.pathname],write:false,
+  const bundle=await build({entryPoints:[fileURLToPath(file)],write:false,
    bundle:true,platform:"neutral",format:"esm",target:"es2022",
    logLevel:"silent",metafile:true});
   assert.equal(bundle.outputFiles.length,1,name);

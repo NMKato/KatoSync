@@ -141,6 +141,15 @@ SHA-256-Freigaben nachträglich umgeschrieben.
   alternativen QA-Einstiege wurden syntaktisch/als vollständiges
   esbuild-Bundle geprüft, **nicht** in einer echten Deno-Edge-
   Runtime ausgeführt. Solch ein Test bleibt zwingend vor Deploy.
+- Ein **separat manuell gestarteter, non-deploy GitHub Fast Gate**
+  auf Commit `7285156` bestätigte zunächst Web Build und Rust-Format,
+  fand aber in der **Windows Node Regression** ein falsches
+  `file.pathname`-Dateipfadformat (`/D:/...`) im *neuen esbuild-Test*.
+  Der Test ist nun plattformübergreifend mit `fileURLToPath(file)`
+  korrigiert und erneut **10/10 gezielt, 774/774 voll** auf dem M2
+  gelaufen. **Der neue HEAD benötigt danach einen frischen
+  Windows-GitHub-CI-Lauf**; der alte fehlgeschlagene Lauf darf
+  nicht als grüne Abnahme umgedeutet werden.
 - GitHub-CI-Ergebnis und produktive Freigabe sind hiervon
   unabhängig zu kontrollieren. Live KATOOS wurde ausschließlich
   lesend auf aktive Edge-Funktionsnamen/-Versionen untersucht.
