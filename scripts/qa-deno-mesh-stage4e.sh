@@ -23,6 +23,15 @@ deno test --no-config --no-remote \
 deno test --no-check --no-config --no-remote \
   --allow-env=SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY,KATOSYNC_MESH_ENTITLEMENT_BOUNDARY_STAGE,KATOSYNC_MESH_INBOX_STAGE,KATOSYNC_MESH_INBOX_RECEIVE_STAGE,KATOSYNC_MESH_PAIRING_RELAY_STAGE,KATOSYNC_MESH_ENROLLMENT_STAGE,KATOSYNC_MESH_RELAY_QA_MODE,KATOSYNC_MESH_RELAY_QA_PROJECT_REF,DENO_DEPLOYMENT_ID \
   tests/deno/meshEntrypointDefaultOffStage4E.test.ts
+# NEW, strictly QA-only owner cancellation endpoint: full Deno graph check
+# without --no-check, then invoke its actual Deno.serve index under a stub.
+# Only synthetic per-test environment keys; NO --allow-net or real credentials.
+deno check --no-config --no-remote \
+  supabase/functions/mesh-inbox-terminal-owner-qa/index.ts \
+  tests/deno/meshTerminalOwnerEntrypointStage4E.test.ts
+deno test --no-config --no-remote \
+  --allow-env=SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY,KATOSYNC_INBOX_TERMINAL_OWNER_STAGE,KATOSYNC_INBOX_TERMINAL_OWNER_PROJECT_REF \
+  tests/deno/meshTerminalOwnerEntrypointStage4E.test.ts
 # Independent TS6 shadow compatibility test does NOT touch immutable handlers.
 # The Node22 type-strip runtime imports both ORIGINAL and copied QA crypto.
 node --experimental-strip-types scripts/qa-deno-ts6-crypto-shadow.mjs
