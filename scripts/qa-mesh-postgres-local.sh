@@ -40,6 +40,7 @@ case "${1:-legacy}" in
   quota-stage4e) TEST_FILE="$ROOT/tests/sql/mesh_quota_stage4e_disposable_qa.sql" ;;
   quota-stage4e-identity) TEST_FILE="$ROOT/tests/sql/mesh_quota_stage4e_identity_disposable_qa.sql" ;;
   quota-stage4e-release-candidate) TEST_FILE="$ROOT/tests/sql/mesh_stage4e_release_candidate_disposable_qa.sql" ;;
+  quota-stage4e-atomic-writes) TEST_FILE="$ROOT/tests/sql/mesh_stage4e_atomic_write_disposable_qa.sql" ;;
   inbox) TEST_FILE="$ROOT/tests/sql/mesh_inbox_send_qa.sql" ;;
   inbox-receiver) TEST_FILE="$ROOT/tests/sql/mesh_inbox_receive_qa.sql" ;;
   inbox-proof) TEST_FILE="$ROOT/tests/sql/mesh_resolution_proof_qa.sql" ;;
@@ -52,7 +53,12 @@ case "${1:-legacy}" in
 esac
 "$PG_BIN/psql" -h "$DIR" -p "$PORT" -U postgres -d postgres -X -v ON_ERROR_STOP=1 \
   -f "$TEST_FILE"
-if test "${1:-legacy}" = "inbox-edge-e2e"; then
+if test "${1:-legacy}" = "quota-stage4e-atomic-writes"; then
+  KATOSYNC_MESH_ATOMIC_RACE_ALLOW=EPHEMERAL_UNIX_SOCKET_ONLY \
+  KATOSYNC_MESH_E2E_SOCKET="$DIR" KATOSYNC_MESH_E2E_PORT="$PORT" \
+  KATOSYNC_PG_BIN="$PG_BIN" \
+    node "$ROOT/tests/qa/meshAtomicEntitlementRaceStage4E.mjs"
+elif test "${1:-legacy}" = "inbox-edge-e2e"; then
   KATOSYNC_MESH_E2E_ALLOW=EPHEMERAL_UNIX_SOCKET_ONLY \
     KATOSYNC_MESH_E2E_SOCKET="$DIR" KATOSYNC_MESH_E2E_PORT="$PORT" \
     node --experimental-strip-types --test "$ROOT/tests/meshInboxEdgePostgresE2e.qa.ts"

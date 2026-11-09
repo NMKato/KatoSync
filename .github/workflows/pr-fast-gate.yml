@@ -82,3 +82,19 @@ jobs:
 
       - name: Windows TypeScript
         run: npm run typecheck
+
+  deno-mesh-stage4e-qa:
+    name: Deno Mesh Stage4E QA (no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+
+      - name: Setup independent Deno test runtime
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.6
+
+      - name: Run permission-restricted native Deno QA (no network / no deploy)
+        run: bash scripts/qa-deno-mesh-stage4e.sh
