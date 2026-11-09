@@ -87,3 +87,33 @@ test("old migration files and signed cryptographic handlers remain untouched",()
  const pinned=read("scripts/qa-mesh-inbox-edge-package-review.mjs");
  assert.match(pinned,/EDGE_SOURCE_HASH_CHANGED_/);
 });
+
+test("TS6 crypto QA runs ephemeral no-deploy copy with original-vs-shadow Ed25519 parity",()=>{
+ const shadow=read("scripts/qa-deno-ts6-crypto-shadow.mjs");
+ const runner=read("scripts/qa-deno-mesh-stage4e.sh");
+ const workflow=read(".github/workflows/pr-fast-gate.yml");
+ assert.match(shadow,/mkdtempSync/);
+ assert.match(shadow,/cpSync\(src,shadow/);
+ assert.match(shadow,/rmSync\(tmp,\{recursive:true,force:true\}\)/);
+ assert.match(shadow,/new Uint8Array\(new ArrayBuffer\(src.byteLength\)\)/);
+ assert.match(shadow,/crypto\.subtle\.verify/);
+ assert.match(shadow,/verifyStoredSignedMeshInvite/);
+ assert.match(shadow,/verifyRelayListProof/);
+ assert.match(shadow,/createHash\("sha256"\)/);
+ for(const path of ["mesh-inbox-send/send.ts","mesh-inbox-receive/receive.ts",
+  "mesh-pairing-relay/protocol.ts","mesh-device-presence-qa/heartbeat.ts"])
+   assert.ok(shadow.includes(path),path);
+ assert.match(runner,/node --experimental-strip-types scripts\/qa-deno-ts6-crypto-shadow\.mjs/);
+ assert.match(workflow,/node-version: '22'/);
+ assert.match(workflow,/deno-version: v2\.9\.6/);
+ assert.doesNotMatch(shadow,/supabase functions deploy|supabase db push|SUPABASE_SERVICE_ROLE_KEY/i);
+});
+
+test("historical inbox invitation cancellation remains blocked until separately approved",()=>{
+ const source=read("tests/fixtures/migrations/20261030072543_mesh_recipient_signed_inbox_atomic_decisions.sql");
+ const fixture=read("tests/sql/mesh_stage4e_atomic_write_disposable_qa.sql");
+ assert.match(source,/new\.state NOT IN \('accepted','rejected'\)/);
+ assert.match(source,/KATOSYNC_MESH_INBOX_INVALID_RESOLUTION/);
+ assert.match(fixture,/ATOMIC_QA_UNREVIEWED_CANCELLATION_ENABLED/);
+ assert.match(fixture,/ATOMIC_QA_CANCELLATION_WRONG_DENIAL/);
+});

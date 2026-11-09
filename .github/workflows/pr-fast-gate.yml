@@ -96,5 +96,10 @@ jobs:
         with:
           deno-version: v2.9.6
 
-      - name: Run permission-restricted native Deno QA (no network / no deploy)
+      - name: Setup Node for isolated SHA-pinned crypto parity QA
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run native Deno and original-vs-shadow Ed25519 parity (no deploy)
         run: bash scripts/qa-deno-mesh-stage4e.sh

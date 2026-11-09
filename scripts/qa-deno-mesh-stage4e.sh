@@ -23,4 +23,7 @@ deno test --no-config --no-remote \
 deno test --no-check --no-config --no-remote \
   --allow-env=SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY,KATOSYNC_MESH_ENTITLEMENT_BOUNDARY_STAGE,KATOSYNC_MESH_INBOX_STAGE,KATOSYNC_MESH_INBOX_RECEIVE_STAGE,KATOSYNC_MESH_PAIRING_RELAY_STAGE,KATOSYNC_MESH_ENROLLMENT_STAGE,KATOSYNC_MESH_RELAY_QA_MODE,KATOSYNC_MESH_RELAY_QA_PROJECT_REF,DENO_DEPLOYMENT_ID \
   tests/deno/meshEntrypointDefaultOffStage4E.test.ts
+# Independent TS6 shadow compatibility test does NOT touch immutable handlers.
+# The Node22 type-strip runtime imports both ORIGINAL and copied QA crypto.
+node --experimental-strip-types scripts/qa-deno-ts6-crypto-shadow.mjs
 echo KATOSYNC_STAGE4E_NATIVE_DENO_QA_PASS_NO_DEPLOY
