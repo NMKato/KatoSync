@@ -50,6 +50,7 @@ case "${1:-legacy}" in
   inbox-edge-e2e) TEST_FILE="$ROOT/tests/sql/mesh_inbox_edge_e2e_setup.sql" ;;
   inbox-relay) TEST_FILE="$ROOT/tests/sql/mesh_pairing_relay_qa.sql" ;;
   shared-rollout) TEST_FILE="$ROOT/tests/sql/mesh_stage3v_shared_schema_compat.sql" ;;
+  shared-beta-failclose) TEST_FILE="$ROOT/tests/sql/mesh_shared_k2s_private_beta_failclosed_qa.sql" ;;
   inbox-relay-rust-e2e) TEST_FILE="$ROOT/tests/sql/mesh_relay_stage3k_setup.sql" ;;
   *) echo "MESH_QA_UNKNOWN_TEST_SELECTION" >&2; exit 2 ;;
 esac
