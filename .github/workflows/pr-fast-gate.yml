@@ -103,3 +103,18 @@ jobs:
 
       - name: Run native Deno and original-vs-shadow Ed25519 parity (no deploy)
         run: bash scripts/qa-deno-mesh-stage4e.sh
+
+      - name: Build disposable PostgreSQL17 and Node22 integration test image
+        run: docker build -f tests/qa/pg17-node22-localstack.Dockerfile -t katosync-stage4e-qa:local .
+
+      - name: Local signed ES256 Auth to real PostgreSQL17 cancellation E2E (no deploy)
+        run: |
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --user postgres \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/src,readonly" \
+            --workdir /src --entrypoint /bin/bash \
+            -e KATOSYNC_PG_BIN=/usr/local/bin \
+            katosync-stage4e-qa:local \
+            scripts/qa-mesh-postgres-local.sh inbox-lifecycle-localstack
