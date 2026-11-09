@@ -1,5 +1,7 @@
 # KatoSync Stage4J — real macOS resource admission, isolated QA candidate
 
+**Post-build update (2026-11-09):** The originally unnotarized signed candidate subsequently passed isolated PDF/Typst functional QA, Apple notarization (`Accepted`), stapling and Gatekeeper assessment. The historical pre-notarization status and outstanding gates below describe the initial build state only. Current internal status and explicit public/Mesh release HOLD are documented in [Stage4J notarized functional QA](KATOSYNC_STAGE4J_NOTARIZED_FUNCTIONAL_QA_2026-11-09.md).
+
 **Date:** 2026-11-09 (Europe/Berlin)
 **Input:** Draft PR #247 at `9f98ae1b33fe187f0de7fd77305ac4dc43046cd2`, Stage4I owner-scoped manual peer preflight.
 **Goal:** an internal, side-by-side signed macOS QA candidate carrying real Poppler, Typst and speech-helper resources, instead of inherited `.test-only` placeholders.
