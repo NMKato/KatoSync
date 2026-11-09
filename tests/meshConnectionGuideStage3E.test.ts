@@ -31,7 +31,8 @@ test("guide is above hidden diagnostics; device selection never auto sends, gran
  assert.match(guide,/presentation\.recentlyReported\.map\(renderRegistration\)/);
  assert.match(guide,/presentation\.olderEntries\.map\(renderRegistration\)/);
  assert.match(view,/aria-pressed=\{selectedDeviceId===device\.deviceId\}/);
- assert.match(view,/onClick=\{\(\)=>setSelectedDeviceId\(device\.deviceId\)\}/);
+ assert.match(view,/onClick=\{\(\)=>\{[\s\S]*?setSelectedDeviceId\(device\.deviceId\);/);
+ assert.match(view,/nativePreflightOperation\.current\+\+;nativePreflightInFlight\.current=false/);
  assert.match(guide,/selectedDevice\.membershipState==="discovered"&&qaAuthEnabled/);
  assert.match(guide,/inboxSendEnabled\?/);
  assert.match(guide,/onClick=\{\(\)=>void sendNativeInbox\(selectedDevice\.deviceId\)\}/);

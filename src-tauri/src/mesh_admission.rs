@@ -2,8 +2,9 @@
 //! Mesh Stage 2D: native-only, owner-scoped admission for a one-shot pinned
 //! mTLS probe. UI fields and network discovery never grant peer trust.
 //!
-//! No Tauri command invokes this; no socket listener, remote dispatch,
-//! session persistence or writer authorization is enabled.
+//! Only a manually invoked, read-only QA preflight is exposed to Tauri.
+//! No socket listener, transport, remote dispatch, session persistence
+//! or writer authorization is enabled.
 
 use crate::{
     mesh_enrollment_gate::require_both_devices_enrolled,
@@ -13,6 +14,7 @@ use crate::{
     mesh_trust::{approved_peer_for_account, ApprovedPeer},
 };
 use ed25519_dalek::SigningKey;
+use serde::Serialize;
 use tokio::net::TcpStream;
 
 struct NativeAdmission {
@@ -102,6 +104,67 @@ async fn recheck_after_probe(
         .map_err(|_| "MESH_ADMISSION_ENROLLMENT_REVOKED".to_string())
 }
 
+/// Stage4I: explicit UI-triggered, READ-ONLY admission preflight.
+/// A positive result authorizes NO trust, socket, remote job or durable
+/// connection: it only indicates the existing QA admission predicates passed
+/// at the moment of the check. Results must expire when the account, roster
+/// or local Keychain approval changes.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePeerPreflight {
+    protocol: &'static str,
+    admission_eligible: bool,
+    paired: bool,
+    transport_ready: bool,
+    remote_jobs_enabled: bool,
+    verified_peers: u8,
+}
+
+fn exact_public_fingerprint(value: &str) -> bool {
+    value.len() == 47
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if index % 3 == 2 {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit() && !byte.is_ascii_lowercase()
+            }
+        })
+}
+
+fn diagnostic_preflight_result() -> NativePeerPreflight {
+    NativePeerPreflight {
+        protocol: "katosync-mesh-native-peer-preflight-v1",
+        admission_eligible: true,
+        paired: false,
+        transport_ready: false,
+        remote_jobs_enabled: false,
+        verified_peers: 0,
+    }
+}
+
+#[tauri::command]
+pub async fn mesh_native_peer_preflight(
+    requested_fingerprint: String,
+) -> Result<NativePeerPreflight, String> {
+    // No peer is trusted merely because a public inventory row exists.
+    if !exact_public_fingerprint(&requested_fingerprint) {
+        return Err("MESH_PREFLIGHT_INVALID_PEER".into());
+    }
+    // Reuse all existing checks: isolated QA feature, live authenticated
+    // owner, existing Keychain identity, locally approved exact peer pin,
+    // owner-scoped RLS GET for BOTH enrolled keys and a fresh account check.
+    let admitted = authorize(&requested_fingerprint)
+        .await
+        .map_err(|_| "MESH_PREFLIGHT_NOT_READY".to_string())?;
+    // Check again after every await to reject a rotated key, revoked peer,
+    // changed owner, or invalidated server-side enrollment.
+    recheck_after_probe(&admitted, &requested_fingerprint)
+        .await
+        .map_err(|_| "MESH_PREFLIGHT_NOT_READY".to_string())?;
+    // No TcpStream / listener / trust write / job dispatch from this IPC path.
+    Ok(diagnostic_preflight_result())
+}
+
 /// An internal service must supply the peer certificate and a socket. Never
 /// expose this API through the frontend. The TLS layer validates the cert
 /// against a Keychain-derived *explicitly approved* public-key pin.
@@ -149,6 +212,33 @@ mod tests {
             approved_at: at,
             status: "locally_approved".into(),
         }
+    }
+
+    #[test]
+    fn stage4i_preflight_rejects_untrusted_peer_ids_before_network_or_keychain() {
+        let valid = fingerprint(&SigningKey::from_bytes(&[71; 32]).verifying_key());
+        assert!(exact_public_fingerprint(&valid));
+        for bad in [
+            "",
+            "A",
+            "wrong-peer",
+            "00:11:22",
+            &valid.to_ascii_lowercase(),
+            &format!("{}{}", valid, "-00"),
+        ] {
+            assert!(!exact_public_fingerprint(bad));
+        }
+    }
+
+    #[test]
+    fn stage4i_preflight_never_claims_real_pairing_or_transport_permissions() {
+        let result = serde_json::to_value(diagnostic_preflight_result()).unwrap();
+        assert_eq!(result["protocol"], "katosync-mesh-native-peer-preflight-v1");
+        assert_eq!(result["admissionEligible"], true);
+        assert_eq!(result["paired"], false);
+        assert_eq!(result["transportReady"], false);
+        assert_eq!(result["remoteJobsEnabled"], false);
+        assert_eq!(result["verifiedPeers"], 0);
     }
 
     #[test]

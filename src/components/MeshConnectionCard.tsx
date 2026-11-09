@@ -66,6 +66,15 @@ type MeshNativeIssuerReadiness = {
   remoteJobsEnabled:false;
 };
 
+type MeshNativePeerPreflight = {
+  protocol:"katosync-mesh-native-peer-preflight-v1";
+  admissionEligible:true;
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+  verifiedPeers:0;
+};
+
 type MeshKatoosSharedPreflight = {
   protocol:"mesh-katoos-shared-preflight-v1";
   sharedIssuerVerified:true;
@@ -209,6 +218,20 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   // A user-visible pairing guide is NOT an authenticated transport session.
   const [guideOpen,setGuideOpen]=useState(false);
   const [selectedDeviceId,setSelectedDeviceId]=useState<string|null>(null);
+  // Stage4I: explicit read-only admission report, never an active connection.
+  const [nativePreflight,setNativePreflight]=useState<{
+    deviceId:string;fingerprint:string;eligible:true;
+  }|null>(null);
+  const [nativePreflightError,setNativePreflightError]=useState(false);
+  const [nativePreflightBusy,setNativePreflightBusy]=useState(false);
+  const nativePreflightInFlight=useRef(false);
+  const nativePreflightOperation=useRef(0);
+  // Readiness is an ephemeral observation, never a durable permission.
+  useEffect(()=>{
+    if(!nativePreflight)return;
+    const timeout=window.setTimeout(()=>setNativePreflight(null),30_000);
+    return ()=>window.clearTimeout(timeout);
+  },[nativePreflight]);
   // Synchronous guards survive double-clicks before React can re-render.
   // Epochs invalidate late async results after an account/surface refresh.
   const rosterOperation=useRef(0);
@@ -317,6 +340,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       inboxOperation.current++;inboxInFlight.current=false;
       recipientOperation.current++;recipientInFlight.current=false;
       setDirectory(null);setSelectedDeviceId(null);setGuideOpen(false);
+      nativePreflightOperation.current++;nativePreflightInFlight.current=false;
+      setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
       setDirectoryError(false);setDirectoryIssue(null);
       setNativeInboxPrepared(null);setNativeInboxSent(null);
       setRecipientInbox(null);setRecipientDecision(null);
@@ -531,6 +556,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     const operation=++rosterOperation.current;
     setDirectoryBusy(true);setDirectoryError(false);setDirectoryIssue(null);setDirectory(null);
     setSelectedDeviceId(null);
+    nativePreflightOperation.current++;nativePreflightInFlight.current=false;
+    setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
     setNativeInboxPrepared(null);setNativeInboxError(false);setNativeInboxSent(null);setRecipientInbox(null);setRecipientDecision(null);
     resetRelay();
     challengeOperation.current++;challengeInFlight.current=false;
@@ -753,6 +780,34 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   };
   const selectedDevice=directory?.devices.find(d=>d.deviceId===selectedDeviceId &&
     d.fingerprint!==agentBootstrap?.fingerprint)??null;
+  // A manual preflight checks existing Keychain pin + current owner + RLS
+  // enrollment. It never creates a key, pairs a device or opens a socket.
+  const runNativePeerPreflight=async(device:MeshAccountDevice)=>{
+    if(!qaAuthEnabled||nativePreflightInFlight.current||
+       selectedDeviceId!==device.deviceId||device.membershipState==="revoked"||
+       !/^[0-9A-F]{2}(-[0-9A-F]{2}){15}$/.test(device.fingerprint))return;
+    nativePreflightInFlight.current=true;
+    const operation=++nativePreflightOperation.current;
+    setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(true);
+    try{
+      const result=await invoke<MeshNativePeerPreflight>(
+        "mesh_native_peer_preflight",{requestedFingerprint:device.fingerprint});
+      if(result.protocol!=="katosync-mesh-native-peer-preflight-v1"||
+         result.admissionEligible!==true||result.paired!==false||
+         result.transportReady!==false||result.remoteJobsEnabled!==false||
+         result.verifiedPeers!==0)throw Error("unexpected_mesh_trust");
+      if(operation===nativePreflightOperation.current){
+        setNativePreflight({deviceId:device.deviceId,
+          fingerprint:device.fingerprint,eligible:true});
+      }
+    }catch{
+      if(operation===nativePreflightOperation.current)setNativePreflightError(true);
+    }finally{
+      if(operation===nativePreflightOperation.current){
+        nativePreflightInFlight.current=false;setNativePreflightBusy(false);
+      }
+    }
+  };
   // Relay proof alone never grants trust. Selected target and independently
   // entered OTHER device's SAS must match the locally verified public key.
   const relayApprovalEligible=canConfirmRelayPeerLocally({
@@ -820,6 +875,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       throw new Error("unexpected_peer_permission");
     }
     setApprovedPeers(value.peers);
+    // An updated local pin inventory invalidates any earlier admission result.
+    nativePreflightOperation.current++;nativePreflightInFlight.current=false;
+    setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
   };
   const loadApproved=async()=>{
     setPairingBusy(true);setApprovalError(false);
@@ -1044,7 +1102,11 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     className="vision-mesh-guide-device" key={device.deviceId}
     aria-pressed={selectedDeviceId===device.deviceId}
     disabled={directoryBusy||nativeInboxBusy||recipientBusy}
-    onClick={()=>setSelectedDeviceId(device.deviceId)}>
+    onClick={()=>{
+      nativePreflightOperation.current++;nativePreflightInFlight.current=false;
+      setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
+      setSelectedDeviceId(device.deviceId);
+    }}>
     <span className="vision-mesh-guide-device-name"><strong>{displayRegistrationName(device)}</strong>
       <small>{device.displayName}</small>
       <small>{device.platformOs} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>
@@ -1171,6 +1233,20 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
               disabled={nativeInboxBusy||directoryBusy||recipientBusy}
               onClick={()=>void prepareNativeInbox(selectedDevice.deviceId)}>{t("mesh.inbox.prepare")}</button>:
           <small>{t("mesh.guide.sendUnavailable")}</small>}
+        {qaAuthEnabled&&selectedDevice.membershipState!=="revoked"?<>
+          <button type="button" className="ghost compact-button"
+            disabled={nativePreflightBusy||directoryBusy||pairingBusy}
+            onClick={()=>void runNativePeerPreflight(selectedDevice)}>
+            <RefreshCcw size={14} className={nativePreflightBusy?"spin":""}/>
+            {t("mesh.nativePreflight.check")}
+          </button>
+          {nativePreflight?.deviceId===selectedDevice.deviceId&&
+           nativePreflight.fingerprint===selectedDevice.fingerprint?
+            <small role="status">{t("mesh.nativePreflight.eligible")}</small>:null}
+          {nativePreflightError?<small role="alert" className="vision-mesh-error">
+            {t("mesh.nativePreflight.blocked")}</small>:null}
+          <small>{t("mesh.nativePreflight.noTrust")}</small>
+        </>:null}
         <small>{t("mesh.inbox.noTrust")}</small>
       </div>:null}
       {nativeInboxSent?<p role="status" className="vision-mesh-compact-notice">

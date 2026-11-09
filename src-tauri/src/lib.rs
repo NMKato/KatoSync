@@ -454,6 +454,7 @@ pub fn run() {
             local_control_snapshot,
             mesh_readiness::mesh_local_readiness,
             mesh_native_issuer::mesh_native_issuer_readiness,
+            mesh_admission::mesh_native_peer_preflight,
             mesh_katoos_shared_preflight::mesh_katoos_shared_preflight,
             mesh_owner_review_readback::mesh_owner_review_readback_qa,
             mesh_preview_auth::mesh_preview_auth_status,
