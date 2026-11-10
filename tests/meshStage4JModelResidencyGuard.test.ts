@@ -6,6 +6,7 @@ import {readFileSync} from "node:fs";
 const read=(path:string)=>readFileSync(new URL("../"+path,import.meta.url),"utf8");
 const source=read("src-tauri/src/local_brain.rs");
 const manifest=JSON.parse(read("src/lib/localBrainManifest.json"));
+const build=read("scripts/build-mesh-qa-stage4j-candidate-macos.sh");
 
 test("Local Brain serializes full asynchronous model start and controlled stop",()=>{
   assert.match(source,/static MODEL_START_LOCK: tokio::sync::Mutex<\(\)>/);
@@ -31,4 +32,13 @@ test("secondary model requires a separate pinned release contract; never auto-lo
   assert.ok(manifest.models.every((m:any)=>/^[a-f0-9]{64}$/.test(m.sha256) && m.sizeBytes>0));
   assert.match(source,/pub async fn start\(app: &AppHandle\)/);
   assert.doesNotMatch(source,/pub fn auto_load_two_models\(/);
+});
+
+
+test("model guard signed QA build uses a new collision-protected slot, not the live singleton app",()=>{
+  assert.match(build,/MODEL_GUARD_20261110/);
+  assert.match(build,/\.KatoSync-Mesh-Stage4J-ModelGuardQA/);
+  assert.match(build,/KatoSync 4J Model Guard QA/);
+  assert.match(build,/! -e "\$OUTDIR"/);
+  assert.match(build,/KATOSYNC_STAGE4J_EXPECT_SHA/);
 });

@@ -19,6 +19,8 @@ if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_20261110" ]]; then
  OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-SingletonQA"
 elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_FIX_20261110" ]]; then
  OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-SingletonFixedQA"
+elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "MODEL_GUARD_20261110" ]]; then
+ OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-ModelGuardQA"
 elif [[ -n "${KATOSYNC_STAGE4J_QA_SLOT:-}" ]]; then
  echo "STAGE4J_UNKNOWN_QA_SLOT";exit 2
 fi
@@ -69,7 +71,9 @@ done
 ditto "$ROOT_RES/licenses" "$APP_RES/licenses"
 cp "$BIN" "$APP/Contents/MacOS/katosync"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $ID" "$APP/Contents/Info.plist"
-if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_FIX_20261110" ]]; then
+if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "MODEL_GUARD_20261110" ]]; then
+ /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Model Guard QA" "$APP/Contents/Info.plist"
+elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_FIX_20261110" ]]; then
  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Single Instance Fixed QA" "$APP/Contents/Info.plist"
 elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_20261110" ]]; then
  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Single Instance QA" "$APP/Contents/Info.plist"
