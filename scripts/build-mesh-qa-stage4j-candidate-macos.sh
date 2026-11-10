@@ -44,7 +44,7 @@ xcrun stapler validate "$BASE" >/dev/null
 node "$ROOT/scripts/qa-stage4j-macos-resource-audit.mjs"
 [[ -x "$ROOT/node_modules/.bin/tauri" ]] || { echo "STAGE4J_TAURI_MISSING";exit 3; }
 STAGING="$(mktemp -d "$HOME/Applications/.KatoSync-Stage4J-Build.XXXXXX")"
-ENTITLEMENTS="$(mktemp /tmp/katosync-stage4j-entitlements.XXXXXX.plist)"
+ENTITLEMENTS="$(mktemp /tmp/katosync-stage4j-entitlements.XXXXXX)"
 cleanup(){
  rm -f -- "$ENTITLEMENTS"
  if [[ "$STAGING" == "$HOME/Applications/.KatoSync-Stage4J-Build."* ]];then
