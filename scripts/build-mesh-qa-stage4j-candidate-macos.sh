@@ -21,6 +21,10 @@ elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_FIX_20261110" ]]; then
  OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-SingletonFixedQA"
 elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "MODEL_GUARD_20261110" ]]; then
  OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-ModelGuardQA"
+elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "STAGE4N_SIGNED_20261110" ]]; then
+ # Do NOT launch or install alongside Stage4J; identity and Keychain remain
+ # Stage4J while this signed candidate is under separate QA validation.
+ OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4N-TruthQA"
 elif [[ -n "${KATOSYNC_STAGE4J_QA_SLOT:-}" ]]; then
  echo "STAGE4J_UNKNOWN_QA_SLOT";exit 2
 fi
@@ -71,7 +75,9 @@ done
 ditto "$ROOT_RES/licenses" "$APP_RES/licenses"
 cp "$BIN" "$APP/Contents/MacOS/katosync"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $ID" "$APP/Contents/Info.plist"
-if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "MODEL_GUARD_20261110" ]]; then
+if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "STAGE4N_SIGNED_20261110" ]]; then
+ /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync Stage4N Truth QA" "$APP/Contents/Info.plist"
+elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "MODEL_GUARD_20261110" ]]; then
  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Model Guard QA" "$APP/Contents/Info.plist"
 elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_FIX_20261110" ]]; then
  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Single Instance Fixed QA" "$APP/Contents/Info.plist"
