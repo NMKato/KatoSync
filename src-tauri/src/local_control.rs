@@ -1,3 +1,5 @@
+mod agent_scope;
+
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -41,6 +43,8 @@ struct LocalControlJob {
     resource_locks: Vec<String>,
     #[serde(default)]
     dedupe_key: Option<String>,
+    #[serde(default)]
+    agent_scope: Option<agent_scope::AgentJobScope>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -342,6 +346,9 @@ fn command_basename(command: &str) -> &str {
 
 fn validate_command(job: &LocalControlJob) -> Result<(), String> {
     let mode = job.mode.as_str();
+    if mode == "agent_read_only" {
+        return agent_scope::validate_command(job);
+    }
     if !matches!(mode, "read_only" | "workspace_write") {
         return Err("Local Control: mode muss read_only oder workspace_write sein.".to_string());
     }
@@ -539,6 +546,7 @@ fn execute_job(root: &Path, job: &LocalControlJob) -> LocalControlResult {
     let validation = validate_job_id(&job.id)
         .and_then(|_| allowed_cwd(Path::new(&job.cwd)))
         .and_then(|_| validate_command(job))
+        .and_then(|_| agent_scope::validate_agent_job(job))
         .and_then(|_| git_clean_if_required(job));
 
     if let Err(e) = validation {
@@ -573,7 +581,18 @@ fn execute_job(root: &Path, job: &LocalControlJob) -> LocalControlResult {
         }
     };
 
-    let mut child = match Command::new(&job.command)
+    let command_name = if job.mode == "agent_read_only" {
+        "/usr/bin/git"
+    } else {
+        job.command.as_str()
+    };
+    let mut process = Command::new(command_name);
+    if job.mode == "agent_read_only" {
+        process
+            .args(["--no-optional-locks", "-c", "core.fsmonitor=false"])
+            .env("GIT_OPTIONAL_LOCKS", "0");
+    }
+    let mut child = match process
         .args(&job.args)
         .current_dir(&job.cwd)
         .env("PATH", child_path())
@@ -646,6 +665,12 @@ fn execute_job(root: &Path, job: &LocalControlJob) -> LocalControlResult {
         thread::sleep(Duration::from_millis(250));
     }
 
+    if job.mode == "agent_read_only" && result.status == "completed" {
+        if let Err(error) = agent_scope::validate_agent_job(job) {
+            result.status = "failed".to_string();
+            result.error = Some(format!("STAGE4L_POSTCHECK_DENIED: {error}"));
+        }
+    }
     result.finished_at = now();
     result.duration_ms = started.elapsed().as_millis();
     result
@@ -700,6 +725,17 @@ fn git_value(cwd: &str, args: &[&str]) -> String {
 }
 
 fn effective_dedupe_key(job: &LocalControlJob) -> String {
+    // MARK: Never trust an Inbox-provided dedupe override for scoped agent jobs.
+    // Nor invoke Git on an unvalidated agent cwd before admission.
+    if job.mode == "agent_read_only" {
+        return format!(
+            "stage4l|{}|{}|{}|{}",
+            job.project_id.as_deref().unwrap_or(""),
+            job.id,
+            cwd_key(&job.cwd),
+            job.args.join("\u{001f}")
+        );
+    }
     if let Some(key) = job.dedupe_key.as_ref().filter(|key| !key.trim().is_empty()) {
         return key.trim().to_string();
     }
@@ -1025,6 +1061,7 @@ mod tests {
             project_id: Some("test-project".to_string()),
             resource_locks: Vec::new(),
             dedupe_key: None,
+            agent_scope: None,
         }
     }
 
