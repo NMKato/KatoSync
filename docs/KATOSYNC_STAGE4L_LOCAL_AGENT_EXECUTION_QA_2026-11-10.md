@@ -40,3 +40,14 @@
 **Entscheidung:** Stage4L lokaler QA-Leseauftrag nachgewiesen; neue native Agenten-Zulassung als *Quelländerung*, noch nicht produktiv ausgeführt. Release bleibt NO-GO.
 
 Created by NMKato Solutions
+
+
+## Ergaenzende native Source-Modultests – 10.11.2026
+
+- Reproduzierbare, separate Cargo-QA-Crate unter tests/native/stage4l verwendet DIREKT die echte src-tauri/src/local_control/agent_scope.rs, nicht eine kopierte/veraltete Version.
+- In einem separaten Crate mit bewusst abgeleiteter LocalControlJob-Typstruktur und eigens begrenztem projektregister-Stubsystem: **8/8 native Rust-Tests bestanden, 0 fehlgeschlagen**.
+- Enthaelt echte temporaere Git-Commit-/Worktree-Tests fuer korrekte Projekt-Common-Directory, exakte Agentenbranch-Zuordnung und veralteten HEAD.
+- Der Register-Stub ist absichtlich keine echte Owner-Session oder Authentifizierung; ein positives Fixture-Ergebnis darf nicht als Live-Genehmigung interpretiert werden.
+- Erstaufbau der isolierten Cargo-Testdependencies dauerte rund 4m33s; die im Repository wiederholbare QA-Suite mit vorhandenem Cargo-Cache lief in 22s.
+- **Vollstaendige Tauri-/Local-Control-Library-, App-Packaging-, Signing- und M2/M3-Ausfuehrungstests weiterhin OFFEN.** Kein Installationspaket auf den Macs ersetzt.
+- Verifikation vor Release braucht insbesondere echte registrierte KatoOS-Owner-Session, signierte Approval-Receipts, Wiederanlauf und Revocation, sowie native Cross-OS-Checks.
