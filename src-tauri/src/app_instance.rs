@@ -226,21 +226,14 @@ pub fn allow_gui_start() -> bool {
         );
         return false;
     };
+    // If another coordinated instance already holds the lock, simply exit.
+    // Never invoke AppleScript here: LaunchServices may block when resolving
+    // two installations with the same CFBundleIdentifier.
     let file = match lock_for_session(&root, uid) {
         Ok(file) => file,
-        Err(cause) => {
-            if cause == "INSTANCE_ALREADY_RUNNING"
-                && process_list(&home, uid, std::process::id())
-                    .ok()
-                    .is_some_and(|apps| apps.iter().any(|a| a.bundle_id == NEW_APP))
-            {
-                // A coordinated Stage4J already owns the user lock: reuse its window.
-                let _ = Command::new("/usr/bin/osascript").args(["-e",
-                    "tell application id \"com.nmkato.katosync.meshqa.stage4j-isolated\" to activate"
-                ]).status();
-                return false;
-            }
-            notify("KatoSync läuft bereits oder die Startsperre ist nicht verfügbar. Die bestehende Instanz bleibt aktiv.");
+        Err(cause) if cause == "INSTANCE_ALREADY_RUNNING" => return false,
+        Err(_) => {
+            notify("KatoSync konnte die sichere Startsperre nicht öffnen. Die vorhandene App bleibt aktiv.");
             return false;
         }
     };

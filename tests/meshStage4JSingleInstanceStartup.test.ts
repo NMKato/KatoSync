@@ -16,12 +16,16 @@ test("signed Stage4J GUI only is protected, not headless sync or Stage35",()=>{
   assert.match(build,/--features stage4j-qa/);
   assert.match(build,/KATOSYNC_STAGE4J_QA_SLOT/);
   assert.match(build,/SINGLETON_20261110/);
+  assert.match(build,/SINGLETON_FIX_20261110/);
+  assert.match(build,/\.KatoSync-Mesh-Stage4J-SingletonFixedQA/);
   assert.match(build,/\.KatoSync-Mesh-Stage4J-SingletonQA/);
 });
 
 test("one owner-level lock; ambiguous or unsafe processes do not get killed",()=>{
   assert.match(guard,/file\.try_lock\(\)/);
   assert.match(guard,/INSTANCE_ALREADY_RUNNING/);
+  assert.match(guard,/Err\(cause\) if cause == "INSTANCE_ALREADY_RUNNING" => return false/);
+  assert.doesNotMatch(guard,/to activate/);
   assert.match(guard,/file_type\(\)\.is_dir\(\)/);
   assert.match(guard,/info\.uid\(\) != uid/);
   assert.match(guard,/TeamIdentifier=\{TEAM_ID\}/);

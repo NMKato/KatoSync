@@ -34,3 +34,9 @@
 **Nachgewiesen:** 861/861 Node-Regressionstests, 2/2 native Rust-Singleton-Tests, TypeScript-Typprüfung und Formatprüfung bestanden. Der nachfolgende Sonderfall-Sicherheitspatch erfordert noch einmal seine gezielten Tests und die neu signierte Hardware-App. Bis dahin ist die **alte** signierte Stage4J-Binärdatei weiterhin ohne dieses neue Single-Instance-Gate.
 
 Created by NMKato Solutions
+
+## Live-QA-Korrektur: zweite GUI darf nicht auf AppleScript warten
+
+Beim ersten Hardware-Doppelstartversuch der notarisierten Single-Instance-QA-App auf M2 übernahm die erste App die exklusive Dateisperre korrekt. Die zweite Instanz blockierte jedoch bei einem zusätzlichen AppleScript-`activate`-Aufruf, der wegen gleicher Bundle-ID nicht zuverlässig aufgelöst wurde. Ein QA-eigener AppleScript-Helfer wurde gezielt beendet; die erste App lief weiter.
+
+**Quellcode-Korrektur:** Wenn `INSTANCE_ALREADY_RUNNING` erkannt wird, kehrt die zweite Instanz jetzt ohne AppleScript, Dialog oder weiteres I/O sofort zurück. Die ursprüngliche notarisierten Kandidaten-App ist damit für einen erneuten Doppelstarttest nicht mehr geeignet; es muss eine neue signierte und notarisierten QA-Binärdatei erstellt werden. Für M3 erfolgte noch kein Versionswechsel.
