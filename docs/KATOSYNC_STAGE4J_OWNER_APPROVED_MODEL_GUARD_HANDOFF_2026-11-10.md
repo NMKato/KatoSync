@@ -42,3 +42,16 @@ Sobald alle lokalen Eingaben gespeichert sind und der Besitzer am jeweiligen Mac
 **Entscheidung:** STAGE4J_OWNER_HANDOFF_PREFLIGHT_TWO_MAC_PASS. MODEL_GUARD_LIVE_ACTIVATION_PENDING_OWNER_APPROVAL.
 
 Created by NMKato Solutions
+
+
+## Physischer Live-Wechsel 15:15–15:18 Uhr, 10.11.2026
+
+- M2, 15:14: Read-only-Vorprüfung PASS: bisherige Stage4J SingletonFixedQA PID 48795, exakte Code-Signaturen und ModelGuard-SHA, Apple-Gatekeeper akzeptiert, Inbox 0 / Running 0, kein KatoSync-Modellport 17842.
+- M2, 15:15: Besitzer bestätigte den macOS-Sicherheitsdialog. Das Handoff-Skript führte ausschließlich den nativen Menübefehl Quit KatoSync 4J Single Instance Fixed QA aus. Alte PID 48795 war danach nicht mehr aktiv. Erst dann wurde die notarisierten ModelGuardQA-App geöffnet; neue PID 71328. Script-Endstatus STAGE4J_HANDOFF_ONE_MODEL_GUARD_INSTANCE_RUNNING, Exit 0.
+- M2: zusätzlicher praktischer Doppelstart mit open -n erzeugte keinen weiteren App-Prozess; M2_NEW_MODEL_GUARD_SINGLE_INSTANCE_PASS. Nachkontrolle 15:18 zeigte ausschließlich PID 71328 und ein GUI-Fenster KatoSync 4J · Mesh Isolation QA (kein Live-Pairing).
+- M2: Port 127.0.0.1:17842 weiterhin unbelegt, also kein impliziter Modellstart. Der getrennte KAI-Desktop-Gemma-Server (llama-server PID 74002) blieb aktiv. Dies ist noch kein Funktionsnachweis für eine echte Modellinferenz oder einen Modellwechsel.
+- M3: Vorabprüfung PASS, der danach angezeigte Eigentümerdialog wurde nicht bestätigt bzw. lief ab. Das Script gab STAGE4J_HANDOFF_OWNER_CANCELLED, Exit 5 zurück. Alte SingletonFixedQA PID 39937 blieb unverändert aktiv; die neue ModelGuardQA-App ist auf M3 lediglich geprüft und bereitgestellt, nicht gestartet.
+- Sicherheitsziel für beide Macs eingehalten: pro Mac exakt eine KatoSync-GUI-App; keine erzwungene Prozessbeendigung, keine zusätzlichen lokalen Modellserver, keine Mesh-SAS-Freigabe, keine Cloud-Auftragsausführung.
+- Aktueller Abnahmezustand: STAGE4J_M2_MODEL_GUARD_OWNER_HANDOFF_LIVE_PASS; STAGE4J_M3_OWNER_APPROVAL_PENDING. Die beiden Zustände dürfen im Fortschrittsalgorithmus nicht zu einem gemeinsamen Two-Mac-Live-Pass zusammengefasst werden.
+
+Nächster Gate: Besitzer bestätigt später den M3-Wechsel am dortigen Mac mit dem bereits geprüften Handoff-Skript; danach echter app-seitiger Local-Brain-Start-/Stop- und Port-Kollisionsnachweis unter kontrollierten Bedingungen. SAS-/mTLS-Pairing separat und nur mit manuellem Owner-Codevergleich.
