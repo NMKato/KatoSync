@@ -14,6 +14,12 @@ REF="${KATOSYNC_STAGE4J_EXPECT_SHA:-}"
 }
 BASE="$HOME/Applications/KatoSync Mesh QA Stage35.app"
 OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-Isolated-Candidate"
+# The original notarized binary remains immutable. Opt-in to a collision-free QA slot.
+if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_20261110" ]]; then
+ OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-SingletonQA"
+elif [[ -n "${KATOSYNC_STAGE4J_QA_SLOT:-}" ]]; then
+ echo "STAGE4J_UNKNOWN_QA_SLOT";exit 2
+fi
 OUT="$OUTDIR/KatoSync Mesh QA Stage4J Candidate.app"
 TEAM="T8SB89JPX7"
 SIGN="Developer ID Application: MK Heartbeat UG (haftungsbeschraenkt) ($TEAM)"
@@ -61,7 +67,11 @@ done
 ditto "$ROOT_RES/licenses" "$APP_RES/licenses"
 cp "$BIN" "$APP/Contents/MacOS/katosync"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $ID" "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync Mesh QA Stage4J Candidate" "$APP/Contents/Info.plist"
+if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_20261110" ]]; then
+ /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Single Instance QA" "$APP/Contents/Info.plist"
+else
+ /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync Mesh QA Stage4J Candidate" "$APP/Contents/Info.plist"
+fi
 test -z "$(find "$APP_RES" -name '.test-only' -print -quit)"
 test "$(find "$APP_RES/poppler/libs" -type f -name '*.dylib'|wc -l|tr -d ' ')" -ge 29
 for file in "$APP_RES/poppler/libs/"*.dylib;do

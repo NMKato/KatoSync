@@ -25,6 +25,8 @@ use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
+#[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+mod app_instance;
 mod context_pack;
 mod desktop_widget;
 mod github_app_auth;
@@ -333,6 +335,12 @@ pub fn run() {
             let _ = write_log("error", &format!("Headless-Sync fehlgeschlagen: {error:#}"));
             std::process::exit(1);
         }
+        return;
+    }
+
+    // Prevent duplicate GUI instances; never interfere with headless jobs.
+    #[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+    if !app_instance::allow_gui_start() {
         return;
     }
 

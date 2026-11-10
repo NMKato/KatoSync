@@ -108,6 +108,16 @@ pub struct LocalControlQueuedJobSnapshot {
 
 /// Echte Agent-Arbeit aktiv oder wartend: Local-Control-Lanes/Inbox oder externe Orchestrierung.
 /// Ohne lesbaren Control-Root gibt es keinen Daemon und damit keine externe Arbeit.
+/// Fail-closed startup check for a legacy-app handoff.
+/// Read errors are NOT evidence that the old app is idle.
+pub(crate) fn handoff_work_idle() -> bool {
+    monitor_snapshot().is_ok_and(|snapshot| {
+        snapshot.active_lanes.is_empty()
+            && snapshot.queued_jobs.is_empty()
+            && !snapshot.orchestration.work_active(chrono::Utc::now())
+    })
+}
+
 pub fn work_active() -> bool {
     monitor_snapshot().is_ok_and(|snapshot| {
         !snapshot.active_lanes.is_empty()
