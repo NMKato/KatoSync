@@ -1,4 +1,6 @@
 // Created by NMKato Solutions
+mod inference_readiness;
+
 use crate::model_distribution::{
     self as dist, release_gate_blockers, Channel, DistributionBase, ExpectedArtifact, ModelPackage,
     OriginPolicy, PackagePublication, PackageStore, UpdateState,
@@ -892,10 +894,19 @@ VERIFIZIERTE QUELLEN:
 
 pub async fn status(app: &AppHandle) -> Result<LocalBrainStatus> {
     let mut status = snapshot(app)?;
-    status.running = owned_child_alive()
-        || (status.runtime_installed
-            && status.model_installed
-            && serves_alias(HEALTH_URL, MODELS_URL, &status.model_alias).await);
+    // MARK: PID alive only means a process exists; it is NOT inference-readiness.
+    // Reap a terminated owned child, but never equate it to a verified model.
+    let _ = owned_child_alive();
+    let alias_ready = if status.runtime_installed && status.model_installed {
+        serves_alias(HEALTH_URL, MODELS_URL, &status.model_alias).await
+    } else {
+        false
+    };
+    status.running = inference_readiness::inference_ready(
+        status.runtime_installed,
+        status.model_installed,
+        alias_ready,
+    );
     // Manifest capability alone never means that the *running* server can see images.
     status.vision_ready = status.running && status.vision_ready && vision_service_ready().await;
     Ok(status)
@@ -1272,13 +1283,13 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
         .lock()
         .map_err(|_| anyhow!("Local-Brain-Prozesslock ist beschaedigt"))? = Some(child);
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()?;
+    // Only the configured model alias on the pinned loopback port counts as
+    // a ready server. HTTP /health alone may succeed before weights are loaded.
     for _ in 0..45 {
-        if let Ok(response) = client.get(HEALTH_URL).send().await {
-            if response.status().is_success() {
-                return status(app).await;
+        if serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
+            let observed = status(app).await?;
+            if observed.running {
+                return Ok(observed);
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -1286,7 +1297,7 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
 
     let _ = stop_owned();
     Err(anyhow!(
-        "Local Brain wurde gestartet, aber der Health-Check blieb 45 Sekunden lang rot"
+        "Local Brain konnte Health und gepinntes Modell-Alias nicht bestaetigen"
     ))
 }
 
