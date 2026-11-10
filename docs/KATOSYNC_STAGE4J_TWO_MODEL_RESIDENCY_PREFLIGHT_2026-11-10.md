@@ -29,4 +29,13 @@ Der bisherige `local_brain::start`-Weg prüfte die bestehende Laufzeit, ließ ab
 
 **Wichtig:** Der neue Startschutz ist zunächst eine **Quelländerung**. Er ist noch nicht Bestandteil der bereits signierten Stage4J-App, solange keine neue Build-, Signatur- und Apple-Notarisierungsprüfung abgeschlossen wurde. Weder zwei installierte lokale Modelle noch ein automatischer Modellwechsel werden dadurch vorgetäuscht. Öffentliche Modellverteilung bleibt bis zur Lizenzfreigabe gesperrt.
 
+## Kontrollierte Regression nach dem Quell-Fix
+
+- **865/865** vollständige Node-Tests bestanden, keine fehlgeschlagenen Tests.
+- **4/4** gezielte Stage4J-Modellresidenz-Vertragstests bestanden (in der vollständigen Node-Suite enthalten).
+- **1/1** nativer Rust-Test: belegten lokalen Loopback-Port sicher erkannt; kein Modellserver gestartet oder fremder Prozess beendet.
+- **2/2** native Rust-Single-Instance-Tests erneut bestanden: exklusiver Benutzer-Lock und exakte Prozessidentität.
+- Rust-Formatprüfung bestanden.
+- Source-Commit: `d56f8a1` auf `qa/stage4j-resources-20261109`. Keine App-Signierung, Notarisierung, Mesh-Kopplung, Cloud-Migration, Modellinstallation oder GitHub-Push infolge dieses Fixes.
+
 Created by NMKato Solutions
