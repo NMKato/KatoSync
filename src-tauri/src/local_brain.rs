@@ -1139,6 +1139,50 @@ async fn verified_model_for_launch(app: &AppHandle, model: &ModelManifest) -> Re
     .context("Local-Brain-Modell ist nicht installiert oder nicht verifiziert")
 }
 
+// Stage4J-Qualitaetsgate: die Prozentzahl ist nur ein konservativer
+// macOS-Druckindikator, keine praezise freie Speicherliste.
+#[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+fn macos_memory_free_percent(text: &str) -> Option<u64> {
+    text.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("System-wide memory free percentage:")
+            .and_then(|value| value.trim().trim_end_matches('%').parse::<u64>().ok())
+            .filter(|value| *value <= 100)
+    })
+}
+
+#[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+fn macos_unified_memory_reserve_allows(total_bytes: u64, percent: u64, needed: u64) -> bool {
+    percent <= 100 && total_bytes > 0 && total_bytes.saturating_mul(percent) / 100 >= needed
+}
+
+#[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+fn ensure_stage4j_unified_memory_budget(model: &ModelManifest, total_gib: u64) -> Result<()> {
+    let output = Command::new("/usr/bin/memory_pressure")
+        .arg("-Q")
+        .output()
+        .context("macOS-Speicherdruck konnte nicht erhoben werden")?;
+    if !output.status.success() {
+        return Err(anyhow!("Local Brain: macOS-Speicherdruck nicht messbar"));
+    }
+    let percent = macos_memory_free_percent(&String::from_utf8_lossy(&output.stdout))
+        .ok_or_else(|| anyhow!("Local Brain: Speicherreserve nicht vertrauenswuerdig"))?;
+    let gib = 1024_u64.pow(3);
+    let total_bytes = total_gib.saturating_mul(gib);
+    let model_bytes = model
+        .size_bytes
+        .saturating_add(model.mmproj.as_ref().map_or(0, |p| p.size_bytes));
+    // Hinzu kommen KV-Kontext, Laufzeit und ein geschuetzter Rest fuer macOS,
+    // KAI Desktop und andere Anwendungen. Unified-GPU-RAM NICHT doppelt zaehlen.
+    let needed = model_bytes.saturating_add(4 * gib);
+    if !macos_unified_memory_reserve_allows(total_bytes, percent, needed) {
+        return Err(anyhow!(
+            "Local Brain wird aus Speicherschutz nicht geladen: Unified-Memory-Reserve zu niedrig (macOS-Indikator: {percent} %)"
+        ));
+    }
+    Ok(())
+}
+
 /// Startet hoechstens einen KatoSync-Modellserver. Fremde lokale Dienste werden nie beendet.
 pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
     // Der Guard muss vor dem ersten await und der Lebenszeichenpruefung liegen.
@@ -1174,6 +1218,11 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
             detected_ram_gb
         ));
     }
+
+    // Der Stage4J-M2 hat zwar 16 GiB installiert, kann aber durch KAI Desktop
+    // und den gemeinsamen macOS GPU-Speicher trotzdem unter Druck stehen.
+    #[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+    ensure_stage4j_unified_memory_budget(model, detected_ram_gb)?;
 
     let model_file = verified_model_for_launch(app, model).await?;
     // Existing text-only server is not stopped/restarted without operator action.
@@ -1309,6 +1358,47 @@ pub async fn remove(app: &AppHandle) -> Result<LocalBrainStatus> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+    #[test]
+    fn macos_memory_pressure_must_be_parseable_and_bounded() {
+        assert_eq!(
+            macos_memory_free_percent("System-wide memory free percentage: 35%"),
+            Some(35)
+        );
+        assert_eq!(
+            macos_memory_free_percent("System-wide memory free percentage: 0%"),
+            Some(0)
+        );
+        assert_eq!(
+            macos_memory_free_percent("System-wide memory free percentage: 101%"),
+            None
+        );
+        assert_eq!(macos_memory_free_percent("unknown"), None);
+        assert_eq!(
+            macos_memory_free_percent("System-wide memory free percentage: bogus"),
+            None
+        );
+    }
+
+    #[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+    #[test]
+    fn macos_sixteen_gib_guard_rejects_thirty_five_percent_reserve() {
+        let gib = 1024_u64.pow(3);
+        let model = recommended_model(&manifest().unwrap()).unwrap().clone();
+        let min_bytes = model.size_bytes + model.mmproj.as_ref().unwrap().size_bytes + 4 * gib;
+        assert!(!macos_unified_memory_reserve_allows(
+            16 * gib,
+            35,
+            min_bytes
+        ));
+        assert!(macos_unified_memory_reserve_allows(16 * gib, 75, min_bytes));
+        assert!(!macos_unified_memory_reserve_allows(
+            16 * gib,
+            101,
+            min_bytes
+        ));
+    }
 
     #[test]
     fn local_brain_port_occupation_is_detected_without_killing_other_processes() {
