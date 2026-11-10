@@ -51,3 +51,41 @@ antwortet. Im UI konnte damit fälschlich „läuft“ angezeigt werden.
 Remote- und Produktionsfreigaben bleiben gesperrt.
 
 Created by NMKato Solutions
+
+
+## Build- und Signaturversuch am M2 (10.11.2026, 20:55–21:11 MEZ)
+
+- In einem eigenen, kollisionsgeschuetzten Stage4M-Readiness-QA-Slot
+  wurde der exakt gepinnte Source-HEAD e0575c58dd41232e01cf7b9b9f4cc4c1147818df
+  mit dem vorhandenen Developer-ID-Signer vorbereitet.
+- Unveraenderte, bereits gepruefte STT-/Poppler-/Typst-/Lizenzressourcen
+  wurden nur in den isolierten Worktree kopiert; Audit bestaetigte
+  29 eingebettete Poppler-Libraries, 4 Lizenzfiles, unveraenderten SHA-Lock.
+- Erster Preflight zeigte einen macOS-spezifischen mktemp-Template-Fehler.
+  Dieser wurde in e0575c5 behoben. Zweiter Anlauf:
+  TypeScript + Vite Production-Build PASS (ein Bundle-Size-Warning).
+- Cargo wurde mit vorhandenem 13-GB-Buildcache und maximal 2 Jobs gestartet.
+  Rustc baute die grosse native Tauri-KatoSync-Library, gab nur Dead-Code-
+  Warnungen aus, lief jedoch nach 15 Minuten weiterhin mit erheblicher CPU.
+  Es gab bis dahin keine Compiler-Abbruchdiagnose.
+- Der EIGENE Build wurde deshalb kontrolliert beendet; keine fremden
+  Modellprozesse wurden beendet, bestehende Stage4J-App unveraendert.
+- **Es entstand KEIN fertiges Stage4M-App-Bundle, keine Developer-ID-
+  Signatur dieses neuen Builds, keine Notarisierung und keine Installation.**
+  Build-Gate und Reise-/Remote-Go-Live bleiben AUSDRUECKLICH ROT.
+- GitHub Source-/Fast-Gate von e0575c5 wurde erfolgreich.
+- Neuem signiertem QA-Build erst eine separate Laufzeit-/Account-
+  Isolation beibringen, bevor er neben Stage4J gestartet wird; der
+  aktuell geerbte stage4j-qa-Feature-Namespace verwendet die bestehenden
+  Stage4J-App-Support-/Keychain-Identitaeten und ist nicht als
+  parallele eigenstaendige Runtime freigegeben.
+
+### Naechster Review-Punkt
+
+1. QA-Build-Performance isoliert untersuchen, dabei M2-Last und Disk pruefen.
+2. Native Paketierung vollstaendig abschliessen, Developer-ID und externe
+   Paketressourcen pruefen; keinesfalls vor vollstaendiger Pruefung starten.
+3. Eigenstaendigen Stage4M-App-Support- und GUI-Singleton-Namespace fuer
+   parallelen privaten Test entwickeln.
+4. Erst danach signierte Client-QA auf M2, freigegebener M3-Test und
+   authentifizierte Owner-/Mesh-/Agentenpruefung.
