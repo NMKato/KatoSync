@@ -28,6 +28,9 @@ const PORT: &str = "17842";
 const MANIFEST_SCHEMA_VERSION: u32 = 2;
 static CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
 static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Serialize model starts, including downloads/verification and the first health probe.
+/// Two concurrent UI clicks must never spawn competing llama-server processes.
+static MODEL_START_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -507,6 +510,13 @@ fn find_runtime_binary(dir: &Path, executable: &str) -> Option<PathBuf> {
             entry.file_type().is_file() && entry.file_name().to_string_lossy() == executable
         })
         .map(|entry| entry.into_path())
+}
+
+fn local_brain_port_occupied(address: &str) -> bool {
+    let Ok(socket) = address.parse::<std::net::SocketAddr>() else {
+        return false;
+    };
+    std::net::TcpStream::connect_timeout(&socket, Duration::from_millis(200)).is_ok()
 }
 
 fn owned_child_alive() -> bool {
@@ -1129,7 +1139,54 @@ async fn verified_model_for_launch(app: &AppHandle, model: &ModelManifest) -> Re
     .context("Local-Brain-Modell ist nicht installiert oder nicht verifiziert")
 }
 
+// Stage4J-Qualitaetsgate: die Prozentzahl ist nur ein konservativer
+// macOS-Druckindikator, keine praezise freie Speicherliste.
+#[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+fn macos_memory_free_percent(text: &str) -> Option<u64> {
+    text.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("System-wide memory free percentage:")
+            .and_then(|value| value.trim().trim_end_matches('%').parse::<u64>().ok())
+            .filter(|value| *value <= 100)
+    })
+}
+
+#[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+fn macos_unified_memory_reserve_allows(total_bytes: u64, percent: u64, needed: u64) -> bool {
+    percent <= 100 && total_bytes > 0 && total_bytes.saturating_mul(percent) / 100 >= needed
+}
+
+#[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+fn ensure_stage4j_unified_memory_budget(model: &ModelManifest, total_gib: u64) -> Result<()> {
+    let output = Command::new("/usr/bin/memory_pressure")
+        .arg("-Q")
+        .output()
+        .context("macOS-Speicherdruck konnte nicht erhoben werden")?;
+    if !output.status.success() {
+        return Err(anyhow!("Local Brain: macOS-Speicherdruck nicht messbar"));
+    }
+    let percent = macos_memory_free_percent(&String::from_utf8_lossy(&output.stdout))
+        .ok_or_else(|| anyhow!("Local Brain: Speicherreserve nicht vertrauenswuerdig"))?;
+    let gib = 1024_u64.pow(3);
+    let total_bytes = total_gib.saturating_mul(gib);
+    let model_bytes = model
+        .size_bytes
+        .saturating_add(model.mmproj.as_ref().map_or(0, |p| p.size_bytes));
+    // Hinzu kommen KV-Kontext, Laufzeit und ein geschuetzter Rest fuer macOS,
+    // KAI Desktop und andere Anwendungen. Unified-GPU-RAM NICHT doppelt zaehlen.
+    let needed = model_bytes.saturating_add(4 * gib);
+    if !macos_unified_memory_reserve_allows(total_bytes, percent, needed) {
+        return Err(anyhow!(
+            "Local Brain wird aus Speicherschutz nicht geladen: Unified-Memory-Reserve zu niedrig (macOS-Indikator: {percent} %)"
+        ));
+    }
+    Ok(())
+}
+
+/// Startet hoechstens einen KatoSync-Modellserver. Fremde lokale Dienste werden nie beendet.
 pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
+    // Der Guard muss vor dem ersten await und der Lebenszeichenpruefung liegen.
+    let _model_start_guard = MODEL_START_LOCK.lock().await;
     let manifest = manifest()?;
     let model = recommended_model(&manifest)?;
     let key = target_key();
@@ -1143,6 +1200,29 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
     if owned_child_alive() || serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
         return status(app).await;
     }
+    // Ein unbekannter Dienst auf unserem Port ist kein Grund fuer einen zweiten
+    // Modellstart. Fail closed; niemals fremde Prozesse abschiessen.
+    if local_brain_port_occupied("127.0.0.1:17842") {
+        return Err(anyhow!(
+            "Local-Brain-Port 17842 ist durch einen anderen Dienst belegt"
+        ));
+    }
+    // Modellgroesse und Laufzeit erst dann verifizieren, wenn der Rechner die
+    // erforderliche physische RAM-Kapazitaet besitzt.
+    let detected_ram_gb = detect_ram_gb()
+        .ok_or_else(|| anyhow!("Local Brain: Arbeitsspeicher konnte nicht geprueft werden"))?;
+    if detected_ram_gb < model.minimum_ram_gb {
+        return Err(anyhow!(
+            "Local Brain benoetigt mindestens {} GiB RAM; erkannt: {} GiB",
+            model.minimum_ram_gb,
+            detected_ram_gb
+        ));
+    }
+
+    // Der Stage4J-M2 hat zwar 16 GiB installiert, kann aber durch KAI Desktop
+    // und den gemeinsamen macOS GPU-Speicher trotzdem unter Druck stehen.
+    #[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+    ensure_stage4j_unified_memory_budget(model, detected_ram_gb)?;
 
     let model_file = verified_model_for_launch(app, model).await?;
     // Existing text-only server is not stopped/restarted without operator action.
@@ -1224,6 +1304,8 @@ pub fn stop_owned() -> Result<()> {
 }
 
 pub async fn stop(app: &AppHandle) -> Result<LocalBrainStatus> {
+    // Auch Stop darf nicht parallel zum noch laufenden Start passieren.
+    let _model_start_guard = MODEL_START_LOCK.lock().await;
     stop_owned()?;
     status(app).await
 }
@@ -1276,6 +1358,55 @@ pub async fn remove(app: &AppHandle) -> Result<LocalBrainStatus> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+    #[test]
+    fn macos_memory_pressure_must_be_parseable_and_bounded() {
+        assert_eq!(
+            macos_memory_free_percent("System-wide memory free percentage: 35%"),
+            Some(35)
+        );
+        assert_eq!(
+            macos_memory_free_percent("System-wide memory free percentage: 0%"),
+            Some(0)
+        );
+        assert_eq!(
+            macos_memory_free_percent("System-wide memory free percentage: 101%"),
+            None
+        );
+        assert_eq!(macos_memory_free_percent("unknown"), None);
+        assert_eq!(
+            macos_memory_free_percent("System-wide memory free percentage: bogus"),
+            None
+        );
+    }
+
+    #[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+    #[test]
+    fn macos_sixteen_gib_guard_rejects_thirty_five_percent_reserve() {
+        let gib = 1024_u64.pow(3);
+        let model = recommended_model(&manifest().unwrap()).unwrap().clone();
+        let min_bytes = model.size_bytes + model.mmproj.as_ref().unwrap().size_bytes + 4 * gib;
+        assert!(!macos_unified_memory_reserve_allows(
+            16 * gib,
+            35,
+            min_bytes
+        ));
+        assert!(macos_unified_memory_reserve_allows(16 * gib, 75, min_bytes));
+        assert!(!macos_unified_memory_reserve_allows(
+            16 * gib,
+            101,
+            min_bytes
+        ));
+    }
+
+    #[test]
+    fn local_brain_port_occupation_is_detected_without_killing_other_processes() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        assert!(local_brain_port_occupied(&address));
+        assert!(!local_brain_port_occupied("not-a-socket"));
+    }
 
     #[test]
     fn embedded_manifest_is_versioned_and_has_recommended_model() {

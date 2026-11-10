@@ -25,6 +25,8 @@ use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
+#[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+mod app_instance;
 mod context_pack;
 mod desktop_widget;
 mod github_app_auth;
@@ -78,8 +80,10 @@ const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.auth.qa";
 #[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage3x.qa";
-#[cfg(feature = "stage35-qa")]
+#[cfg(all(feature = "stage35-qa", not(feature = "stage4j-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage35.qa";
+#[cfg(feature = "stage4j-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage4j.qa";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";
 const SUPABASE_SESSION_ACCOUNT: &str = "supabase-refresh-token";
@@ -90,8 +94,10 @@ const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.github.login.qa.sync";
 #[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa")))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage3x.sync";
-#[cfg(feature = "stage35-qa")]
+#[cfg(all(feature = "stage35-qa", not(feature = "stage4j-qa")))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage35.sync";
+#[cfg(feature = "stage4j-qa")]
+const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage4j.sync";
 // KATOOS canonical issuer on explicit, isolated QA feature only. Never silently
 // migrate or reinterpret existing KatoSync tenants/sessions on stable builds.
 #[cfg(feature = "katoos-auth-qa")]
@@ -329,6 +335,12 @@ pub fn run() {
             let _ = write_log("error", &format!("Headless-Sync fehlgeschlagen: {error:#}"));
             std::process::exit(1);
         }
+        return;
+    }
+
+    // Prevent duplicate GUI instances; never interfere with headless jobs.
+    #[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
+    if !app_instance::allow_gui_start() {
         return;
     }
 
@@ -5226,7 +5238,9 @@ fn app_support_dir() -> Result<PathBuf> {
     let dir = dirs::data_dir()
         .or_else(dirs::home_dir)
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
-        .join(if cfg!(feature = "stage35-qa") {
+        .join(if cfg!(feature = "stage4j-qa") {
+            "KatoSync Mesh QA Stage4J"
+        } else if cfg!(feature = "stage35-qa") {
             "KatoSync Mesh QA Stage35"
         } else if cfg!(feature = "stage3x-qa") {
             "KatoSync Mesh QA Stage3X"
@@ -5250,7 +5264,9 @@ fn logs_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
         .join("Library")
         .join("Logs")
-        .join(if cfg!(feature = "stage35-qa") {
+        .join(if cfg!(feature = "stage4j-qa") {
+            "KatoSync Mesh QA Stage4J"
+        } else if cfg!(feature = "stage35-qa") {
             "KatoSync Mesh QA Stage35"
         } else if cfg!(feature = "stage3x-qa") {
             "KatoSync Mesh QA Stage3X"

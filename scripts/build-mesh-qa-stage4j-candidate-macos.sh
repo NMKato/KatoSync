@@ -13,11 +13,21 @@ REF="${KATOSYNC_STAGE4J_EXPECT_SHA:-}"
  echo "STAGE4J_SOURCE_SHA_NOT_PINNED";exit 2;
 }
 BASE="$HOME/Applications/KatoSync Mesh QA Stage35.app"
-OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-Candidate"
+OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-Isolated-Candidate"
+# The original notarized binary remains immutable. Opt-in to a collision-free QA slot.
+if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_20261110" ]]; then
+ OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-SingletonQA"
+elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_FIX_20261110" ]]; then
+ OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-SingletonFixedQA"
+elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "MODEL_GUARD_20261110" ]]; then
+ OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-ModelGuardQA"
+elif [[ -n "${KATOSYNC_STAGE4J_QA_SLOT:-}" ]]; then
+ echo "STAGE4J_UNKNOWN_QA_SLOT";exit 2
+fi
 OUT="$OUTDIR/KatoSync Mesh QA Stage4J Candidate.app"
 TEAM="T8SB89JPX7"
 SIGN="Developer ID Application: MK Heartbeat UG (haftungsbeschraenkt) ($TEAM)"
-ID="com.nmkato.katosync.meshqa.stage4j-candidate"
+ID="com.nmkato.katosync.meshqa.stage4j-isolated"
 TARGET="${CARGO_TARGET_DIR:-$HOME/Projects/KatoSync/src-tauri/target}"
 [[ -d "$BASE" && ! -L "$BASE" && ! -e "$OUT" &&
    ! -L "$OUT" && ! -e "$OUTDIR" &&
@@ -43,12 +53,13 @@ APP="$STAGING/KatoSync Mesh QA Stage4J Candidate.app"
 codesign -d --entitlements :- "$BASE" > "$ENTITLEMENTS" 2>/dev/null
 plutil -lint "$ENTITLEMENTS" >/dev/null
 cd "$ROOT"
-VITE_KATOOS_AUTH_QA=1 VITE_STAGE35_AUTO_RESUME_QA=1 VITE_STAGE35_HEARTBEAT_QA=1 npm run build
-VITE_KATOOS_AUTH_QA=1 VITE_STAGE35_AUTO_RESUME_QA=1 VITE_STAGE35_HEARTBEAT_QA=1 \
+VITE_KATOOS_AUTH_QA=1 VITE_STAGE35_AUTO_RESUME_QA=0 VITE_STAGE35_HEARTBEAT_QA=0 npm run build
+VITE_KATOOS_AUTH_QA=1 VITE_STAGE35_AUTO_RESUME_QA=0 VITE_STAGE35_HEARTBEAT_QA=0 \
   npm exec -- tauri build --debug --no-bundle \
-  --config src-tauri/tauri.mesh-qa-stage35.conf.json --features stage35-qa
+  --config src-tauri/tauri.mesh-qa-stage4j.conf.json --features stage4j-qa
 BIN="$TARGET/debug/katosync"
 [[ -x "$BIN" && -s "$BIN" ]] || { echo "STAGE4J_NATIVE_BINARY_MISSING";exit 4; }
+python3 "$ROOT/scripts/qa-stage4j-native-namespace-audit.py" "$BIN"
 ditto "$BASE" "$APP"
 ROOT_RES="$ROOT/src-tauri/resources"
 APP_RES="$APP/Contents/Resources/resources"
@@ -60,7 +71,15 @@ done
 ditto "$ROOT_RES/licenses" "$APP_RES/licenses"
 cp "$BIN" "$APP/Contents/MacOS/katosync"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $ID" "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync Mesh QA Stage4J Candidate" "$APP/Contents/Info.plist"
+if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "MODEL_GUARD_20261110" ]]; then
+ /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Model Guard QA" "$APP/Contents/Info.plist"
+elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_FIX_20261110" ]]; then
+ /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Single Instance Fixed QA" "$APP/Contents/Info.plist"
+elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_20261110" ]]; then
+ /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Single Instance QA" "$APP/Contents/Info.plist"
+else
+ /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync Mesh QA Stage4J Candidate" "$APP/Contents/Info.plist"
+fi
 test -z "$(find "$APP_RES" -name '.test-only' -print -quit)"
 test "$(find "$APP_RES/poppler/libs" -type f -name '*.dylib'|wc -l|tr -d ' ')" -ge 29
 for file in "$APP_RES/poppler/libs/"*.dylib;do
@@ -85,6 +104,7 @@ mv "$APP" "$OUT"
 codesign --verify --deep --strict "$OUT"
 test -z "$(find "$OUT/Contents/Resources/resources" -name '.test-only' -print -quit)"
 echo "STAGE4J_SIGNED_ISOLATED_QA_CANDIDATE_READY"
+echo "STAGE4J_DISTINCT_KEYCHAIN_CONFIG_LOGS_LAUNCH_AGENT"
 echo "STAGE4J_EXPLICIT_NOT_NOTARIZED_NOT_INSTALLED"
 echo "STAGE4J_EXACT_SOURCE_SHA=$REF"
 shasum -a 256 "$OUT/Contents/MacOS/katosync"
