@@ -21,6 +21,9 @@ elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_FIX_20261110" ]]; then
  OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-SingletonFixedQA"
 elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "MODEL_GUARD_20261110" ]]; then
  OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4J-ModelGuardQA"
+elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "READINESS_20261110" ]]; then
+ # Stage4M source QA: never overwrite any already-installed Stage4J slot.
+ OUTDIR="$HOME/Applications/.KatoSync-Mesh-Stage4M-ReadinessQA"
 elif [[ -n "${KATOSYNC_STAGE4J_QA_SLOT:-}" ]]; then
  echo "STAGE4J_UNKNOWN_QA_SLOT";exit 2
 fi
@@ -41,7 +44,7 @@ xcrun stapler validate "$BASE" >/dev/null
 node "$ROOT/scripts/qa-stage4j-macos-resource-audit.mjs"
 [[ -x "$ROOT/node_modules/.bin/tauri" ]] || { echo "STAGE4J_TAURI_MISSING";exit 3; }
 STAGING="$(mktemp -d "$HOME/Applications/.KatoSync-Stage4J-Build.XXXXXX")"
-ENTITLEMENTS="$(mktemp /tmp/katosync-stage4j-entitlements.XXXXXX.plist)"
+ENTITLEMENTS="$(mktemp /tmp/katosync-stage4j-entitlements.XXXXXX)"
 cleanup(){
  rm -f -- "$ENTITLEMENTS"
  if [[ "$STAGING" == "$HOME/Applications/.KatoSync-Stage4J-Build."* ]];then
@@ -71,7 +74,9 @@ done
 ditto "$ROOT_RES/licenses" "$APP_RES/licenses"
 cp "$BIN" "$APP/Contents/MacOS/katosync"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $ID" "$APP/Contents/Info.plist"
-if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "MODEL_GUARD_20261110" ]]; then
+if [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "READINESS_20261110" ]]; then
+ /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync Stage4M Readiness QA" "$APP/Contents/Info.plist"
+elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "MODEL_GUARD_20261110" ]]; then
  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Model Guard QA" "$APP/Contents/Info.plist"
 elif [[ "${KATOSYNC_STAGE4J_QA_SLOT:-}" == "SINGLETON_FIX_20261110" ]]; then
  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName KatoSync 4J Single Instance Fixed QA" "$APP/Contents/Info.plist"
