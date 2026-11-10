@@ -44,3 +44,7 @@
 **Entscheidung:** `STAGE4J_MODEL_GUARD_SIGNED_BUILD_PASS` und `APPLE_NOTARIZATION_BLOCKED_MISSING_KEYCHAIN_PROFILE`. Nicht installieren oder starten.
 
 Created by NMKato Solutions
+
+## Auflösung des historischen Notarisierungs-Blockers (10.11.2026)
+
+Das zuvor fehlende Keychain-Profil wurde interaktiv neu eingerichtet. Apple hat das unveränderte Paket akzeptiert; Ticket, Gatekeeper und beide physischen Macs wurden erfolgreich nachgeprüft. Der oben beschriebene Hold dokumentiert den **historischen Zwischenstand**, nicht den aktuellen Paketstatus. Aktuelle Abnahme siehe [Stage4J ModelGuard Apple Accepted Two-Mac](KATOSYNC_STAGE4J_MODEL_GUARD_APPLE_ACCEPTED_TWO_MAC_2026-11-10.md). Die neue App bleibt bis zum kontrollierten Ein-Instanz-Handoff nur staged.
