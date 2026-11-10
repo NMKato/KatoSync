@@ -39,3 +39,5 @@ Next:
 **Decision:** `STAGE4J_ORIGINAL_SIGNED_CANDIDATE_NO_LAUNCH`. New isolated build pending native compile, review, signing, notarization and controlled runtime test.
 
 Created by NMKato Solutions
+
+**Post-build hardware result (2026-11-10):** A NEW isolated Stage4J application from this source was signed, Apple-notarized, stapled, accepted by Gatekeeper on physical M2/M3 and booted alongside the unchanged Stage35 apps. See [isolated two-Mac startup QA](KATOSYNC_STAGE4J_ISOLATED_TWO_MAC_APP_LAUNCH_QA_2026-11-10.md). Original 2026-11-09 Stage4J candidate remains NO-LAUNCH. Owner login/SAS/Mesh trust remain unproven.
