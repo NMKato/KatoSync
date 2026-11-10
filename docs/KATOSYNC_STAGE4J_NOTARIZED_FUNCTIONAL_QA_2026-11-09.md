@@ -1,5 +1,7 @@
 # KatoSync Stage4J — notarized internal macOS QA and functional resource evidence
 
+**Safety update (2026-11-10):** This notarized resource candidate must not be launched beside Stage35: its original native Stage35 feature still shared Keychain/config/LaunchAgent namespaces. This finding does not invalidate the resource and Apple-notarization checks below. See [Stage4J runtime isolation review](KATOSYNC_STAGE4J_SIDE_BY_SIDE_RUNTIME_ISOLATION_2026-11-10.md) for source-level correction and remaining gates.
+
 **Date:** 2026-11-09 · **Scope:** isolated ARM64 internal QA; not a production or public-beta release.
 **Build origin:** pinned source commit `9f98ae1b33fe187f0de7fd77305ac4dc43046cd2`.
 **QA bundle ID:** `com.nmkato.katosync.meshqa.stage4j-candidate`.

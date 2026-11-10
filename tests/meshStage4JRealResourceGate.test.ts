@@ -38,8 +38,8 @@ test("build is isolated, sha-pinned, authenticated and fail-closed",()=>{
  assert.match(build,/KATOSYNC_STAGE4J_EXPECT_SHA/);
  assert.match(build,/STAGE4J_SOURCE_SHA_NOT_PINNED/);
  assert.match(build,/STAGE4J_INPUT_OR_OUTPUT_COLLISION/);
- assert.match(build,/\.KatoSync-Mesh-Stage4J-Candidate/);
- assert.match(build,/com\.nmkato\.katosync\.meshqa\.stage4j-candidate/);
+ assert.match(build,/\.KatoSync-Mesh-Stage4J-Isolated-Candidate/);
+ assert.match(build,/com\.nmkato\.katosync\.meshqa\.stage4j-isolated/);
  assert.match(build,/codesign --verify --deep --strict "\$BASE"/);
  assert.match(build,/xcrun stapler validate "\$BASE"/);
  assert.doesNotMatch(build,/rm -rf.*\$BASE/);
@@ -51,7 +51,7 @@ test("build verifies resources, signs nested runtime, and cannot silently upload
  assert.match(build,/codesign --verify --deep --strict "\$APP"/);
  assert.match(build,/STAGE4J_EXPLICIT_NOT_NOTARIZED_NOT_INSTALLED/);
  assert.doesNotMatch(build,/notarytool submit|stapler staple|spctl --assess|supabase db push|git push|open -a/);
- assert.match(build,/--features stage35-qa/);
+ assert.match(build,/--features stage4j-qa/);
  assert.match(build,/VITE_KATOOS_AUTH_QA=1/);
 });
 test("the existing release gate continues rejecting all .test-only resources",()=>{

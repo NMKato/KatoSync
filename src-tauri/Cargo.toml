@@ -50,6 +50,7 @@ github-login-qa = [] # Isolated local test app; never include in production buil
 katoos-auth-qa = ["github-login-qa"] # Canonical KATOOS Auth only in isolated QA; legacy KatoSync unchanged
 stage3x-qa = ["katoos-auth-qa"] # Dedicated Stage3X app Keychain/config/logs/LaunchAgent isolation
 stage35-qa = ["stage3x-qa"] # Distinct Stage35 hardware/auto-discovery QA namespace
+stage4j-qa = ["stage35-qa"] # NEW independent Stage4J runtime; never share Stage35 credentials
 mesh-preview-auth-qa = ["github-login-qa"] # Separate QA-only Preview login; requires pinned build config
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
