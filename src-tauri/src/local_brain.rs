@@ -28,6 +28,9 @@ const PORT: &str = "17842";
 const MANIFEST_SCHEMA_VERSION: u32 = 2;
 static CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
 static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Serialize model starts, including downloads/verification and the first health probe.
+/// Two concurrent UI clicks must never spawn competing llama-server processes.
+static MODEL_START_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -507,6 +510,13 @@ fn find_runtime_binary(dir: &Path, executable: &str) -> Option<PathBuf> {
             entry.file_type().is_file() && entry.file_name().to_string_lossy() == executable
         })
         .map(|entry| entry.into_path())
+}
+
+fn local_brain_port_occupied(address: &str) -> bool {
+    let Ok(socket) = address.parse::<std::net::SocketAddr>() else {
+        return false;
+    };
+    std::net::TcpStream::connect_timeout(&socket, Duration::from_millis(200)).is_ok()
 }
 
 fn owned_child_alive() -> bool {
@@ -1129,7 +1139,10 @@ async fn verified_model_for_launch(app: &AppHandle, model: &ModelManifest) -> Re
     .context("Local-Brain-Modell ist nicht installiert oder nicht verifiziert")
 }
 
+/// Startet hoechstens einen KatoSync-Modellserver. Fremde lokale Dienste werden nie beendet.
 pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
+    // Der Guard muss vor dem ersten await und der Lebenszeichenpruefung liegen.
+    let _model_start_guard = MODEL_START_LOCK.lock().await;
     let manifest = manifest()?;
     let model = recommended_model(&manifest)?;
     let key = target_key();
@@ -1142,6 +1155,24 @@ pub async fn start(app: &AppHandle) -> Result<LocalBrainStatus> {
         .ok_or_else(|| anyhow!("llama.cpp Runtime ist nicht installiert"))?;
     if owned_child_alive() || serves_alias(HEALTH_URL, MODELS_URL, &model.alias).await {
         return status(app).await;
+    }
+    // Ein unbekannter Dienst auf unserem Port ist kein Grund fuer einen zweiten
+    // Modellstart. Fail closed; niemals fremde Prozesse abschiessen.
+    if local_brain_port_occupied("127.0.0.1:17842") {
+        return Err(anyhow!(
+            "Local-Brain-Port 17842 ist durch einen anderen Dienst belegt"
+        ));
+    }
+    // Modellgroesse und Laufzeit erst dann verifizieren, wenn der Rechner die
+    // erforderliche physische RAM-Kapazitaet besitzt.
+    let detected_ram_gb = detect_ram_gb()
+        .ok_or_else(|| anyhow!("Local Brain: Arbeitsspeicher konnte nicht geprueft werden"))?;
+    if detected_ram_gb < model.minimum_ram_gb {
+        return Err(anyhow!(
+            "Local Brain benoetigt mindestens {} GiB RAM; erkannt: {} GiB",
+            model.minimum_ram_gb,
+            detected_ram_gb
+        ));
     }
 
     let model_file = verified_model_for_launch(app, model).await?;
@@ -1224,6 +1255,8 @@ pub fn stop_owned() -> Result<()> {
 }
 
 pub async fn stop(app: &AppHandle) -> Result<LocalBrainStatus> {
+    // Auch Stop darf nicht parallel zum noch laufenden Start passieren.
+    let _model_start_guard = MODEL_START_LOCK.lock().await;
     stop_owned()?;
     status(app).await
 }
@@ -1276,6 +1309,14 @@ pub async fn remove(app: &AppHandle) -> Result<LocalBrainStatus> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn local_brain_port_occupation_is_detected_without_killing_other_processes() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        assert!(local_brain_port_occupied(&address));
+        assert!(!local_brain_port_occupied("not-a-socket"));
+    }
 
     #[test]
     fn embedded_manifest_is_versioned_and_has_recommended_model() {
