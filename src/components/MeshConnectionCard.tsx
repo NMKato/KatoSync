@@ -12,6 +12,7 @@ import {meshRegistrationAgentName,presentMeshRegistrations} from "../lib/meshDir
 import {canConfirmRelayPeerLocally} from "../lib/meshRelayLocalApproval35F";
 import {matchEasyRelayMessage,canQuickApproveSameCode,validEasyMeshSession,
   type EasyMeshSession,type EasyMeshStage} from "../lib/meshEasyPairing";
+import {EASY_RELAY_POLL_MS,canPollEasyMeshRelay} from "../lib/meshRelayFlowPolicy4U";
 
 function relativeTime(value: string | null | undefined, lang: string): string | null {
   if (!value) return null;
@@ -448,6 +449,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   },[recipientInbox]);
   const decideRecipientInvite=async(item:MeshReceivedItem,action:"accept"|"reject")=>{
     if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientInFlight.current||
+       (easyEnabled&&easySession!==null)||
        !recipientInbox?.some(x=>x.requestId===item.requestId)||Date.parse(item.expiresAt)<=Date.now())return;
     recipientInFlight.current=true;
     const operation=++recipientOperation.current;
@@ -844,36 +846,50 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   },[easyEnabled,easySession,acceptedInboxOffer]);
 
   useEffect(()=>{
-    if(!easyEnabled||!easySession||!challengeRelayWork||
+    if(!easyEnabled||!easySession||!challengeRelayWork||relayBusy||relayError||
+       easyStage==="error"||relayInFlight.current||
        easySession.role!=="recipient"||
        challengeRelayWork.requestId!==easySession.requestId||
        challengeRelayWork.deviceId!==easySession.peerDeviceId)return;
     void sendRelay(challengeRelayWork,"challenge");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[easyEnabled,easySession,challengeRelayWork]);
+  },[easyEnabled,easySession,challengeRelayWork,relayBusy,relayError,easyStage]);
 
   useEffect(()=>{
-    if(!easyEnabled||!easySession||!responseRelayWork||
+    if(!easyEnabled||!easySession||!responseRelayWork||relayBusy||relayError||
+       easyStage==="error"||relayInFlight.current||
        easySession.role!=="sender"||
        responseRelayWork.requestId!==easySession.requestId||
        responseRelayWork.deviceId!==easySession.peerDeviceId)return;
     void sendRelay(responseRelayWork,"response");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[easyEnabled,easySession,responseRelayWork]);
+  },[easyEnabled,easySession,responseRelayWork,relayBusy,relayError,easyStage]);
 
   useEffect(()=>{
-    if(!easyEnabled||!easySession||relayProof||easyStage==="approved"||
-       !validEasyMeshSession(easySession,Date.now()))return;
-    const refresh=()=>{if(!relayInFlight.current)void loadRelay();};
-    // One bounded QA request; do not run a permanent background relay.
-    const timer=window.setInterval(refresh,5_000);
+    if(!easyEnabled||!easySession||
+       !canPollEasyMeshRelay({
+         sessionValid:validEasyMeshSession(easySession,Date.now()),
+         stage:easyStage,hasProof:relayProof!==null,
+         hasOutboundWork:challengeRelayWork!==null||responseRelayWork!==null,
+         hasAcceptedOffer:acceptedInboxOffer!==null,
+         failed:challengeError||relayError
+       }))return;
+    // Stage4U: server permits at most 12 signed reads/min/device.
+    // 12 seconds leaves headroom for the immediate first read and manual QA.
+    // Outbound signed messages ALWAYS take priority over a background poll.
+    const refresh=()=>{
+      if(!relayInFlight.current&&!challengeRelayWork&&!responseRelayWork)void loadRelay();
+    };
+    const timer=window.setInterval(refresh,EASY_RELAY_POLL_MS);
     refresh();
     return ()=>window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[easyEnabled,easySession,relayProof,easyStage]);
+  },[easyEnabled,easySession,relayProof,easyStage,challengeRelayWork,
+     responseRelayWork,acceptedInboxOffer,challengeError,relayError]);
 
   useEffect(()=>{
-    if(!easyEnabled||!easySession||!relayMessages||relayInFlight.current)return;
+    if(!easyEnabled||!easySession||!relayMessages||relayInFlight.current||
+       relayError||challengeError||easyStage==="error")return;
     const now=Date.now();
     const item=relayMessages.find(message=>matchEasyRelayMessage(easySession,message,now));
     if(!item)return;
@@ -885,7 +901,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     if(easySession.role==="sender")void prepareRelayResponse(item);
     else void verifyRelayResponse(item);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[easyEnabled,easySession,relayMessages]);
+  },[easyEnabled,easySession,relayMessages,relayError,challengeError,easyStage]);
 
   useEffect(()=>{
     if(!easyEnabled||!relayProof||!easySession)return;
@@ -893,6 +909,12 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
        validEasyMeshSession(easySession,Date.now()))setEasyStage("compare");
     else setEasyStage("error");
   },[easyEnabled,relayProof,easySession]);
+
+  useEffect(()=>{
+    if(easyEnabled&&easySession&&(challengeError||relayError)){
+      setEasyStage("error");
+    }
+  },[easyEnabled,easySession,challengeError,relayError]);
 
   useEffect(()=>{
     if(!easyEnabled||!easySession)return;
@@ -1530,12 +1552,12 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           </div>
           <div className="vision-mesh-invite-actions">
             <button type="button" className="primary compact-button vision-mesh-accept"
-              disabled={recipientBusy}
+              disabled={recipientBusy||(easyEnabled&&easySession!==null)}
               onClick={()=>void decideRecipientInvite(item,"accept")}>
               {t("mesh.recipient.accept")}
             </button>
             <button type="button" className="ghost compact-button vision-mesh-decline"
-              disabled={recipientBusy}
+              disabled={recipientBusy||(easyEnabled&&easySession!==null)}
               onClick={()=>void decideRecipientInvite(item,"reject")}>
               {t("mesh.recipient.reject")}
             </button>
