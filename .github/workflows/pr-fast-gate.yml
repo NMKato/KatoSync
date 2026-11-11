@@ -66,6 +66,9 @@ jobs:
       - name: Stage4R guarded owner pairing QA routes and UX contract
         run: bash scripts/qa-stage4r-owner-gates.sh
 
+      - name: Stage4S one-click Mesh onboarding and human-confirmed trust
+        run: bash scripts/qa-stage4s-easy-mesh-pair.sh
+
   windows-node-regression:
     name: Windows Node Regression
     runs-on: windows-latest

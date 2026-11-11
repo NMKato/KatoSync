@@ -11181,3 +11181,43 @@ button.agent-tile:hover {
 .provider-mesh-card .vision-mesh-sas-approval button:disabled{
   opacity:.45;cursor:not-allowed;
 }
+
+
+/* Stage4S: Bluetooth-like Mesh guide using the existing KatoSync design system. */
+.provider-cards > .provider-mesh-card{grid-column:1 / -1;}
+.provider-mesh-card .vision-mesh-easy-panel{
+  display:grid;gap:10px;min-width:0;
+  padding:14px 16px;border:1px solid var(--line);border-radius:14px;
+  background:var(--surface);
+}
+.provider-mesh-card .vision-mesh-easy-panel>strong{
+  color:var(--text);font-size:14px;line-height:1.35;
+}
+.provider-mesh-card .vision-mesh-easy-panel p{
+  margin:0;color:var(--text);font-size:13px;line-height:1.55;
+}
+.provider-mesh-card .vision-mesh-easy-panel small{
+  font-size:11px;color:var(--text-muted);line-height:1.5;
+}
+.provider-mesh-card .vision-mesh-easy-check{
+  display:grid;gap:12px;min-width:0;
+  padding:14px;border:1px solid var(--line);border-radius:12px;
+  background:var(--surface-raised);
+}
+.provider-mesh-card .vision-mesh-easy-check code{
+  font-size:clamp(18px,2.8vw,26px);font-weight:750;
+  line-height:1.4;letter-spacing:.10em;overflow-wrap:anywhere;
+}
+.provider-mesh-card .vision-mesh-easy-check button{
+  justify-self:start;max-width:100%;min-height:42px;
+}
+.provider-mesh-card .vision-mesh-easy-advanced-toggle{
+  justify-self:start;font-size:11px;opacity:.8;
+}
+.provider-mesh-card .vision-mesh-easy-panel button:disabled{
+  cursor:not-allowed;opacity:.55;
+}
+@media(max-width:480px){
+  .provider-mesh-card .vision-mesh-easy-check button{width:100%;justify-self:stretch;}
+  .provider-mesh-card .vision-mesh-easy-panel{padding:11px;}
+}
