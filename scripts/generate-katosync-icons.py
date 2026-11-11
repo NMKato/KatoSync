@@ -56,16 +56,38 @@ def full_canvas(original: Image.Image) -> Image.Image:
     return transparent
 
 
+def native_dock_icon(original: Image.Image) -> Image.Image:
+    # MARK: macOS Tahoe 26 places free-form transparent icons on an OS gray tile.
+    # A fully opaque black native icon is clipped by the OS's own squircle mask.
+    # Keep the original colored emblem and its transparency unchanged.
+    bounds = original.getchannel("A").getbbox()
+    assert bounds is not None
+    artwork = original.crop(bounds)
+    factor = min(832 / artwork.width, 832 / artwork.height)
+    artwork = artwork.resize(
+        (round(artwork.width * factor), round(artwork.height * factor)),
+        Image.Resampling.LANCZOS,
+    )
+    icon = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 255))
+    icon.alpha_composite(artwork, ((SIZE - artwork.width) // 2,
+                                  (SIZE - artwork.height) // 2))
+    return icon
+
+
 def main() -> None:
     original = load_original()
-    icon = full_canvas(original)
+    transparent = full_canvas(original)
+    native_icon = native_dock_icon(original)
     ICONS.mkdir(parents=True, exist_ok=True)
+    # In-app, web and K2S keep the original on transparent backgrounds.
     for destination in (
-        ICONS / "icon-1024-master.png",
         ROOT / "public/katosync_logo_centered.png",
         ROOT / "public/kai-ai-icon.png",
     ):
-        icon.save(destination, optimize=True)
+        transparent.save(destination, optimize=True)
+    # Only native launch icons use black to counter Tahoe's gray tile.
+    native_icon.save(ICONS / "icon-1024-master.png", optimize=True)
+    icon = native_icon
     for dimensions, filename in (
         (32, "32x32.png"),
         (128, "128x128.png"),
@@ -92,7 +114,7 @@ def main() -> None:
             ["iconutil", "-c", "icns", "-o", str(ICONS / "icon.icns"), str(iconset)],
             check=True,
         )
-    print("KATO_ORIGINAL_TRANSPARENT_ICON_READY", EXPECTED_SHA)
+    print("KATO_BLACK_NATIVE_DOCK_AND_TRANSPARENT_UI_READY", EXPECTED_SHA)
 
 
 if __name__ == "__main__":

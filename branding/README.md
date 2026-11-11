@@ -8,8 +8,13 @@ and K2S may reuse this one pinned master for technically resized brand assets.
 
 ## Requirements
 
-- No dark squircle, background tile, shadow or invented lettering behind the signet.
-- The 1024px icon has only 20px transparent safe margins, instead of a small inset logo.
+- The owner's transparent 256px master is unchanged and is the source of all exports.
+- In-app, web, and K2S content retain an edge-to-edge transparent 1024px mark.
+- Native macOS launch/Dock icon uses an opaque **pure black** square background,
+  832px gold/silver foreground and no added shadows, to avoid macOS Tahoe 26
+  rendering unsupported free-form transparent icons on its low-contrast gray tile.
+- macOS clips the black icon to its own rounded-square shape. This is a
+  platform-specific representation, not a modification to the shared brand master.
 - Never modify existing Developer-ID-signed or Apple-notarized app bundles in place.
   Ship brand changes only through a new signed, verified and notarized QA release.
 - Product names stay in UI labels; do not change the signed-off master pixels.
