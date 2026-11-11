@@ -10,6 +10,8 @@ import { activeMeshInvitations, nextMeshInboxExpiryDelay } from "../lib/meshInbo
 import {selectMeshColleague} from "../lib/meshAgentIntroduction35";
 import {meshRegistrationAgentName,presentMeshRegistrations} from "../lib/meshDirectoryPresentation35";
 import {canConfirmRelayPeerLocally} from "../lib/meshRelayLocalApproval35F";
+import {matchEasyRelayMessage,canQuickApproveSameCode,validEasyMeshSession,
+  type EasyMeshSession,type EasyMeshStage} from "../lib/meshEasyPairing";
 
 function relativeTime(value: string | null | undefined, lang: string): string | null {
   if (!value) return null;
@@ -216,7 +218,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const {t,lang}=useT();
   const [detailsOpen,setDetailsOpen]=useState(false);
   // A user-visible pairing guide is NOT an authenticated transport session.
-  const [guideOpen,setGuideOpen]=useState(false);
+  const [guideOpen,setGuideOpen]=useState(import.meta.env.VITE_MESH_EASY_PAIR_QA==="1");
+  const [easyAdvancedOpen,setEasyAdvancedOpen]=useState(false);
   const [selectedDeviceId,setSelectedDeviceId]=useState<string|null>(null);
   // Stage4I: explicit read-only admission report, never an active connection.
   const [nativePreflight,setNativePreflight]=useState<{
@@ -373,9 +376,21 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [relayProof,setRelayProof]=useState<MeshPairingProof|null>(null);
   const [relayBusy,setRelayBusy]=useState(false);
   const [relayError,setRelayError]=useState(false);
+  // Stage4S: a single bounded, explicitly initiated pairing session.
+  // The public messages may travel automatically; Keychain approval cannot.
+  const easyEnabled=import.meta.env.VITE_MESH_EASY_PAIR_QA==="1"&&
+    import.meta.env.VITE_KATOOS_AUTH_QA==="1"&&
+    import.meta.env.VITE_MESH_INBOX_SEND_QA==="1"&&
+    import.meta.env.VITE_MESH_INBOX_RECEIVE_QA==="1"&&
+    import.meta.env.VITE_MESH_RELAY_QA==="1";
+  const [easySession,setEasySession]=useState<EasyMeshSession|null>(null);
+  const [easyStage,setEasyStage]=useState<EasyMeshStage>("idle");
+  const easyHandled=useRef(new Set<string>());
   const relayInFlight=useRef(false);
   const relayOperation=useRef(0);
   const resetRelay=()=>{
+    easyHandled.current.clear();
+    setEasySession(null);setEasyStage("idle");
     relayOperation.current++;relayInFlight.current=false;
     setSentRequest(null);setChallengeRelayWork(null);setResponseRelayWork(null);
     setRelayMessages(null);setRelayReceipt(null);setRelayProof(null);
@@ -386,15 +401,18 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [challengeBusy,setChallengeBusy]=useState(false);
   const challengeInFlight=useRef(false);
   const challengeOperation=useRef(0);
-  const loadRecipientInbox=async()=>{
+  const loadRecipientInbox=async(quiet=false)=>{
     if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientInFlight.current)return;
     recipientInFlight.current=true;
     const operation=++recipientOperation.current;
-    setRecipientBusy(true);setRecipientError(false);setRecipientDecision(null);setRecipientInbox(null);
-    // A new inbox scan never silently revives an earlier accepted offer.
-    challengeOperation.current++;challengeInFlight.current=false;
-    setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
-    setChallengeRelayWork(null);
+    if(!quiet){setRecipientBusy(true);setRecipientInbox(null);setRecipientDecision(null);}
+    setRecipientError(false);
+    // Only a deliberate fresh scan invalidates an earlier accepted offer.
+    if(!quiet){
+      challengeOperation.current++;challengeInFlight.current=false;
+      setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
+      setChallengeRelayWork(null);
+    }
     try{
       const result=await invoke<MeshReceivedInbox>("mesh_inbox_recipient_list");
       if(result.paired!==false||result.transportReady!==false||result.remoteJobsEnabled!==false||
@@ -415,7 +433,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       setRecipientInbox(activeMeshInvitations(result.invitations));
     }catch{if(operation===recipientOperation.current)setRecipientError(true);}
     finally{if(operation===recipientOperation.current){
-      recipientInFlight.current=false;setRecipientBusy(false);
+      recipientInFlight.current=false;if(!quiet)setRecipientBusy(false);
     }}
   };
   useEffect(()=>{
@@ -446,6 +464,22 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       setRecipientInbox(list=>list?.filter(x=>x.requestId!==item.requestId)??null);
       if(result.state==="accepted"&&item.signedOffer.expiresAt*1000>Date.now()){
         setAcceptedInboxOffer(item);
+        if(easyEnabled){
+          const own=directory?.devices.find(d=>d.fingerprint===agentBootstrap?.fingerprint);
+          const sender=directory?.devices.find(d=>d.deviceId===item.sourceDeviceId&&
+            d.fingerprint===item.fingerprint&&d.membershipState!=="revoked");
+          if(own&&sender){
+            setSelectedDeviceId(sender.deviceId);
+            setEasySession({role:"recipient",requestId:item.requestId,
+              localDeviceId:own.deviceId,peerDeviceId:sender.deviceId,
+              peerFingerprint:sender.fingerprint,expiresAtMs:Date.parse(item.expiresAt)});
+            setEasyStage("verifying");
+          }else{
+            // The inbox was signed, but UI registration identity is stale.
+            // Fail closed: a new explicit discovery is required for local pin.
+            setEasyStage("error");
+          }
+        }
       }else{
         setAcceptedInboxOffer(null);
       }
@@ -503,11 +537,15 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [directoryBusy,setDirectoryBusy]=useState(false);
   const [directoryError,setDirectoryError]=useState(false);
   const [directoryIssue,setDirectoryIssue]=useState<"quota"|"rate"|"plan"|null>(null);
-  const sendNativeInbox=async(targetDeviceId:string)=>{
-    // A separate, explicitly activated QA-only command; no implicit send from discovery.
+  const sendNativeInbox=async(targetDeviceId:string,directClick=false)=>{
+    // A click on a registered target is an explicit request, not implicit discovery.
     if(import.meta.env.VITE_MESH_INBOX_SEND_QA!=="1"||inboxInFlight.current||
-       nativeInboxSent===targetDeviceId||selectedDeviceId!==targetDeviceId||
+       nativeInboxSent===targetDeviceId||(!directClick&&selectedDeviceId!==targetDeviceId)||
        !directory?.devices.some(d=>d.deviceId===targetDeviceId&&d.membershipState==="discovered"))return;
+    const own=directory?.devices.find(d=>d.fingerprint===agentBootstrap?.fingerprint);
+    const peer=directory?.devices.find(d=>d.deviceId===targetDeviceId&&
+      d.fingerprint!==agentBootstrap?.fingerprint);
+    if(easyEnabled&&(!own||!peer||own.deviceId===peer.deviceId))return;
     inboxInFlight.current=true;
     const operation=++inboxOperation.current;
     setNativeInboxBusy(true);setNativeInboxError(false);setNativeInboxSent(null);setNativeInboxPrepared(null);
@@ -521,6 +559,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       if(operation===inboxOperation.current){
         setNativeInboxSent(targetDeviceId);
         setSentRequest({requestId:result.requestId,deviceId:targetDeviceId,expiresAt:result.expiresAt});
+        if(easyEnabled&&own&&peer){
+          setSelectedDeviceId(targetDeviceId);
+          setEasySession({role:"sender",requestId:result.requestId,
+            localDeviceId:own.deviceId,peerDeviceId:peer.deviceId,
+            peerFingerprint:peer.fingerprint,expiresAtMs:Date.parse(result.expiresAt)});
+          setEasyStage("waiting");
+          easyHandled.current.clear();
+        }
       }
     }catch{if(operation===inboxOperation.current)setNativeInboxError(true);}
     finally{if(operation===inboxOperation.current){
@@ -778,6 +824,91 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       relayInFlight.current=false;setRelayBusy(false);
     }}
   };
+  // Stage4S: background only AFTER explicit device request and recipient acceptance.
+  // Bound every poll to a signed request and its expiry; never auto-approve a key.
+  useEffect(()=>{
+    if(!easyEnabled||!guideOpen||easySession||acceptedInboxOffer||acceptedChallenge||relayProof)return;
+    void loadRecipientInbox(true);
+    const timer=window.setInterval(()=>void loadRecipientInbox(true),8_000);
+    return ()=>window.clearInterval(timer);
+    // No account enroll, polling only while the owner keeps Mesh guide open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,guideOpen,easySession,acceptedInboxOffer,acceptedChallenge,relayProof]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession||!validEasyMeshSession(easySession,Date.now()))return;
+    if(easySession.role!=="recipient"||!acceptedInboxOffer||
+       acceptedInboxOffer.requestId!==easySession.requestId)return;
+    void prepareAcceptedChallenge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,easySession,acceptedInboxOffer]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession||!challengeRelayWork||
+       easySession.role!=="recipient"||
+       challengeRelayWork.requestId!==easySession.requestId||
+       challengeRelayWork.deviceId!==easySession.peerDeviceId)return;
+    void sendRelay(challengeRelayWork,"challenge");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,easySession,challengeRelayWork]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession||!responseRelayWork||
+       easySession.role!=="sender"||
+       responseRelayWork.requestId!==easySession.requestId||
+       responseRelayWork.deviceId!==easySession.peerDeviceId)return;
+    void sendRelay(responseRelayWork,"response");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,easySession,responseRelayWork]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession||relayProof||easyStage==="approved"||
+       !validEasyMeshSession(easySession,Date.now()))return;
+    const refresh=()=>{if(!relayInFlight.current)void loadRelay();};
+    // One bounded QA request; do not run a permanent background relay.
+    const timer=window.setInterval(refresh,5_000);
+    refresh();
+    return ()=>window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,easySession,relayProof,easyStage]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession||!relayMessages||relayInFlight.current)return;
+    const now=Date.now();
+    const item=relayMessages.find(message=>matchEasyRelayMessage(easySession,message,now));
+    if(!item)return;
+    const id=item.requestId+"/"+item.kind+"/"+item.senderDeviceId;
+    if(easyHandled.current.has(id))return;
+    easyHandled.current.add(id);
+    setEasyStage("verifying");
+    // Rust validates exact signed challenge/response and account-bound nonces.
+    if(easySession.role==="sender")void prepareRelayResponse(item);
+    else void verifyRelayResponse(item);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,easySession,relayMessages]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!relayProof||!easySession)return;
+    if(relayProof.fingerprint===easySession.peerFingerprint&&
+       validEasyMeshSession(easySession,Date.now()))setEasyStage("compare");
+    else setEasyStage("error");
+  },[easyEnabled,relayProof,easySession]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession)return;
+    const ms=easySession.expiresAtMs-Date.now();
+    if(ms<=0||ms>10*60_000){setEasySession(null);setEasyStage("expired");return;}
+    const expiry=window.setTimeout(()=>{
+      setEasySession(null);setEasyStage("expired");
+      setNativeInboxSent(null);setSentRequest(null);
+      setAcceptedInboxOffer(null);setAcceptedChallenge(null);
+      setChallengeRelayWork(null);setResponseRelayWork(null);
+      setRelayProof(null);setRelayMessages(null);
+      easyHandled.current.clear();
+    },ms);
+    return ()=>window.clearTimeout(expiry);
+  },[easyEnabled,easySession]);
+
   const selectedDevice=directory?.devices.find(d=>d.deviceId===selectedDeviceId &&
     d.fingerprint!==agentBootstrap?.fingerprint)??null;
   // A manual preflight checks existing Keychain pin + current owner + RLS
@@ -895,6 +1026,32 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     }catch{setApprovalError(true);}
     finally{setPairingBusy(false);}
   };
+  // The click is a human assertion that BOTH screens show the SAME code.
+  // Supplying the local code to native is permitted only on that explicit
+  // acknowledgment; a mere account match or relay proof never pins a key.
+  const approveEasyPeer=async()=>{
+    if(!easyEnabled||!canQuickApproveSameCode({
+      proof:relayProof,peer:selectedDevice,session:easySession,
+      explicitOwnerConfirmation:true,busy:pairingBusy||relayBusy||directoryBusy,
+      nowMs:Date.now()
+    }))return;
+    const code=relayProof!.comparisonCode;
+    const fingerprint=relayProof!.fingerprint;
+    setPairingBusy(true);setApprovalError(false);
+    try{
+      const result=await invoke<MeshPeerInventory>("mesh_local_approve_peer",
+        {confirmedCode:code});
+      if(result.approvalOnly!==true||result.transportReady!==false||
+         result.remoteJobsEnabled!==false||!result.peers.some(peer=>
+           peer.fingerprint===fingerprint&&peer.status==="locally_approved"))
+        throw Error("unexpected_local_trust_result");
+      checkInventory(result);
+      setEasySession(null);setEasyStage("approved");
+      setRelayProof(null);setConfirmedCode("");
+    }catch{setApprovalError(true);setEasyStage("error");}
+    finally{setPairingBusy(false);}
+  };
+
   const revokePeer=async(fingerprint:string)=>{
     setPairingBusy(true);setApprovalError(false);
     try{checkInventory(await invoke<MeshPeerInventory>("mesh_local_revoke_peer",{fingerprint}));}
@@ -1021,7 +1178,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     setNativeInboxSent(null);setNativeInboxPrepared(null);
     setRecipientInbox(null);setRecipientDecision(null);
     setDirectoryBusy(false);setNativeInboxBusy(false);setRecipientBusy(false);
-    setGuideOpen(false);
+    setGuideOpen(import.meta.env.VITE_MESH_EASY_PAIR_QA==="1");
     setDirectoryError(false);setDirectoryIssue(null);
     void refresh();
   },[refresh,refreshEpoch]);
@@ -1100,27 +1257,40 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const registeredPlatform=(os:MeshAccountDevice["platformOs"])=>
     t(os==="macos"?"mesh.directory.deviceMac":
       os==="windows"?"mesh.directory.deviceWindows":"mesh.directory.deviceLinux");
+  const manualMeshControls=!easyEnabled||
+    (easyAdvancedOpen&&(!easySession||easyStage==="error"));
   const readiness=snapshot?.localControl??"unknown";
-  const renderRegistration=(device:MeshAccountDevice)=><button type="button"
+  const renderRegistration=(device:MeshAccountDevice)=>{
+    const lastSeen=Date.parse(device.lastSeenAt??"");
+    const recent=Number.isFinite(lastSeen)&&lastSeen<=Date.now()+5*60_000&&
+      lastSeen>=Date.now()-2*60*60_000;
+    const canRequest=easyEnabled&&recent&&device.membershipState==="discovered"&&
+      device.fingerprint!==agentBootstrap?.fingerprint&&!easySession&&
+      easyStage!=="approved"&&!nativeInboxSent;
+    return <button type="button"
     className="vision-mesh-guide-device" key={device.deviceId}
     aria-pressed={selectedDeviceId===device.deviceId}
-    disabled={directoryBusy||nativeInboxBusy||recipientBusy}
+    disabled={directoryBusy||nativeInboxBusy||recipientBusy||
+      (easyEnabled&&!canRequest)}
     onClick={()=>{
       nativePreflightOperation.current++;nativePreflightInFlight.current=false;
       setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
       setSelectedDeviceId(device.deviceId);
+      if(canRequest)void sendNativeInbox(device.deviceId,true);
     }}>
     <span className="vision-mesh-guide-device-name"><strong>{displayRegistrationName(device)}</strong>
-      <small>{device.displayName}</small>
-      <small>{registeredPlatform(device.platformOs)} · {t("mesh.directory.modelUnverified")}</small>
-      <small>{t(("mesh.directory."+device.membershipState) as TKey)} · {t("mesh.directory.identitySuffix",{id:device.fingerprint.slice(-8)})}</small>
+      {!easyEnabled?<small>{device.displayName}</small>:null}
+      <small>{registeredPlatform(device.platformOs)} · {t("mesh.directory.identitySuffix",{id:device.fingerprint.slice(-8)})}</small>
+      {!easyEnabled?<small>{t("mesh.directory.modelUnverified")} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>:null}
       <small>{device.lastSeenAt?
         t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
         t("mesh.directory.notSeen")}</small>
     </span>
-    <span className="vision-mesh-guide-select">{t(selectedDeviceId===device.deviceId?
-      "mesh.guide.selected":"mesh.guide.choose")}</span>
+    <span className="vision-mesh-guide-select">{t(easyEnabled?
+      canRequest?"mesh.easy.connect":"mesh.easy.history":
+      selectedDeviceId===device.deviceId?"mesh.guide.selected":"mesh.guide.choose")}</span>
   </button>;
+  };
   return <section className="vision-mesh-readiness vision-mesh-compact provider-mesh-card glass" aria-label={t("mesh.simple.title")}>
     <div className="vision-mesh-compact-top">
       <div className="vision-mesh-compact-identity">
@@ -1144,9 +1314,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           <RefreshCcw size={15} className={directoryBusy?"spin":""}/>
           {t("mesh.directory.refresh")}
         </button>
-        <button type="button" className="primary compact-button"
+        {!easyEnabled?<button type="button" className="primary compact-button"
           disabled={pairingBusy||!snapshot}
-          onClick={startConnectionGuide}>{t("mesh.simple.connect")}</button>
+          onClick={startConnectionGuide}>{t("mesh.simple.connect")}</button>:null}
         <button type="button" className="ghost compact-button" aria-expanded={detailsOpen}
           aria-controls="vision-mesh-technical-details"
           onClick={()=>setDetailsOpen(value=>!value)}>{t("mesh.simple.details")}</button>
@@ -1191,20 +1361,52 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     {guideOpen?<div className="vision-mesh-guide" role="region"
       aria-label={t("mesh.guide.heading")}>
       <div className="vision-mesh-guide-heading">
-        <strong>{t("mesh.guide.heading")}</strong>
+        <strong>{t(easyEnabled?"mesh.easy.title":"mesh.guide.heading")}</strong>
         <small>{t("mesh.guide.notConnected")}</small>
       </div>
-      <p>{t("mesh.guide.description")}</p>
+      <p>{t(easyEnabled?"mesh.easy.description":"mesh.guide.description")}</p>
       {!inboxSendEnabled?<p className="vision-mesh-compact-notice" role="status">
         {t("mesh.guide.deliveryDisabled")}</p>:null}
       {!inboxReceiveEnabled?<p className="vision-mesh-compact-notice" role="status">
         {t("mesh.recipient.disabled")}</p>:null}
+      {easyEnabled?<section className="vision-mesh-easy-panel"
+          aria-label={t("mesh.easy.title")} role="status">
+        <strong>{t("mesh.easy.progressTitle")}</strong>
+        {easyStage==="waiting"?<p>{t("mesh.easy.waiting")}</p>:
+         easyStage==="verifying"?<p>{t("mesh.easy.verifying")}</p>:
+         easyStage==="compare"&&relayProof?<div className="vision-mesh-easy-check">
+           <p>{t("mesh.easy.compare")}</p>
+           <code className="vision-mesh-sas-approval-code">{relayProof.comparisonCode}</code>
+           <small>{t("mesh.easy.compareOnlyOnDevices")}</small>
+           <button type="button" className="primary compact-button"
+             disabled={!canQuickApproveSameCode({
+               proof:relayProof,peer:selectedDevice,session:easySession,
+               explicitOwnerConfirmation:true,
+               busy:pairingBusy||relayBusy||directoryBusy,
+               nowMs:Date.now()
+             })||(easySession?.role==="sender"&&relayReceipt!=="response")}
+             onClick={()=>void approveEasyPeer()}>
+             {t("mesh.easy.codesMatch")}
+           </button>
+           {!selectedDevice||selectedDevice.fingerprint!==relayProof.fingerprint?
+             <p role="alert" className="vision-mesh-warning">{t("mesh.easy.peerNotVerified")}</p>:null}
+         </div>:
+         easyStage==="approved"?<p>{t("mesh.easy.approvedLocalOnly")}</p>:
+         easyStage==="expired"?<p>{t("mesh.easy.expired")}</p>:
+         easyStage==="error"?<p role="alert">{t("mesh.easy.failed")}</p>:
+         <p>{t("mesh.easy.ready")}</p>}
+        <small>{t("mesh.easy.noTransport")}</small>
+        <button type="button" className="ghost compact-button vision-mesh-easy-advanced-toggle"
+          aria-expanded={easyAdvancedOpen} onClick={()=>setEasyAdvancedOpen(v=>!v)}>
+          {t("mesh.easy.advanced")}
+        </button>
+      </section>:null}
     <section className="vision-mesh-account-directory" aria-label={t("mesh.directory.heading")}>
       <div className="vision-mesh-directory-heading">
-        <strong>{t("mesh.directory.heading")}</strong>
+        <strong>{t(easyEnabled?"mesh.easy.devices":"mesh.directory.heading")}</strong>
         <span className="vision-mesh-directory-note">{t("mesh.simple.discoveryStatus")}</span>
       </div>
-      <p>{t("mesh.directory.notice")}</p>
+      {!easyEnabled?<p>{t("mesh.directory.notice")}</p>:null}
       {directory===null&&!directoryBusy&&!directoryError?
         <p>{t("mesh.guide.notLoaded")}</p>:null}
       {directoryBusy?<p role="status">{t("mesh.guide.loading")}</p>:null}
@@ -1223,13 +1425,15 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
             {t("mesh.directory.recent")}
           </p>:null}
         {presentation.recentlyReported.map(renderRegistration)}
+        {easyEnabled&&presentation.recentlyReported.length===0?
+          <p className="vision-mesh-compact-notice">{t("mesh.easy.otherMacFind")}</p>:null}
         {presentation.olderEntries.length>0?<details className="vision-mesh-older-registrations">
           <summary>{t("mesh.directory.older",{count:presentation.olderEntries.length})}</summary>
           <p>{t("mesh.directory.olderNotice")}</p>
           {presentation.olderEntries.map(renderRegistration)}
         </details>:null}
       </>:directory?.devices.map(renderRegistration)}
-      {selectedDevice?<div className="vision-mesh-guide-target" role="group"
+      {manualMeshControls&&selectedDevice?<div className="vision-mesh-guide-target" role="group"
         aria-label={t("mesh.guide.target")}>
         <strong>{selectedDevice.personaName||selectedDevice.displayName}</strong>
         {selectedDevice.membershipState==="discovered"&&qaAuthEnabled?
@@ -1277,18 +1481,18 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         t("mesh.directory.unavailable")}</p>:null}
       {inboxReceiveEnabled?<section className="vision-mesh-recipient-inbox"
          aria-label={t("mesh.recipient.heading")}>
-        <strong>{t("mesh.recipient.heading")}</strong>
-        <p>{t("mesh.recipient.notice")}</p>
-        <button type="button" className="ghost compact-button"
+        <strong>{t(easyEnabled?"mesh.easy.incoming":"mesh.recipient.heading")}</strong>
+        <p>{t(easyEnabled?"mesh.easy.incomingHint":"mesh.recipient.notice")}</p>
+        {!easyEnabled?<button type="button" className="ghost compact-button"
           disabled={recipientBusy||directoryBusy}
-          onClick={()=>void loadRecipientInbox()}>{t("mesh.recipient.refresh")}</button>
+          onClick={()=>void loadRecipientInbox()}>{t("mesh.recipient.refresh")}</button>:null}
         {recipientInbox?.length===0?<p role="status">{t("mesh.recipient.empty")}</p>:null}
         {recipientInbox?.map(item=><div className="vision-mesh-directory-row" key={item.requestId}>
           <div>
             <strong>{directory?.devices.find(d=>d.deviceId===item.sourceDeviceId)?.displayName||
               t("mesh.recipient.unknownSource")}</strong>
             <small>{t("mesh.recipient.expires")}: {relativeTime(item.expiresAt,lang)||"—"}</small>
-            <small>{item.fingerprint}</small>
+            {!easyEnabled?<small>{item.fingerprint}</small>:null}
           </div>
           <button type="button" className="ghost compact-button" disabled={recipientBusy}
             onClick={()=>void decideRecipientInvite(item,"accept")}>{t("mesh.recipient.accept")}</button>
@@ -1299,7 +1503,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           {t(recipientDecision==="accepted"?"mesh.recipient.accepted":"mesh.recipient.rejected")}
           {" "}{t("mesh.recipient.notConnected")}
         </p>:null}
-        {acceptedInboxOffer?<div className="vision-mesh-guide-target" role="group"
+        {manualMeshControls&&acceptedInboxOffer?<div className="vision-mesh-guide-target" role="group"
            aria-label={t("mesh.handoff.heading")}>
           <strong>{t("mesh.handoff.heading")}</strong>
           <p>{t("mesh.handoff.description")}</p>
@@ -1309,7 +1513,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
             {t("mesh.handoff.createChallenge")}</button>
           <small>{t("mesh.inbox.noTrust")}</small>
         </div>:null}
-        {acceptedChallenge?<div className="vision-mesh-guide-target" role="status">
+        {manualMeshControls&&acceptedChallenge?<div className="vision-mesh-guide-target" role="status">
           <strong>{t("mesh.handoff.ready")}</strong>
           <p>{t(relayQa?"mesh.relay.signedReady":"mesh.handoff.next")}</p>
           {relayQa&&challengeRelayWork?
@@ -1326,8 +1530,10 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         {recipientError?<p role="alert" className="vision-mesh-error">
           {t("mesh.recipient.failed")}
         </p>:null}
+        {easyEnabled&&(challengeError||relayError||approvalError)?
+          <p role="alert" className="vision-mesh-error">{t("mesh.easy.failed")}</p>:null}
       </section>:null}
-      {relayQa?<section className="vision-mesh-recipient-inbox"
+      {relayQa&&manualMeshControls?<section className="vision-mesh-recipient-inbox"
         aria-label={t("mesh.relay.heading")}>
         <strong>{t("mesh.relay.heading")}</strong>
         <p>{t("mesh.relay.notice")}</p>
