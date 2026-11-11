@@ -19,14 +19,18 @@ assert Image.open(MASTER).size == (256, 256), "ORIGINAL_SIZE_CHANGED"
 expected = Image.open(ROOT / "src-tauri/icons/icon-1024-master.png").convert("RGBA")
 assert expected.size == (1024, 1024)
 alpha = expected.getchannel("A")
-assert alpha.getextrema() == (0, 255)
-assert alpha.getbbox() == (20, 20, 1004, 1004), f"WRONG_ICON_SCALE: {alpha.getbbox()}"
-assert all(alpha.getpixel(p) == 0 for p in ((0, 0), (0, 1023), (1023, 0), (1023, 1023))), \
-    "OPAQUE_ICON_BACKGROUND"
+assert alpha.getextrema() == (255, 255), "NATIVE_DOCK_ICON_MUST_BE_OPAQUE"
+assert expected.getpixel((0, 0)) == (0, 0, 0, 255), "NATIVE_DOCK_MUST_BE_BLACK"
+assert expected.getpixel((512, 512))[:3] != (0, 0, 0), "LOGO_NOT_VISIBLE"
 
+# Native macOS/Windows launcher icon is black; UI retains real alpha.
+ui_icons = []
 for name in ("public/kai-ai-icon.png", "public/katosync_logo_centered.png"):
     candidate = Image.open(ROOT / name).convert("RGBA")
-    assert ImageChops.difference(expected, candidate).getbbox() is None, f"BRAND_DRIFT: {name}"
+    assert candidate.getchannel("A").getextrema() == (0, 255), f"UI_ALPHA_LOST: {name}"
+    assert candidate.getchannel("A").getbbox() == (20, 20, 1004, 1004), f"UI_SCALE_BAD: {name}"
+    ui_icons.append(candidate)
+assert ImageChops.difference(ui_icons[0], ui_icons[1]).getbbox() is None, "BRAND_UI_DRIFT"
 
 for name, size in (
     ("32x32.png", (32, 32)),
@@ -35,8 +39,8 @@ for name, size in (
 ):
     icon = Image.open(ROOT / "src-tauri/icons" / name).convert("RGBA")
     assert icon.size == size
-    assert icon.getchannel("A").getextrema() == (0, 255), name
-    assert icon.getchannel("A").getpixel((0, 0)) == 0, name
+    assert icon.getchannel("A").getextrema() == (255, 255), name
+    assert icon.getpixel((0, 0)) == (0, 0, 0, 255), name
 
 icns = ROOT / "src-tauri/icons/icon.icns"
 assert icns.read_bytes().startswith(b"icns"), "ICNS_HEADER_BAD"
@@ -49,6 +53,6 @@ with tempfile.TemporaryDirectory(prefix="katosync-stage4o-icns-") as temp:
     assert ImageChops.difference(expected, layer).getbbox() is None, "ICNS_MASTER_MISMATCH"
 
 print("KATO_ORIGINAL_MASTER_SHA256_PASS")
-print("KATO_TRANSPARENT_FULLSCREEN_ICON_PASS")
+print("KATO_OPAQUE_BLACK_DOCK_ICON_PASS")
 print("KATO_WIDGET_AND_APP_BRANDING_CONSISTENT_PASS")
 print("KATO_ICNS_MASTER_MATCH_PASS")
