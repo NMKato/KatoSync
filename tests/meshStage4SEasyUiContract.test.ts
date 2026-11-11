@@ -18,7 +18,7 @@ test("one-click device selection explicitly sends only for discovered fresh non-
 test("background protocol is bounded to the signed request and cancels on expiration",()=>{
  assert.ok(auto>0&&auto<turn);
  assert.match(ui,/matchEasyRelayMessage\(easySession,message,now\)/);
- assert.match(ui,/setInterval\(refresh,5_000\)/);
+ assert.match(ui,/setInterval\(refresh,EASY_RELAY_POLL_MS\)/);
  assert.match(ui,/window\.setInterval\(\(\)=>void loadRecipientInbox\(true\),8_000\)/);
  assert.match(ui,/setTimeout\(\(\)=>\{\s*setEasySession\(null\);setEasyStage\("expired"\)/);
  assert.match(ui,/if\(!easyEnabled\|\|!easySession\|\|!challengeRelayWork/);

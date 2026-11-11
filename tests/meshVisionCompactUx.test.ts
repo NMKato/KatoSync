@@ -35,7 +35,9 @@ test("no fake connected or uptime label in stage zero",()=>{
  // The legacy stage-zero view has no connected state; the later QA
  // polling is explicitly limited to active owner pairing, with cleanup.
  assert.match(part,/const easyEnabled=import\.meta\.env\.VITE_MESH_EASY_PAIR_QA==="1"/);
- assert.match(part,/if\(!easyEnabled\|\|!easySession\|\|relayProof/);
+ assert.match(part,/if\(!easyEnabled\|\|!easySession\|\|/);
+ assert.match(part,/canPollEasyMeshRelay\(\{/);
+ assert.match(part,/hasOutboundWork:challengeRelayWork!==null\|\|responseRelayWork!==null/);
  assert.match(part,/validEasyMeshSession\(easySession,Date\.now\(\)\)/);
  assert.match(part,/window\.clearInterval\(timer\)/);
 });
