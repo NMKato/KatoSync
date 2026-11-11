@@ -63,6 +63,9 @@ jobs:
       - name: Stage4P singleton headless startup contract
         run: bash scripts/qa-stage4p-singleton-headless.sh
 
+      - name: Stage4R guarded owner pairing QA routes and UX contract
+        run: bash scripts/qa-stage4r-owner-gates.sh
+
   windows-node-regression:
     name: Windows Node Regression
     runs-on: windows-latest
