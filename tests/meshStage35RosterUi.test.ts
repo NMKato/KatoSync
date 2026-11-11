@@ -20,7 +20,8 @@ test("the own current app identity cannot be selected as the target peer",()=>{
 test("discovered QA identity is not described as a trusted colleague",()=>{
  assert.ok(ui.includes('colleagueRecommendation?.stage==="ready_for_hello"'));
  assert.ok(ui.includes('t("mesh.agent35.accountRecords"'));
- assert.ok(ui.includes('t("mesh.agent35.pendingTrust")'));
+ assert.ok(ui.includes('t(locallyPaired?"mesh.status.helloBlocked":"mesh.agent35.pendingTrust")'));
+ assert.ok(ui.includes("secureTransportReady:false"));
 });
 test("all four UI languages distinguish app identity from physical computer",()=>{
  for(const lang of ["de","en","es","ru"]){
