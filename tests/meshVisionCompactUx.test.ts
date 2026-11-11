@@ -32,7 +32,12 @@ test("no fake connected or uptime label in stage zero",()=>{
  assert.match(part,/remoteReadOnlyDispatch/);
  assert.match(part,/crossDeviceWrites/);
  assert.doesNotMatch(part,/connectedAt\s*=\s*Date\.now/);
- assert.doesNotMatch(part,/setInterval/);
+ // The legacy stage-zero view has no connected state; the later QA
+ // polling is explicitly limited to active owner pairing, with cleanup.
+ assert.match(part,/const easyEnabled=import\.meta\.env\.VITE_MESH_EASY_PAIR_QA==="1"/);
+ assert.match(part,/if\(!easyEnabled\|\|!easySession\|\|relayProof/);
+ assert.match(part,/validEasyMeshSession\(easySession,Date\.now\(\)\)/);
+ assert.match(part,/window\.clearInterval\(timer\)/);
 });
 
 test("existing secure reauth, signature, SAS and revoke tools remain behind Details",()=>{

@@ -15,7 +15,7 @@ test("expiry filter is deterministic and excludes expired/invalid invitations",(
  assert.deepEqual(activeMeshInvitations(items,now+201),[]);
  assert.deepEqual(items.map(x=>x.requestId),["test--1","test-0","test-50","test-200","invalid"]);
 });
-test("single expiration timer is bounded and does not auto-read inbox",()=>{
+test("expiry timer remains bounded; Stage4S inbox poll is owner-gated and cancellable",()=>{
  const now=1_700_000_000_000;
  assert.equal(nextMeshInboxExpiryDelay([entry(50,now),entry(400,now)],now),60);
  assert.equal(nextMeshInboxExpiryDelay([entry(-50,now)],now),null);
@@ -23,7 +23,13 @@ test("single expiration timer is bounded and does not auto-read inbox",()=>{
  assert.ok((nextMeshInboxExpiryDelay([entry(100_000_000_000,now)],now)??0)<=2_147_483_000);
  assert.match(ui,/window\.clearTimeout\(timer\)/);
  assert.match(ui,/activeMeshInvitations\(items\)/);
- assert.doesNotMatch(ui,/setInterval\(/);
+ // Stage3F still owns only the single expiration timeout. The new
+ // Stage4S inbox poll is opt-in and tied to the open account guide.
+ assert.match(ui,/const easyEnabled=import\.meta\.env\.VITE_MESH_EASY_PAIR_QA==="1"/);
+ assert.match(ui,/if\(!easyEnabled\|\|!guideOpen\|\|easySession\|\|acceptedInboxOffer/);
+ assert.match(ui,/window\.setInterval\(\(\)=>void loadRecipientInbox\(true\),8_000\)/);
+ assert.match(ui,/return \(\)=>window\.clearInterval\(timer\)/);
+ assert.match(ui,/setTimeout\(\(\)=>\{\s*setEasySession\(null\);setEasyStage\("expired"\)/);
 });
 test("synchronous operation tokens prevent UI double-click send or duplicate recipient decision",()=>{
  assert.match(ui,/const inboxInFlight=useRef\(false\)/);
