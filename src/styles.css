@@ -11221,3 +11221,223 @@ button.agent-tile:hover {
   .provider-mesh-card .vision-mesh-easy-check button{width:100%;justify-self:stretch;}
   .provider-mesh-card .vision-mesh-easy-panel{padding:11px;}
 }
+/* Created by NMKato Solutions — Stage4T human-first Mesh QA.
+   Three ordinary actions; all trust and transport checks remain native and fail closed. */
+.provider-mesh-card .vision-mesh-guide {
+  gap:18px;
+  padding:clamp(15px,2vw,24px);
+  border:1px solid color-mix(in srgb,var(--line) 66%,#53b7c2 34%);
+  background:linear-gradient(156deg,
+    color-mix(in srgb,var(--surface-raised) 92%,#123f4c 8%),
+    color-mix(in srgb,var(--surface) 95%,#57341a 5%));
+}
+.provider-mesh-card .vision-mesh-guide-heading {
+  align-items:center;padding-bottom:4px;gap:12px;
+}
+.provider-mesh-card .vision-mesh-guide-heading strong {
+  font-size:clamp(17px,1.8vw,21px);line-height:1.4;letter-spacing:-.015em;
+}
+.provider-mesh-card .vision-mesh-guide-heading small {
+  padding:6px 11px;border-radius:99px;
+  border:1px solid color-mix(in srgb,#e7a353 36%,var(--line));
+  background:color-mix(in srgb,#e7a353 12%,var(--surface));
+  font-size:12px;white-space:normal;overflow-wrap:anywhere;
+}
+.provider-mesh-card .vision-mesh-guide>p {
+  font-size:14px;line-height:1.65;max-width:72ch;
+}
+.provider-mesh-card .vision-mesh-simple-steps {
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;
+  min-width:0;
+}
+.provider-mesh-card .vision-mesh-simple-step {
+  display:flex;align-items:center;gap:11px;min-width:0;
+  padding:13px 14px;border-radius:14px;
+  border:1px solid var(--line);
+  background:var(--surface);
+  color:var(--text-muted);
+  font-size:13px;font-weight:600;line-height:1.45;
+  overflow-wrap:anywhere;
+}
+.provider-mesh-card .vision-mesh-step-number {
+  display:grid;place-items:center;flex-shrink:0;
+  width:31px;height:31px;border-radius:11px;
+  background:color-mix(in srgb,#839dab 16%,var(--surface-raised));
+  color:var(--text);font-variant-numeric:tabular-nums;
+}
+.provider-mesh-card .vision-mesh-simple-step[data-state="active"] {
+  border-color:color-mix(in srgb,#e59a4d 64%,var(--line));
+  background:color-mix(in srgb,#e59a4d 11%,var(--surface));
+  color:var(--text);
+}
+.provider-mesh-card .vision-mesh-simple-step[data-state="active"] .vision-mesh-step-number {
+  background:#d98a3a;color:#101419;
+}
+.provider-mesh-card .vision-mesh-simple-step[data-state="complete"] {
+  border-color:color-mix(in srgb,#4ec4ac 53%,var(--line));
+  background:color-mix(in srgb,#4ec4ac 9%,var(--surface));
+  color:var(--text);
+}
+.provider-mesh-card .vision-mesh-simple-step[data-state="complete"] .vision-mesh-step-number {
+  background:#3baf99;color:#10201d;
+}
+.provider-mesh-card .vision-mesh-easy-panel {
+  gap:11px;
+  padding:17px 19px;
+  border:1px solid color-mix(in srgb,#68aaca 42%,var(--line));
+  border-left:4px solid #56a8c1;
+  border-radius:15px;
+  background:color-mix(in srgb,#3b9fb5 8%,var(--surface));
+}
+.provider-mesh-card .vision-mesh-easy-panel[data-stage="waiting"],
+.provider-mesh-card .vision-mesh-easy-panel[data-stage="verifying"] {
+  border-left-color:#e49b4b;
+  background:color-mix(in srgb,#e49b4b 9%,var(--surface));
+}
+.provider-mesh-card .vision-mesh-easy-panel[data-stage="compare"],
+.provider-mesh-card .vision-mesh-easy-panel[data-stage="approved"] {
+  border-left-color:#54bc9c;
+  background:color-mix(in srgb,#54bc9c 9%,var(--surface));
+}
+.provider-mesh-card .vision-mesh-easy-panel[data-stage="error"],
+.provider-mesh-card .vision-mesh-easy-panel[data-stage="expired"] {
+  border-left-color:#df8767;
+  background:color-mix(in srgb,#df8767 9%,var(--surface));
+}
+.provider-mesh-card .vision-mesh-easy-panel>strong {font-size:15px;}
+.provider-mesh-card .vision-mesh-easy-panel p {font-size:14px;line-height:1.6;}
+.provider-mesh-card .vision-mesh-easy-check {
+  padding:16px;border-radius:12px;
+  border:1px solid color-mix(in srgb,#54bc9c 43%,var(--line));
+  background:var(--surface-raised);
+}
+.provider-mesh-card .vision-mesh-sas-approval-code {
+  display:block;width:fit-content;max-width:100%;overflow-wrap:anywhere;
+  padding:13px 19px;border:1px solid color-mix(in srgb,#54bc9c 52%,var(--line));
+  border-radius:12px;background:var(--surface);
+  font-size:clamp(21px,3vw,32px);font-weight:800;letter-spacing:.09em;
+  font-variant-numeric:tabular-nums;
+}
+.provider-mesh-card .vision-mesh-guide .vision-mesh-account-directory,
+.provider-mesh-card .vision-mesh-recipient-inbox {
+  display:grid;gap:12px;min-width:0;margin:0;
+  padding:clamp(15px,2vw,22px);
+  border-radius:16px;border:1px solid var(--line);
+}
+.provider-mesh-card .vision-mesh-guide .vision-mesh-account-directory {
+  border-color:color-mix(in srgb,#54b6c0 48%,var(--line));
+  background:color-mix(in srgb,#54b6c0 6%,var(--surface));
+}
+.provider-mesh-card .vision-mesh-recipient-inbox {
+  border-color:color-mix(in srgb,#e7a353 46%,var(--line));
+  background:color-mix(in srgb,#e7a353 6%,var(--surface));
+}
+.provider-mesh-card .vision-mesh-directory-heading strong,
+.provider-mesh-card .vision-mesh-recipient-inbox>strong {
+  font-size:16px;line-height:1.4;color:var(--text);
+}
+.provider-mesh-card .vision-mesh-directory-heading {align-items:flex-start;}
+.provider-mesh-card .vision-mesh-directory-note {
+  font-size:11px;line-height:1.5;max-width:44ch;color:var(--text-muted);
+}
+.provider-mesh-card .vision-mesh-directory-meta {
+  font-size:12px;color:var(--text-muted);margin:0;
+}
+.provider-mesh-card .vision-mesh-own-registration {
+  padding:12px;border-radius:12px;
+  border:1px solid color-mix(in srgb,#54b6c0 29%,var(--line));
+  background:var(--surface);
+  min-width:0;overflow-wrap:anywhere;
+}
+.provider-mesh-card .vision-mesh-registration-section-label {
+  margin:7px 0 0;font-size:12px;font-weight:600;
+}
+.provider-mesh-card .vision-mesh-guide-device {
+  min-height:77px;padding:13px 15px;margin:2px 0;
+  border:1px solid color-mix(in srgb,#54b6c0 32%,var(--line));
+  border-radius:13px;background:var(--surface);
+  gap:12px;min-width:0;
+}
+.provider-mesh-card .vision-mesh-guide-device[data-selected="true"] {
+  border-color:color-mix(in srgb,#ed9b47 65%,var(--line));
+  background:color-mix(in srgb,#ed9b47 9%,var(--surface));
+}
+.provider-mesh-card .vision-mesh-guide-device:not(:disabled):hover {
+  border-color:#55bdbe;
+  background:color-mix(in srgb,#55bdbe 9%,var(--surface));
+}
+.provider-mesh-card .vision-mesh-guide-device:disabled {
+  cursor:not-allowed;opacity:.82;
+}
+.provider-mesh-card .vision-mesh-guide-device-name strong {font-size:14px;line-height:1.4;}
+.provider-mesh-card .vision-mesh-guide-device-name small {font-size:12px;line-height:1.45;}
+.provider-mesh-card .vision-mesh-guide-select {
+  padding:8px 12px;border-radius:9px;
+  border:1px solid color-mix(in srgb,#e39b50 34%,var(--line));
+  background:color-mix(in srgb,#e39b50 13%,var(--surface-raised));
+  color:var(--text);font-size:12px;line-height:1.4;
+  max-width:42%;white-space:normal;text-align:center;
+}
+.provider-mesh-card .vision-mesh-invite-card {
+  display:grid;grid-template-columns:minmax(0,1fr) auto;
+  gap:15px;align-items:center;
+  padding:15px;border:1px solid color-mix(in srgb,#e7a353 42%,var(--line));
+  border-radius:13px;background:var(--surface);
+}
+.provider-mesh-card .vision-mesh-invite-summary {
+  min-width:0;display:grid;gap:5px;overflow-wrap:anywhere;
+}
+.provider-mesh-card .vision-mesh-invite-summary strong {font-size:15px;line-height:1.4;}
+.provider-mesh-card .vision-mesh-invite-eyebrow {
+  color:color-mix(in srgb,#e7a353 56%,var(--text));
+  font-size:11px;font-weight:700;letter-spacing:.02em;
+}
+.provider-mesh-card .vision-mesh-invite-actions {
+  display:flex;flex-wrap:wrap;align-items:center;gap:9px;
+}
+.provider-mesh-card .vision-mesh-invite-actions .compact-button {
+  min-height:43px;padding:10px 16px;font-size:13px;font-weight:750;
+  border-radius:11px;
+}
+.provider-mesh-card .vision-mesh-invite-actions .vision-mesh-accept {
+  color:#10211c;background:#62c8a2;
+  border:1px solid #62c8a2;
+}
+.provider-mesh-card .vision-mesh-invite-actions .vision-mesh-accept:hover:not(:disabled) {
+  background:#83debb;border-color:#83debb;
+}
+.provider-mesh-card .vision-mesh-invite-actions .vision-mesh-decline {
+  background:var(--surface-raised);
+  border:1px solid color-mix(in srgb,#db896f 30%,var(--line));
+  color:var(--text);
+}
+.provider-mesh-card .vision-mesh-received-confirmation {
+  display:grid;gap:5px;padding:12px 14px;border-radius:11px;
+  border:1px solid color-mix(in srgb,#62c8a2 45%,var(--line));
+  background:color-mix(in srgb,#62c8a2 10%,var(--surface));
+  line-height:1.55;
+}
+.provider-mesh-card .vision-mesh-inbox-empty {
+  margin:0;padding:11px 13px;border:1px dashed var(--line);
+  border-radius:10px;background:var(--surface);
+}
+.provider-mesh-card .vision-mesh-recipient-inbox>p {margin:0;font-size:13px;line-height:1.6;}
+.provider-mesh-card .vision-mesh-guide .compact-button:focus-visible,
+.provider-mesh-card .vision-mesh-guide-device:focus-visible {
+  outline:3px solid #61c9ce;outline-offset:3px;
+}
+@media(max-width:760px) {
+  .provider-mesh-card .vision-mesh-simple-steps {grid-template-columns:1fr;}
+  .provider-mesh-card .vision-mesh-invite-card {grid-template-columns:1fr;}
+  .provider-mesh-card .vision-mesh-invite-actions {justify-content:stretch;}
+  .provider-mesh-card .vision-mesh-invite-actions .compact-button {flex:1 1 auto;}
+}
+@media(max-width:420px) {
+  .provider-mesh-card .vision-mesh-guide-device {align-items:flex-start;flex-direction:column;}
+  .provider-mesh-card .vision-mesh-guide-select {max-width:100%;}
+  .provider-mesh-card .vision-mesh-invite-actions {flex-direction:column;}
+  .provider-mesh-card .vision-mesh-invite-actions .compact-button {width:100%;}
+}
+@media(prefers-reduced-motion:reduce) {
+  .provider-mesh-card .vision-mesh-guide-device {transition:none;}
+}
