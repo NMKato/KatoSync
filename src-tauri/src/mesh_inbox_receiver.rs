@@ -341,7 +341,7 @@ async fn post_inbox(proof: &RecipientProof<'_>, token: &str) -> Result<Vec<u8>, 
     }
     let response = client
         .post(format!(
-            "{}/functions/v1/mesh-inbox-receive",
+            "{}/functions/v1/mesh-inbox-receive-qa",
             crate::KATOSYNC_AUTH_URL
         ))
         .header("apikey", crate::KATOSYNC_AUTH_ANON_KEY)
