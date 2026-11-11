@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Reproduzierbarer KatoSync/Kato AI-Icon-Export aus dem Original mit Transparenz.
+"""Kato AI Original-Master; native Dock icon uses solid black for contrast.
 
 Created by NMKato Solutions.
-MARK: Kein Squircle, kein zusätzlicher Hintergrund, kein externes Bild.
+MARK: UI bleibt transparent. Nur native Icons erhalten Schwarz statt macOS-Grau.
 Die freigegebene Originalgrafik selbst bleibt unverändert.
 """
 from __future__ import annotations
@@ -56,16 +56,26 @@ def full_canvas(original: Image.Image) -> Image.Image:
     return transparent
 
 
+def native_dock_canvas(transparent_logo: Image.Image) -> Image.Image:
+    # MARK: macOS kann transparente App-Icons auf eine graue Kachel setzen.
+    # Ein vollständig deckendes Schwarz verhindert diese schlechte Kontrastfläche.
+    # Apple legt selbst die endgültige Dock-Maskierung fest.
+    black = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 255))
+    black.alpha_composite(transparent_logo)
+    return black
+
+
 def main() -> None:
     original = load_original()
-    icon = full_canvas(original)
+    transparent_logo = full_canvas(original)
+    icon = native_dock_canvas(transparent_logo)
     ICONS.mkdir(parents=True, exist_ok=True)
+    icon.save(ICONS / "icon-1024-master.png", optimize=True)
     for destination in (
-        ICONS / "icon-1024-master.png",
         ROOT / "public/katosync_logo_centered.png",
         ROOT / "public/kai-ai-icon.png",
     ):
-        icon.save(destination, optimize=True)
+        transparent_logo.save(destination, optimize=True)
     for dimensions, filename in (
         (32, "32x32.png"),
         (128, "128x128.png"),
@@ -92,7 +102,7 @@ def main() -> None:
             ["iconutil", "-c", "icns", "-o", str(ICONS / "icon.icns"), str(iconset)],
             check=True,
         )
-    print("KATO_ORIGINAL_TRANSPARENT_ICON_READY", EXPECTED_SHA)
+    print("KATO_NATIVE_BLACK_DOCK_AND_TRANSPARENT_UI_READY", EXPECTED_SHA)
 
 
 if __name__ == "__main__":

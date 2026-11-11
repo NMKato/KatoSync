@@ -8,8 +8,13 @@ and K2S may reuse this one pinned master for technically resized brand assets.
 
 ## Requirements
 
-- No dark squircle, background tile, shadow or invented lettering behind the signet.
-- The 1024px icon has only 20px transparent safe margins, instead of a small inset logo.
+- The master and in-app/web assets remain transparent and unchanged. Native
+  macOS/Windows app icons use only a SOLID BLACK surface for contrast on
+  macOS 26, with no extra light-gray system tile, decorative shadow,
+  double squircle or invented lettering behind the signet.
+- The 1024px transparent signet is scaled with a 20px safe margin and
+  composited onto solid black ONLY for the native app icon. Apple applies
+  the final Dock corner mask. Avoid adding another inner rounded border.
 - Never modify existing Developer-ID-signed or Apple-notarized app bundles in place.
   Ship brand changes only through a new signed, verified and notarized QA release.
 - Product names stay in UI labels; do not change the signed-off master pixels.

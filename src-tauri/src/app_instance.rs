@@ -17,6 +17,7 @@ const OLD_STAGE35: &str = "com.nmkato.katosync.meshqa.stage35";
 const OLD_STAGE3X: &str = "com.nmkato.katosync.meshqa.stage3x";
 const PRODUCTION_APP: &str = "com.nmkato.katosync";
 const EXECUTABLE_SUFFIX: &str = ".app/Contents/MacOS/katosync";
+mod process_mode;
 static OWNED_LOCK: OnceLock<File> = OnceLock::new();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,6 +44,11 @@ fn process_line(raw: &str, uid: u32, own_pid: u32) -> Option<(u32, PathBuf)> {
     let end = command.find(EXECUTABLE_SUFFIX)? + EXECUTABLE_SUFFIX.len();
     let trailing = &command[end..];
     if !trailing.is_empty() && !trailing.starts_with(char::is_whitespace) {
+        return None;
+    }
+    // MARK: A login-launched headless Local Control daemon is not a second GUI.
+    // Only genuine GUI candidates must compete for the singleton lock.
+    if process_mode::is_headless_process_args(trailing) {
         return None;
     }
     Some((pid, PathBuf::from(&command[..end])))
