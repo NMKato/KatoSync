@@ -17,3 +17,5 @@ Security test plan: wrong/revoked/cross-owner pin, malformed/oversize DER, publi
 Build gates: source review, Rust native compiler/tests, TypeScript and Node regression, CI, signed and notarized QA apps, physical M2/M3 positive and negative tests. Do not merge to main or deploy remote authorization.
 
 Current status: SOURCE-ONLY QA candidate. Not installed; real-key physical test not performed. Earlier synthetic identity mTLS LAN tests were separately successful.
+
+Headless signed-app QA: --stage4w-private-lan-qa-once listen|connect <local-ip> <peer-ip> <port> <peer-public-fingerprint>. The isolated stage4j-qa binary and KATOSYNC_STAGE4W_LAN_QA_ONCE=OWNER_LAUNCHED_QA_ONLY are both required. This is the SAME native Keychain, owner, enrollment and TLS gate, not a shortcut or secret exporter.

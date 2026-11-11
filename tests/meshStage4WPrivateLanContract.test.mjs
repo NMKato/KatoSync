@@ -61,3 +61,17 @@ test("client certificate exchange and strict TLS tests exist with invalid cert d
  assert.match(native,/server_probe\(server, &b_cert, &pin\(&a\), &der\)/);
  assert.match(native,/client_probe\(client, &a_cert, &pin\(&b\), &der\)/);
 });
+
+test("explicit headless CLI uses the same native admission and never bypasses remote job locks",()=>{
+ const lib=read("src-tauri/src/lib.rs");
+ const qa=read("src-tauri/src/mesh_private_lan_qa.rs");
+ assert.match(lib,/--stage4w-private-lan-qa-once/);
+ assert.match(lib,/#\[cfg\(feature = "stage4j-qa"\)\]/);
+ assert.match(lib,/run_cli_once\(args\)/);
+ assert.match(lib,/STAGE4W_REAL_KEY_PINNED_MTLS_ONCE_PASS_NO_REMOTE/);
+ assert.match(qa,/run_cli_once\(args: Vec<String>\)/);
+ assert.match(qa,/args.len\(\) != 5/);
+ assert.match(qa,/gate\(\)\?/);
+ assert.match(qa,/remote_jobs_enabled\s*\|\|\s*result\.cross_device_writes/);
+ assert.match(qa,/IpAddr::V4\(expected_ip\)/);
+});

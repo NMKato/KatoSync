@@ -190,7 +190,7 @@ pub(crate) async fn mesh_private_lan_listen_once_qa(
         .map_err(|_| "MESH_STAGE4W_ACCEPT_TIMEOUT".to_string())?
         .map_err(|_| "MESH_STAGE4W_ACCEPT_FAILED".to_string())?;
     drop(listener); // no second client, no persistent listener
-    if peer.ip() != expected_ip.into() {
+    if peer.ip() != std::net::IpAddr::V4(expected_ip) {
         return Err("MESH_STAGE4W_SOURCE_IP_DENIED".into());
     }
     let certificate = read_cert(&mut socket).await?;
@@ -223,7 +223,7 @@ pub(crate) async fn mesh_private_lan_connect_once_qa(
         .await
         .map_err(|_| "MESH_STAGE4W_CONNECT_TIMEOUT".to_string())?
         .map_err(|_| "MESH_STAGE4W_CONNECT_FAILED".to_string())?;
-    if socket.peer_addr().map(|a| a.ip()).ok() != Some(expected_ip.into()) {
+    if socket.peer_addr().map(|a| a.ip()).ok() != Some(std::net::IpAddr::V4(expected_ip)) {
         return Err("MESH_STAGE4W_REMOTE_ADDRESS_MISMATCH".into());
     }
     write_cert(&mut socket, identity.certificate_der()).await?;
@@ -232,6 +232,43 @@ pub(crate) async fn mesh_private_lan_connect_once_qa(
         .await
         .map_err(|_| "MESH_STAGE4W_PINNED_MTLS_DENIED".to_string())?;
     Ok(proof_complete())
+}
+
+/// Owner-authorized headless native QA entrypoint. Exposes no web IPC,
+/// exports no device key, and cannot activate remote jobs.
+pub(crate) async fn run_cli_once(args: Vec<String>) -> Result<(), String> {
+    gate()?;
+    if args.len() != 5 {
+        return Err("MESH_STAGE4W_CLI_ARGUMENTS_DENIED".into());
+    }
+    let role = args[0].as_str();
+    let port: u16 = args[3]
+        .parse()
+        .map_err(|_| "MESH_STAGE4W_CLI_ARGUMENTS_DENIED".to_string())?;
+    let result = match role {
+        "listen" => {
+            mesh_private_lan_listen_once_qa(args[1].clone(), args[2].clone(), port, args[4].clone())
+                .await?
+        }
+        "connect" => {
+            mesh_private_lan_connect_once_qa(
+                args[1].clone(),
+                args[2].clone(),
+                port,
+                args[4].clone(),
+            )
+            .await?
+        }
+        _ => return Err("MESH_STAGE4W_CLI_ARGUMENTS_DENIED".into()),
+    };
+    if !result.peer_authenticated_once
+        || result.channel_still_active
+        || result.remote_jobs_enabled
+        || result.cross_device_writes
+    {
+        return Err("MESH_STAGE4W_CLI_INVALID_RESULT".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
