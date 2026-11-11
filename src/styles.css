@@ -11451,3 +11451,10 @@ button.agent-tile:hover {
   width:9px;height:9px;flex:none;border-radius:50%;
   background:#55c4a0;box-shadow:0 0 0 3px color-mix(in srgb,#55c4a0 15%,transparent);
 }
+
+/* NMKato Solutions Stage4W: manual QA controls stay inside advanced details. */
+.vision-mesh-lan-qa { padding: 14px; margin: 14px 0; border: 1px solid var(--line, #5555); border-radius: 12px; }
+.vision-mesh-lan-qa summary { cursor: pointer; font-weight: 650; }
+.vision-mesh-lan-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:12px 0; }
+.vision-mesh-lan-confirm { display:flex; align-items:start; gap:10px; margin:12px 0; }
+.vision-mesh-lan-confirm input { flex:none; margin-top:4px; }

@@ -49,6 +49,7 @@ mod mesh_katoos_shared_preflight;
 mod mesh_native_issuer;
 mod mesh_owner_review_readback;
 mod mesh_preview_auth;
+mod mesh_private_lan_qa;
 mod mesh_readiness;
 mod mesh_relay_client;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
@@ -467,6 +468,8 @@ pub fn run() {
             mesh_readiness::mesh_local_readiness,
             mesh_native_issuer::mesh_native_issuer_readiness,
             mesh_admission::mesh_native_peer_preflight,
+            mesh_private_lan_qa::mesh_private_lan_listen_once_qa,
+            mesh_private_lan_qa::mesh_private_lan_connect_once_qa,
             mesh_katoos_shared_preflight::mesh_katoos_shared_preflight,
             mesh_owner_review_readback::mesh_owner_review_readback_qa,
             mesh_preview_auth::mesh_preview_auth_status,

@@ -223,6 +223,13 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [guideOpen,setGuideOpen]=useState(import.meta.env.VITE_MESH_EASY_PAIR_QA==="1");
   const [easyAdvancedOpen,setEasyAdvancedOpen]=useState(false);
   const [selectedDeviceId,setSelectedDeviceId]=useState<string|null>(null);
+  // Stage4W: opt-in engineering QA, never automatic pairing/remote execution.
+  const [lanQaLocalIp,setLanQaLocalIp]=useState("");
+  const [lanQaPeerIp,setLanQaPeerIp]=useState("");
+  const [lanQaPort,setLanQaPort]=useState("39402");
+  const [lanQaConsent,setLanQaConsent]=useState(false);
+  const [lanQaBusy,setLanQaBusy]=useState(false);
+  const [lanQaResult,setLanQaResult]=useState<"passed"|"failed"|null>(null);
   // Stage4I: explicit read-only admission report, never an active connection.
   const [nativePreflight,setNativePreflight]=useState<{
     deviceId:string;fingerprint:string;eligible:true;
@@ -346,6 +353,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       inboxOperation.current++;inboxInFlight.current=false;
       recipientOperation.current++;recipientInFlight.current=false;
       setDirectory(null);setSelectedDeviceId(null);setGuideOpen(false);
+      setLanQaConsent(false);setLanQaResult(null);
       trustReadEpoch.current++;setApprovedPeers(null);
       nativePreflightOperation.current++;nativePreflightInFlight.current=false;
       setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
@@ -972,6 +980,37 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     busy:pairingBusy||relayBusy||directoryBusy
   });
   const qaAuthEnabled=import.meta.env.VITE_KATOOS_AUTH_QA==="1";
+  const lanQaEnabled=qaAuthEnabled&&import.meta.env.VITE_STAGE4W_LAN_QA==="1";
+  const runLanQa=async(role:"listen"|"connect")=>{
+    if(!lanQaEnabled||lanQaBusy||!lanQaConsent||
+       !selectedDevice||!approvedPeers?.some(peer=>
+         peer.status==="locally_approved"&&peer.fingerprint===selectedDevice.fingerprint)||
+       !lanQaLocalIp.trim()||!lanQaPeerIp.trim()||!/^[0-9]{4,5}$/.test(lanQaPort))return;
+    const port=Number(lanQaPort);
+    if(!Number.isInteger(port)||port<1025||port>65535)return;
+    setLanQaBusy(true);setLanQaResult(null);
+    try{
+      const result=await invoke<{
+        protocol:"katosync-stage4w-private-lan-once-v1";
+        peerAuthenticatedOnce:true;channelStillActive:false;
+        remoteJobsEnabled:false;crossDeviceWrites:false;
+      }>(role==="listen"?
+        "mesh_private_lan_listen_once_qa":"mesh_private_lan_connect_once_qa",{
+        localIp:lanQaLocalIp.trim(),peerIp:lanQaPeerIp.trim(),
+        port,requestedFingerprint:selectedDevice.fingerprint
+      });
+      if(result.protocol!=="katosync-stage4w-private-lan-once-v1"||
+         result.peerAuthenticatedOnce!==true||
+         result.channelStillActive!==false||
+         result.remoteJobsEnabled!==false||
+         result.crossDeviceWrites!==false)throw new Error("invalid_native_qa_claim");
+      setLanQaResult("passed");
+    }catch{
+      setLanQaResult("failed");
+    }finally{
+      setLanQaBusy(false);setLanQaConsent(false);
+    }
+  };
   const inboxSendEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_SEND_QA==="1";
   const inboxReceiveEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_RECEIVE_QA==="1";
   const [clipboardStatus,setClipboardStatus]=useState<"ok"|"failed"|null>(null);
@@ -1682,6 +1721,45 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     </section>
     </div>:null}
     <div className="vision-mesh-technical" id="vision-mesh-technical-details" hidden={!detailsOpen}>
+      {lanQaEnabled?<details className="vision-mesh-advanced vision-mesh-lan-qa">
+        <summary>{t("mesh.stage4w.title")}</summary>
+        <p>{t("mesh.stage4w.explanation")}</p>
+        <p className="vision-mesh-warning" role="note">{t("mesh.stage4w.noRemote")}</p>
+        <div className="vision-mesh-lan-fields">
+          <label className="vision-mesh-field">{t("mesh.stage4w.localIp")}
+            <input value={lanQaLocalIp} autoComplete="off" spellCheck={false}
+              placeholder="192.168.178.97" maxLength={15}
+              onChange={e=>setLanQaLocalIp(e.target.value)}/></label>
+          <label className="vision-mesh-field">{t("mesh.stage4w.peerIp")}
+            <input value={lanQaPeerIp} autoComplete="off" spellCheck={false}
+              placeholder="192.168.178.162" maxLength={15}
+              onChange={e=>setLanQaPeerIp(e.target.value)}/></label>
+          <label className="vision-mesh-field">{t("mesh.stage4w.port")}
+            <input value={lanQaPort} inputMode="numeric" maxLength={5}
+              onChange={e=>setLanQaPort(e.target.value)}/></label>
+        </div>
+        <label className="vision-mesh-lan-confirm">
+          <input type="checkbox" checked={lanQaConsent}
+            disabled={lanQaBusy||!selectedDevice}
+            onChange={e=>setLanQaConsent(e.target.checked)}/>
+          {t("mesh.stage4w.confirm")}
+        </label>
+        <div className="vision-mesh-invite-actions">
+          <button type="button" className="ghost compact-button" disabled={
+            lanQaBusy||!lanQaConsent||!selectedDevice||
+            !approvedPeers?.some(peer=>peer.fingerprint===selectedDevice.fingerprint)
+          } onClick={()=>void runLanQa("listen")}>
+            {t("mesh.stage4w.listen")}</button>
+          <button type="button" className="ghost compact-button" disabled={
+            lanQaBusy||!lanQaConsent||!selectedDevice||
+            !approvedPeers?.some(peer=>peer.fingerprint===selectedDevice.fingerprint)
+          } onClick={()=>void runLanQa("connect")}>
+            {t("mesh.stage4w.connect")}</button>
+        </div>
+        {lanQaBusy?<p role="status">{t("mesh.stage4w.running")}</p>:null}
+        {lanQaResult?<p role="status">{t(lanQaResult==="passed"?
+           "mesh.stage4w.passed":"mesh.stage4w.failed")}</p>:null}
+      </details>:null}
       <section className="mesh-hub-preference" aria-label={t("mesh.hub.heading")}>
         <label className="mesh-hub-preference-option">
           <input type="checkbox" checked={hubPreference?.preferred??false}
