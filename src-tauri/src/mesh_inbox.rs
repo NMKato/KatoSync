@@ -283,7 +283,7 @@ pub async fn mesh_inbox_invite_send(
         .map_err(|_| "MESH_INBOX_UNAVAILABLE".to_string())?;
     let response = client
         .post(format!(
-            "{}/functions/v1/mesh-inbox-send",
+            "{}/functions/v1/mesh-inbox-send-qa",
             crate::KATOSYNC_AUTH_URL
         ))
         .header("apikey", crate::KATOSYNC_AUTH_ANON_KEY)

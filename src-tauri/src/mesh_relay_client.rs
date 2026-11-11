@@ -419,7 +419,7 @@ async fn invoke_endpoint(
         .map_err(|_| "MESH_RELAY_UNAVAILABLE")?;
     let response = client
         .post(format!(
-            "{}/functions/v1/mesh-pairing-relay",
+            "{}/functions/v1/mesh-pairing-relay-qa",
             crate::KATOSYNC_AUTH_URL
         ))
         .header("apikey", crate::KATOSYNC_AUTH_ANON_KEY)

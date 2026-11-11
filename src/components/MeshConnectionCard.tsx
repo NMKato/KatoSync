@@ -1097,6 +1097,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const displayRegistrationName=(device:MeshAccountDevice)=>
     device.personaName||meshRegistrationAgentName(device.fingerprint,device.platformOs)||
     device.displayName;
+  const registeredPlatform=(os:MeshAccountDevice["platformOs"])=>
+    t(os==="macos"?"mesh.directory.deviceMac":
+      os==="windows"?"mesh.directory.deviceWindows":"mesh.directory.deviceLinux");
   const readiness=snapshot?.localControl??"unknown";
   const renderRegistration=(device:MeshAccountDevice)=><button type="button"
     className="vision-mesh-guide-device" key={device.deviceId}
@@ -1109,7 +1112,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     }}>
     <span className="vision-mesh-guide-device-name"><strong>{displayRegistrationName(device)}</strong>
       <small>{device.displayName}</small>
-      <small>{device.platformOs} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>
+      <small>{registeredPlatform(device.platformOs)} · {t("mesh.directory.modelUnverified")}</small>
+      <small>{t(("mesh.directory."+device.membershipState) as TKey)} · {t("mesh.directory.identitySuffix",{id:device.fingerprint.slice(-8)})}</small>
       <small>{device.lastSeenAt?
         t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
         t("mesh.directory.notSeen")}</small>
@@ -1191,6 +1195,10 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <small>{t("mesh.guide.notConnected")}</small>
       </div>
       <p>{t("mesh.guide.description")}</p>
+      {!inboxSendEnabled?<p className="vision-mesh-compact-notice" role="status">
+        {t("mesh.guide.deliveryDisabled")}</p>:null}
+      {!inboxReceiveEnabled?<p className="vision-mesh-compact-notice" role="status">
+        {t("mesh.recipient.disabled")}</p>:null}
     <section className="vision-mesh-account-directory" aria-label={t("mesh.directory.heading")}>
       <div className="vision-mesh-directory-heading">
         <strong>{t("mesh.directory.heading")}</strong>
@@ -1208,6 +1216,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         {presentation.own?<div className="vision-mesh-own-registration">
           <strong>{t("mesh.directory.own")}</strong>
           <small>{displayRegistrationName(presentation.own)} · {t("mesh.directory.registered")}</small>
+          <small>{registeredPlatform(presentation.own.platformOs)} · {agentBootstrap?.hardware.chipFamily||t("mesh.directory.modelUnverified")}</small>
         </div>:null}
         {presentation.recentlyReported.length>0?
           <p className="vision-mesh-registration-section-label">
@@ -1229,9 +1238,13 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
               disabled={nativeInboxBusy||directoryBusy||recipientBusy||
                 nativeInboxSent===selectedDevice.deviceId}
               onClick={()=>void sendNativeInbox(selectedDevice.deviceId)}>{t("mesh.inbox.send")}</button>:
-            <button type="button" className="ghost compact-button"
-              disabled={nativeInboxBusy||directoryBusy||recipientBusy}
-              onClick={()=>void prepareNativeInbox(selectedDevice.deviceId)}>{t("mesh.inbox.prepare")}</button>:
+            <details className="vision-mesh-older-registrations">
+              <summary>{t("mesh.guide.advancedPreparation")}</summary>
+              <p>{t("mesh.guide.preparationDoesNotSend")}</p>
+              <button type="button" className="ghost compact-button"
+                disabled={nativeInboxBusy||directoryBusy||recipientBusy}
+                onClick={()=>void prepareNativeInbox(selectedDevice.deviceId)}>{t("mesh.inbox.prepare")}</button>
+            </details>:
           <small>{t("mesh.guide.sendUnavailable")}</small>}
         {qaAuthEnabled&&selectedDevice.membershipState!=="revoked"?<>
           <button type="button" className="ghost compact-button"
