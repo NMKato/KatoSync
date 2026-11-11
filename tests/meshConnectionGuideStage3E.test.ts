@@ -21,7 +21,7 @@ test("Connect opens a read-only verified account roster, Find explicitly enrolls
  assert.match(native,/discovery_only: true/);
  assert.match(native,/transport_ready: false/);
 });
-test("guide is above hidden diagnostics; device selection never auto sends, grants trust or starts mTLS",()=>{
+test("guide is above hidden diagnostics; explicitly selecting a peer cannot grant trust or start mTLS",()=>{
  const visible=view.indexOf('{guideOpen?<div className="vision-mesh-guide"');
  const hidden=view.indexOf('<div className="vision-mesh-technical"');
  assert.ok(visible>0&&hidden>visible);
@@ -30,7 +30,7 @@ test("guide is above hidden diagnostics; device selection never auto sends, gran
  // so recently reported and older registrations preserve the same click gating.
  assert.match(guide,/presentation\.recentlyReported\.map\(renderRegistration\)/);
  assert.match(guide,/presentation\.olderEntries\.map\(renderRegistration\)/);
- assert.match(view,/aria-pressed=\{selectedDeviceId===device\.deviceId\}/);
+ assert.match(view,/data-selected=\{selectedDeviceId===device\.deviceId\}/);
  assert.match(view,/onClick=\{\(\)=>\{[\s\S]*?setSelectedDeviceId\(device\.deviceId\);/);
  assert.match(view,/nativePreflightOperation\.current\+\+;nativePreflightInFlight\.current=false/);
  assert.match(guide,/selectedDevice\.membershipState==="discovered"&&qaAuthEnabled/);

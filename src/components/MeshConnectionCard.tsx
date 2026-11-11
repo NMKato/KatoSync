@@ -1266,10 +1266,11 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       lastSeen>=Date.now()-2*60*60_000;
     const canRequest=easyEnabled&&recent&&device.membershipState==="discovered"&&
       device.fingerprint!==agentBootstrap?.fingerprint&&!easySession&&
+      !recipientInbox?.length&&!acceptedInboxOffer&&
       easyStage!=="approved"&&!nativeInboxSent;
     return <button type="button"
     className="vision-mesh-guide-device" key={device.deviceId}
-    aria-pressed={selectedDeviceId===device.deviceId}
+    data-selected={selectedDeviceId===device.deviceId}
     disabled={directoryBusy||nativeInboxBusy||recipientBusy||
       (easyEnabled&&!canRequest)}
     onClick={()=>{
@@ -1287,7 +1288,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         t("mesh.directory.notSeen")}</small>
     </span>
     <span className="vision-mesh-guide-select">{t(easyEnabled?
-      canRequest?"mesh.easy.connect":"mesh.easy.history":
+      canRequest?"mesh.easy.connect":
+      easySession?.peerDeviceId===device.deviceId?"mesh.easy.requestInProgress":
+      recent?"mesh.easy.notAvailable":"mesh.easy.history":
       selectedDeviceId===device.deviceId?"mesh.guide.selected":"mesh.guide.choose")}</span>
   </button>;
   };
@@ -1365,11 +1368,32 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <small>{t("mesh.guide.notConnected")}</small>
       </div>
       <p>{t(easyEnabled?"mesh.easy.description":"mesh.guide.description")}</p>
+      {easyEnabled?<div className="vision-mesh-simple-steps"
+        aria-label={t("mesh.easy.stepsLabel")}>
+        <div className="vision-mesh-simple-step"
+          data-state={easySession?"complete":"active"}>
+          <span aria-hidden="true" className="vision-mesh-step-number">1</span>
+          <span>{t("mesh.easy.stepFind")}</span>
+        </div>
+        <div className="vision-mesh-simple-step"
+          data-state={easyStage==="verifying"||easyStage==="compare"||easyStage==="approved"?"complete":
+            easyStage==="waiting"||recipientInbox?.length?"active":"pending"}>
+          <span aria-hidden="true" className="vision-mesh-step-number">2</span>
+          <span>{t("mesh.easy.stepAccept")}</span>
+        </div>
+        <div className="vision-mesh-simple-step"
+          data-state={easyStage==="approved"?"complete":
+            easyStage==="compare"?"active":"pending"}>
+          <span aria-hidden="true" className="vision-mesh-step-number">3</span>
+          <span>{t("mesh.easy.stepCompare")}</span>
+        </div>
+      </div>:null}
       {!inboxSendEnabled?<p className="vision-mesh-compact-notice" role="status">
         {t("mesh.guide.deliveryDisabled")}</p>:null}
       {!inboxReceiveEnabled?<p className="vision-mesh-compact-notice" role="status">
         {t("mesh.recipient.disabled")}</p>:null}
       {easyEnabled?<section className="vision-mesh-easy-panel"
+          data-stage={easyStage}
           aria-label={t("mesh.easy.title")} role="status">
         <strong>{t("mesh.easy.progressTitle")}</strong>
         {easyStage==="waiting"?<p>{t("mesh.easy.waiting")}</p>:
@@ -1411,9 +1435,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <p>{t("mesh.guide.notLoaded")}</p>:null}
       {directoryBusy?<p role="status">{t("mesh.guide.loading")}</p>:null}
       {directory?.devices.length===0?<p role="status">{t("mesh.directory.empty")}</p>:null}
-      {directory?<p className="vision-mesh-registration-summary" role="status">
-        {t("mesh.directory.identityCount",{count:presentation?.totalIdentities??directory.devices.length})}
-      </p>:null}
+      {directory?(easyEnabled?
+        <details className="vision-mesh-older-registrations vision-mesh-directory-meta">
+          <summary>{t("mesh.easy.accountInfo")}</summary>
+          <p>{t("mesh.directory.identityCount",{count:presentation?.totalIdentities??directory.devices.length})}</p>
+        </details>:
+        <p className="vision-mesh-registration-summary" role="status">
+          {t("mesh.directory.identityCount",{count:presentation?.totalIdentities??directory.devices.length})}
+        </p>):null}
       {presentation?<>
         {presentation.own?<div className="vision-mesh-own-registration">
           <strong>{t("mesh.directory.own")}</strong>
@@ -1486,22 +1515,36 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         {!easyEnabled?<button type="button" className="ghost compact-button"
           disabled={recipientBusy||directoryBusy}
           onClick={()=>void loadRecipientInbox()}>{t("mesh.recipient.refresh")}</button>:null}
-        {recipientInbox?.length===0?<p role="status">{t("mesh.recipient.empty")}</p>:null}
-        {recipientInbox?.map(item=><div className="vision-mesh-directory-row" key={item.requestId}>
-          <div>
-            <strong>{directory?.devices.find(d=>d.deviceId===item.sourceDeviceId)?.displayName||
-              t("mesh.recipient.unknownSource")}</strong>
+        {recipientInbox?.length===0&&!acceptedInboxOffer&&recipientDecision!=="accepted"?
+          <p role="status" className="vision-mesh-inbox-empty">{t("mesh.recipient.empty")}</p>:null}
+        {recipientInbox?.map(item=><div className="vision-mesh-directory-row vision-mesh-invite-card" key={item.requestId}>
+          <div className="vision-mesh-invite-summary">
+            <small className="vision-mesh-invite-eyebrow">{t("mesh.easy.incomingFrom")}</small>
+            <strong>{(()=>{
+              const source=directory?.devices.find(d=>d.deviceId===item.sourceDeviceId&&
+                d.fingerprint===item.fingerprint);
+              return source?displayRegistrationName(source):t("mesh.recipient.unknownSource");
+            })()}</strong>
             <small>{t("mesh.recipient.expires")}: {relativeTime(item.expiresAt,lang)||"—"}</small>
             {!easyEnabled?<small>{item.fingerprint}</small>:null}
           </div>
-          <button type="button" className="ghost compact-button" disabled={recipientBusy}
-            onClick={()=>void decideRecipientInvite(item,"accept")}>{t("mesh.recipient.accept")}</button>
-          <button type="button" className="ghost compact-button" disabled={recipientBusy}
-            onClick={()=>void decideRecipientInvite(item,"reject")}>{t("mesh.recipient.reject")}</button>
+          <div className="vision-mesh-invite-actions">
+            <button type="button" className="primary compact-button vision-mesh-accept"
+              disabled={recipientBusy}
+              onClick={()=>void decideRecipientInvite(item,"accept")}>
+              {t("mesh.recipient.accept")}
+            </button>
+            <button type="button" className="ghost compact-button vision-mesh-decline"
+              disabled={recipientBusy}
+              onClick={()=>void decideRecipientInvite(item,"reject")}>
+              {t("mesh.recipient.reject")}
+            </button>
+          </div>
         </div>)}
-        {recipientDecision?<p role="status">
-          {t(recipientDecision==="accepted"?"mesh.recipient.accepted":"mesh.recipient.rejected")}
-          {" "}{t("mesh.recipient.notConnected")}
+        {recipientDecision?<p role="status" className="vision-mesh-received-confirmation">
+          <strong>{t(recipientDecision==="accepted"?"mesh.recipient.accepted":"mesh.recipient.rejected")}</strong>
+          <span>{recipientDecision==="accepted"?
+            t("mesh.easy.acceptedHint"):t("mesh.recipient.notConnected")}</span>
         </p>:null}
         {manualMeshControls&&acceptedInboxOffer?<div className="vision-mesh-guide-target" role="group"
            aria-label={t("mesh.handoff.heading")}>
