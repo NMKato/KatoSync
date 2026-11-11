@@ -11441,3 +11441,13 @@ button.agent-tile:hover {
 @media(prefers-reduced-motion:reduce) {
   .provider-mesh-card .vision-mesh-guide-device {transition:none;}
 }
+
+/* Created by NMKato Solutions — Stage4V: persistent local pairing status.
+   Green applies to a native, owner-scoped local pin only; never a live tunnel. */
+.provider-mesh-card .vision-mesh-compact-state[data-pairing-status="locally_paired"] {
+  color:color-mix(in srgb,#57c8aa 73%,var(--text));
+}
+.provider-mesh-card .vision-mesh-locally-paired-dot {
+  width:9px;height:9px;flex:none;border-radius:50%;
+  background:#55c4a0;box-shadow:0 0 0 3px color-mix(in srgb,#55c4a0 15%,transparent);
+}

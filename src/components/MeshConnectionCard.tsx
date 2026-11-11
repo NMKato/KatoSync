@@ -13,6 +13,7 @@ import {canConfirmRelayPeerLocally} from "../lib/meshRelayLocalApproval35F";
 import {matchEasyRelayMessage,canQuickApproveSameCode,validEasyMeshSession,
   type EasyMeshSession,type EasyMeshStage} from "../lib/meshEasyPairing";
 import {EASY_RELAY_POLL_MS,canPollEasyMeshRelay} from "../lib/meshRelayFlowPolicy4U";
+import {deriveLocalPairingStatus} from "../lib/meshPairingStatus4V";
 
 function relativeTime(value: string | null | undefined, lang: string): string | null {
   if (!value) return null;
@@ -301,6 +302,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [pairingVerified,setPairingVerified]=useState<MeshPairingProof|null>(null);
   const [confirmedCode,setConfirmedCode]=useState("");
   const [approvedPeers,setApprovedPeers]=useState<MeshApprovedPeer[]|null>(null);
+  const trustReadEpoch=useRef(0);
   const [approvalError,setApprovalError]=useState(false);
   const [reauthEmail,setReauthEmail]=useState("");
   const [reauthPassword,setReauthPassword]=useState("");
@@ -344,6 +346,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       inboxOperation.current++;inboxInFlight.current=false;
       recipientOperation.current++;recipientInFlight.current=false;
       setDirectory(null);setSelectedDeviceId(null);setGuideOpen(false);
+      trustReadEpoch.current++;setApprovedPeers(null);
       nativePreflightOperation.current++;nativePreflightInFlight.current=false;
       setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
       setDirectoryError(false);setDirectoryIssue(null);
@@ -1140,6 +1143,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     }catch{setIdentityError(true);}finally{setPairingBusy(false);}
   };
   const refresh=useCallback(async()=>{
+    const request=++trustReadEpoch.current;
+    setApprovedPeers(null);
     sharedRequest.current++;
     setSharedPreflight(null);setSharedError(false);setSharedBusy(false);
     setLoading(true);
@@ -1151,11 +1156,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         setError(false);
         return;
       }
-      const [actual,issuer,preview]=await Promise.all([
+      const [actual,issuer,preview,pins]=await Promise.all([
         invoke<MeshLocalReadiness>("mesh_local_readiness"),
         invoke<MeshNativeIssuerReadiness>("mesh_native_issuer_readiness").catch(()=>null),
-        invoke<MeshPreviewAuthStatus>("mesh_preview_auth_status").catch(()=>null)
+        invoke<MeshPreviewAuthStatus>("mesh_preview_auth_status").catch(()=>null),
+        // Account-verified native Keychain read only. No discovery, no approval.
+        invoke<MeshPeerInventory>("mesh_local_approved_peers").catch(()=>null)
       ]);
+      if(request!==trustReadEpoch.current)return;
       if(actual.protocol!=="mesh-readonly-v0" || actual.deviceIdentity!=="not_paired" ||
         actual.peerTransport!=="not_connected" || actual.verifiedPeers!==0 ||
         actual.remoteReadOnlyDispatch || actual.crossDeviceWrites) {
@@ -1174,9 +1182,17 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         preview.remoteJobsEnabled===false&&preview.sessionVerified===false&&
         (!preview.configured||(preview.previewIssuerOnly&&preview.independentKeychain));
       setPreviewStatus(previewValid?preview:null);
+      const pinInventoryValid=pins?.approvalOnly===true &&
+        pins.transportReady===false && pins.remoteJobsEnabled===false &&
+        Array.isArray(pins.peers) && pins.peers.length<=10 &&
+        pins.peers.every(peer=>peer.status==="locally_approved" &&
+          peer.approvedAt>0 &&
+          /^[0-9A-F]{2}(-[0-9A-F]{2}){15}$/.test(peer.fingerprint));
+      setApprovedPeers(pinInventoryValid?pins.peers:null);
       setSnapshot(actual);
       setError(false);
     } catch {
+      if(request!==trustReadEpoch.current)return;
       setSnapshot(null);
       setIssuerSnapshot(null);
       setPreviewStatus(null);
@@ -1282,6 +1298,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const manualMeshControls=!easyEnabled||
     (easyAdvancedOpen&&(!easySession||easyStage==="error"));
   const readiness=snapshot?.localControl??"unknown";
+  const pairingStatus=deriveLocalPairingStatus({
+    pins:approvedPeers,devices:directory?.devices??null,
+    ownFingerprint:agentBootstrap?.fingerprint??null,
+    transport:snapshot?.peerTransport??null,
+    remoteReadOnlyDispatch:snapshot?.remoteReadOnlyDispatch??null,
+    crossDeviceWrites:snapshot?.crossDeviceWrites??null
+  });
+  const locallyPaired=pairingStatus==="locally_paired";
   const renderRegistration=(device:MeshAccountDevice)=>{
     const lastSeen=Date.parse(device.lastSeenAt??"");
     const recent=Number.isFinite(lastSeen)&&lastSeen<=Date.now()+5*60_000&&
@@ -1322,10 +1346,15 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <span className="vision-mesh-compact-icon"><ShieldCheck size={19} aria-hidden="true"/></span>
         <div className="vision-mesh-compact-status">
           <strong>{t("mesh.simple.title")}</strong>
-          <span className="vision-mesh-compact-state"><span className="vision-mesh-offline-dot"/>
-            {error?t("mesh.simple.unavailable"):t("mesh.simple.disconnected")}
+          <span className="vision-mesh-compact-state"
+            data-pairing-status={pairingStatus}>
+            <span className={locallyPaired?"vision-mesh-locally-paired-dot":"vision-mesh-offline-dot"}/>
+            {error?t("mesh.simple.unavailable"):
+              locallyPaired?t("mesh.status.locallyPaired"):
+              pairingStatus==="checking"?t("mesh.status.checking"):
+              t("mesh.simple.disconnected")}
           </span>
-          <small>{t("mesh.simple.noPeers")}</small>
+          <small>{locallyPaired?t("mesh.status.noTransport"):t("mesh.simple.noPeers")}</small>
         </div>
         <button type="button" className="ghost compact-button mesh-status-refresh"
           aria-label={t("connections.refreshMesh")} title={t("connections.refreshMesh")}
@@ -1359,7 +1388,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         presentation?.registeredPeers?
           t("mesh.agent35.accountRecords",{count:presentation.registeredPeers}):
           t("mesh.agent35.noColleagues")}</small>
-      <small>{t("mesh.agent35.pendingTrust")}</small>
+      <small>{t(locallyPaired?"mesh.status.helloBlocked":"mesh.agent35.pendingTrust")}</small>
     </div>:null}
     {offer?<div className="vision-mesh-compact-notice" role="status">
       <span>{t("mesh.simple.offerReady")}</span>
@@ -1387,24 +1416,24 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       aria-label={t("mesh.guide.heading")}>
       <div className="vision-mesh-guide-heading">
         <strong>{t(easyEnabled?"mesh.easy.title":"mesh.guide.heading")}</strong>
-        <small>{t("mesh.guide.notConnected")}</small>
+        <small>{t(locallyPaired?"mesh.status.locallyPaired":"mesh.guide.notConnected")}</small>
       </div>
       <p>{t(easyEnabled?"mesh.easy.description":"mesh.guide.description")}</p>
       {easyEnabled?<div className="vision-mesh-simple-steps"
         aria-label={t("mesh.easy.stepsLabel")}>
         <div className="vision-mesh-simple-step"
-          data-state={easySession?"complete":"active"}>
+          data-state={easySession||locallyPaired?"complete":"active"}>
           <span aria-hidden="true" className="vision-mesh-step-number">1</span>
           <span>{t("mesh.easy.stepFind")}</span>
         </div>
         <div className="vision-mesh-simple-step"
-          data-state={easyStage==="verifying"||easyStage==="compare"||easyStage==="approved"?"complete":
+          data-state={locallyPaired||easyStage==="verifying"||easyStage==="compare"||easyStage==="approved"?"complete":
             easyStage==="waiting"||recipientInbox?.length?"active":"pending"}>
           <span aria-hidden="true" className="vision-mesh-step-number">2</span>
           <span>{t("mesh.easy.stepAccept")}</span>
         </div>
         <div className="vision-mesh-simple-step"
-          data-state={easyStage==="approved"?"complete":
+          data-state={locallyPaired||easyStage==="approved"?"complete":
             easyStage==="compare"?"active":"pending"}>
           <span aria-hidden="true" className="vision-mesh-step-number">3</span>
           <span>{t("mesh.easy.stepCompare")}</span>
@@ -1437,7 +1466,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
            {!selectedDevice||selectedDevice.fingerprint!==relayProof.fingerprint?
              <p role="alert" className="vision-mesh-warning">{t("mesh.easy.peerNotVerified")}</p>:null}
          </div>:
-         easyStage==="approved"?<p>{t("mesh.easy.approvedLocalOnly")}</p>:
+         locallyPaired||easyStage==="approved"?<p>{t("mesh.easy.approvedLocalOnly")}</p>:
          easyStage==="expired"?<p>{t("mesh.easy.expired")}</p>:
          easyStage==="error"?<p role="alert">{t("mesh.easy.failed")}</p>:
          <p>{t("mesh.easy.ready")}</p>}

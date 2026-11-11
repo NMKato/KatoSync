@@ -12,7 +12,7 @@ test("exactly three understandable stages are visible in simplified mode",()=>{
   assert.match(ui,/mesh\.easy\.stepFind/);
   assert.match(ui,/mesh\.easy\.stepAccept/);
   assert.match(ui,/mesh\.easy\.stepCompare/);
-  assert.match(ui,/easySession\?"complete":"active"/);
+  assert.match(ui,/easySession\|\|locallyPaired\?"complete":"active"/);
   assert.match(ui,/easyStage==="compare"\?"active":"pending"/);
 });
 test("one request cannot be sent when an inbound request is awaiting a decision",()=>{
