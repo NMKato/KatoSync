@@ -60,6 +60,9 @@ jobs:
       - name: Stage4M native inference truth (isolated, no Tauri build)
         run: bash scripts/qa-stage4m-inference-truth.sh
 
+      - name: Stage4P singleton headless startup contract
+        run: bash scripts/qa-stage4p-singleton-headless.sh
+
   windows-node-regression:
     name: Windows Node Regression
     runs-on: windows-latest
