@@ -49,6 +49,7 @@ mod mesh_katoos_shared_preflight;
 mod mesh_native_issuer;
 mod mesh_owner_review_readback;
 mod mesh_preview_auth;
+mod mesh_private_lan_qa;
 mod mesh_readiness;
 mod mesh_relay_client;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
@@ -319,6 +320,32 @@ pub struct LaunchAgentStatus {
 }
 
 pub fn run() {
+    // Manual, bounded headless QA for physical M2/M3 paired-key verification.
+    // No Tauri webview, no background listener and no authorization of jobs.
+    if env::args().nth(1).as_deref() == Some("--stage4w-private-lan-qa-once") {
+        #[cfg(feature = "stage4j-qa")]
+        {
+            let args = env::args().skip(2).collect();
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| "MESH_STAGE4W_RUNTIME_UNAVAILABLE".to_string())
+                .and_then(|rt| rt.block_on(mesh_private_lan_qa::run_cli_once(args)));
+            match result {
+                Ok(()) => println!("STAGE4W_REAL_KEY_PINNED_MTLS_ONCE_PASS_NO_REMOTE"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(5);
+                }
+            }
+            return;
+        }
+        #[cfg(not(feature = "stage4j-qa"))]
+        {
+            eprintln!("MESH_STAGE4W_EXPLICIT_QA_OPT_IN_REQUIRED");
+            std::process::exit(5);
+        }
+    }
     if env::args().any(|arg| arg == "--local-control-daemon") {
         if let Err(error) = local_control::run_daemon() {
             eprintln!("KatoSync Local Control fehlgeschlagen: {error}");
@@ -467,6 +494,8 @@ pub fn run() {
             mesh_readiness::mesh_local_readiness,
             mesh_native_issuer::mesh_native_issuer_readiness,
             mesh_admission::mesh_native_peer_preflight,
+            mesh_private_lan_qa::mesh_private_lan_listen_once_qa,
+            mesh_private_lan_qa::mesh_private_lan_connect_once_qa,
             mesh_katoos_shared_preflight::mesh_katoos_shared_preflight,
             mesh_owner_review_readback::mesh_owner_review_readback_qa,
             mesh_preview_auth::mesh_preview_auth_status,
