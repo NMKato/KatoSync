@@ -14,6 +14,7 @@ import {matchEasyRelayMessage,canQuickApproveSameCode,validEasyMeshSession,
   type EasyMeshSession,type EasyMeshStage} from "../lib/meshEasyPairing";
 import {EASY_RELAY_POLL_MS,canPollEasyMeshRelay} from "../lib/meshRelayFlowPolicy4U";
 import {deriveLocalPairingStatus} from "../lib/meshPairingStatus4V";
+import {canSelectLocallyApprovedPeerForQa} from "../lib/meshPairedSelection4X";
 
 function relativeTime(value: string | null | undefined, lang: string): string | null {
   if (!value) return null;
@@ -1349,20 +1350,32 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     const lastSeen=Date.parse(device.lastSeenAt??"");
     const recent=Number.isFinite(lastSeen)&&lastSeen<=Date.now()+5*60_000&&
       lastSeen>=Date.now()-2*60*60_000;
-    const canRequest=easyEnabled&&recent&&device.membershipState==="discovered"&&
+    const canSelectPinned=canSelectLocallyApprovedPeerForQa({
+      enabled:lanQaEnabled,peer:device,approvedPeers,
+      ownFingerprint:agentBootstrap?.fingerprint??null
+    });
+    // Local approval blocks repeat invitations even in builds where the
+    // advanced QA selector is completely disabled.
+    const alreadyPinned=approvedPeers?.some(pin=>
+      pin.status==="locally_approved"&&pin.fingerprint===device.fingerprint)===true;
+    // An unreadable Keychain inventory must fail closed rather than offer
+    // a new invite for an already approved peer.
+    const canRequest=easyEnabled&&approvedPeers!==null&&!alreadyPinned&&recent&&
+      device.membershipState==="discovered"&&
       device.fingerprint!==agentBootstrap?.fingerprint&&!easySession&&
       !recipientInbox?.length&&!acceptedInboxOffer&&
       easyStage!=="approved"&&!nativeInboxSent;
     return <button type="button"
     className="vision-mesh-guide-device" key={device.deviceId}
     data-selected={selectedDeviceId===device.deviceId}
-    disabled={directoryBusy||nativeInboxBusy||recipientBusy||
-      (easyEnabled&&!canRequest)}
+    disabled={directoryBusy||nativeInboxBusy||recipientBusy||lanQaBusy||
+      (easyEnabled&&!canRequest&&!canSelectPinned)}
     onClick={()=>{
       nativePreflightOperation.current++;nativePreflightInFlight.current=false;
       setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
       setSelectedDeviceId(device.deviceId);
-      if(canRequest)void sendNativeInbox(device.deviceId,true);
+      if(canRequest&&!alreadyPinned)void sendNativeInbox(device.deviceId,true);
+      if(canSelectPinned){setLanQaConsent(false);setLanQaResult(null);}
     }}>
     <span className="vision-mesh-guide-device-name"><strong>{displayRegistrationName(device)}</strong>
       {!easyEnabled?<small>{device.displayName}</small>:null}
@@ -1372,7 +1385,10 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
         t("mesh.directory.notSeen")}</small>
     </span>
-    <span className="vision-mesh-guide-select">{t(easyEnabled?
+    <span className="vision-mesh-guide-select">{t(canSelectPinned?
+      selectedDeviceId===device.deviceId?"mesh.stage4x.selectedPaired":"mesh.stage4x.selectPaired":
+      alreadyPinned?"mesh.stage4x.alreadyPaired":
+      easyEnabled?
       canRequest?"mesh.easy.connect":
       easySession?.peerDeviceId===device.deviceId?"mesh.easy.requestInProgress":
       recent?"mesh.easy.notAvailable":"mesh.easy.history":
@@ -1415,6 +1431,23 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           onClick={()=>setDetailsOpen(value=>!value)}>{t("mesh.simple.details")}</button>
       </div>
     </div>
+    <section className="vision-mesh-readiness-lanes" aria-label={t("mesh.stage4x.heading")}>
+      <div className="vision-mesh-readiness-lane" data-ready={locallyPaired?"yes":"no"}>
+        <span className="vision-mesh-readiness-step">01 · {t("mesh.stage4x.local")}</span>
+        <strong>{t(locallyPaired?"mesh.stage4x.paired":"mesh.stage4x.notPaired")}</strong>
+        <small>{t("mesh.stage4x.localHint")}</small>
+      </div>
+      <div className="vision-mesh-readiness-lane" data-ready="no">
+        <span className="vision-mesh-readiness-step">02 · {t("mesh.stage4x.tunnel")}</span>
+        <strong>{t("mesh.stage4x.notOnline")}</strong>
+        <small>{t("mesh.stage4x.tunnelHint")}</small>
+      </div>
+      <div className="vision-mesh-readiness-lane" data-ready="no">
+        <span className="vision-mesh-readiness-step">03 · {t("mesh.stage4x.control")}</span>
+        <strong>{t("mesh.stage4x.locked")}</strong>
+        <small>{t("mesh.stage4x.controlHint")}</small>
+      </div>
+    </section>
     {agentBootstrap?<div className="vision-mesh-compact-notice" role="status">
       <strong>{t("mesh.agent35.identity",{name:agentBootstrap.agentName})}</strong>
       <small>{t("mesh.agent35.hardware",{
@@ -1725,6 +1758,10 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <summary>{t("mesh.stage4w.title")}</summary>
         <p>{t("mesh.stage4w.explanation")}</p>
         <p className="vision-mesh-warning" role="note">{t("mesh.stage4w.noRemote")}</p>
+        {!selectedDevice?<p role="status">{t("mesh.stage4x.pickPaired")}</p>:
+          <p className="vision-mesh-lan-peer" role="status">
+            {t("mesh.stage4x.qaSelected")}: <strong>{displayRegistrationName(selectedDevice)}</strong>
+          </p>}
         <div className="vision-mesh-lan-fields">
           <label className="vision-mesh-field">{t("mesh.stage4w.localIp")}
             <input value={lanQaLocalIp} autoComplete="off" spellCheck={false}

@@ -11458,3 +11458,38 @@ button.agent-tile:hover {
 .vision-mesh-lan-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:12px 0; }
 .vision-mesh-lan-confirm { display:flex; align-items:start; gap:10px; margin:12px 0; }
 .vision-mesh-lan-confirm input { flex:none; margin-top:4px; }
+
+/* NMKato Solutions Stage4X: clearly separate local pairing, encrypted
+   network connection and remote execution. The last two never claim online. */
+.provider-mesh-card .vision-mesh-readiness-lanes {
+ display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+ gap:12px;margin:14px 0 10px;
+}
+.provider-mesh-card .vision-mesh-readiness-lane {
+ display:flex;flex-direction:column;gap:6px;min-width:0;
+ padding:15px 16px;min-height:108px;border-radius:15px;
+ border:1px solid color-mix(in srgb,var(--text) 11%,var(--line));
+ background:color-mix(in srgb,var(--surface-raised) 56%,var(--surface));
+ overflow-wrap:anywhere;
+}
+.provider-mesh-card .vision-mesh-readiness-lane[data-ready="yes"] {
+ border-color:color-mix(in srgb,#50b89d 43%,var(--line));
+ background:color-mix(in srgb,#50b89d 7%,var(--surface));
+}
+.provider-mesh-card .vision-mesh-readiness-step {
+ font-size:11px;font-weight:650;letter-spacing:.025em;color:var(--text-muted);
+}
+.provider-mesh-card .vision-mesh-readiness-lane>strong {
+ font-size:15px;font-weight:700;line-height:1.4;color:var(--text);
+}
+.provider-mesh-card .vision-mesh-readiness-lane>small {
+ font-size:12px;line-height:1.45;color:var(--text-muted);
+}
+.provider-mesh-card .vision-mesh-lan-peer {
+ padding:9px 12px;border:1px solid var(--line);
+ border-radius:10px;background:var(--surface);overflow-wrap:anywhere;
+}
+@media(max-width:800px){
+ .provider-mesh-card .vision-mesh-readiness-lanes {grid-template-columns:1fr;}
+ .provider-mesh-card .vision-mesh-readiness-lane {min-height:0;}
+}
