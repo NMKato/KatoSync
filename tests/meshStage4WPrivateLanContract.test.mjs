@@ -75,3 +75,10 @@ test("explicit headless CLI uses the same native admission and never bypasses re
  assert.match(qa,/remote_jobs_enabled\s*\|\|\s*result\.cross_device_writes/);
  assert.match(qa,/IpAddr::V4\(expected_ip\)/);
 });
+
+test("isolated Stage4W window no longer presents the legacy 4J title",()=>{
+ const config=JSON.parse(read("src-tauri/tauri.mesh-qa-stage4w.conf.json"));
+ assert.equal(config.identifier,"com.nmkato.katosync.meshqa.stage4j-isolated");
+ assert.match(config.app.windows[0].title,/Stage4W/);
+ assert.doesNotMatch(config.app.windows[0].title,/4J/);
+});
