@@ -17,7 +17,9 @@ test("exactly three understandable stages are visible in simplified mode",()=>{
 });
 test("one request cannot be sent when an inbound request is awaiting a decision",()=>{
   assert.match(ui,/device\.fingerprint!==agentBootstrap\?\.fingerprint&&!easySession&&\s*!recipientInbox\?\.length&&!acceptedInboxOffer/);
-  assert.match(ui,/if\(canRequest\)void sendNativeInbox\(device\.deviceId,true\)/);
+  assert.match(ui,/const canRequest=easyEnabled&&approvedPeers!==null&&!alreadyPinned&&recent/);
+  assert.match(ui,/if\(canRequest&&!alreadyPinned\)void sendNativeInbox\(device\.deviceId,true\)/);
+  assert.match(ui,/alreadyPinned\?"mesh\.stage4x\.alreadyPaired"/);
   assert.doesNotMatch(ui,/onMouseOver=\{\(\)=>void sendNativeInbox/);
 });
 test("device cards do not mislabel an in-progress request as a former app",()=>{

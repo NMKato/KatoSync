@@ -9,9 +9,12 @@ const auto=ui.indexOf("// Stage4S: background only AFTER");
 const approval=ui.indexOf("const approveEasyPeer=async");
 const turn=ui.indexOf("return <section className=");
 test("one-click device selection explicitly sends only for discovered fresh non-self peers",()=>{
- assert.match(ui,/const canRequest=easyEnabled&&recent&&device\.membershipState==="discovered"/);
+ assert.match(ui,/const canRequest=easyEnabled&&approvedPeers!==null&&!alreadyPinned&&recent&&\s*device\.membershipState==="discovered"/);
+ assert.match(ui,/const alreadyPinned=approvedPeers\?\.some\(pin=>/);
+ assert.match(ui,/pin\.status==="locally_approved"&&pin\.fingerprint===device\.fingerprint/);
  assert.match(ui,/device\.fingerprint!==agentBootstrap\?\.fingerprint&&!easySession/);
- assert.match(ui,/if\(canRequest\)void sendNativeInbox\(device\.deviceId,true\)/);
+ assert.match(ui,/if\(canRequest&&!alreadyPinned\)void sendNativeInbox\(device\.deviceId,true\)/);
+ assert.match(ui,/if\(canSelectPinned\)\{setLanQaConsent\(false\);setLanQaResult\(null\);\}/);
  assert.match(ui,/!directory\?\.devices\.some\(d=>d\.deviceId===targetDeviceId&&d\.membershipState==="discovered"\)/);
  assert.ok(begin>0);
 });
