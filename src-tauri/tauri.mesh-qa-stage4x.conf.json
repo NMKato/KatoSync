@@ -1,0 +1,20 @@
+{
+  "productName": "KatoSync Stage4X UX QA",
+  "identifier": "com.nmkato.katosync.meshqa.stage4j-isolated",
+  "build": {
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "KatoSync Stage4X · Sicherer Mesh-Verbindungsstatus (QA)",
+        "width": 1240,
+        "height": 820,
+        "minWidth": 1040,
+        "minHeight": 720,
+        "resizable": true,
+        "center": true
+      }
+    ]
+  }
+}

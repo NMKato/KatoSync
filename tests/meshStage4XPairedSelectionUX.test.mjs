@@ -56,3 +56,10 @@ test("all four locales distinguish local pairing, live tunnel and remote control
   }
  }
 });
+
+test("Stage4X QA app uses a distinct label without altering isolated bundle identity",()=>{
+ const cfg=JSON.parse(readFileSync(new URL("../src-tauri/tauri.mesh-qa-stage4x.conf.json",import.meta.url),"utf8"));
+ assert.equal(cfg.identifier,"com.nmkato.katosync.meshqa.stage4j-isolated");
+ assert.match(cfg.productName,/Stage4X UX QA/);
+ assert.match(cfg.app.windows[0].title,/Stage4X/);
+});
