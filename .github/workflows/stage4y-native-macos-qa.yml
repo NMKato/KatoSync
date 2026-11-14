@@ -1,0 +1,53 @@
+name: Stage4Y Native macOS QA (no deploy)
+
+on:
+  push:
+    branches:
+      - qa/stage4y-admission-diagnostics-20261114
+    paths:
+      - "src-tauri/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/stage4y-native-macos-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage4y-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stage4y-native:
+    name: macOS native Stage4J gate (no signing)
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout exact QA branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install repository-pinned Rust compiler
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup show active-toolchain
+          cargo --version
+
+      - name: Verify native formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Compile isolated Stage4J with Stage4Y diagnostic
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa
+
+      - name: Run native Stage4Y admission denial tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa stage4y_diagnostics_tests --lib
+
+      - name: Confirm no release or device action
+        run: |
+          echo "STAGE4Y_NATIVE_QA_ONLY"
+          echo "No signing, notarization, deployment, keychain or device operation."
