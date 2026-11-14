@@ -58,6 +58,7 @@ import {
 } from "./components/Primitives";
 import { RichMarkdown } from "./components/RichMarkdown";
 import { RemoteCommanderUsagePanel } from "./components/RemoteCommanderUsagePanel";
+import { RemoteCommanderPermissionsPanel } from "./components/RemoteCommanderPermissionsPanel";
 import { Bars, Donut, KpiTiles, StatusList, Timeline } from "./components/DiagramComponents";
 import {
   codexTimeline,
@@ -962,6 +963,8 @@ export default function App() {
 
           {/* RC-11: separate Remote MCP statistics, never substitute API quotas or demo counts. */}
           {visibleStep === "settings" ? <RemoteCommanderUsagePanel /> : null}
+          {/* RC66: owner-visible permissions; no data or callbacks until verified API. */}
+          {visibleStep === "settings" ? <RemoteCommanderPermissionsPanel /> : null}
 
           {visibleStep === "settings" ? (
           <Panel

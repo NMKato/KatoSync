@@ -4222,3 +4222,31 @@ pre {
   .remote-usage-breakdown { grid-template-columns: 1fr; }
   .remote-usage-chart { gap: 5px; }
 }
+
+/* RC66: isolated Remote Commander permission review; no active backend by default. */
+.rc66-permissions-panel { grid-column:span 8; min-height:0; }
+.rc66-unavailable { display:flex;align-items:flex-start;gap:12px;padding:16px;
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface-2); }
+.rc66-unavailable svg { flex:0 0 auto;color:var(--text-muted); }
+.rc66-unavailable strong { color:var(--text);font-size:14px; }
+.rc66-unavailable p,.rc66-note { margin:8px 0 0;color:var(--text-muted);font-size:12px;line-height:1.6; }
+.rc66-permissions-panel h4 {margin:16px 0 8px;color:var(--text);font-size:13px;}
+.rc66-permission-row {display:flex;align-items:center;justify-content:space-between;
+  gap:12px;padding:12px;margin:8px 0;border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--surface-2);}
+.rc66-permission-row strong {display:block;font-size:13px;overflow-wrap:anywhere;color:var(--text);}
+.rc66-permission-row small {display:block;margin-top:5px;font-size:11px;color:var(--text-muted);}
+.rc66-action,.rc66-review-actions button {padding:8px 12px;border-radius:9px;
+  border:1px solid var(--line);color:var(--text);background:var(--surface-2);cursor:pointer;}
+.rc66-action:hover,.rc66-review-actions button:hover:not(:disabled) {border-color:var(--brand);}
+.rc66-review {padding:14px;margin-top:14px;border:1px solid var(--brand);
+  border-radius:var(--r-md);background:var(--surface-2);}
+.rc66-review strong {color:var(--text);font-size:14px;}
+.rc66-review p,.rc66-review label {color:var(--text-muted);font-size:12px;line-height:1.6;}
+.rc66-review label {display:flex;align-items:center;gap:8px;margin:12px 0;}
+.rc66-review-actions {display:flex;flex-wrap:wrap;gap:10px;}
+.rc66-review-actions button:disabled {opacity:.5;cursor:not-allowed;}
+@media(max-width:880px) {
+  .rc66-permissions-panel {grid-column:1/-1;}
+  .rc66-permission-row {align-items:flex-start;flex-direction:column;}
+}
