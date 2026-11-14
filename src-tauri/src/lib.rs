@@ -320,6 +320,34 @@ pub struct LaunchAgentStatus {
 }
 
 pub fn run() {
+    // Stage4Y: bounded, explicitly owner-launched read-only admission diagnosis.
+    // Outputs fixed safe categories only. Never mutates keys/trust or opens LAN.
+    if env::args().nth(1).as_deref() == Some("--stage4y-admission-qa-once") {
+        #[cfg(feature = "stage4j-qa")]
+        {
+            let args = env::args().skip(2).collect();
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| "MESH_STAGE4Y_RUNTIME_UNAVAILABLE".to_string())
+                .and_then(|rt| {
+                    rt.block_on(mesh_private_lan_qa::run_cli_admission_diagnostic_once(args))
+                });
+            match result {
+                Ok(()) => println!("MESH_STAGE4Y_ADMISSION_OK_NO_REMOTE"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(5);
+                }
+            }
+            return;
+        }
+        #[cfg(not(feature = "stage4j-qa"))]
+        {
+            eprintln!("MESH_STAGE4Y_QA_NOT_CONFIGURED");
+            std::process::exit(5);
+        }
+    }
     // Manual, bounded headless QA for physical M2/M3 paired-key verification.
     // No Tauri webview, no background listener and no authorization of jobs.
     if env::args().nth(1).as_deref() == Some("--stage4w-private-lan-qa-once") {

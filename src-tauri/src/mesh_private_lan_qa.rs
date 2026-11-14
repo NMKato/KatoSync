@@ -234,6 +234,19 @@ pub(crate) async fn mesh_private_lan_connect_once_qa(
     Ok(proof_complete())
 }
 
+/// Stage4Y read-only admission diagnosis. Uses exactly the same build, runtime
+/// owner opt-in and single-operation gate as the existing one-shot TLS probe.
+pub(crate) async fn run_cli_admission_diagnostic_once(args: Vec<String>) -> Result<(), String> {
+    gate()?;
+    let _permit = SingleQaPermit::acquire()?;
+    if args.len() != 1 {
+        return Err("MESH_STAGE4Y_DIAGNOSTIC_ARGUMENTS_DENIED".into());
+    }
+    mesh_admission::stage4y_qa_admission_diagnostic(&args[0])
+        .await
+        .map_err(str::to_string)
+}
+
 /// Owner-authorized headless native QA entrypoint. Exposes no web IPC,
 /// exports no device key, and cannot activate remote jobs.
 pub(crate) async fn run_cli_once(args: Vec<String>) -> Result<(), String> {

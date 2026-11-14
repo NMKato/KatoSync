@@ -194,6 +194,99 @@ pub(crate) async fn probe_server_after_approval(
     recheck_after_probe(&admitted, requested_fingerprint).await
 }
 
+// Stage4Y: explicitly gated diagnostic ONLY. Reuses the exact admission and
+// post-admission checks above; does not create identities, change trust, bind
+// sockets, or authorize a remote job. Only stable categories cross CLI stdout.
+#[cfg(feature = "stage4j-qa")]
+fn stage4y_safe_failure(error: &str) -> &'static str {
+    match error {
+        "MESH_ADMISSION_NOT_CONFIGURED" => "MESH_STAGE4Y_QA_NOT_CONFIGURED",
+        "MESH_ADMISSION_LOGIN_REQUIRED" => "MESH_STAGE4Y_SESSION_UNVERIFIED",
+        "MESH_ADMISSION_LOCAL_IDENTITY_MISSING" | "MESH_ADMISSION_LOCAL_IDENTITY_CHANGED" => {
+            "MESH_STAGE4Y_LOCAL_IDENTITY_UNVERIFIED"
+        }
+        "MESH_ADMISSION_PEER_NOT_APPROVED"
+        | "MESH_ADMISSION_PEER_REVOKED"
+        | "MESH_ADMISSION_PEER_CHANGED" => "MESH_STAGE4Y_PEER_APPROVAL_UNVERIFIED",
+        "MESH_ADMISSION_ENROLLMENT_REQUIRED" | "MESH_ADMISSION_ENROLLMENT_REVOKED" => {
+            "MESH_STAGE4Y_ENROLLMENT_UNVERIFIED"
+        }
+        "MESH_ADMISSION_ACCOUNT_CHANGED" => "MESH_STAGE4Y_ACCOUNT_CHANGED",
+        _ => "MESH_STAGE4Y_ADMISSION_UNVERIFIED",
+    }
+}
+
+/// Invoked ONLY from the separately double-gated Stage4W CLI. No Tauri IPC
+/// registration. Exact owner, enrolled public keys and locally pinned peer are
+/// checked afresh using the existing authorization implementation.
+#[cfg(feature = "stage4j-qa")]
+pub(crate) async fn stage4y_qa_admission_diagnostic(
+    requested_fingerprint: &str,
+) -> Result<(), &'static str> {
+    if !exact_public_fingerprint(requested_fingerprint) {
+        return Err("MESH_STAGE4Y_INVALID_PEER");
+    }
+    let admitted = authorize(requested_fingerprint)
+        .await
+        .map_err(|e| stage4y_safe_failure(&e))?;
+    recheck_after_probe(&admitted, requested_fingerprint)
+        .await
+        .map_err(|e| stage4y_safe_failure(&e))?;
+    Ok(())
+}
+
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod stage4y_diagnostics_tests {
+    use super::stage4y_safe_failure;
+
+    #[test]
+    fn only_fixed_non_sensitive_qa_categories_leave_the_native_service() {
+        for (internal, safe) in [
+            (
+                "MESH_ADMISSION_LOGIN_REQUIRED",
+                "MESH_STAGE4Y_SESSION_UNVERIFIED",
+            ),
+            (
+                "MESH_ADMISSION_LOCAL_IDENTITY_MISSING",
+                "MESH_STAGE4Y_LOCAL_IDENTITY_UNVERIFIED",
+            ),
+            (
+                "MESH_ADMISSION_PEER_NOT_APPROVED",
+                "MESH_STAGE4Y_PEER_APPROVAL_UNVERIFIED",
+            ),
+            (
+                "MESH_ADMISSION_PEER_REVOKED",
+                "MESH_STAGE4Y_PEER_APPROVAL_UNVERIFIED",
+            ),
+            (
+                "MESH_ADMISSION_ENROLLMENT_REQUIRED",
+                "MESH_STAGE4Y_ENROLLMENT_UNVERIFIED",
+            ),
+            (
+                "MESH_ADMISSION_ENROLLMENT_REVOKED",
+                "MESH_STAGE4Y_ENROLLMENT_UNVERIFIED",
+            ),
+            (
+                "MESH_ADMISSION_ACCOUNT_CHANGED",
+                "MESH_STAGE4Y_ACCOUNT_CHANGED",
+            ),
+        ] {
+            assert_eq!(stage4y_safe_failure(internal), safe);
+        }
+        for sensitive in [
+            "token=redacted",
+            "owner-id=redacted",
+            "raw keychain error",
+            "",
+        ] {
+            assert_eq!(
+                stage4y_safe_failure(sensitive),
+                "MESH_STAGE4Y_ADMISSION_UNVERIFIED"
+            );
+        }
+    }
+}
+
 // No real-Keychain tests here: those would mutate a live user's OS account.
 // Pure key selection/revocation cases reside in mesh_trust::tests, while the
 // synthetic TLS hardware tests remain in mesh_transport::tests.
