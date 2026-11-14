@@ -14,7 +14,7 @@ const labels: Record<Lang, {
   de:{
     title:"Remote Commander – Nutzung",
     unavailable:"Noch keine Live-Nutzungsdaten verfügbar",
-    hint:"Remote-MCP-Anmeldung und geschützte Usage-API sind noch nicht freigeschaltet. Es werden keine Testwerte oder Daten anderer Anbieter angezeigt.",
+    hint:"Die Desktop-App hat noch keine verifizierte Remote-MCP-Nutzungs-API angebunden. Das ist unabhängig von einer erfolgreichen ChatGPT-Anmeldung. Keine Testwerte oder Daten anderer Anbieter.",
     calls:"Toolaufrufe in diesem Monat",average:"Tagesdurchschnitt",
     noLimit:"Keine feste monatliche Aufrufgrenze",remaining:"Verbleibende Aufrufe",
     blocked:"Durch Kontingent abgewiesen",history:"Letzte sechs Monate",
@@ -24,7 +24,7 @@ const labels: Record<Lang, {
   },
   en:{
     title:"Remote Commander – Usage",unavailable:"No live usage data available yet",
-    hint:"Remote MCP sign-in and the protected usage API are not enabled. No sample figures or other providers' data are shown.",
+    hint:"The desktop app has not yet integrated verified Remote MCP usage data. This is separate from a successful ChatGPT login. No sample figures or third-party data are displayed.",
     calls:"Tool calls this month",average:"Daily average",
     noLimit:"No fixed monthly tool-call limit",remaining:"Calls remaining",
     blocked:"Quota-denied calls",history:"Last six months",
@@ -34,7 +34,7 @@ const labels: Record<Lang, {
   },
   es:{
     title:"Remote Commander – Uso",unavailable:"Todavía no hay datos reales de uso",
-    hint:"El inicio de sesión MCP y la API de uso protegida aún no están activos. No se muestran datos de prueba ni de terceros.",
+    hint:"La app de escritorio todavía no usa una API de estadísticas MCP verificada. Esto es distinto del inicio de sesión de ChatGPT. No se muestran cifras de prueba ni de terceros.",
     calls:"Llamadas a herramientas este mes",average:"Promedio diario",
     noLimit:"Sin límite mensual fijo de llamadas",remaining:"Llamadas restantes",
     blocked:"Llamadas rechazadas por cuota",history:"Últimos seis meses",
@@ -45,7 +45,7 @@ const labels: Record<Lang, {
   ru:{
     title:"Remote Commander — Использование",
     unavailable:"Данные о реальном использовании пока недоступны",
-    hint:"Вход Remote MCP и защищённый API статистики пока не включены. Тестовые и сторонние данные не показываются.",
+    hint:"В приложении пока не подключена проверенная статистика Remote MCP. Это не связано с успешным входом в ChatGPT. Тестовые и сторонние данные не показываются.",
     calls:"Вызовы инструментов за месяц",average:"Среднее за день",
     noLimit:"Без фиксированного месячного лимита",remaining:"Осталось вызовов",
     blocked:"Отклонено по лимиту",history:"Последние шесть месяцев",
