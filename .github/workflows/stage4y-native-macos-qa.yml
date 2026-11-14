@@ -41,6 +41,15 @@ jobs:
       - name: Verify native formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
+      - name: Prepare compile-only resource directories
+        # Poppler/Typst binaries are intentionally Git-ignored. This CI job
+        # runs cargo check/test only: no packaging, signing or deployment.
+        # Empty placeholders satisfy tauri-build path validation, not runtime QA.
+        run: |
+          mkdir -p src-tauri/resources/poppler src-tauri/resources/typst
+          touch src-tauri/resources/poppler/.qa-compile-only
+          touch src-tauri/resources/typst/.qa-compile-only
+
       - name: Compile isolated Stage4J with Stage4Y diagnostic
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa
 
