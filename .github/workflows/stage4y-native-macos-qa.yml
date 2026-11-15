@@ -68,6 +68,31 @@ jobs:
       - name: Run native Stage4Y admission denial tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa stage4y_diagnostics_tests --lib
 
+      - name: Build isolated unsigned Stage4Y QA executable
+        # The runtime source and exact pinned toolchain were already checked.
+        # Deliberately ship NO Apple credentials and NO signed app from CI.
+        env:
+          TAURI_CONFIG: '{"productName":"KatoSync Stage4Y Admission QA","identifier":"com.nmkato.katosync.meshqa.stage4j-isolated","build":{"beforeBuildCommand":""}}'
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa --bin katosync
+
+      - name: Record exact unsigned binary SHA-256 and commit
+        run: |
+          cd src-tauri/target/debug
+          shasum -a 256 katosync > stage4y-katosync.sha256
+          printf '%s\n' "${GITHUB_SHA}" > stage4y-source-commit.txt
+          cat stage4y-katosync.sha256
+
+      - name: Export unsigned QA executable for local Developer-ID signing
+        uses: actions/upload-artifact@v4
+        with:
+          name: katosync-stage4y-macos-arm64-unsigned
+          path: |
+            src-tauri/target/debug/katosync
+            src-tauri/target/debug/stage4y-katosync.sha256
+            src-tauri/target/debug/stage4y-source-commit.txt
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Confirm no release or device action
         run: |
           echo "STAGE4Y_NATIVE_QA_ONLY"
