@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "test:remote-usage": "node --experimental-strip-types --test tests/remoteUsageContract.test.mjs tests/remoteUsageClient.test.mjs",
     "test:remote-consent": "node --experimental-strip-types --test tests/remoteConsentContract.test.mjs",
+    "test:workstation-planner": "node --experimental-strip-types --test tests/ownerWorkstationPlanner.test.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },
