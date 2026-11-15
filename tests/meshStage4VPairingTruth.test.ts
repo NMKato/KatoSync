@@ -23,6 +23,17 @@ test("only a native locally approved key matching an active same-account roster 
  assert.equal(deriveLocalPairingStatus({...base,ownFingerprint:null}),"checking");
  assert.equal(deriveLocalPairingStatus({...base,transport:null}),"checking");
 });
+test("owner-trusted enrollment keeps locally approved pairing without implying transport",()=>{
+ const trusted={...other,membershipState:"trusted"};
+ assert.equal(deriveLocalPairingStatus({...base,devices:[me,trusted]}),"locally_paired");
+ assert.equal(deriveLocalPairingStatus({...base,devices:[me,{...trusted,membershipState:"pending"}]}),"not_paired");
+ assert.equal(deriveLocalPairingStatus({...base,devices:[me,{...trusted,membershipState:"revoked"}]}),"not_paired");
+ assert.equal(deriveLocalPairingStatus({...base,pins:[],devices:[me,trusted]}),"not_paired");
+ assert.equal(deriveLocalPairingStatus({...base,devices:[me,{...trusted,ownerUserId:"owner-b"}]}),"not_paired");
+ assert.equal(deriveLocalPairingStatus({...base,devices:[me,trusted],transport:"connected"}),"checking");
+ assert.equal(deriveLocalPairingStatus({...base,devices:[me,trusted],crossDeviceWrites:true}),"checking");
+});
+
 test("cross-account, self-pin, wrong key, revoked or stale roster never show pairing",()=>{
  for(const bad of [
   {devices:[me,{...other,ownerUserId:"owner-b"}]},

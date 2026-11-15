@@ -25,6 +25,6 @@ export function deriveLocalPairingStatus(input:{
     input.devices!.some(peer=>peer.fingerprint===pin.fingerprint &&
       peer.fingerprint!==own.fingerprint &&
       peer.ownerUserId===own.ownerUserId &&
-      peer.membershipState==="discovered"));
+      (peer.membershipState==="discovered" || peer.membershipState==="trusted")));
   return ownsPeer ? "locally_paired":"not_paired";
 }
