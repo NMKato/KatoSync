@@ -54,6 +54,10 @@ mod mesh_readiness;
 mod mesh_relay_client;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_tailnet_qa;
+// Stage4AB: pure native QA proposal only. Not wired into Mesh transport or IPC.
+#[cfg(feature = "stage4j-qa")]
+#[allow(dead_code)]
+mod mesh_session_gate;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.
 #[allow(dead_code)]
