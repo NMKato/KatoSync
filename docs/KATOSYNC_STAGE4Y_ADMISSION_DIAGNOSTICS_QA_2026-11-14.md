@@ -32,3 +32,27 @@ No account IDs, token, public-key inventory, raw OS errors, private keys, Keycha
 4. Persistent tunnel with liveness, revocation and reconnect requires a separate implementation and approval. No success claimed from this diagnostic.
 
 **Release holds:** Draft only, no main merge, no production OAuth changes and no remote operations.
+
+## 15 Nov 2026 – Stage4Z PostgREST enrollment parser fix
+
+Both separately Apple-notarized M2 and M3 Stage4Y native QA commands
+returned `MESH_STAGE4Y_ENROLLMENT_UNVERIFIED`. Owner session, local
+Ed25519 identity and existing peer approval were reached successfully.
+
+Root cause in source: the owner-scoped `mesh_devices` GET selects
+PostgreSQL snake_case columns, whereas `EnrollmentRecord` previously
+used serde `rename_all = "camelCase"` and `deny_unknown_fields`.
+This rejected a valid PostgREST response at deserialization.
+
+Fix is intentionally limited to the response struct field mapping.
+Keep `deny_unknown_fields`, both exact public Ed25519 keys, same
+owner, enrollment timestamps, RLS, revocation checks, and existing
+local Keychain pin mandatory. No SQL migration, trust mutation,
+Keychain reset or remote job authorization.
+
+Verify new native Rust test with an actual snake_case JSON fixture plus
+a negative unknown-field fixture, and continue the physical admission
+QA on both notarized Macs only after fresh source build/sign/notarize.
+The Stage4W cross-site Tailscale transport remains separately blocked
+by its intentional RFC1918/same-/24 policy and needs an independent
+reviewed overlay QA change.

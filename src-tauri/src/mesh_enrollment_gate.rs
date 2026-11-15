@@ -22,7 +22,9 @@ const MAX_OWNER_DEVICES: usize = 10;
 const MAX_RESPONSE_BYTES: usize = 16_384;
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+// PostgREST returns the original snake_case PostgreSQL column names.
+// Keep deny_unknown_fields: malformed/expanded roster payloads fail closed.
+#[serde(deny_unknown_fields)]
 struct EnrollmentRecord {
     owner_user_id: Uuid,
     signing_public_key: String,
@@ -203,6 +205,40 @@ mod tests {
                 .unwrap()
                 .with_timezone(&chrono::Utc),
         )
+    }
+
+    #[test]
+    fn postgrest_snake_case_roster_decodes_without_weakening_validation() {
+        // Match the exact column names selected from the canonical KatoOS
+        // REST endpoint. Regression: camelCase renaming rejected valid rows.
+        let json = serde_json::json!([
+            {
+                "owner_user_id": UID,
+                "signing_public_key": URL_SAFE_NO_PAD.encode(key(3).as_bytes()),
+                "fingerprint": fingerprint(&key(3)),
+                "membership_state": "discovered",
+                "enrolled_at": "2026-10-28T12:00:00Z",
+                "revoked_at": null
+            },
+            {
+                "owner_user_id": UID,
+                "signing_public_key": URL_SAFE_NO_PAD.encode(key(4).as_bytes()),
+                "fingerprint": fingerprint(&key(4)),
+                "membership_state": "trusted",
+                "enrolled_at": "2026-10-28T12:00:00+00:00",
+                "revoked_at": null
+            }
+        ]);
+        let decoded: Vec<EnrollmentRecord> = serde_json::from_value(json.clone())
+            .expect("canonical snake_case PostgREST rows must decode");
+        assert_eq!(check(&decoded), Ok(()));
+
+        let mut tampered = json;
+        tampered[0]["unexpected_field"] = serde_json::json!("must-fail");
+        assert!(
+            serde_json::from_value::<Vec<EnrollmentRecord>>(tampered).is_err(),
+            "unexpected fields must remain denied"
+        );
     }
 
     #[test]
