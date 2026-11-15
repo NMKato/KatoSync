@@ -68,6 +68,9 @@ jobs:
       - name: Run native Stage4Y admission denial tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa stage4y_diagnostics_tests --lib
 
+      - name: Verify native strict PostgREST enrollment JSON deserialization
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa postgrest_snake_case_roster_decodes_without_weakening_validation --lib
+
       - name: Build isolated unsigned Stage4Y QA executable
         # The runtime source and exact pinned toolchain were already checked.
         # Deliberately ship NO Apple credentials and NO signed app from CI.
