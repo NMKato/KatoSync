@@ -24,3 +24,14 @@ In der Easy-Pair-Liste war die Geräte-Schaltfläche im aktivierten Easy-Modus n
 
 ## Negative Prüfung
 Abgewiesene Geräte, unbekannte lokale Schlüssel, eigenes Gerät, ungültiger Fingerprint, fehlendes QA-Flag und leeres Inventar dürfen weder als lokaler Testpartner erscheinen noch eine neue Einladung erzeugen. Bereits lokal bestätigte Geräte dürfen nie ungefragt erneut eingeladen werden. UI-Status „Verbindung aktiv“ bzw. „Fernsteuerung erlaubt“ darf nicht durch eine lokale Pairing-Freigabe entstehen.
+
+
+## 15 Nov 2026 – truthful local pairing after owner-roster promotion
+
+A peer whose locally approved Keychain pin is unchanged must continue to
+display **locally paired** when its owner-scoped enrollment state moves from
+`discovered` to `trusted`. The `trusted` roster field by itself remains
+insufficient: missing local approval, cross-account ownership, `pending` or
+`revoked` peers all fail closed. No UI label may infer an active transport,
+remote job permission or cross-device write from this display-only fix.
+Regression coverage: `tests/meshStage4VPairingTruth.test.ts`.
