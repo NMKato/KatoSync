@@ -54,6 +54,11 @@ mod mesh_readiness;
 mod mesh_relay_client;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_tailnet_qa;
+// Stage4AB.1 – internal, passive lease-state logic only. Deliberately has no
+// Tauri IPC/CLI, no long-lived socket, no runtime supervisor and no job grant.
+#[cfg(feature = "stage4j-qa")]
+#[allow(dead_code)]
+mod mesh_durable_lease_qa;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.
 #[allow(dead_code)]
