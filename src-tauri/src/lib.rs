@@ -52,6 +52,8 @@ mod mesh_preview_auth;
 mod mesh_private_lan_qa;
 mod mesh_readiness;
 mod mesh_relay_client;
+#[cfg(feature = "stage4j-qa")]
+mod mesh_tailnet_qa;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.
 #[allow(dead_code)]
@@ -320,6 +322,33 @@ pub struct LaunchAgentStatus {
 }
 
 pub fn run() {
+    // Stage4AA: distinct QA-only tailnet mTLS proof, *not* the Stage4W LAN
+    // route. Requires BOTH dedicated owner opt-ins, existing mutual Keychain
+    // pins, owner enrollment and an authenticated online Tailscale overlay.
+    if env::args().nth(1).as_deref() == Some("--stage4aa-tailnet-qa-once") {
+        #[cfg(feature = "stage4j-qa")]
+        {
+            let args = env::args().skip(2).collect();
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| "MESH_STAGE4AA_RUNTIME_UNAVAILABLE".to_string())
+                .and_then(|rt| rt.block_on(mesh_tailnet_qa::run_once(args)));
+            match result {
+                Ok(()) => println!("MESH_STAGE4AA_PINNED_MTLS_ONCE_PASS_NO_REMOTE"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(5);
+                }
+            }
+            return;
+        }
+        #[cfg(not(feature = "stage4j-qa"))]
+        {
+            eprintln!("MESH_STAGE4AA_QA_NOT_CONFIGURED");
+            std::process::exit(5);
+        }
+    }
     // Stage4Y: bounded, explicitly owner-launched read-only admission diagnosis.
     // Outputs fixed safe categories only. Never mutates keys/trust or opens LAN.
     if env::args().nth(1).as_deref() == Some("--stage4y-admission-qa-once") {

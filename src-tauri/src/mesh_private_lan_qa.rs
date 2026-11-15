@@ -48,9 +48,9 @@ fn gate() -> Result<(), String> {
 
 // Even direct IPC concurrency may never start multiple QA probes in one app.
 static QA_ACTIVE: AtomicBool = AtomicBool::new(false);
-struct SingleQaPermit;
+pub(crate) struct SingleQaPermit;
 impl SingleQaPermit {
-    fn acquire() -> Result<Self, String> {
+    pub(crate) fn acquire() -> Result<Self, String> {
         QA_ACTIVE
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "MESH_STAGE4W_ALREADY_RUNNING".to_string())?;
@@ -89,7 +89,7 @@ fn bounded_cert(cert: &[u8]) -> Result<(), String> {
     }
     Ok(())
 }
-async fn write_cert(socket: &mut TcpStream, cert: &[u8]) -> Result<(), String> {
+pub(crate) async fn write_cert(socket: &mut TcpStream, cert: &[u8]) -> Result<(), String> {
     bounded_cert(cert)?;
     timeout(PRELUDE_DEADLINE, async {
         socket
@@ -108,7 +108,7 @@ async fn write_cert(socket: &mut TcpStream, cert: &[u8]) -> Result<(), String> {
     .await
     .map_err(|_| "MESH_STAGE4W_CERT_TIMEOUT".to_string())?
 }
-async fn read_cert(socket: &mut TcpStream) -> Result<Vec<u8>, String> {
+pub(crate) async fn read_cert(socket: &mut TcpStream) -> Result<Vec<u8>, String> {
     timeout(PRELUDE_DEADLINE, async {
         let mut len = [0u8; 2];
         socket
@@ -130,7 +130,9 @@ async fn read_cert(socket: &mut TcpStream) -> Result<Vec<u8>, String> {
     .map_err(|_| "MESH_STAGE4W_CERT_TIMEOUT".to_string())?
 }
 
-async fn owner_qa_identity(requested_fingerprint: &str) -> Result<DeviceTlsIdentity, String> {
+pub(crate) async fn owner_qa_identity(
+    requested_fingerprint: &str,
+) -> Result<DeviceTlsIdentity, String> {
     // Admission fetches the exact existing pin from the OS Keychain; the
     // caller cannot create, rotate or substitute a device identity.
     mesh_admission::mesh_native_peer_preflight(requested_fingerprint.to_owned())
