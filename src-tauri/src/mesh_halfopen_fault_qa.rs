@@ -57,7 +57,8 @@ async fn real_pinned_tls13_half_open_heartbeat_timeout_cannot_keep_live_lease() 
         client_identity.certificate_der(),
     ).unwrap();
     let (client_io, server_io) = duplex(16_384);
-    let (second_request_seen, server_may_finish) = oneshot::channel::<()>();
+    let (second_request_seen_tx, second_request_seen_rx) = oneshot::channel::<()>();
+    let (client_timeout_done_tx, client_timeout_done_rx) = oneshot::channel::<()>();
 
     let client = async move {
         let server_name = rustls::pki_types::ServerName::try_from(TLS_PEER_DNS_NAME).unwrap();
@@ -83,6 +84,7 @@ async fn real_pinned_tls13_half_open_heartbeat_timeout_cannot_keep_live_lease() 
         // remains genuinely OPEN but never emits the second PONG.
         tls.write_all(b"PING").await.unwrap();
         tls.flush().await.unwrap();
+        second_request_seen_rx.await.unwrap();
         let stalled = timeout(Duration::from_millis(180), tls.read_exact(&mut response)).await;
         assert!(stalled.is_err(), "half-open channel did not time out");
         lease.on_network_loss();
@@ -107,7 +109,7 @@ async fn real_pinned_tls13_half_open_heartbeat_timeout_cannot_keep_live_lease() 
             ),
             AttemptDecision::AttemptNewFullTlsAfter(Duration::from_secs(2)),
         );
-        server_may_finish.send(()).unwrap();
+        client_timeout_done_tx.send(()).unwrap();
         drop(tls);
     };
 
@@ -124,9 +126,9 @@ async fn real_pinned_tls13_half_open_heartbeat_timeout_cannot_keep_live_lease() 
         tls.read_exact(&mut second).await.unwrap();
         assert_eq!(&second, b"PING");
         // HOLD the TLS connection open without sending an ACK.
-        second_request_seen.send(()).unwrap();
+        second_request_seen_tx.send(()).unwrap();
         // Deliberately withhold the second PONG until the client times out.
-        let _ = server_may_finish.await;
+        let _ = client_timeout_done_rx.await;
         drop(tls);
     };
 
