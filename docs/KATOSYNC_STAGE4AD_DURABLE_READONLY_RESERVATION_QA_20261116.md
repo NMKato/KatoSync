@@ -14,6 +14,7 @@ New private module: src-tauri/src/mesh_durable_lease_qa/signed_job_qa/journal_qa
 
 - Trusted local agent config must supply an already existing canonical owner-private journal directory. Reject symlinks, non-directory paths and Unix mode bits accessible by group/others. Never accept an arbitrary journal path from a model, chat or remote request.
 - Input must be a non-executing Stage4AC candidate with matching typed task ID, action and output limit. It never creates execution authority.
+- Stage4AD now additionally includes a private propose_and_reserve wrapper inside Stage4AC: it verifies the canonical signed permit, live heartbeat-bound Mesh lease and fresh server grant first; only then opens the journal. Invalid signatures cannot create reservation files, and reopen/replay still fails closed. This wrapper also remains non-executing.
 - Exclusively reserve two names under the private root: one for fixed-size hexadecimal task ID and one for hexadecimal nonce. Both use atomic create_new, 0600 file permissions, bounded SHA-256 metadata and fsync of file and parent directory.
 - A crash or failed second write leaves the first task marker present and permanently blocks automatic replay until independent owner review; no cleanup silently unlocks it.
 - Concurrent proposals on one local host cannot both reserve the same task marker. Reused task IDs and nonces are blocked across process reopen.

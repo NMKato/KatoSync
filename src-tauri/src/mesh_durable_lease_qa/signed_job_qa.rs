@@ -137,6 +137,7 @@ enum Denial {
     WrongBoundPeer,
     Replay,
     CapacityExceeded,
+    JournalUnavailable,
 }
 #[derive(Debug, PartialEq, Eq)]
 struct Candidate {
@@ -214,6 +215,26 @@ impl ReplayLedger {
             execution_authorized: false,
             requires_native_executor_recheck: true,
         })
+    }
+    /// Safe ordering: first verify cryptographic permit, live canonical Mesh
+    /// lease, owner grant and replay. Only then reserve task/nonce on disk.
+    /// A failed disk reservation poisons this in-memory candidate as well.
+    /// Even on success the returned value is NEVER an execution permit.
+    fn propose_and_reserve(
+        &mut self,
+        lease: &MeshLeaseMachine,
+        signed: &SignedTask,
+        pinned_signer: &VerifyingKey,
+        authority: RevocationRecheck,
+        now: Instant,
+        now_ms: u64,
+        journal: &journal_qa::Journal,
+    ) -> Result<Candidate, Denial> {
+        let candidate = self.propose(lease, signed, pinned_signer, authority, now, now_ms)?;
+        journal
+            .reserve(&candidate, signed)
+            .map_err(|_| Denial::JournalUnavailable)?;
+        Ok(candidate)
     }
 }
 
@@ -489,6 +510,90 @@ mod tests {
             Action::GitStatusShort
         );
     }
+    #[test]
+    fn durable_reservation_is_only_after_verified_signed_live_grant() {
+        use std::fs;
+        let path = std::env::temp_dir().join(format!(
+            "katosync-stage4ad-integration-{}",
+            uuid::Uuid::new_v4()
+        ));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+        }
+        #[cfg(not(unix))]
+        fs::create_dir(&path).unwrap();
+        let root = path.canonicalize().unwrap();
+        let journal = journal_qa::Journal::open_existing(&root).unwrap();
+        let (mesh, now) = live();
+        let mut ledger = ReplayLedger::default();
+        let grant = sign(task());
+        let candidate = ledger
+            .propose_and_reserve(
+                &mesh,
+                &grant,
+                &signer().verifying_key(),
+                fresh(),
+                now,
+                WALL,
+                &journal,
+            )
+            .unwrap();
+        assert!(!candidate.execution_authorized);
+        assert!(candidate.requires_native_executor_recheck);
+        // Fresh process/ledger must not allow the same signed task.
+        let mut new_ledger = ReplayLedger::default();
+        assert_eq!(
+            new_ledger.propose_and_reserve(
+                &mesh,
+                &grant,
+                &signer().verifying_key(),
+                fresh(),
+                now,
+                WALL,
+                &journal
+            ),
+            Err(Denial::JournalUnavailable)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn rejected_signature_never_creates_a_durable_reservation() {
+        use std::fs;
+        let path = std::env::temp_dir().join(format!(
+            "katosync-stage4ad-rejected-{}",
+            uuid::Uuid::new_v4()
+        ));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+        }
+        #[cfg(not(unix))]
+        fs::create_dir(&path).unwrap();
+        let root = path.canonicalize().unwrap();
+        let journal = journal_qa::Journal::open_existing(&root).unwrap();
+        let (mesh, now) = live();
+        let mut ledger = ReplayLedger::default();
+        let mut invalid = sign(task());
+        invalid.signature = [0; 64];
+        assert_eq!(
+            ledger.propose_and_reserve(
+                &mesh,
+                &invalid,
+                &signer().verifying_key(),
+                fresh(),
+                now,
+                WALL,
+                &journal
+            ),
+            Err(Denial::InvalidSignature)
+        );
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn canonical_signed_payload_has_domain_and_fixed_length() {
         let mut p = task();

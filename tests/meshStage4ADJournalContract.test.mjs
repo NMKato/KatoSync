@@ -43,3 +43,14 @@ test("dedicated macOS native regression has no production deploy/signed app",()=
  assert.match(workflow,/STAGE4AD_DURABLE_JOURNAL_QA_ONLY_NO_REMOTE/);
  assert.doesNotMatch(workflow,/wrangler deploy|supabase db push|cargo tauri build|codesign -s/);
 });
+
+test("Stage4AC enforces signature and live lease before durable reservation",()=>{
+ assert.match(parent,/fn propose_and_reserve\(/);
+ const wrapper=parent.slice(parent.indexOf("fn propose_and_reserve("));
+ assert.ok(wrapper.indexOf("self.propose(")>=0);
+ assert.ok(wrapper.indexOf("journal")>=0);
+ assert.ok(wrapper.indexOf("self.propose(")<wrapper.indexOf(".reserve(&candidate, signed)"));
+ assert.match(parent,/durable_reservation_is_only_after_verified_signed_live_grant/);
+ assert.match(parent,/rejected_signature_never_creates_a_durable_reservation/);
+ assert.match(parent,/Denial::JournalUnavailable/);
+});

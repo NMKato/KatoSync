@@ -17,7 +17,7 @@ enum Denial {
     Duplicate,
     Storage,
 }
-struct Journal {
+pub(super) struct Journal {
     root: PathBuf,
 }
 fn hex(data: &[u8]) -> String {
@@ -33,7 +33,7 @@ fn marker(dir: &Path, prefix: &str, id: &[u8; 16]) -> PathBuf {
     dir.join(format!("{}-{}.lock", prefix, hex(id)))
 }
 impl Journal {
-    fn open_existing(root: &Path) -> Result<Self, Denial> {
+    pub(super) fn open_existing(root: &Path) -> Result<Self, Denial> {
         let m = fs::symlink_metadata(root).map_err(|_| Denial::InsecureRoot)?;
         if !m.is_dir() || m.file_type().is_symlink() {
             return Err(Denial::InsecureRoot);
@@ -73,7 +73,7 @@ impl Journal {
     }
     // Must only be called AFTER the canonical signed permit and live lease gate.
     // Never interpret this durable reservation as OS/device execution authority.
-    fn reserve(&self, c: &Candidate, s: &SignedTask) -> Result<(), Denial> {
+    pub(super) fn reserve(&self, c: &Candidate, s: &SignedTask) -> Result<(), Denial> {
         if c.execution_authorized
             || !c.requires_native_executor_recheck
             || c.task_id != s.task.task_id
