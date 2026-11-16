@@ -1,0 +1,101 @@
+name: Stage4AC Signed Read-only Job QA (no deploy)
+
+on:
+  push:
+    branches:
+      - qa/stage4ac-signed-readonly-job-admission-20261116
+    paths:
+      - "src-tauri/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/stage4ac-native-macos-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage4ac-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stage4y-native:
+    name: macOS Stage4AC signed read-only permit QA (no signing)
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout exact QA branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install repository-pinned Rust compiler
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup show active-toolchain
+          cargo --version
+
+      - name: Verify native formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Set up Node for real Tauri frontend assets
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install locked frontend dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build actual TypeScript and Vite frontend
+        run: npm run build
+
+      - name: Prepare compile-only resource directories
+        # Poppler/Typst binaries are intentionally Git-ignored. This CI job
+        # runs cargo check/test only: no packaging, signing or deployment.
+        # Empty placeholders satisfy tauri-build path validation, not runtime QA.
+        run: |
+          mkdir -p src-tauri/resources/poppler src-tauri/resources/typst
+          touch src-tauri/resources/poppler/.qa-compile-only
+          touch src-tauri/resources/typst/.qa-compile-only
+
+      - name: Compile isolated Stage4J with Stage4Y diagnostic
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa
+
+      - name: Run native Stage4Y admission denial tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa stage4y_diagnostics_tests --lib
+
+      - name: Verify native strict PostgREST enrollment JSON deserialization
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa postgrest_snake_case_roster_decodes_without_weakening_validation --lib
+
+      - name: Verify Stage4AA strict Tailnet policy and owner double opt-in
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_tailnet_qa::tests --lib
+
+      - name: Run Stage4AA static contract regression
+        run: node --experimental-strip-types --test tests/meshStage4AATailnetContract.test.mjs
+
+      - name: Verify Stage4AB1 native monotonic lease and security tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_durable_lease_qa::tests --lib
+
+      - name: Verify Stage4AB1 no-remote-rights static contract
+        run: node --experimental-strip-types --test tests/meshStage4AB1LeaseStateContract.test.mjs
+
+      - name: Verify real pinned TLS loopback and bounded authenticated in-channel heartbeats
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_durable_lease_qa::inchannel_qa::tests --lib
+
+      - name: Verify Stage4AB2 code surfaces no remote command authority
+        run: node --test tests/meshStage4AB2InchannelContract.test.mjs
+
+      - name: Verify signed owner-session-bound Git read-only proposal against canonical live Mesh lease
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_durable_lease_qa::signed_job_qa::tests --lib
+
+      - name: Verify Stage4AC signed-job boundary and non-execution contract
+        run: node --test tests/meshStage4ACSignedJobContract.test.mjs
+
+      - name: Confirm passive QA only, no deploy or runtime device actions
+        run: |
+          echo "STAGE4AC_SIGNED_GRANT_QA_ONLY_NO_REMOTE"
+          echo "No signing, notarization, deployment, Keychain mutation, listener, persistent transport or remote jobs."
