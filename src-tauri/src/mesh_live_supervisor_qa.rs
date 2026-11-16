@@ -8,6 +8,7 @@
 
 use crate::{
     mesh_admission::{self, NativeAdmission},
+    mesh_clock_gap_qa::ClockGapMonitor,
     mesh_durable_lease_qa::LiveTlsLease,
     mesh_private_lan_qa::{read_cert, write_cert, SingleQaPermit},
     mesh_tailnet_qa::{policy, require_owner_opt_ins, verify_live_tailnet},
@@ -280,15 +281,27 @@ async fn server_once(
         session,
         Instant::now(),
     )?;
+    // Fail closed on macOS sleep/wake gaps even if the kernel does not
+    // emit a socket EOF and Instant pauses while the machine sleeps.
+    let mut clock_gap = ClockGapMonitor::capture();
     for seq in 1..=HEARTBEAT_COUNT {
+        clock_gap
+            .check_or_invalidate(&mut lease)
+            .map_err(str::to_string)?;
         if !lease.is_live(Instant::now()) {
             return Err("MESH_STAGE4AB2_LEASE_EXPIRED".into());
         }
         verify_live_tailnet(local, peer).await?;
         heartbeat_server(&mut tls, seq, &session, &admitted, peer_fingerprint).await?;
+        clock_gap
+            .check_or_invalidate(&mut lease)
+            .map_err(str::to_string)?;
         mesh_admission::recheck_after_probe(&admitted, peer_fingerprint)
             .await
             .map_err(|_| "MESH_STAGE4AB2_ADMISSION_REVOKED".to_string())?;
+        clock_gap
+            .check_or_invalidate(&mut lease)
+            .map_err(str::to_string)?;
         lease.verified_in_channel_heartbeat(seq, Instant::now())?;
         if seq == 1 && fault == Some(QaFault::ServerDropAfterFirstAuthenticatedHeartbeat) {
             // A REAL open, pinned TLS stream is dropped now. No synthetic
@@ -357,7 +370,13 @@ async fn client_once(
         session,
         Instant::now(),
     )?;
+    // Fail closed on macOS sleep/wake gaps even if the kernel does not
+    // emit a socket EOF and Instant pauses while the machine sleeps.
+    let mut clock_gap = ClockGapMonitor::capture();
     for seq in 1..=HEARTBEAT_COUNT {
+        clock_gap
+            .check_or_invalidate(&mut lease)
+            .map_err(str::to_string)?;
         sleep(HEARTBEAT_INTERVAL).await;
         if !lease.is_live(Instant::now()) {
             return Err("MESH_STAGE4AB2_LEASE_EXPIRED".into());
@@ -377,9 +396,15 @@ async fn client_once(
             }
         }
         heartbeat_client(&mut tls, seq, &session).await?;
+        clock_gap
+            .check_or_invalidate(&mut lease)
+            .map_err(str::to_string)?;
         mesh_admission::recheck_after_probe(&admitted, peer_fingerprint)
             .await
             .map_err(|_| "MESH_STAGE4AB2_ADMISSION_REVOKED".to_string())?;
+        clock_gap
+            .check_or_invalidate(&mut lease)
+            .map_err(str::to_string)?;
         lease.verified_in_channel_heartbeat(seq, Instant::now())?;
     }
     lease.close();
