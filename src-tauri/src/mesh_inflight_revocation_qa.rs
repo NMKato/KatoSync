@@ -8,14 +8,19 @@
 
 use crate::{
     mesh_durable_lease_qa::LiveTlsLease,
-    mesh_fault_policy_qa::{classify_attempt, AttemptDecision, SimulatedRevalidation, TransportFault},
+    mesh_fault_policy_qa::{
+        classify_attempt, AttemptDecision, SimulatedRevalidation, TransportFault,
+    },
     mesh_identity::fingerprint,
     mesh_tls::{strict_client_config, strict_server_config, DeviceTlsIdentity, TLS_PEER_DNS_NAME},
     mesh_trust::ApprovedPeer,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ed25519_dalek::SigningKey;
-use std::{sync::Arc, time::{Duration, Instant}};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     io::{duplex, AsyncReadExt, AsyncWriteExt},
     sync::oneshot,
@@ -45,7 +50,10 @@ fn simulated_current() -> SimulatedRevalidation {
 /// In-memory revocation models the signal only; no real server database
 /// is written. TLS and its failure after the first heartbeat are real.
 async fn run_synthetic_in_flight_revoke(fault: TransportFault) {
-    assert!(matches!(fault, TransportFault::PeerRevoked | TransportFault::OwnerChanged));
+    assert!(matches!(
+        fault,
+        TransportFault::PeerRevoked | TransportFault::OwnerChanged
+    ));
     let client_key = SigningKey::from_bytes(&[41u8; 32]);
     let server_key = SigningKey::from_bytes(&[42u8; 32]);
     let local_client = DeviceTlsIdentity::from_signing_key(&client_key).unwrap();
@@ -54,19 +62,23 @@ async fn run_synthetic_in_flight_revoke(fault: TransportFault) {
         &local_client,
         &synthetic_approved(&server_key),
         local_server.certificate_der(),
-    ).unwrap();
+    )
+    .unwrap();
     let server_cfg = strict_server_config(
         &local_server,
         &synthetic_approved(&client_key),
         local_client.certificate_der(),
-    ).unwrap();
+    )
+    .unwrap();
     let (client_io, server_io) = duplex(16_384);
     let (signal_revoke, receive_revoke) = oneshot::channel::<()>();
 
     let client = async move {
         let dns = rustls::pki_types::ServerName::try_from(TLS_PEER_DNS_NAME).unwrap();
         let mut tls = TlsConnector::from(Arc::new(client_cfg))
-            .connect(dns, client_io).await.unwrap();
+            .connect(dns, client_io)
+            .await
+            .unwrap();
         assert_eq!(
             tls.get_ref().1.protocol_version(),
             Some(rustls::ProtocolVersion::TLSv1_3)
@@ -92,7 +104,9 @@ async fn run_synthetic_in_flight_revoke(fault: TransportFault) {
 
     let server = async move {
         let mut tls = TlsAcceptor::from(Arc::new(server_cfg))
-            .accept(server_io).await.unwrap();
+            .accept(server_io)
+            .await
+            .unwrap();
         assert_eq!(
             tls.get_ref().1.protocol_version(),
             Some(rustls::ProtocolVersion::TLSv1_3)
@@ -106,11 +120,14 @@ async fn run_synthetic_in_flight_revoke(fault: TransportFault) {
             client_key.verifying_key().to_bytes(),
             [88u8; 32],
             now,
-        ).unwrap();
+        )
+        .unwrap();
         let mut first = [0u8; 4];
         tls.read_exact(&mut first).await.unwrap();
         assert_eq!(&first, b"PING");
-        lease.verified_in_channel_heartbeat(1, Instant::now()).unwrap();
+        lease
+            .verified_in_channel_heartbeat(1, Instant::now())
+            .unwrap();
         tls.write_all(b"PONG").await.unwrap();
         tls.flush().await.unwrap();
         assert!(lease.is_live(Instant::now()));
@@ -129,7 +146,9 @@ async fn run_synthetic_in_flight_revoke(fault: TransportFault) {
 
     timeout(Duration::from_secs(8), async {
         tokio::join!(client, server);
-    }).await.expect("synthetic revocation test exceeded its bounded deadline");
+    })
+    .await
+    .expect("synthetic revocation test exceeded its bounded deadline");
 }
 
 #[tokio::test]
