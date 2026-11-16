@@ -34,6 +34,9 @@ mod local_brain;
 mod local_control;
 mod memory_fabric;
 mod mesh_agent_bootstrap;
+// QA-only clock discontinuity guard; never a production OS event observer.
+#[cfg(feature = "stage4j-qa")]
+mod mesh_clock_gap_qa;
 mod mesh_device_presence;
 mod mesh_directory;
 mod mesh_enrollment_client;
