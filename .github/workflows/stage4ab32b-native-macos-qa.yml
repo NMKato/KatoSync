@@ -111,7 +111,7 @@ jobs:
         run: node --experimental-strip-types --test tests/meshStage4AB32BFaultPolicyContract.test.mjs
 
       - name: Verify real mutual TLS1.3 duplex denies synthetic in-flight revocation
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_inflight_revocation_qa:: --lib
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_inflight_revocation_qa --lib
 
       - name: Verify Stage4AB32B recovery gate never approves remote network fault
         run: |
