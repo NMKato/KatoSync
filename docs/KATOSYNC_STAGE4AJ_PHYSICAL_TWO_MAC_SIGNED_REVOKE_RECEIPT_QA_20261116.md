@@ -23,6 +23,8 @@ The `rc66kAckSha256` field is a **synthetic correlation digest**, not a cryptogr
 
 The on-disk marker persists across **process exits/reopens**, but a reboot/recovery exercise and a durable ordered sequence journal have **not** yet been proven on the production KatoSync runtime. Do not interpret a missing synthetic marker as permission. The test root is only an ephemeral `/tmp` fixture, not production application storage.
 
+After the physical test, the temporary private CA, server, issuer, client and device signing keys were removed from their respective QA fixture directories. The M3's non-secret QA revocation marker remains for read-only inspection; no private test key is committed to Git.
+
 ## QA regression and next stage
 
 - Native Rust Stage4AI chain: **56/56** tests passed locally (no changes in production Rust code in Stage4AJ).
