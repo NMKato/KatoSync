@@ -168,6 +168,10 @@ impl ReplayLedger {
         if session.last_sequence == 0 {
             return Err(Denial::ClosedLease);
         }
+        let task = &signed.task;
+        if !task.valid(now_ms) {
+            return Err(Denial::MalformedPermit);
+        }
         if authority.tenant_id != signed.task.tenant_id
             || authority.owner_session_id != signed.task.owner_session_id
             || authority.client_id != signed.task.client_id
@@ -181,10 +185,6 @@ impl ReplayLedger {
             || !authority.client_device_project_grant_active
         {
             return Err(Denial::StaleAuthority);
-        }
-        let task = &signed.task;
-        if !task.valid(now_ms) {
-            return Err(Denial::MalformedPermit);
         }
         let signature = Signature::from_bytes(&signed.signature);
         pinned_signer
