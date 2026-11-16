@@ -1,0 +1,44 @@
+name: Stage4AF native execution-time Git HEAD fence (QA only)
+
+on:
+  push:
+    branches:
+      - qa/stage4af-executor-time-readonly-fence-20261116
+    paths:
+      - "src-tauri/src/mesh_durable_lease_qa/**"
+      - "tests/native/stage4af/**"
+      - "tests/meshStage4AFExecutorFenceContract.test.mjs"
+      - ".github/workflows/stage4af-native-execution-fence-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage4af-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-qa:
+    name: Isolated real Rust Ed25519 and temporary Git HEAD (no deploy)
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned native toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+      - name: Verify native source formatting
+        run: |
+          rustfmt --edition 2021 --check src-tauri/src/mesh_durable_lease_qa/signed_job_qa.rs
+          rustfmt --edition 2021 --check src-tauri/src/mesh_durable_lease_qa/signed_job_qa/execution_fence_qa.rs
+          rustfmt --edition 2021 --check tests/native/stage4af/src/lib.rs
+      - name: Verify locked minimal Rust Stage4AC–AF source harness with real Git fixture
+        run: cargo test --locked --manifest-path tests/native/stage4af/Cargo.toml --lib
+      - name: Run source-only no-runtime-IPC and Stage4L isolation contracts
+        run: node --test tests/meshStage4AFExecutorFenceContract.test.mjs tests/meshStage4AESignedReceiptContract.test.mjs
+      - name: Confirm no production remote execution
+        run: |
+          echo "STAGE4AF_EXECUTION_FENCE_QA_NO_REMOTE_NO_DEPLOY"
+          echo "No Auth grants, Keychain writes, Supabase, Cloudflare, live Mesh or device IPC."

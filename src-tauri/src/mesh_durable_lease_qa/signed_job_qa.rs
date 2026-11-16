@@ -5,8 +5,13 @@
 //! A trusted runtime signer, active RC66 owner session, server revocation
 //! revalidation, durable replay ledger, and Stage4L executor remain separate.
 #[allow(dead_code)]
+#[path = "signed_job_qa/execution_fence_qa.rs"]
+mod execution_fence_qa;
+#[allow(dead_code)]
+#[path = "signed_job_qa/journal_qa.rs"]
 mod journal_qa;
 #[allow(dead_code)]
+#[path = "signed_job_qa/receipt_qa.rs"]
 mod receipt_qa;
 
 use super::MeshLeaseMachine;
