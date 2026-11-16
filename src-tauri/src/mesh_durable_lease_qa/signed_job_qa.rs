@@ -6,6 +6,8 @@
 //! revalidation, durable replay ledger, and Stage4L executor remain separate.
 #[allow(dead_code)]
 mod journal_qa;
+#[allow(dead_code)]
+mod receipt_qa;
 
 use super::MeshLeaseMachine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};

@@ -9,7 +9,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
-const MAX_RECORD_BYTES: usize = 256;
+const MAX_RECORD_BYTES: usize = 512;
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Denial {
     InsecureRoot,
@@ -70,6 +70,33 @@ impl Journal {
         File::open(&self.root)
             .and_then(|d| d.sync_all())
             .map_err(|_| Denial::Storage)
+    }
+    /// Store a terminal record only after both reserved markers exist.
+    /// The parent MUST verify the receipt signature first. This routine is
+    /// a private storage primitive, not an attestation or an executor.
+    pub(super) fn store_verified_terminal_record(
+        &self,
+        task_id: &[u8; 16],
+        nonce: &[u8; 16],
+        record: &[u8],
+    ) -> Result<(), Denial> {
+        if record.is_empty() || record.len() > MAX_RECORD_BYTES {
+            return Err(Denial::Storage);
+        }
+        for path in [
+            marker(&self.root, "task", task_id),
+            marker(&self.root, "nonce", nonce),
+        ] {
+            let m = fs::symlink_metadata(path).map_err(|_| Denial::InvalidCandidate)?;
+            if !m.is_file() || m.file_type().is_symlink() {
+                return Err(Denial::InvalidCandidate);
+            }
+            #[cfg(unix)]
+            if m.permissions().mode() & 0o077 != 0 {
+                return Err(Denial::InvalidCandidate);
+            }
+        }
+        self.write_once(&marker(&self.root, "receipt", task_id), record)
     }
     // Must only be called AFTER the canonical signed permit and live lease gate.
     // Never interpret this durable reservation as OS/device execution authority.
