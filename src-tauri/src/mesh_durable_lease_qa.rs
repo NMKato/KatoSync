@@ -8,6 +8,9 @@
 //! OPEN, pinned mutual-TLS stream before it can mint ValidatedOpenTlsSocket.
 //! None of those constructors or a production caller exists in Stage4AB.1.
 
+#[allow(dead_code)]
+mod inchannel_qa;
+
 use serde::Serialize;
 use std::time::{Duration, Instant};
 
