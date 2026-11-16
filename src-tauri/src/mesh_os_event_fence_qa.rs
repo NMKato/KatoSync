@@ -1,7 +1,7 @@
 // Created by NMKato Solutions
 //! Stage4AB.3.2B: QA-only parser and fail-closed lease fence for passive
 //! macOS event observation. A sidecar line NEVER authenticates a peer.
-//! The Swift observer is bounded and not yet attached to the live supervisor.
+//! The Objective-C observer is bounded and not wired to the live supervisor.
 //! No Tauri command, networking, Keychain, remote jobs, or enrollment writes.
 
 use crate::mesh_durable_lease_qa::LiveTlsLease;

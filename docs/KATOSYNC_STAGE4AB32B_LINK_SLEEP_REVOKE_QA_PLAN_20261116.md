@@ -80,3 +80,24 @@ and bounded exit. NO actual sleep, wake or Wi-Fi failure event induced.
 The native macOS CI compiles and smoke-tests the observer without hardware
 fault injection. Physical M2/M3 Link/Sleep/Wake and live enrollment revocation
 acceptance remain OPEN. No production change or authorization increase.
+
+## In-process QA event-to-heartbeat cancellation (synthetic delivery)
+
+The test-only `mesh_os_event_channel_qa.rs` accepts strictly parsed event
+frames from a **bounded Tokio channel owned by the same test process** while
+an existing TLS heartbeat future remains pending. The `tokio::select!`
+branch is event-biased; queued loss, sleep, wake, observer-stop, or malformed
+frames synchronously invalidate the canonical `LiveTlsLease` and cancel the
+pending heartbeat future. A disconnected producer also drops the current
+lease. Wi-Fi `AVAILABLE` and `OBSERVING` are not owner or TLS evidence;
+no event can create a new session or grant jobs. A success-ready heartbeat
+must first drain all queued event frames, so a pending denial cannot race it.
+
+Six native tests cover real Tokio duplex read cancellation, harmless Wi-Fi
+availability, denial prioritization, producer disconnection, forged frames,
+and failure to revive a revoked lease. There is no OS daemon, real Wi-Fi
+fault injection, cross-device job, keychain access or production supervisor
+change. The native AppKit observer and this channel are **not yet connected**;
+the QA event input is deliberately synthetic pending a reviewed, signed
+in-process macOS event source and independent recovery. Physical sleep/wake,
+M2/M3 link loss and live enrollment revoke acceptance all remain OPEN.

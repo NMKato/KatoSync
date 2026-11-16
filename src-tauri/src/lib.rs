@@ -50,6 +50,9 @@ mod mesh_inbox;
 mod mesh_inbox_receiver;
 mod mesh_katoos_shared_preflight;
 mod mesh_native_issuer;
+// Stage4AB.3.2B: pure test-only OS-event in-flight heartbeat cancellation.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_os_event_channel_qa;
 // Stage4AB.3.2B: pure test-only deny-only macOS OS event frame fence.
 #[cfg(all(test, feature = "stage4j-qa"))]
 mod mesh_os_event_fence_qa;
