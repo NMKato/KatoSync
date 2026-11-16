@@ -70,14 +70,8 @@ mod tests {
     use super::*;
 
     fn new_lease(now: Instant) -> LiveTlsLease {
-        LiveTlsLease::after_verified_open_channel(
-            [1u8; 16],
-            [2u8; 32],
-            [3u8; 32],
-            [4u8; 32],
-            now,
-        )
-        .expect("synthetic test-only authenticated lease")
+        LiveTlsLease::after_verified_open_channel([1u8; 16], [2u8; 32], [3u8; 32], [4u8; 32], now)
+            .expect("synthetic test-only authenticated lease")
     }
 
     fn fixture(now: Instant, wall: SystemTime) -> ClockGapMonitor {
@@ -93,8 +87,14 @@ mod tests {
         let start = Instant::now();
         let wall = SystemTime::UNIX_EPOCH + Duration::from_secs(123_000);
         let mut monitor = fixture(start, wall);
-        assert!(monitor.observe(start + Duration::from_secs(5), wall + Duration::from_secs(5)));
-        assert!(monitor.observe(start + Duration::from_secs(10), wall + Duration::from_secs(10)));
+        assert!(monitor.observe(
+            start + Duration::from_secs(5),
+            wall + Duration::from_secs(5)
+        ));
+        assert!(monitor.observe(
+            start + Duration::from_secs(10),
+            wall + Duration::from_secs(10)
+        ));
         let lease = new_lease(start);
         assert!(lease.is_live(start));
     }
@@ -104,9 +104,15 @@ mod tests {
         let start = Instant::now();
         let wall = SystemTime::UNIX_EPOCH + Duration::from_secs(123_000);
         let mut monitor = fixture(start, wall);
-        assert!(!monitor.observe(start + Duration::from_secs(2), wall + Duration::from_secs(22)));
+        assert!(!monitor.observe(
+            start + Duration::from_secs(2),
+            wall + Duration::from_secs(22)
+        ));
         assert!(monitor.poisoned);
-        assert!(!monitor.observe(start + Duration::from_secs(25), wall + Duration::from_secs(25)));
+        assert!(!monitor.observe(
+            start + Duration::from_secs(25),
+            wall + Duration::from_secs(25)
+        ));
     }
 
     #[test]
@@ -114,11 +120,20 @@ mod tests {
         let start = Instant::now();
         let wall = SystemTime::UNIX_EPOCH + Duration::from_secs(123_000);
         let mut exact = fixture(start, wall);
-        assert!(!exact.observe(start + Duration::from_secs(5), wall + Duration::from_secs(7)));
+        assert!(!exact.observe(
+            start + Duration::from_secs(5),
+            wall + Duration::from_secs(7)
+        ));
         let mut rollback = fixture(start, wall);
-        assert!(!rollback.observe(start + Duration::from_secs(1), wall - Duration::from_secs(1)));
+        assert!(!rollback.observe(
+            start + Duration::from_secs(1),
+            wall - Duration::from_secs(1)
+        ));
         let mut monotonic_jump = fixture(start, wall);
-        assert!(!monotonic_jump.observe(start + Duration::from_secs(8), wall + Duration::from_secs(2)));
+        assert!(!monotonic_jump.observe(
+            start + Duration::from_secs(8),
+            wall + Duration::from_secs(2)
+        ));
     }
 
     #[test]
@@ -143,11 +158,16 @@ mod tests {
         let mut lease = new_lease(start);
         assert!(lease.is_live(start));
         let mut monitor = fixture(start, wall);
-        assert!(!monitor.observe(start + Duration::from_secs(3), wall + Duration::from_secs(13)));
+        assert!(!monitor.observe(
+            start + Duration::from_secs(3),
+            wall + Duration::from_secs(13)
+        ));
         // check_or_invalidate is the SAME runtime hook used in AB2 supervisor.
         assert_eq!(monitor.check_or_invalidate(&mut lease), Err(FAIL_CLOSED));
         assert!(!lease.is_live(Instant::now()));
-        assert!(lease.verified_in_channel_heartbeat(1, Instant::now()).is_err());
+        assert!(lease
+            .verified_in_channel_heartbeat(1, Instant::now())
+            .is_err());
         assert_eq!(monitor.check_or_invalidate(&mut lease), Err(FAIL_CLOSED));
     }
 
@@ -158,6 +178,9 @@ mod tests {
         let mut monitor = fixture(start + Duration::from_secs(10), wall);
         assert!(!monitor.observe(start, wall + Duration::from_secs(5)));
         assert!(monitor.poisoned);
-        assert!(!monitor.observe(start + Duration::from_secs(11), wall + Duration::from_secs(11)));
+        assert!(!monitor.observe(
+            start + Duration::from_secs(11),
+            wall + Duration::from_secs(11)
+        ));
     }
 }
