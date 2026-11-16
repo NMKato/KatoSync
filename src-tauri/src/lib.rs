@@ -60,6 +60,8 @@ mod mesh_tailnet_qa;
 #[allow(dead_code)]
 mod mesh_durable_lease_qa;
 #[cfg(feature = "stage4j-qa")]
+mod mesh_fault_reconnect_qa;
+#[cfg(feature = "stage4j-qa")]
 mod mesh_live_supervisor_qa;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_reconnect_qa;
@@ -331,6 +333,33 @@ pub struct LaunchAgentStatus {
 }
 
 pub fn run() {
+    // Stage4AB.3.2A: real, bounded fault of an already authenticated
+    // TLS stream followed by exactly ONE wholly re-authorized new session.
+    // No production daemon, remote dispatch, OS network or key mutation.
+    if env::args().nth(1).as_deref() == Some("--stage4ab32-drop-reconnect-qa-once") {
+        #[cfg(feature = "stage4j-qa")]
+        {
+            let args = env::args().skip(2).collect();
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| "MESH_STAGE4AB32_RUNTIME_UNAVAILABLE".to_string())
+                .and_then(|rt| rt.block_on(mesh_fault_reconnect_qa::run_drop_then_reconnect(args)));
+            match result {
+                Ok(()) => println!("MESH_STAGE4AB32_REAL_TLS_DROP_AND_REAUTH_PASS_NO_REMOTE"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(5);
+                }
+            }
+            return;
+        }
+        #[cfg(not(feature = "stage4j-qa"))]
+        {
+            eprintln!("MESH_STAGE4AB32_QA_NOT_CONFIGURED");
+            std::process::exit(5);
+        }
+    }
     // Stage4AB.3: manually launched, TWO cleanly closed TLS sessions with
     // fresh owner/enrollment verification before each new connection.
     // Not a daemon, production reconnect watcher or remote job grant.
