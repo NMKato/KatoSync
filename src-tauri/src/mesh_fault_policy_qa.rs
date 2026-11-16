@@ -55,7 +55,10 @@ pub(crate) fn classify_attempt(
     failures: u8,
     budget_remaining: Duration,
 ) -> AttemptDecision {
-    if !matches!(fault, TransportFault::NetworkLost | TransportFault::SleepOrWake) {
+    if !matches!(
+        fault,
+        TransportFault::NetworkLost | TransportFault::SleepOrWake
+    ) {
         return AttemptDecision::StopSecurityEvent;
     }
     if !check.all_current() {
@@ -126,9 +129,8 @@ mod tests {
     }
 
     fn lease(now: Instant) -> LiveTlsLease {
-        LiveTlsLease::after_verified_open_channel(
-            [1; 16], [2; 32], [3; 32], [4; 32], now
-        ).expect("synthetic QA lease")
+        LiveTlsLease::after_verified_open_channel([1; 16], [2; 32], [3; 32], [4; 32], now)
+            .expect("synthetic QA lease")
     }
 
     #[test]
@@ -214,10 +216,26 @@ mod tests {
     fn only_fully_revalidated_new_nonce_and_tls_proof_may_claim_authenticated() {
         let previous = [10; 32];
         let next = [11; 32];
-        assert!(new_session_may_be_reported_authenticated(previous, next, fresh()));
-        assert!(!new_session_may_be_reported_authenticated(previous, previous, fresh()));
-        assert!(!new_session_may_be_reported_authenticated([0; 32], next, fresh()));
-        assert!(!new_session_may_be_reported_authenticated(previous, [0; 32], fresh()));
+        assert!(new_session_may_be_reported_authenticated(
+            previous,
+            next,
+            fresh()
+        ));
+        assert!(!new_session_may_be_reported_authenticated(
+            previous,
+            previous,
+            fresh()
+        ));
+        assert!(!new_session_may_be_reported_authenticated(
+            [0; 32],
+            next,
+            fresh()
+        ));
+        assert!(!new_session_may_be_reported_authenticated(
+            previous,
+            [0; 32],
+            fresh()
+        ));
         for missing in 0..5 {
             let mut proof = fresh();
             match missing {
@@ -227,7 +245,9 @@ mod tests {
                 3 => proof.current_consent_rechecked = false,
                 _ => proof.verified_in_channel_heartbeat = false,
             }
-            assert!(!new_session_may_be_reported_authenticated(previous, next, proof));
+            assert!(!new_session_may_be_reported_authenticated(
+                previous, next, proof
+            ));
         }
     }
 }
