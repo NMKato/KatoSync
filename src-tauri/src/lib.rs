@@ -61,6 +61,11 @@ mod mesh_tailnet_qa;
 mod mesh_durable_lease_qa;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_fault_reconnect_qa;
+// Stage4AB.3.2B: QA-only deterministic fault and retry gate tests;
+// never an authenticated runtime producer or remote privilege source.
+#[cfg(feature = "stage4j-qa")]
+#[allow(dead_code)]
+mod mesh_fault_policy_qa;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_live_supervisor_qa;
 #[cfg(feature = "stage4j-qa")]
