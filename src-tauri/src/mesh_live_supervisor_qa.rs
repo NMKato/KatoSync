@@ -363,6 +363,17 @@ pub(crate) async fn run_once(args: Vec<String>) -> Result<(), String> {
     require_all_opt_ins()?;
     let _permit = SingleQaPermit::acquire()
         .map_err(|_| "MESH_STAGE4AB2_CONCURRENT_PROBE_DENIED".to_string())?;
+    run_once_under_existing_qa_permit(&_permit, args).await
+}
+
+/// Stage4AB.3 internal-only entry: the caller already owns the original
+/// SingleQaPermit across BOTH bounded re-authenticated sessions. The AB2
+/// owner/QA gates are rechecked on each attempt. Not exposed to IPC.
+pub(crate) async fn run_once_under_existing_qa_permit(
+    _permit: &SingleQaPermit,
+    args: Vec<String>,
+) -> Result<(), String> {
+    require_all_opt_ins()?;
     if args.len() != 5 {
         return Err("MESH_STAGE4AB2_ARGUMENTS_DENIED".into());
     }

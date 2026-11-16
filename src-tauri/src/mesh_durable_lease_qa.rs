@@ -283,8 +283,27 @@ impl LiveTlsLease {
     pub(crate) fn close(&mut self) {
         self.machine.socket_closed();
     }
+    // Internal QA boundary. A remote device-presence receipt is never enough
+    // to reverse these invalidations. A fresh, pinned TLS handshake plus
+    // full owner/Keychain/enrollment preflight is mandatory.
+    pub(crate) fn on_network_loss(&mut self) {
+        self.machine.network_lost();
+    }
+    pub(crate) fn on_sleep_or_wake(&mut self) {
+        self.machine.sleep_or_wake();
+    }
+    pub(crate) fn on_owner_or_peer_revoked(&mut self) {
+        self.machine.revoked_or_owner_changed();
+    }
     pub(crate) fn is_live(&self, now: Instant) -> bool {
         self.machine.snapshot(now).channel_still_active
+    }
+}
+
+// Fail closed on early exit after TLS stream loss, timeout or revocation.
+impl Drop for LiveTlsLease {
+    fn drop(&mut self) {
+        self.machine.socket_closed();
     }
 }
 
@@ -471,6 +490,35 @@ mod tests {
                 .snapshot(now + MAX_SESSION_AGE)
                 .live_peer_authenticated
         );
+    }
+
+    #[test]
+    fn stage4ab3_qa_bridge_revocation_sleep_and_network_loss_fail_closed() {
+        let now = Instant::now();
+        let b = binding();
+        let fresh = || {
+            LiveTlsLease::after_verified_open_channel(
+                b.owner_id,
+                b.local_ed25519,
+                b.peer_ed25519,
+                b.tls_session_nonce,
+                now,
+            )
+            .unwrap()
+        };
+        let mut a = fresh();
+        assert!(a.is_live(now));
+        a.on_owner_or_peer_revoked();
+        assert!(!a.is_live(now));
+        let mut b = fresh();
+        b.on_sleep_or_wake();
+        assert!(!b.is_live(now));
+        let mut c = fresh();
+        c.on_network_loss();
+        assert!(!c.is_live(now));
+        let mut d = fresh();
+        d.close();
+        assert!(!d.is_live(now));
     }
 
     #[test]

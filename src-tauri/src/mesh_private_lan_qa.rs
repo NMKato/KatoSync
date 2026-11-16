@@ -48,13 +48,15 @@ fn gate() -> Result<(), String> {
 
 // Even direct IPC concurrency may never start multiple QA probes in one app.
 static QA_ACTIVE: AtomicBool = AtomicBool::new(false);
-pub(crate) struct SingleQaPermit;
+pub(crate) struct SingleQaPermit {
+    _private: (),
+}
 impl SingleQaPermit {
     pub(crate) fn acquire() -> Result<Self, String> {
         QA_ACTIVE
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "MESH_STAGE4W_ALREADY_RUNNING".to_string())?;
-        Ok(Self)
+        Ok(Self { _private: () })
     }
 }
 impl Drop for SingleQaPermit {
