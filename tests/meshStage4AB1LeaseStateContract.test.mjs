@@ -11,7 +11,11 @@ const cloud=readFileSync(new URL("src-tauri/src/mesh_device_presence.rs",root),"
 test("lease machine is internal, QA compiled and not callable by web UI or CLI",()=>{
  assert.match(entry, /\#\[cfg\(feature = "stage4j-qa"\)\]\s*\#\[allow\(dead_code\)\]\s*mod mesh_durable_lease_qa;/);
  assert.doesNotMatch(entry,/mesh_durable_lease_qa::/);
- assert.doesNotMatch(rust,/\#\[tauri::command\]|pub\s+(?:async\s+)?fn|pub\(crate\)\s+(?:async\s+)?fn/);
+ assert.doesNotMatch(rust,/\#\[tauri::command\]|pub\s+(?:async\s+)?fn/);
+ // AB2 exposes a narrow crate-internal QA bridge, never an IPC, CLI or
+ // external Rust API. Only sealed owner/key/session-bound inputs are accepted.
+ assert.match(rust,/pub\(crate\) struct LiveTlsLease/);
+ assert.match(rust,/pub\(crate\) fn after_verified_open_channel/);
  assert.doesNotMatch(rust,/Tcp(?:Listener|Stream|Socket)|Command::new|reqwest::|\bstd::fs\b/);
 });
 

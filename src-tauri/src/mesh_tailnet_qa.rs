@@ -36,7 +36,7 @@ fn gate(compiled: bool, local: Option<&str>, tailnet: Option<&str>) -> bool {
     compiled && local == Some(LAN_OPT_IN_VALUE) && tailnet == Some(OPT_IN_VALUE)
 }
 
-fn require_owner_opt_ins() -> Result<(), String> {
+pub(crate) fn require_owner_opt_ins() -> Result<(), String> {
     if gate(
         cfg!(feature = "stage4j-qa"),
         std::env::var(LAN_OPT_IN).ok().as_deref(),
@@ -53,7 +53,7 @@ fn is_overlay_v4(ip: &Ipv4Addr) -> bool {
     octets[0] == 100 && (64..=127).contains(&octets[1])
 }
 
-fn policy(local: &str, remote: &str, port: u16) -> Result<(Ipv4Addr, Ipv4Addr), String> {
+pub(crate) fn policy(local: &str, remote: &str, port: u16) -> Result<(Ipv4Addr, Ipv4Addr), String> {
     let local = local
         .parse::<Ipv4Addr>()
         .map_err(|_| "MESH_STAGE4AA_ADDRESS_DENIED")?;
@@ -126,7 +126,7 @@ fn verify_daemon_snapshot(doc: &Value, local: Ipv4Addr, remote: Ipv4Addr) -> Res
 }
 
 /// Fixed, non-shell command and bounded result; no path from CLI input.
-async fn verify_live_tailnet(local: Ipv4Addr, remote: Ipv4Addr) -> Result<(), String> {
+pub(crate) async fn verify_live_tailnet(local: Ipv4Addr, remote: Ipv4Addr) -> Result<(), String> {
     let output = timeout(
         TAILNET_STATUS_TIMEOUT,
         Command::new(TAILSCALE_MACOS_BIN)

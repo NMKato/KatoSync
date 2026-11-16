@@ -17,10 +17,10 @@ use ed25519_dalek::SigningKey;
 use serde::Serialize;
 use tokio::net::TcpStream;
 
-struct NativeAdmission {
-    owner_uid: String,
-    local_signing: SigningKey,
-    approved_peer: ApprovedPeer,
+pub(crate) struct NativeAdmission {
+    pub(crate) owner_uid: String,
+    pub(crate) local_signing: SigningKey,
+    pub(crate) approved_peer: ApprovedPeer,
 }
 
 fn qa_build_enabled() -> Result<(), &'static str> {
@@ -38,7 +38,7 @@ fn approval_unchanged(before: &ApprovedPeer, after: &ApprovedPeer) -> bool {
         && before.status == after.status
 }
 
-async fn authorize(requested_fingerprint: &str) -> Result<NativeAdmission, String> {
+pub(crate) async fn authorize(requested_fingerprint: &str) -> Result<NativeAdmission, String> {
     // Stage 2D is isolated to the explicit KATOOS Auth QA build. A stable
     // binary must not treat an unrelated legacy issuer as a Mesh owner.
     qa_build_enabled().map_err(str::to_string)?;
@@ -75,7 +75,7 @@ async fn authorize(requested_fingerprint: &str) -> Result<NativeAdmission, Strin
     })
 }
 
-async fn recheck_after_probe(
+pub(crate) async fn recheck_after_probe(
     admitted: &NativeAdmission,
     requested_fingerprint: &str,
 ) -> Result<(), String> {
