@@ -62,12 +62,12 @@ impl Receipt {
     }
 }
 #[derive(Clone)]
-struct SignedReceipt {
+pub(super) struct SignedReceipt {
     receipt: Receipt,
     signature: [u8; 64],
 }
 #[derive(Debug, PartialEq, Eq)]
-enum Denial {
+pub(super) enum Denial {
     UntrustedCandidate,
     WrongDevice,
     UnverifiedGitHead,
@@ -104,7 +104,7 @@ fn decode_head_bytes(raw: &[u8], len: u8) -> Result<[u8; 32], Denial> {
     }
     Ok(out)
 }
-fn sign_git_head_result(
+pub(super) fn sign_git_head_result(
     signed_task: &SignedTask,
     candidate: &Candidate,
     actual_stdout: &[u8],
@@ -164,7 +164,7 @@ fn sign_git_head_result(
     let signature = device_key.sign(&receipt.canonical_bytes()).to_bytes();
     Ok(SignedReceipt { receipt, signature })
 }
-fn verify_receipt(
+pub(super) fn verify_receipt(
     signed: &SignedReceipt,
     task: &SignedTask,
     expected_device: &VerifyingKey,
@@ -215,7 +215,7 @@ fn verify_receipt(
 
 /// QA-only durable receipt: verify exact device signature and output BEFORE
 /// writing, and only after the journal has reserved task ID and nonce.
-fn persist_verified_receipt(
+pub(super) fn persist_verified_receipt(
     journal: &super::journal_qa::Journal,
     signed: &SignedReceipt,
     task: &SignedTask,

@@ -1,0 +1,659 @@
+// NMKato Solutions – Stage4AF native source-only execution-time gate.
+// This private module does NOT execute Git outside #[cfg(test)] and has no
+// public IPC/MCP/browser endpoint. All authorities here are synthetic QA.
+// A non-test production executor MUST independently verify server grants,
+// immutable project registry, Keychain pins, live socket and revocation.
+// IMPORTANT: a pre-execution gate alone cannot eliminate the TOCTOU window.
+use super::{Action, Candidate, RevocationRecheck, SignedTask};
+use crate::mesh_durable_lease_qa::MeshLeaseMachine;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Instant,
+};
+
+const MAX_EXECUTION_RECHECK_AGE_MS: u64 = 2_000;
+
+#[derive(Clone, Debug)]
+struct TrustedNativeProject {
+    project_id: [u8; 16],
+    canonical_root: PathBuf,
+}
+#[derive(Clone, Copy, Debug)]
+struct TrustedExecutionRecheck {
+    owner_id: [u8; 16],
+    tenant_id: [u8; 16],
+    owner_session_id: [u8; 16],
+    client_id: [u8; 16],
+    local_device_key: [u8; 32],
+    peer_device_key: [u8; 32],
+    project_id: [u8; 16],
+    owner_session_active: bool,
+    client_device_project_grant_active: bool,
+    independent_mfa_bound: bool,
+    no_pending_revoke: bool,
+    checked_at_ms: u64,
+}
+#[derive(Debug, PartialEq, Eq)]
+enum Denial {
+    NoLiveChannel,
+    WrongSignedPermit,
+    RevokedOrStale,
+    UnregisteredProject,
+    UnsupportedAction,
+    UnsafeFixtureRoot,
+    GitFailed,
+    ReceiptFailed,
+}
+#[derive(Debug)]
+struct QaExecutionFence {
+    registered_root: PathBuf,
+    task_id: [u8; 16],
+    project_id: [u8; 16],
+    checked_at_ms: u64,
+}
+fn registered_root_matches(root: &Path) -> bool {
+    let Ok(meta) = fs::symlink_metadata(root) else {
+        return false;
+    };
+    if !meta.is_dir() || meta.file_type().is_symlink() {
+        return false;
+    }
+    let Ok(canonical) = root.canonicalize() else {
+        return false;
+    };
+    canonical == root
+}
+fn validate_before_qa_read(
+    mesh: &MeshLeaseMachine,
+    signed: &SignedTask,
+    candidate: &Candidate,
+    issuer: &VerifyingKey,
+    authority: RevocationRecheck,
+    refreshed: TrustedExecutionRecheck,
+    registered: &TrustedNativeProject,
+    now: Instant,
+    now_ms: u64,
+) -> Result<QaExecutionFence, Denial> {
+    // Do not trust the earlier admission's stale state. Check canonical
+    // native live channel and heartbeat from the still-open session now.
+    if !mesh.snapshot(now).live_peer_authenticated {
+        return Err(Denial::NoLiveChannel);
+    }
+    let session = mesh.session.as_ref().ok_or(Denial::NoLiveChannel)?;
+    if session.last_sequence == 0 {
+        return Err(Denial::NoLiveChannel);
+    }
+    let task = &signed.task;
+    if task.action != Action::GitHead || candidate.action != Action::GitHead {
+        return Err(Denial::UnsupportedAction);
+    }
+    if candidate.execution_authorized
+        || !candidate.requires_native_executor_recheck
+        || candidate.task_id != task.task_id
+        || candidate.maximum_output_bytes > 4096
+        || !task.valid(now_ms)
+        || issuer
+            .verify(
+                &task.canonical_bytes(),
+                &Signature::from_bytes(&signed.signature),
+            )
+            .is_err()
+        || task.owner_id != session.binding.owner_id
+        || task.local_device_public_key != session.binding.local_ed25519
+        || task.peer_device_public_key != session.binding.peer_ed25519
+    {
+        return Err(Denial::WrongSignedPermit);
+    }
+    // Every field from the second independently sourced current-state
+    // response has to match the ORIGINAL signed permit and session.
+    if !refreshed.owner_session_active
+        || !refreshed.client_device_project_grant_active
+        || !refreshed.independent_mfa_bound
+        || !refreshed.no_pending_revoke
+        || !authority.owner_session_active
+        || !authority.client_device_project_grant_active
+        || authority.owner_session_id != task.owner_session_id
+        || authority.tenant_id != task.tenant_id
+        || authority.client_id != task.client_id
+        || authority.project_id != task.project_id
+        || refreshed.owner_id != task.owner_id
+        || refreshed.tenant_id != task.tenant_id
+        || refreshed.owner_session_id != task.owner_session_id
+        || refreshed.client_id != task.client_id
+        || refreshed.local_device_key != task.local_device_public_key
+        || refreshed.peer_device_key != task.peer_device_public_key
+        || refreshed.project_id != task.project_id
+        || refreshed.checked_at_ms > now_ms
+        || now_ms.saturating_sub(refreshed.checked_at_ms) > MAX_EXECUTION_RECHECK_AGE_MS
+        || authority.checked_at_ms > now_ms
+        || now_ms.saturating_sub(authority.checked_at_ms) > MAX_EXECUTION_RECHECK_AGE_MS
+    {
+        return Err(Denial::RevokedOrStale);
+    }
+    if registered.project_id != task.project_id
+        || !registered_root_matches(&registered.canonical_root)
+    {
+        return Err(Denial::UnregisteredProject);
+    }
+    Ok(QaExecutionFence {
+        registered_root: registered.canonical_root.clone(),
+        task_id: task.task_id,
+        project_id: task.project_id,
+        checked_at_ms: now_ms,
+    })
+}
+
+// The *only* child in this module invoking Git is test-only. It reads
+// a temporary, exact QA repository created in the test; no owner repo
+// and no untrusted shell/command/path interpolation.
+#[cfg(test)]
+fn qa_execute_git_head_and_store_receipt(
+    fence: &QaExecutionFence,
+    signed: &SignedTask,
+    candidate: &Candidate,
+    journal: &super::journal_qa::Journal,
+    device_signer: &ed25519_dalek::SigningKey,
+    now_ms: u64,
+) -> Result<Vec<u8>, Denial> {
+    use std::process::Command;
+    if fence.task_id != signed.task.task_id
+        || fence.project_id != signed.task.project_id
+        || fence.checked_at_ms != now_ms
+        || !registered_root_matches(&fence.registered_root)
+        || !fence
+            .registered_root
+            .join(".stage4af-temporary-qa-only")
+            .is_file()
+    {
+        return Err(Denial::UnsafeFixtureRoot);
+    }
+    let result = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&fence.registered_root)
+        .output()
+        .map_err(|_| Denial::GitFailed)?;
+    if !result.status.success()
+        || result.stdout.is_empty()
+        || result.stdout.len() > 65
+        || !result.stderr.is_empty()
+    {
+        return Err(Denial::GitFailed);
+    }
+    let receipt = super::receipt_qa::sign_git_head_result(
+        signed,
+        candidate,
+        &result.stdout,
+        now_ms,
+        device_signer,
+    )
+    .map_err(|_| Denial::ReceiptFailed)?;
+    super::receipt_qa::verify_receipt(
+        &receipt,
+        signed,
+        &device_signer.verifying_key(),
+        &result.stdout,
+    )
+    .map_err(|_| Denial::ReceiptFailed)?;
+    super::receipt_qa::persist_verified_receipt(
+        journal,
+        &receipt,
+        signed,
+        &device_signer.verifying_key(),
+        &result.stdout,
+    )
+    .map_err(|_| Denial::ReceiptFailed)?;
+    Ok(result.stdout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{journal_qa::Journal, ReadOnlyTask, ReplayLedger};
+    use super::*;
+    use crate::mesh_durable_lease_qa::{
+        ChannelBinding, ValidatedOpenTlsSocket, VerifiedInChannelHeartbeat,
+    };
+    use ed25519_dalek::{Signer, SigningKey};
+    use std::{fs, process::Command, time::Duration};
+
+    const T: u64 = 1_800_000_000_000;
+
+    struct QaRoot(PathBuf);
+    impl QaRoot {
+        fn create() -> Self {
+            let base =
+                std::env::temp_dir().join(format!("katosync-stage4af-{}", uuid::Uuid::new_v4()));
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                fs::DirBuilder::new().mode(0o700).create(&base).unwrap();
+            }
+            #[cfg(not(unix))]
+            fs::create_dir(&base).unwrap();
+            Self(base.canonicalize().unwrap())
+        }
+    }
+    impl Drop for QaRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    fn git(root: &Path, args: &[&str]) -> Vec<u8> {
+        let r = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            r.status.success(),
+            "Git fixture failure: {}",
+            String::from_utf8_lossy(&r.stderr)
+        );
+        r.stdout
+    }
+    struct Fixture {
+        _root: QaRoot,
+        repository: TrustedNativeProject,
+        journal: Journal,
+        mesh: MeshLeaseMachine,
+        now: Instant,
+        signed: SignedTask,
+        candidate: Candidate,
+        issuer: SigningKey,
+        device: SigningKey,
+        authority: RevocationRecheck,
+        refresh: TrustedExecutionRecheck,
+        expected_stdout: Vec<u8>,
+    }
+    fn setup() -> Fixture {
+        let root = QaRoot::create();
+        let project = root.0.join("project");
+        fs::create_dir(&project).unwrap();
+        git(&project, &["init", "-q"]);
+        git(
+            &project,
+            &[
+                "-c",
+                "user.name=NMKato QA",
+                "-c",
+                "user.email=qa@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-q",
+                "-m",
+                "Stage4AF QA fixture",
+            ],
+        );
+        fs::write(project.join(".stage4af-temporary-qa-only"), b"QA").unwrap();
+        let stdout = git(&project, &["rev-parse", "HEAD"]);
+        let expected_head_len = if stdout.len() == 41 { 20 } else { 32 };
+        let mut expected_head = [0u8; 32];
+        for i in 0..expected_head_len as usize {
+            let s = std::str::from_utf8(&stdout[i * 2..i * 2 + 2]).unwrap();
+            expected_head[i] = u8::from_str_radix(s, 16).unwrap();
+        }
+        let device = SigningKey::from_bytes(&[42; 32]);
+        let issuer = SigningKey::from_bytes(&[43; 32]);
+        let task = ReadOnlyTask {
+            owner_id: [1; 16],
+            tenant_id: [21; 16],
+            owner_session_id: [11; 16],
+            client_id: [12; 16],
+            local_device_public_key: device.verifying_key().to_bytes(),
+            peer_device_public_key: [3; 32],
+            project_id: [4; 16],
+            task_id: [5; 16],
+            nonce: [6; 16],
+            expected_head,
+            expected_head_len,
+            action: Action::GitHead,
+            issued_at_ms: T - 100,
+            expires_at_ms: T + 10_000,
+            owner_step_up_at_ms: T - 1000,
+        };
+        let signed = SignedTask {
+            signature: issuer.sign(&task.canonical_bytes()).to_bytes(),
+            task,
+        };
+        let binding = ChannelBinding {
+            owner_id: task.owner_id,
+            local_ed25519: task.local_device_public_key,
+            peer_ed25519: task.peer_device_public_key,
+            tls_session_nonce: [8; 32],
+        };
+        let now = Instant::now();
+        let mut mesh = MeshLeaseMachine::default();
+        assert!(mesh.locally_approved());
+        assert!(mesh.begin_verification());
+        assert!(mesh.on_still_open_tls_socket(ValidatedOpenTlsSocket { binding }, now));
+        assert!(mesh.on_verified_channel_heartbeat(
+            VerifiedInChannelHeartbeat {
+                binding,
+                sequence: 1
+            },
+            now
+        ));
+        let auth = RevocationRecheck {
+            owner_session_active: true,
+            client_device_project_grant_active: true,
+            owner_session_id: task.owner_session_id,
+            tenant_id: task.tenant_id,
+            client_id: task.client_id,
+            project_id: task.project_id,
+            checked_at_ms: T - 10,
+        };
+        let refresh = TrustedExecutionRecheck {
+            owner_id: task.owner_id,
+            tenant_id: task.tenant_id,
+            owner_session_id: task.owner_session_id,
+            client_id: task.client_id,
+            local_device_key: task.local_device_public_key,
+            peer_device_key: task.peer_device_public_key,
+            project_id: task.project_id,
+            owner_session_active: true,
+            client_device_project_grant_active: true,
+            independent_mfa_bound: true,
+            no_pending_revoke: true,
+            checked_at_ms: T - 10,
+        };
+        let dir = root.0.join("journal");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        }
+        #[cfg(not(unix))]
+        fs::create_dir(&dir).unwrap();
+        let journal = Journal::open_existing(&dir.canonicalize().unwrap()).unwrap();
+        let candidate = ReplayLedger::default()
+            .propose_and_reserve(
+                &mesh,
+                &signed,
+                &issuer.verifying_key(),
+                auth,
+                now,
+                T,
+                &journal,
+            )
+            .unwrap();
+        Fixture {
+            _root: root,
+            repository: TrustedNativeProject {
+                project_id: task.project_id,
+                canonical_root: project.canonicalize().unwrap(),
+            },
+            journal,
+            mesh,
+            now,
+            signed,
+            candidate,
+            issuer,
+            device,
+            authority: auth,
+            refresh,
+            expected_stdout: stdout,
+        }
+    }
+    fn fence(
+        f: &Fixture,
+        when: Instant,
+        wall: u64,
+        recheck: TrustedExecutionRecheck,
+    ) -> Result<QaExecutionFence, Denial> {
+        validate_before_qa_read(
+            &f.mesh,
+            &f.signed,
+            &f.candidate,
+            &f.issuer.verifying_key(),
+            f.authority,
+            recheck,
+            &f.repository,
+            when,
+            wall,
+        )
+    }
+    #[test]
+    fn real_temporary_git_head_requires_fresh_fence_and_signed_durable_result() {
+        let f = setup();
+        let v = fence(&f, f.now, T, f.refresh).unwrap();
+        let actual = qa_execute_git_head_and_store_receipt(
+            &v,
+            &f.signed,
+            &f.candidate,
+            &f.journal,
+            &f.device,
+            T,
+        )
+        .unwrap();
+        assert_eq!(actual, f.expected_stdout);
+        assert_eq!(v.task_id, f.signed.task.task_id);
+        let stored = fs::read_dir(f._root.0.join("journal"))
+            .unwrap()
+            .filter_map(|x| x.ok())
+            .count();
+        assert_eq!(stored, 3);
+        assert_eq!(
+            qa_execute_git_head_and_store_receipt(
+                &v,
+                &f.signed,
+                &f.candidate,
+                &f.journal,
+                &f.device,
+                T
+            ),
+            Err(Denial::ReceiptFailed)
+        );
+    }
+    #[test]
+    fn revoked_owner_or_device_or_queued_revoke_after_admission_denies_execution() {
+        let f = setup();
+        for variant in 0..4 {
+            let mut a = f.refresh;
+            match variant {
+                0 => a.owner_session_active = false,
+                1 => a.client_device_project_grant_active = false,
+                2 => a.independent_mfa_bound = false,
+                _ => a.no_pending_revoke = false,
+            };
+            assert_eq!(fence(&f, f.now, T, a).unwrap_err(), Denial::RevokedOrStale);
+        }
+        assert_eq!(
+            fs::read_dir(f._root.0.join("journal"))
+                .unwrap()
+                .filter_map(|x| x.ok())
+                .count(),
+            2
+        );
+    }
+    #[test]
+    fn closed_lease_and_expired_heartbeat_stay_closed_even_with_valid_signature() {
+        let mut f = setup();
+        f.mesh.socket_closed();
+        assert_eq!(
+            fence(&f, f.now, T, f.refresh).unwrap_err(),
+            Denial::NoLiveChannel
+        );
+        let f = setup();
+        assert_eq!(
+            fence(&f, f.now + Duration::from_secs(30), T, f.refresh).unwrap_err(),
+            Denial::NoLiveChannel
+        );
+    }
+    #[test]
+    fn mismatched_owner_session_peer_project_or_issuer_never_pass() {
+        let f = setup();
+        for variant in 0..6 {
+            let mut a = f.refresh;
+            match variant {
+                0 => a.owner_id = [99; 16],
+                1 => a.tenant_id = [99; 16],
+                2 => a.owner_session_id = [99; 16],
+                3 => a.client_id = [99; 16],
+                4 => a.local_device_key = [99; 32],
+                _ => a.project_id = [99; 16],
+            };
+            assert_eq!(fence(&f, f.now, T, a).unwrap_err(), Denial::RevokedOrStale);
+        }
+        let wrong = SigningKey::from_bytes(&[91; 32]);
+        assert_eq!(
+            validate_before_qa_read(
+                &f.mesh,
+                &f.signed,
+                &f.candidate,
+                &wrong.verifying_key(),
+                f.authority,
+                f.refresh,
+                &f.repository,
+                f.now,
+                T
+            )
+            .unwrap_err(),
+            Denial::WrongSignedPermit
+        );
+    }
+    #[test]
+    fn stale_or_future_recheck_and_expired_signed_job_denied() {
+        let f = setup();
+        let mut a = f.refresh;
+        a.checked_at_ms = T - 2_001;
+        assert_eq!(fence(&f, f.now, T, a).unwrap_err(), Denial::RevokedOrStale);
+        a.checked_at_ms = T + 1;
+        assert_eq!(fence(&f, f.now, T, a).unwrap_err(), Denial::RevokedOrStale);
+        assert_eq!(
+            fence(&f, f.now, T + 10_001, f.refresh).unwrap_err(),
+            Denial::WrongSignedPermit
+        );
+    }
+    #[test]
+    fn unknown_registry_root_or_symlink_never_read() {
+        let f = setup();
+        let mut reg = f.repository.clone();
+        reg.project_id = [99; 16];
+        assert_eq!(
+            validate_before_qa_read(
+                &f.mesh,
+                &f.signed,
+                &f.candidate,
+                &f.issuer.verifying_key(),
+                f.authority,
+                f.refresh,
+                &reg,
+                f.now,
+                T
+            )
+            .unwrap_err(),
+            Denial::UnregisteredProject
+        );
+        let mut reg = f.repository.clone();
+        reg.canonical_root = f._root.0.join("missing");
+        assert_eq!(
+            validate_before_qa_read(
+                &f.mesh,
+                &f.signed,
+                &f.candidate,
+                &f.issuer.verifying_key(),
+                f.authority,
+                f.refresh,
+                &reg,
+                f.now,
+                T
+            )
+            .unwrap_err(),
+            Denial::UnregisteredProject
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let link = f._root.0.join("foreign-link");
+            symlink(&f.repository.canonical_root, &link).unwrap();
+            reg.canonical_root = link;
+            assert_eq!(
+                validate_before_qa_read(
+                    &f.mesh,
+                    &f.signed,
+                    &f.candidate,
+                    &f.issuer.verifying_key(),
+                    f.authority,
+                    f.refresh,
+                    &reg,
+                    f.now,
+                    T
+                )
+                .unwrap_err(),
+                Denial::UnregisteredProject
+            );
+        }
+    }
+    #[test]
+    fn changed_git_head_after_admission_cannot_create_receipt() {
+        let f = setup();
+        let v = fence(&f, f.now, T, f.refresh).unwrap();
+        git(
+            &f.repository.canonical_root,
+            &[
+                "-c",
+                "user.name=NMKato QA",
+                "-c",
+                "user.email=qa@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-q",
+                "-m",
+                "new QA head",
+            ],
+        );
+        assert_eq!(
+            qa_execute_git_head_and_store_receipt(
+                &v,
+                &f.signed,
+                &f.candidate,
+                &f.journal,
+                &f.device,
+                T
+            ),
+            Err(Denial::ReceiptFailed)
+        );
+        assert_eq!(
+            fs::read_dir(f._root.0.join("journal"))
+                .unwrap()
+                .filter_map(|x| x.ok())
+                .count(),
+            2
+        );
+    }
+    #[test]
+    fn fixture_runner_never_accepts_missing_qa_marker_or_changed_fence_time() {
+        let f = setup();
+        let mut v = fence(&f, f.now, T, f.refresh).unwrap();
+        fs::remove_file(
+            f.repository
+                .canonical_root
+                .join(".stage4af-temporary-qa-only"),
+        )
+        .unwrap();
+        assert_eq!(
+            qa_execute_git_head_and_store_receipt(
+                &v,
+                &f.signed,
+                &f.candidate,
+                &f.journal,
+                &f.device,
+                T
+            ),
+            Err(Denial::UnsafeFixtureRoot)
+        );
+        v.checked_at_ms = T + 1;
+        assert_eq!(
+            qa_execute_git_head_and_store_receipt(
+                &v,
+                &f.signed,
+                &f.candidate,
+                &f.journal,
+                &f.device,
+                T
+            ),
+            Err(Denial::UnsafeFixtureRoot)
+        );
+    }
+}
