@@ -45,6 +45,7 @@ enum Denial {
     UnsafeFixtureRoot,
     GitFailed,
     ReceiptFailed,
+    RevokedDuringExecution,
 }
 #[derive(Debug)]
 struct QaExecutionFence {
@@ -145,9 +146,72 @@ fn validate_before_qa_read(
     })
 }
 
-// The *only* child in this module invoking Git is test-only. It reads
-// a temporary, exact QA repository created in the test; no owner repo
-// and no untrusted shell/command/path interpolation.
+// Stage4AG is a synthetic, process-local revocation epoch. This is NOT
+// proof that server revocations are delivered or a live child is cancellable.
+// The local lock serializes revocation against durable receipt commit only.
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct QaLocalRevocationGate {
+    state: std::sync::Mutex<QaRevocationState>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct QaRevocationState {
+    generation: u64,
+    revoked: bool,
+}
+
+#[cfg(test)]
+impl QaLocalRevocationGate {
+    fn snapshot(&self) -> Result<u64, Denial> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| Denial::RevokedDuringExecution)?;
+        if state.revoked {
+            return Err(Denial::RevokedDuringExecution);
+        }
+        Ok(state.generation)
+    }
+
+    fn require(&self, generation: u64) -> Result<(), Denial> {
+        self.commit_if_current(generation, || Ok(()))
+    }
+
+    fn revoke(&self) -> Result<(), Denial> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| Denial::RevokedDuringExecution)?;
+        state.revoked = true;
+        state.generation = state
+            .generation
+            .checked_add(1)
+            .ok_or(Denial::RevokedDuringExecution)?;
+        Ok(())
+    }
+
+    fn commit_if_current<T>(
+        &self,
+        generation: u64,
+        commit: impl FnOnce() -> Result<T, Denial>,
+    ) -> Result<T, Denial> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| Denial::RevokedDuringExecution)?;
+        if state.revoked || state.generation != generation {
+            return Err(Denial::RevokedDuringExecution);
+        }
+        // Hold local QA lock through durable journal commit. No production
+        // server-grant authority or cancellation is inferred from this lock.
+        commit()
+    }
+}
+
+// The ONLY Git child in this module remains inside #[cfg(test)], and
+// may inspect ONLY a disposable fixture root. No owner Git repository.
 #[cfg(test)]
 fn qa_execute_git_head_and_store_receipt(
     fence: &QaExecutionFence,
@@ -155,9 +219,42 @@ fn qa_execute_git_head_and_store_receipt(
     candidate: &Candidate,
     journal: &super::journal_qa::Journal,
     device_signer: &ed25519_dalek::SigningKey,
+    local_revoke: &QaLocalRevocationGate,
     now_ms: u64,
 ) -> Result<Vec<u8>, Denial> {
+    qa_execute_git_head_and_store_receipt_with_hooks(
+        fence,
+        signed,
+        candidate,
+        journal,
+        device_signer,
+        local_revoke,
+        now_ms,
+        || {},
+        || {},
+    )
+}
+
+// Hooks only exist in source-linked Rust tests. They make the two critical
+// revocation windows deterministic without touching any real remote device.
+#[cfg(test)]
+fn qa_execute_git_head_and_store_receipt_with_hooks<BeforeGit, AfterGit>(
+    fence: &QaExecutionFence,
+    signed: &SignedTask,
+    candidate: &Candidate,
+    journal: &super::journal_qa::Journal,
+    device_signer: &ed25519_dalek::SigningKey,
+    local_revoke: &QaLocalRevocationGate,
+    now_ms: u64,
+    before_git: BeforeGit,
+    after_git: AfterGit,
+) -> Result<Vec<u8>, Denial>
+where
+    BeforeGit: FnOnce(),
+    AfterGit: FnOnce(),
+{
     use std::process::Command;
+    let generation = local_revoke.snapshot()?;
     if fence.task_id != signed.task.task_id
         || fence.project_id != signed.task.project_id
         || fence.checked_at_ms != now_ms
@@ -169,11 +266,19 @@ fn qa_execute_git_head_and_store_receipt(
     {
         return Err(Denial::UnsafeFixtureRoot);
     }
-    let result = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(&fence.registered_root)
-        .output()
-        .map_err(|_| Denial::GitFailed)?;
+    before_git();
+    // Serialize local revocation with OS child creation, not only a prior
+    // boolean check; release the lock while the bounded test child runs.
+    let child = local_revoke.commit_if_current(generation, || {
+        Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&fence.registered_root)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|_| Denial::GitFailed)
+    })?;
+    let result = child.wait_with_output().map_err(|_| Denial::GitFailed)?;
     if !result.status.success()
         || result.stdout.is_empty()
         || result.stdout.len() > 65
@@ -181,30 +286,33 @@ fn qa_execute_git_head_and_store_receipt(
     {
         return Err(Denial::GitFailed);
     }
-    let receipt = super::receipt_qa::sign_git_head_result(
-        signed,
-        candidate,
-        &result.stdout,
-        now_ms,
-        device_signer,
-    )
-    .map_err(|_| Denial::ReceiptFailed)?;
-    super::receipt_qa::verify_receipt(
-        &receipt,
-        signed,
-        &device_signer.verifying_key(),
-        &result.stdout,
-    )
-    .map_err(|_| Denial::ReceiptFailed)?;
-    super::receipt_qa::persist_verified_receipt(
-        journal,
-        &receipt,
-        signed,
-        &device_signer.verifying_key(),
-        &result.stdout,
-    )
-    .map_err(|_| Denial::ReceiptFailed)?;
-    Ok(result.stdout)
+    after_git();
+    local_revoke.commit_if_current(generation, || {
+        let receipt = super::receipt_qa::sign_git_head_result(
+            signed,
+            candidate,
+            &result.stdout,
+            now_ms,
+            device_signer,
+        )
+        .map_err(|_| Denial::ReceiptFailed)?;
+        super::receipt_qa::verify_receipt(
+            &receipt,
+            signed,
+            &device_signer.verifying_key(),
+            &result.stdout,
+        )
+        .map_err(|_| Denial::ReceiptFailed)?;
+        super::receipt_qa::persist_verified_receipt(
+            journal,
+            &receipt,
+            signed,
+            &device_signer.verifying_key(),
+            &result.stdout,
+        )
+        .map_err(|_| Denial::ReceiptFailed)?;
+        Ok(result.stdout)
+    })
 }
 
 #[cfg(test)]
@@ -265,6 +373,7 @@ mod tests {
         authority: RevocationRecheck,
         refresh: TrustedExecutionRecheck,
         expected_stdout: Vec<u8>,
+        local_revoke: QaLocalRevocationGate,
     }
     fn setup() -> Fixture {
         let root = QaRoot::create();
@@ -393,6 +502,7 @@ mod tests {
             authority: auth,
             refresh,
             expected_stdout: stdout,
+            local_revoke: QaLocalRevocationGate::default(),
         }
     }
     fn fence(
@@ -423,6 +533,7 @@ mod tests {
             &f.candidate,
             &f.journal,
             &f.device,
+            &f.local_revoke,
             T,
         )
         .unwrap();
@@ -440,6 +551,7 @@ mod tests {
                 &f.candidate,
                 &f.journal,
                 &f.device,
+                &f.local_revoke,
                 T
             ),
             Err(Denial::ReceiptFailed)
@@ -610,6 +722,7 @@ mod tests {
                 &f.candidate,
                 &f.journal,
                 &f.device,
+                &f.local_revoke,
                 T
             ),
             Err(Denial::ReceiptFailed)
@@ -639,6 +752,7 @@ mod tests {
                 &f.candidate,
                 &f.journal,
                 &f.device,
+                &f.local_revoke,
                 T
             ),
             Err(Denial::UnsafeFixtureRoot)
@@ -651,9 +765,85 @@ mod tests {
                 &f.candidate,
                 &f.journal,
                 &f.device,
+                &f.local_revoke,
                 T
             ),
             Err(Denial::UnsafeFixtureRoot)
         );
+    }
+    #[test]
+    fn stage4ag_revoke_between_fence_and_git_launch_denies_without_receipt() {
+        let f = setup();
+        let v = fence(&f, f.now, T, f.refresh).unwrap();
+        assert_eq!(
+            qa_execute_git_head_and_store_receipt_with_hooks(
+                &v,
+                &f.signed,
+                &f.candidate,
+                &f.journal,
+                &f.device,
+                &f.local_revoke,
+                T,
+                || f.local_revoke.revoke().unwrap(),
+                || {},
+            ),
+            Err(Denial::RevokedDuringExecution)
+        );
+        assert_eq!(fs::read_dir(f._root.0.join("journal")).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn stage4ag_revoke_after_git_read_denies_device_receipt_and_durable_commit() {
+        let f = setup();
+        let v = fence(&f, f.now, T, f.refresh).unwrap();
+        assert_eq!(
+            qa_execute_git_head_and_store_receipt_with_hooks(
+                &v,
+                &f.signed,
+                &f.candidate,
+                &f.journal,
+                &f.device,
+                &f.local_revoke,
+                T,
+                || {},
+                || f.local_revoke.revoke().unwrap(),
+            ),
+            Err(Denial::RevokedDuringExecution)
+        );
+        assert_eq!(fs::read_dir(f._root.0.join("journal")).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn stage4ag_revocation_generation_is_monotonic_sticky_and_cannot_rearm() {
+        let f = setup();
+        let generation = f.local_revoke.snapshot().unwrap();
+        f.local_revoke.revoke().unwrap();
+        assert_eq!(
+            f.local_revoke.require(generation),
+            Err(Denial::RevokedDuringExecution)
+        );
+        assert_eq!(
+            f.local_revoke.snapshot(),
+            Err(Denial::RevokedDuringExecution)
+        );
+        f.local_revoke.revoke().unwrap();
+        assert_eq!(
+            f.local_revoke.require(generation),
+            Err(Denial::RevokedDuringExecution)
+        );
+        let v = fence(&f, f.now, T, f.refresh).unwrap();
+        assert_eq!(
+            qa_execute_git_head_and_store_receipt(
+                &v,
+                &f.signed,
+                &f.candidate,
+                &f.journal,
+                &f.device,
+                &f.local_revoke,
+                T,
+            ),
+            Err(Denial::RevokedDuringExecution)
+        );
+        assert_eq!(fs::read_dir(f._root.0.join("journal")).unwrap().count(), 2);
     }
 }
