@@ -51,3 +51,32 @@ This is **NOT** completion of the physical Stage4AB.3.2B acceptance. The origina
 - [ ] Separately review always-on supervisor and relay transport
 
 **Do not merge this stacked PR to main. Keep all production and remote-device authority disabled.**
+
+## Native macOS passive OS-event observation – QA-only checkpoint
+
+The bounded Objective-C observer `scripts/qa-stage4ab32b-macos-os-events.m`
+subscribes to macOS `NSWorkspaceWillSleepNotification` and
+`NSWorkspaceDidWakeNotification`, plus the Wi-Fi-specific `NWPathMonitor`.
+A private 5-second owner-launched process emits only fixed reason tokens
+(`OBSERVING`, `WIFI_PATH_LOST`, `WIFI_PATH_AVAILABLE`, `SLEEP_BEGIN`,
+`WAKE`, `STOPPED`); it never logs hostnames, SSIDs, IPs or identifiers.
+Without exact local `KATOSYNC_STAGE4AB32B_OS_EVENT_QA_READ_ONLY` opt-in, it
+fails with exit 64. The observer has NO network configuration, sleep control,
+listener, keychain access, Tauri IPC, persistence, or remote job features.
+
+`src-tauri/src/mesh_os_event_fence_qa.rs` is strictly
+`#[cfg(all(test, feature = "stage4j-qa"))]` and unit-tests a conservative,
+strictly parsed **deny-only** application of these messages to the canonical
+`LiveTlsLease`. A Wi-Fi-restored, wake or observer-ready message cannot
+mint fresh TLS proof or revive a previously invalidated lease; malformed
+frames and observer termination also invalidate. This pure unit-test receiver
+is **not wired to the running supervisor**: plaintext sidecar frames are not
+independent authenticated runtime evidence. A future in-process/signed native
+integration requires separate review before real long-lived use.
+
+**Evidence to date:** on real M2, unsigned observer compiled; missing opt-in
+correctly denied; with opt-in, observed ready, live Wi-Fi path available,
+and bounded exit. NO actual sleep, wake or Wi-Fi failure event induced.
+The native macOS CI compiles and smoke-tests the observer without hardware
+fault injection. Physical M2/M3 Link/Sleep/Wake and live enrollment revocation
+acceptance remain OPEN. No production change or authorization increase.
