@@ -28,6 +28,14 @@ use tokio::{
 };
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
+/// Stage4AB.3.2 sealed QA-only test injection, never production,
+/// never selected through Stage4AB.2 or Stage4AB.3.1 CLI.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum QaFault {
+    ServerDropAfterFirstAuthenticatedHeartbeat,
+    ClientRequireUnexpectedTlsClose,
+}
+
 const OPT_IN_NAME: &str = "KATOSYNC_STAGE4AB2_LIVE_QA_ONCE";
 const OPT_IN_VALUE: &str = "OWNER_LAUNCHED_LIVE_QA_ONLY";
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(35);
@@ -227,6 +235,7 @@ async fn server_once(
     peer: Ipv4Addr,
     port: u16,
     peer_fingerprint: &str,
+    fault: Option<QaFault>,
 ) -> Result<(), String> {
     verify_live_tailnet(local, peer).await?;
     let admitted = mesh_admission::authorize(peer_fingerprint)
@@ -281,6 +290,13 @@ async fn server_once(
             .await
             .map_err(|_| "MESH_STAGE4AB2_ADMISSION_REVOKED".to_string())?;
         lease.verified_in_channel_heartbeat(seq, Instant::now())?;
+        if seq == 1 && fault == Some(QaFault::ServerDropAfterFirstAuthenticatedHeartbeat) {
+            // A REAL open, pinned TLS stream is dropped now. No synthetic
+            // "connected" event, no Tailscale/OS device or key manipulation.
+            // Client must observe the closed stream before any reconnect.
+            lease.on_network_loss();
+            return Err("MESH_STAGE4AB32_VERIFIED_TLS_STREAM_INTENTIONALLY_DROPPED".into());
+        }
     }
     lease.close();
     // Stream scope ends here. Positive return must NOT imply current online
@@ -293,6 +309,7 @@ async fn client_once(
     peer: Ipv4Addr,
     port: u16,
     peer_fingerprint: &str,
+    fault: Option<QaFault>,
 ) -> Result<(), String> {
     verify_live_tailnet(local, peer).await?;
     let admitted = mesh_admission::authorize(peer_fingerprint)
@@ -349,6 +366,16 @@ async fn client_once(
         mesh_admission::recheck_after_probe(&admitted, peer_fingerprint)
             .await
             .map_err(|_| "MESH_STAGE4AB2_ADMISSION_REVOKED".to_string())?;
+        if seq == 2 && fault == Some(QaFault::ClientRequireUnexpectedTlsClose) {
+            match heartbeat_client(&mut tls, seq, &session).await {
+                Err(error) if error == "MESH_STAGE4AB2_HEARTBEAT_IO" => {
+                    lease.on_network_loss();
+                    return Err("MESH_STAGE4AB32_REMOTE_TLS_CLOSED_AFTER_AUTHENTICATED_HB".into());
+                }
+                Ok(()) => return Err("MESH_STAGE4AB32_EXPECTED_DROP_DID_NOT_HAPPEN".into()),
+                Err(error) => return Err(error),
+            }
+        }
         heartbeat_client(&mut tls, seq, &session).await?;
         mesh_admission::recheck_after_probe(&admitted, peer_fingerprint)
             .await
@@ -373,6 +400,24 @@ pub(crate) async fn run_once_under_existing_qa_permit(
     _permit: &SingleQaPermit,
     args: Vec<String>,
 ) -> Result<(), String> {
+    run_once_with_optional_qa_fault(_permit, args, None).await
+}
+
+/// Only Stage4AB.3.2 may request a controlled fault. This requires the
+/// original sealed exclusive permit AND the normal owner triple opt-ins.
+pub(crate) async fn run_fault_under_existing_qa_permit(
+    permit: &SingleQaPermit,
+    args: Vec<String>,
+    fault: QaFault,
+) -> Result<(), String> {
+    run_once_with_optional_qa_fault(permit, args, Some(fault)).await
+}
+
+async fn run_once_with_optional_qa_fault(
+    _permit: &SingleQaPermit,
+    args: Vec<String>,
+    fault: Option<QaFault>,
+) -> Result<(), String> {
     require_all_opt_ins()?;
     if args.len() != 5 {
         return Err("MESH_STAGE4AB2_ARGUMENTS_DENIED".into());
@@ -381,10 +426,22 @@ pub(crate) async fn run_once_under_existing_qa_permit(
         .parse::<u16>()
         .map_err(|_| "MESH_STAGE4AB2_PORT_DENIED")?;
     let (local, remote) = policy(&args[1], &args[2], port)?;
-    let result = match args[0].as_str() {
-        "listen" => timeout(BOUNDED_QA_MAX, server_once(local, remote, port, &args[4])).await,
-        "connect" => timeout(BOUNDED_QA_MAX, client_once(local, remote, port, &args[4])).await,
-        _ => return Err("MESH_STAGE4AB2_ROLE_DENIED".into()),
+    let result = match (args[0].as_str(), fault) {
+        ("listen", None | Some(QaFault::ServerDropAfterFirstAuthenticatedHeartbeat)) => {
+            timeout(
+                BOUNDED_QA_MAX,
+                server_once(local, remote, port, &args[4], fault),
+            )
+            .await
+        }
+        ("connect", None | Some(QaFault::ClientRequireUnexpectedTlsClose)) => {
+            timeout(
+                BOUNDED_QA_MAX,
+                client_once(local, remote, port, &args[4], fault),
+            )
+            .await
+        }
+        _ => return Err("MESH_STAGE4AB32_ROLE_OR_FAULT_DENIED".into()),
     };
     result.map_err(|_| "MESH_STAGE4AB2_QA_DEADLINE_EXCEEDED".to_string())?
 }
@@ -444,6 +501,37 @@ mod tests {
             &client_session
         )
         .is_err());
+    }
+
+    #[tokio::test]
+    async fn ab32_client_observes_real_io_close_after_first_valid_heartbeat() {
+        let (mut client, mut server) = duplex(1024);
+        let session = [7u8; 32];
+        let (client_result, ()) = tokio::join!(
+            async {
+                let first = heartbeat_client(&mut client, 1, &session).await;
+                let second = heartbeat_client(&mut client, 2, &session).await;
+                (first, second)
+            },
+            async {
+                let mut incoming = [0u8; HEARTBEAT_LEN];
+                server.read_exact(&mut incoming).await.unwrap();
+                verify_heartbeat_frame(&incoming, HB_TAG, 1, &session).unwrap();
+                server
+                    .write_all(&heartbeat_frame(HB_ACK_TAG, 1, &session))
+                    .await
+                    .unwrap();
+                server.flush().await.unwrap();
+                // Physical half of in-memory stream closes. Next heartbeat
+                // must NOT be accepted or converted to a live session.
+                drop(server);
+            }
+        );
+        assert!(client_result.0.is_ok());
+        assert_eq!(
+            client_result.1.err().as_deref(),
+            Some("MESH_STAGE4AB2_HEARTBEAT_IO")
+        );
     }
 
     #[tokio::test]
