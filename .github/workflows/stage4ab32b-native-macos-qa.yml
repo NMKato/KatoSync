@@ -1,0 +1,139 @@
+name: Stage4AB32B Native macOS Fault Policy QA (no deploy)
+
+on:
+  push:
+    branches:
+      - qa/stage4ab32b-fault-gates-20261116
+    paths:
+      - "src-tauri/**"
+      - "tests/meshStage4AB32BFaultPolicyContract.test.mjs"
+      - "rust-toolchain.toml"
+      - ".github/workflows/stage4ab32b-native-macos-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage4ab32b-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stage4y-native:
+    name: macOS Stage4AB32B safety-negative regressions (no signing)
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout exact QA branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install repository-pinned Rust compiler
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup show active-toolchain
+          cargo --version
+
+      - name: Verify native formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Set up Node for real Tauri frontend assets
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install locked frontend dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build actual TypeScript and Vite frontend
+        run: npm run build
+
+      - name: Prepare compile-only resource directories
+        # Poppler/Typst binaries are intentionally Git-ignored. This CI job
+        # runs cargo check/test only: no packaging, signing or deployment.
+        # Empty placeholders satisfy tauri-build path validation, not runtime QA.
+        run: |
+          mkdir -p src-tauri/resources/poppler src-tauri/resources/typst
+          touch src-tauri/resources/poppler/.qa-compile-only
+          touch src-tauri/resources/typst/.qa-compile-only
+
+      - name: Compile isolated Stage4J with Stage4Y diagnostic
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa
+
+      - name: Run native Stage4Y admission denial tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa stage4y_diagnostics_tests --lib
+
+      - name: Verify native strict PostgREST enrollment JSON deserialization
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa postgrest_snake_case_roster_decodes_without_weakening_validation --lib
+
+      - name: Verify Stage4AA strict Tailnet policy and owner double opt-in
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_tailnet_qa::tests --lib
+
+      - name: Run Stage4AA static contract regression
+        run: node --experimental-strip-types --test tests/meshStage4AATailnetContract.test.mjs
+
+      - name: Verify Stage4AB1 monotonic lease and replay denial
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_durable_lease_qa::tests --lib
+
+      - name: Verify Stage4AB2 native live TLS-frame and replay tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_live_supervisor_qa::tests --lib
+
+      - name: Run Stage4AB2 static security boundary contract
+        run: node --experimental-strip-types --test tests/meshStage4AB2LiveSupervisorContract.test.mjs
+
+      - name: Verify Stage4AB3 revocation, lease-drop and reconnect policy
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_reconnect_qa::tests --lib
+
+      - name: Verify internal lease invalidation and reboot policy
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa stage4ab3_qa_bridge_revocation_sleep_and_network_loss_fail_closed --lib
+
+      - name: Verify Stage4AB3 no-remote-rights security boundary
+        run: node --experimental-strip-types --test tests/meshStage4AB3ReconnectContract.test.mjs tests/meshStage4AB1LeaseStateContract.test.mjs
+
+      - name: Verify Stage4AB32 real TLS drop fail-closed contract
+        run: node --experimental-strip-types --test tests/meshStage4AB32DropReconnectContract.test.mjs tests/meshStage4AB3ReconnectContract.test.mjs
+
+      - name: Verify Stage4AB32 sealed fault and reconnect denial tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_fault_reconnect_qa::tests --lib
+
+      - name: Verify Stage4AB32B simulated network sleep revoke negative native tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_fault_policy_qa::tests --lib
+
+      - name: Verify Stage4AB32B static fail-closed source contracts
+        run: node --experimental-strip-types --test tests/meshStage4AB32BFaultPolicyContract.test.mjs
+
+      - name: Build isolated unsigned Stage4AB32B QA executable
+        # The runtime source and exact pinned toolchain were already checked.
+        # Deliberately ship NO Apple credentials and NO signed app from CI.
+        env:
+          TAURI_CONFIG: '{"productName":"KatoSync Stage4AB32B Fault Policy QA","identifier":"com.nmkato.katosync.meshqa.stage4j-isolated","build":{"beforeBuildCommand":""}}'
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa --bin katosync
+
+      - name: Record exact unsigned binary SHA-256 and commit
+        run: |
+          cd src-tauri/target/debug
+          shasum -a 256 katosync > stage4ab32b-katosync.sha256
+          printf '%s\n' "${GITHUB_SHA}" > stage4ab32b-source-commit.txt
+          cat stage4ab32b-katosync.sha256
+
+      - name: Export unsigned QA executable for local Developer-ID signing
+        uses: actions/upload-artifact@v4
+        with:
+          name: katosync-stage4ab32b-macos-arm64-unsigned
+          path: |
+            src-tauri/target/debug/katosync
+            src-tauri/target/debug/stage4ab32b-katosync.sha256
+            src-tauri/target/debug/stage4ab32b-source-commit.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Confirm no release or device action
+        run: |
+          echo "STAGE4AB32B_NATIVE_QA_ONLY"
+          echo "No signing, notarization, deployment, keychain or device operation."
