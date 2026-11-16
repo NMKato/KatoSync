@@ -22,7 +22,7 @@ test("two distinct open sessions are authorized, measured and closed under one Q
   assert.match(reconnect, /for cycle in 0\.\.2/);
   assert.match(reconnect, /run_once_under_existing_qa_permit\(&_permit, args\.clone\(\)\)\s*\.await/);
   assert.match(reconnect, /FIRST_MTLS_SESSION_CLOSED_VERIFIED/);
-  assert.match(supervisor, /pub\(crate\) async fn run_once_under_existing_qa_permit\(_permit: &SingleQaPermit/);
+  assert.match(supervisor, /pub\(crate\) async fn run_once_under_existing_qa_permit\(\s*_permit: &SingleQaPermit/);
   assert.match(supervisor, /require_all_opt_ins\(\)\?/);
   assert.match(supervisor, /server_session_init\(&mut tls, new_nonce\(\)\)/);
   assert.match(supervisor, /client_session_init\(&mut tls, new_nonce\(\)\)/);
