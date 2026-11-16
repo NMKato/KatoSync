@@ -111,7 +111,11 @@ fn accept_pinned_signed_revoke(
 }
 
 #[cfg(test)]
-mod tests {
+#[path = "revoke_delivery_qa/durable_qa.rs"]
+mod durable_qa;
+
+#[cfg(test)]
+pub(super) mod tests {
     use super::super::super::{ReadOnlyTask, SignedTask};
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
@@ -122,15 +126,15 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    const T: u64 = 1_800_000_000_000;
-    fn permit_issuer() -> SigningKey {
+    pub(super) const T: u64 = 1_800_000_000_000;
+    pub(super) fn permit_issuer() -> SigningKey {
         SigningKey::from_bytes(&[61; 32])
     }
-    fn control_signer() -> SigningKey {
+    pub(super) fn control_signer() -> SigningKey {
         SigningKey::from_bytes(&[62; 32])
     }
 
-    fn permit() -> SignedTask {
+    pub(super) fn permit() -> SignedTask {
         let task = ReadOnlyTask {
             owner_id: [1; 16],
             tenant_id: [2; 16],
@@ -154,7 +158,7 @@ mod tests {
         }
     }
 
-    fn signed_notice(p: &SignedTask, sequence: u64) -> QaSignedRevokeNotice {
+    pub(super) fn signed_notice(p: &SignedTask, sequence: u64) -> QaSignedRevokeNotice {
         let t = &p.task;
         let mut notice = QaSignedRevokeNotice {
             owner_id: t.owner_id,

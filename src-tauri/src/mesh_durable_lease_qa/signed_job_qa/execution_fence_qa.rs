@@ -908,3 +908,7 @@ mod tests {
 #[cfg(test)]
 #[path = "execution_fence_qa/revoke_delivery_qa.rs"]
 mod revoke_delivery_qa;
+
+#[cfg(test)]
+#[path = "execution_fence_qa/rc66k_boundary_qa.rs"]
+mod rc66k_boundary_qa;
