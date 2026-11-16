@@ -8,14 +8,20 @@
 
 use crate::{
     mesh_durable_lease_qa::LiveTlsLease,
-    mesh_fault_policy_qa::{classify_attempt, AttemptDecision, SimulatedRevalidation, TransportFault},
+    mesh_fault_policy_qa::{
+        classify_attempt, AttemptDecision, SimulatedRevalidation, TransportFault,
+    },
     mesh_identity::fingerprint,
     mesh_tls::{strict_client_config, strict_server_config, DeviceTlsIdentity, TLS_PEER_DNS_NAME},
     mesh_trust::ApprovedPeer,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ed25519_dalek::SigningKey;
-use std::{net::{Ipv4Addr, SocketAddrV4}, sync::Arc, time::{Duration, Instant}};
+use std::{
+    net::{Ipv4Addr, SocketAddrV4},
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -58,17 +64,20 @@ async fn run_local_kernel_tcp_fault(fault: LoopbackFault) {
         &client_identity,
         &synthetic_peer(&server_key),
         server_identity.certificate_der(),
-    ).unwrap();
+    )
+    .unwrap();
     let server_config = strict_server_config(
         &server_identity,
         &synthetic_peer(&client_key),
         client_identity.certificate_der(),
-    ).unwrap();
+    )
+    .unwrap();
 
     // The kernel assigns a new ephemeral port. Never bind an overlay, LAN,
     // all-interfaces address or the Stage4AB32 hardware QA port.
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .await.unwrap();
+        .await
+        .unwrap();
     let listen_addr = listener.local_addr().unwrap();
     assert!(listen_addr.ip().is_loopback());
     assert_ne!(listen_addr.port(), 39402);
@@ -82,7 +91,9 @@ async fn run_local_kernel_tcp_fault(fault: LoopbackFault) {
         assert!(tcp.peer_addr().unwrap().ip().is_loopback());
         let name = rustls::pki_types::ServerName::try_from(TLS_PEER_DNS_NAME).unwrap();
         let mut tls = TlsConnector::from(Arc::new(client_config))
-            .connect(name, tcp).await.unwrap();
+            .connect(name, tcp)
+            .await
+            .unwrap();
         assert_eq!(
             tls.get_ref().1.protocol_version(),
             Some(rustls::ProtocolVersion::TLSv1_3),
@@ -93,13 +104,16 @@ async fn run_local_kernel_tcp_fault(fault: LoopbackFault) {
             server_key.verifying_key().to_bytes(),
             [73; 32], // synthetic test fixture, never production handshake material
             Instant::now(),
-        ).unwrap();
+        )
+        .unwrap();
         tls.write_all(b"PING").await.unwrap();
         tls.flush().await.unwrap();
         let mut pong = [0u8; 4];
         tls.read_exact(&mut pong).await.unwrap();
         assert_eq!(&pong, b"PONG");
-        lease.verified_in_channel_heartbeat(1, Instant::now()).unwrap();
+        lease
+            .verified_in_channel_heartbeat(1, Instant::now())
+            .unwrap();
         assert!(lease.is_live(Instant::now()));
 
         // A second heartbeat must NEVER refresh the old lease after the
@@ -108,9 +122,13 @@ async fn run_local_kernel_tcp_fault(fault: LoopbackFault) {
             LoopbackFault::PeerCloses => {
                 if tls.write_all(b"PING").await.is_ok() {
                     timeout(Duration::from_millis(700), tls.read_exact(&mut pong))
-                        .await.map(|r| r.is_ok()).unwrap_or(false)
-                } else { false }
-            },
+                        .await
+                        .map(|r| r.is_ok())
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            }
             LoopbackFault::PeerStalls => {
                 tls.write_all(b"PING").await.unwrap();
                 tls.flush().await.unwrap();
@@ -141,7 +159,9 @@ async fn run_local_kernel_tcp_fault(fault: LoopbackFault) {
         assert!(address.ip().is_loopback());
         assert!(socket.local_addr().unwrap().ip().is_loopback());
         let mut tls = TlsAcceptor::from(Arc::new(server_config))
-            .accept(socket).await.unwrap();
+            .accept(socket)
+            .await
+            .unwrap();
         assert_eq!(
             tls.get_ref().1.protocol_version(),
             Some(rustls::ProtocolVersion::TLSv1_3),
@@ -169,7 +189,9 @@ async fn run_local_kernel_tcp_fault(fault: LoopbackFault) {
 
     timeout(Duration::from_secs(8), async {
         tokio::join!(client, server);
-    }).await.expect("loopback fault test exceeded 8s");
+    })
+    .await
+    .expect("loopback fault test exceeded 8s");
 }
 
 #[tokio::test]
