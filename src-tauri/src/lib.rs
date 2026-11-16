@@ -61,6 +61,8 @@ mod mesh_tailnet_qa;
 mod mesh_durable_lease_qa;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_live_supervisor_qa;
+#[cfg(feature = "stage4j-qa")]
+mod mesh_reconnect_qa;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.
 #[allow(dead_code)]
@@ -329,6 +331,33 @@ pub struct LaunchAgentStatus {
 }
 
 pub fn run() {
+    // Stage4AB.3: manually launched, TWO cleanly closed TLS sessions with
+    // fresh owner/enrollment verification before each new connection.
+    // Not a daemon, production reconnect watcher or remote job grant.
+    if env::args().nth(1).as_deref() == Some("--stage4ab3-reconnect-qa-twice") {
+        #[cfg(feature = "stage4j-qa")]
+        {
+            let args = env::args().skip(2).collect();
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| "MESH_STAGE4AB3_RUNTIME_UNAVAILABLE".to_string())
+                .and_then(|rt| rt.block_on(mesh_reconnect_qa::run_twice(args)));
+            match result {
+                Ok(()) => println!("MESH_STAGE4AB3_TWO_NEW_MTLS_SESSIONS_PASS_NO_REMOTE"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(5);
+                }
+            }
+            return;
+        }
+        #[cfg(not(feature = "stage4j-qa"))]
+        {
+            eprintln!("MESH_STAGE4AB3_QA_NOT_CONFIGURED");
+            std::process::exit(5);
+        }
+    }
     // Stage4AB.2: isolated, short-lived, supervised live TLS heartbeat QA.
     // No IPC, remote tools, background launch or persistent production link.
     if env::args().nth(1).as_deref() == Some("--stage4ab2-live-qa-once") {
