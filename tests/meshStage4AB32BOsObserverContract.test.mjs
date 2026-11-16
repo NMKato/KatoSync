@@ -15,8 +15,8 @@ const gate = "KATOSYNC_STAGE4AB32B_OS_EVENT_QA_READ_ONLY";
 test("passive native observer is short lived, denied by default and read-only", () => {
   assert.match(source, /NSWorkspaceWillSleepNotification/);
   assert.match(source, /NSWorkspaceDidWakeNotification/);
-  assert.match(source, /nw_path_monitor_create_with_type\\(nw_interface_type_wifi\\)/);
-  assert.match(source, /dateWithTimeIntervalSinceNow:5\\.0/);
+  assert.ok(source.includes("nw_path_monitor_create_with_type(nw_interface_type_wifi)"));
+  assert.ok(source.includes("dateWithTimeIntervalSinceNow:5.0"));
   assert.match(source, /MESH_STAGE4AB32B_OS_EVENT_QA_OPT_IN_REQUIRED/);
   const code = source.split("\n").filter(line => !line.trimStart().startsWith("//")).join("\n");
   for (const forbidden of [
