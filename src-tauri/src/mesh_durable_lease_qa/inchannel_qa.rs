@@ -284,11 +284,15 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let (caller, answer) = tokio::join!(TcpStream::connect(address), listener.accept());
+        // These peer grants must outlive BOTH asynchronously polled futures.
+        // No temporary ApprovedPeer references across tokio::join!.
+        let pinned_server = approved(&b);
+        let pinned_client = approved(&a);
         tokio::join!(
             client(
                 caller.unwrap(),
                 &a,
-                &approved(&b),
+                &pinned_server,
                 bc.certificate_der(),
                 a_owner,
                 seq
@@ -296,7 +300,7 @@ mod tests {
             server(
                 answer.unwrap().0,
                 &b,
-                &approved(&a),
+                &pinned_client,
                 ac.certificate_der(),
                 b_owner
             )
