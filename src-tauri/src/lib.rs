@@ -69,6 +69,9 @@ mod mesh_fault_policy_qa;
 // Stage4AB.3.2B: test-only mutual TLS duplex and synthetic in-flight revoke.
 #[cfg(all(test, feature = "stage4j-qa"))]
 mod mesh_inflight_revocation_qa;
+// Stage4AB.3.2B: in-memory half-open TLS and simulated sleep/wake tests only.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_halfopen_fault_qa;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_live_supervisor_qa;
 #[cfg(feature = "stage4j-qa")]
