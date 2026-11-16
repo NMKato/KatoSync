@@ -90,6 +90,22 @@ Kato AI kombiniert eine austauschbare lokale Modell-Runtime mit Status-, Speiche
 
 Der macOS-Test auf einem **M2 Pro** hat eine funktionierende lokale Inferenz mit **Metal** bestätigt. Die angezeigte GPU-Auslastung beschreibt dabei das **gesamte Gerät**, nicht die eindeutig gemessene GPU-Auslastung eines einzelnen Modells. Die Windows-Tests beweisen noch **keine** verpackte CUDA- oder Intel-GPU-Inferenz. Fremde Modellprozesse werden nicht automatisch beendet.
 
+## SmartMesh – aktueller QA-Entwicklungsstand (16.11.2026)
+
+Die SmartMesh-Sicherheitsentwicklung erfolgt **git-versioniert auf separaten QA-Branches**, nicht als unkontrollierte Änderung von `main`. Der aktuelle Nachweis ist in [Roadmap #269](https://github.com/NMKato/KatoSync/issues/269), dem Basis-[Draft-PR #278](https://github.com/NMKato/KatoSync/pull/278) und dem darauf aufbauenden [Draft-PR #279](https://github.com/NMKato/KatoSync/pull/279) dokumentiert.
+
+| Prüfbereich | Nachgewiesener Entwicklungsstand | Noch offen |
+| :-- | :-- | :-- |
+| **Gegenseitig gepinntes TLS 1.3** | Native QA mit authentifizierten Heartbeats, kontrolliertem TLS-Abbruch und frisch autorisierter Verbindung | Produktiver, langfristiger Mesh-Supervisor |
+| **Lease / Reconnect / Widerruf** | 25-Sekunden-Heartbeat-Lease, begrenzte Reconnect-Policy, synthetischer Widerruf, Owner-Wechsel und Half-open-Negativfälle im Rust-QA-Code | Echter serverseitiger Enrollment-Widerruf unter laufender Sitzung |
+| **Netzwerk- und Schlafereignisse** | Kurzlebiger nativer macOS-Beobachter (Wi-Fi-Pfad, Sleep/Wake), Clock-Gap-Guard und isolierter deny-only-Event-Fence | Abgenommene In-Process-Anbindung und physische Sleep-/Link-Fault-Tests zwischen M2 und M3 |
+| **Betriebssicherheit** | Passive Checks auf M2/M3; riskante Hardware-Faults werden mangels unabhängig geprüfter Recovery-Verbindung verweigert | Nachgewiesener unabhängiger Wiederherstellungsweg und beaufsichtigte Hardware-Abnahme |
+| **Fernausführung** | TLS-/Presence-Nachweis allein gibt ausdrücklich **keine** Remote-Jobs, Schreibrechte oder Admin-Befugnisse frei | Separater signierter, begrenzter Autorisierungs- und Ausführungs-Gate |
+
+**Verifizierter CI-Checkpoint:** Commit `eaeda348` – [native macOS-QA erfolgreich](https://github.com/NMKato/KatoSync/actions/runs/43947380091), PR Fast Gate und Attribution erfolgreich. Die darauf folgende **In-Process-Event/Heartbeat-Brücke** wird in Draft-PR #279 weiter getestet; ihr neuerer Quellstand ist **nicht bereits durch diesen älteren CI-Nachweis freigegeben**. Für die neuesten Prüfungen gilt jeweils der Commit-spezifische Status im PR.
+
+**Freigabeschranke:** Drafts bleiben ungemergt; keine produktiven Gerätezugriffe, unkontrollierten Netzwerk-/Sleep-Eingriffe, Keychain-Änderungen oder unbeaufsichtigten Remote-Jobs. Nach jedem geprüften Meilenstein werden Quellcode, Tests und Dokumentation gemeinsam in Git versioniert. Ein QA-Erfolg ist **keine** Produktiv- oder Release-Freigabe.
+
 ## KatoSync SmartMesh – gemeinsam arbeiten, Hardware sinnvoll nutzen
 
 > **In Entwicklung / Architekturziel:** SmartMesh ist als [Fleet Mode #13](https://github.com/NMKato/KatoSync/issues/13) und [Core Mesh #15](https://github.com/NMKato/KatoSync/issues/15) spezifiziert. Eine vollständig autonome, sicher abgenommene Geräteverbindung, Git-Übergabe und verteilte Ausführung ist **noch kein veröffentlichter Funktionsumfang**. Sicherheitsvoraussetzung: [#76](https://github.com/NMKato/KatoSync/issues/76).
@@ -192,6 +208,8 @@ Eine neue, plattformübergreifende Bilderstrecke ist geplant: **Project Work Hub
 - [ ] [#76: isolierte Worktrees, Freigaben, dauerhafter Writer-Lease](https://github.com/NMKato/KatoSync/issues/76)
 - [ ] Durchgehender Test: Projekt → freigegebener Agentenwechsel → Edit → Checkpoint → unabhängige Tests
 - [ ] Vollständige Windows- und macOS-Installer mit realen Ressourcen, GUI-/Gerätetests, Signierung
+- [x] SmartMesh **QA-only**: gepinnte TLS-1.3-Heartbeat-/Fault-Tests und passiver macOS-Ereignisbeobachter, ohne produktive Fernrechte ([Draft #278](https://github.com/NMKato/KatoSync/pull/278), [#279](https://github.com/NMKato/KatoSync/pull/279))
+- [ ] SmartMesh: native Event-Quelle und TLS-Supervisor sicher integrieren; unabhängiger Recovery-Pfad, physische M2/M3-Fault-/Revocation-Abnahme ([#269](https://github.com/NMKato/KatoSync/issues/269))
 - [ ] SmartMesh: vertrauenswürdige Gerätenamen/Identitäten, Fähigkeitsrouting, Git-first-Handoff, LAN/P2P/Relay-Fallback, unabhängige Git-Logins und Remote-Writer-Lease
 - [ ] Gerätesynchronisation und belastbare Projekt-Historie / Memory Fabric
 - [ ] Optionale Cloud-Tarife, Limits und Datenschutz-/Sicherheitsabnahme
