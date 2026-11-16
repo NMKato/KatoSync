@@ -4,6 +4,9 @@
 //! opens sockets, reads Keychain, grants rights or creates a public endpoint.
 //! A trusted runtime signer, active RC66 owner session, server revocation
 //! revalidation, durable replay ledger, and Stage4L executor remain separate.
+#[allow(dead_code)]
+mod journal_qa;
+
 use super::MeshLeaseMachine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::{collections::HashSet, time::Instant};
