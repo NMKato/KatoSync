@@ -108,8 +108,8 @@ mod tests {
         .await
         .expect("in-flight event must cancel a pending read promptly");
         assert_eq!(
-            result.as_deref(),
-            Err("MESH_STAGE4AB32B_OS_OBSERVER_LEASE_DENIED")
+            result.err().as_deref(),
+            Some("MESH_STAGE4AB32B_OS_OBSERVER_LEASE_DENIED")
         );
         assert!(!lease.is_live(Instant::now()));
         assert!(lease
@@ -162,7 +162,7 @@ mod tests {
             std::future::pending::<Result<(), String>>().await
         })
         .await;
-        assert_eq!(result.as_deref(), Err(PRODUCER_STOPPED));
+        assert_eq!(result.err().as_deref(), Some(PRODUCER_STOPPED));
         assert!(!lease.is_live(Instant::now()));
     }
 
