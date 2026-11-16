@@ -20,7 +20,7 @@ test("AB3 CLI is QA-only with distinct fourth opt-in and no WebIPC or daemon", (
 test("two distinct open sessions are authorized, measured and closed under one QA concurrency guard", () => {
   assert.match(reconnect, /SingleQaPermit::acquire/);
   assert.match(reconnect, /for cycle in 0\.\.2/);
-  assert.match(reconnect, /run_once_under_existing_qa_permit\(&_permit, args\.clone\(\)\)\.await/);
+  assert.match(reconnect, /run_once_under_existing_qa_permit\(&_permit, args\.clone\(\)\)\s*\.await/);
   assert.match(reconnect, /FIRST_MTLS_SESSION_CLOSED_VERIFIED/);
   assert.match(supervisor, /pub\(crate\) async fn run_once_under_existing_qa_permit\(_permit: &SingleQaPermit/);
   assert.match(supervisor, /require_all_opt_ins\(\)\?/);
