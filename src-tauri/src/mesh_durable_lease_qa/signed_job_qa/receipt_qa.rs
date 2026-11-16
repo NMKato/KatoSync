@@ -380,7 +380,7 @@ mod tests {
         let (_p, out, key, task, c, _mesh, _now) = fixture();
         let signed = sign_git_head_result(&task, &c, &out, T + 2, &key).unwrap();
         let mut wrong = out.clone();
-        wrong[0] = b'0' + ((wrong[0] != b'0') as u8);
+        wrong[0] = if wrong[0] == b'0' { b'1' } else { b'0' };
         assert!(verify_receipt(&signed, &task, &key.verifying_key(), &wrong).is_err());
         let mut forged = signed.clone();
         forged.receipt.exit_code = 1;

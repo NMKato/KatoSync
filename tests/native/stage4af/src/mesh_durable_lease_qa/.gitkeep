@@ -1,0 +1,1 @@
+Stage4AF source-linked QA module lookup root. This directory must exist on fresh checkouts so Rust #[path] canonical relative imports resolve. No runtime module or code is stored here.
