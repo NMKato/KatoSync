@@ -34,6 +34,8 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 > **Entwicklungsstatus (21.10.2026):** Die öffentlich verfügbaren Desktop-Betas und der neuere Project Work Hub haben unterschiedliche Freigabestände. Die Integration der neuen Projekt- und GPU-Funktionen ist erfolgreich getestet, aber **noch nicht in `dev` oder `main` gemergt oder als vollständig geprüfter Installer veröffentlicht**. Details: [Draft-PR #75](https://github.com/NMKato/KatoSync/pull/75).
 
+> **SmartMesh-Sicherheits-QA (16.11.2026, Stage4AG–Stage4AI):** Der isolierte Entwicklungszweig enthält lokale Widerrufs-Race-Fences, signierte synthetische Widerrufsereignisse, einen abbrechbaren **test-only** Child-Prozess, eine strikt geprüfte RC66K-Control-Plane-Quittung (Ed25519/EdDSA-JWS) und eine persistente Fail-Closed-Widerrufssperre. Letzte lokale Abnahme: **56/56 Rust und 37/37 Node**. **Kein Nachweis echter RC66K→Mesh-Gerätezustellung, keine produktive Remote-Git-Ausführung und keine Freigabe der MCP-Geräterechte.** Details: [Stage4AI-QA-Protokoll](docs/KATOSYNC_STAGE4AI_RC66K_WIRE_DURABLE_REVOKE_QA_20261116.md) und [Remote-MCP RC66K Draft #52](https://github.com/NMKato/KatoSync-Remote-MCP/pull/52). Nächster Schritt: Stage4AJ mit unabhängig signiertem, empfängergebundenem Widerruf samt Gerätequittung und physischer Zwei-Mac-Abnahme.
+
 ## Was KatoSync zusammenbringt
 
 | Bereich | Funktionen | Status |
