@@ -88,7 +88,8 @@ pub(crate) async fn run_twice(args: Vec<String>) -> Result<(), String> {
             // Recheck ALL AB2 upstream owner opt-ins on every cycle, and
             // new live owner, Keychain, TLS and both enrolled devices.
             // Any failure closes the socket and stops WITHOUT fallback.
-            mesh_live_supervisor_qa::run_once_under_existing_qa_permit(args.clone()).await?;
+            mesh_live_supervisor_qa::run_once_under_existing_qa_permit(&_permit, args.clone())
+                .await?;
             if cycle == 0 {
                 println!("MESH_STAGE4AB3_FIRST_MTLS_SESSION_CLOSED_VERIFIED");
             }
