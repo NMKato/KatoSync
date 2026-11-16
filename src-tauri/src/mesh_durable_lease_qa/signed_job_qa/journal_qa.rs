@@ -11,7 +11,7 @@ use std::{
 };
 const MAX_RECORD_BYTES: usize = 256;
 #[derive(Debug, PartialEq, Eq)]
-enum Denial {
+pub(super) enum Denial {
     InsecureRoot,
     InvalidCandidate,
     Duplicate,
