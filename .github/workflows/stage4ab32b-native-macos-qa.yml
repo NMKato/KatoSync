@@ -116,6 +116,9 @@ jobs:
       - name: Verify in-memory pinned TLS1.3 half-open channel and simulated sleep/wake denial
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_halfopen_fault_qa --lib
 
+      - name: Verify QA macOS clock gap and sleep/wake fail-closed lease invalidation
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_clock_gap_qa --lib
+
       - name: Verify real localhost kernel TCP pinned TLS1.3 closed and silent peer fail closed
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_loopback_tcp_fault_qa --lib
 
