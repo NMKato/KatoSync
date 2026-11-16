@@ -160,6 +160,7 @@ struct QaLocalRevocationGate {
 struct QaRevocationState {
     generation: u64,
     revoked: bool,
+    last_server_sequence: u64,
 }
 
 #[cfg(test)]
@@ -192,6 +193,25 @@ impl QaLocalRevocationGate {
         Ok(())
     }
 
+    // QA-only, strictly increasing revocation delivery sequence. A true
+    // runtime implementation must persist this across device restarts.
+    fn apply_signed_server_revocation(&self, sequence: u64) -> Result<(), Denial> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| Denial::RevokedDuringExecution)?;
+        if sequence == 0 || sequence <= state.last_server_sequence {
+            return Err(Denial::RevokedDuringExecution);
+        }
+        state.last_server_sequence = sequence;
+        state.revoked = true;
+        state.generation = state
+            .generation
+            .checked_add(1)
+            .ok_or(Denial::RevokedDuringExecution)?;
+        Ok(())
+    }
+
     fn commit_if_current<T>(
         &self,
         generation: u64,
@@ -207,6 +227,43 @@ impl QaLocalRevocationGate {
         // Hold local QA lock through durable journal commit. No production
         // server-grant authority or cancellation is inferred from this lock.
         commit()
+    }
+}
+
+// Stage4AH: bounded cancellation of a test-only child after a locally
+// verified revocation arrives; the final signed receipt remains separately
+// fenced. A real dispatcher needs independent server-side lease authority.
+#[cfg(test)]
+fn qa_wait_with_revocation(
+    mut child: std::process::Child,
+    local_revoke: &QaLocalRevocationGate,
+    generation: u64,
+) -> Result<std::process::Output, Denial> {
+    let started = Instant::now();
+    loop {
+        if let Err(reason) = local_revoke.require(generation) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(reason);
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                local_revoke.require(generation)?;
+                return child.wait_with_output().map_err(|_| Denial::GitFailed);
+            }
+            Ok(None) => {}
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(Denial::GitFailed);
+            }
+        }
+        if started.elapsed() >= std::time::Duration::from_secs(2) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Denial::GitFailed);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 
@@ -278,7 +335,7 @@ where
             .spawn()
             .map_err(|_| Denial::GitFailed)
     })?;
-    let result = child.wait_with_output().map_err(|_| Denial::GitFailed)?;
+    let result = qa_wait_with_revocation(child, local_revoke, generation)?;
     if !result.status.success()
         || result.stdout.is_empty()
         || result.stdout.len() > 65
@@ -847,3 +904,7 @@ mod tests {
         assert_eq!(fs::read_dir(f._root.0.join("journal")).unwrap().count(), 2);
     }
 }
+
+#[cfg(test)]
+#[path = "execution_fence_qa/revoke_delivery_qa.rs"]
+mod revoke_delivery_qa;
