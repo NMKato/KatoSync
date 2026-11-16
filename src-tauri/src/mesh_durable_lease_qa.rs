@@ -10,6 +10,9 @@
 
 #[allow(dead_code)]
 mod inchannel_qa;
+// Stage4AC: private signed read-only admission candidate, NOT an executor.
+#[allow(dead_code)]
+mod signed_job_qa;
 
 use serde::Serialize;
 use std::time::{Duration, Instant};
