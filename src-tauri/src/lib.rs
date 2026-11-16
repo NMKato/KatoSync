@@ -72,6 +72,10 @@ mod mesh_inflight_revocation_qa;
 // Stage4AB.3.2B: in-memory half-open TLS and simulated sleep/wake tests only.
 #[cfg(all(test, feature = "stage4j-qa"))]
 mod mesh_halfopen_fault_qa;
+// Stage4AB.3.2B: synthetic mutually pinned TLS on REAL localhost kernel TCP.
+// Not a production network listener or remote-capability source.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_loopback_tcp_fault_qa;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_live_supervisor_qa;
 #[cfg(feature = "stage4j-qa")]
