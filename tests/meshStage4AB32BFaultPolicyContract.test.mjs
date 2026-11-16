@@ -27,7 +27,7 @@ test("AB3.2B terminal events cannot be reinterpreted as transient network faults
     "NetworkLost", "SleepOrWake", "PeerRevoked", "OwnerChanged",
     "CertificateOrPinMismatch", "HeartbeatReplay", "Unknown"
   ]) assert.ok(policy.includes(kind));
-  assert.match(policy, /if !matches!\(fault, TransportFault::NetworkLost \| TransportFault::SleepOrWake\)/);
+  assert.match(policy, /if !matches!\(\s*fault,\s*TransportFault::NetworkLost \| TransportFault::SleepOrWake\s*\)/);
   assert.match(policy, /AttemptDecision::StopSecurityEvent/);
 });
 
