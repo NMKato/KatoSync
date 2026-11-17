@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 
 const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const bridge = readFileSync(new URL("../src-tauri/src/mesh_os_event_channel_qa.rs", import.meta.url), "utf8");
+const native = readFileSync(new URL("../src-tauri/src/mesh_os_event_native_pipe_qa.rs", import.meta.url), "utf8");
 
 test("in-flight OS event bridge is only compiled as QA tests, not app runtime", () => {
   assert.match(lib, /#\[cfg\(all\(test, feature = "stage4j-qa"\)\)\]\s*mod mesh_os_event_channel_qa;/);
@@ -31,4 +32,19 @@ test("no OS mutation, CLI, runtime IPC, remote execution or authority minting", 
     const implementation = code.split("#[cfg(test)]")[0];
     assert.doesNotMatch(implementation, denied);
   }
+});
+
+
+test("native Apple-to-Rust bridge is ignored-by-default QA only and DENY only", () => {
+  assert.ok(lib.includes('mod mesh_os_event_native_pipe_qa;'));
+  assert.ok(lib.includes('target_os = "macos"'));
+  assert.ok(native.includes('KATOSYNC_STAGE4AB32B_OS_OBSERVER_BIN'));
+  assert.ok(native.includes('heartbeat_or_fail_closed'));
+  assert.ok(native.includes('lease.verified_in_channel_heartbeat(2, Instant::now()).is_err()'));
+  assert.equal(native.split('#[ignore = ').length - 1, 2);
+  assert.ok(native.includes('stdout(Stdio::piped())'));
+  assert.ok(native.includes('env_clear()'));
+  assert.ok(native.includes('kill_on_drop(true)'));
+  assert.ok(!native.includes('TcpListener::bind'));
+  assert.ok(!native.includes('networksetup'));
 });

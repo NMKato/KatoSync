@@ -114,3 +114,29 @@ and the native workflow performs both `node --check` and `node --test`
 compilation**. The duplicate late invocation is removed to reduce runner cost.
 This preflight is purely read-only; it does not broaden device permissions,
 make the in-process QA bridge a production service, or authorize hardware faults.
+
+## Passive Apple event source to native Rust lease denial (hardware-safe CI)
+
+The test-only macOS module `mesh_os_event_native_pipe_qa.rs` compiles only under
+`#[cfg(all(test, feature = "stage4j-qa", target_os = "macos"))]`. Its two tests
+are **ignored by default** and require an explicit CI-supplied
+`KATOSYNC_STAGE4AB32B_OS_OBSERVER_BIN` path. The CI compiles the exact checked-out
+Objective-C AppKit/NWPathMonitor source into an ephemeral **unsigned** local
+binary, with no keychain or Apple signing secrets; it is deleted at the end.
+
+The negative test refuses a process with no explicit opt-in (exit 64). The
+positive *observation-only* QA test executes the Apple observer (strict five
+seconds), pipes actual `OBSERVING`, optional Wi-Fi path, then `STOPPED` frames
+through a bounded Rust Tokio channel, and ensures the STOPPED marker cancels a
+still-pending `tokio::io::duplex` heartbeat read and invalidates the synthetic
+canonical `LiveTlsLease`. The real OS telemetry can **only deny**, never
+approve a new peer, owner, job or connection. Child process has a hard deadline,
+empty inherited environment and kill-on-drop; no Wi-Fi, Tailscale, power or OS
+config changes, no listener or persistent daemon. CI must pass before calling
+this test fully verified.
+
+**Boundary remains:** this is an ephemeral **out-of-process stdout bridge used
+only by an ignored test**, not an authenticated/signed in-process OS callback
+and not a live M2/M3 shared-TLS supervisor. It does not demonstrate a real
+Wi-Fi loss, power sleep/wake event or production enrollment revocation. Those
+remain blocked until independently verified recovery and explicit approval.

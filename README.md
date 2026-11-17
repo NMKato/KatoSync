@@ -98,11 +98,11 @@ Die SmartMesh-Sicherheitsentwicklung erfolgt **git-versioniert auf separaten QA-
 | :-- | :-- | :-- |
 | **Gegenseitig gepinntes TLS 1.3** | Native QA mit authentifizierten Heartbeats, kontrolliertem TLS-Abbruch und frisch autorisierter Verbindung | Produktiver, langfristiger Mesh-Supervisor |
 | **Lease / Reconnect / Widerruf** | 25-Sekunden-Heartbeat-Lease, begrenzte Reconnect-Policy, synthetischer Widerruf, Owner-Wechsel und Half-open-Negativfälle im Rust-QA-Code | Echter serverseitiger Enrollment-Widerruf unter laufender Sitzung |
-| **Netzwerk- und Schlafereignisse** | Kurzlebiger nativer macOS-Beobachter (Wi-Fi-Pfad, Sleep/Wake), Clock-Gap-Guard und isolierter deny-only-Event-Fence | Abgenommene In-Process-Anbindung und physische Sleep-/Link-Fault-Tests zwischen M2 und M3 |
+| **Netzwerk- und Schlafereignisse** | Kurzlebiger nativer macOS-Beobachter (Wi-Fi-Pfad, Sleep/Wake), Clock-Gap-Guard, deny-only-Event-Fence sowie Test-Pipeline von realem Observer-stdout zu wartendem Rust-Heartbeat | Dauerhafte signierte OS-Ereignisquelle im produktiven Supervisor und physische Sleep-/Link-Fault-Tests zwischen M2 und M3 |
 | **Betriebssicherheit** | Passive Checks auf M2/M3; riskante Hardware-Faults werden mangels unabhängig geprüfter Recovery-Verbindung verweigert | Nachgewiesener unabhängiger Wiederherstellungsweg und beaufsichtigte Hardware-Abnahme |
 | **Fernausführung** | TLS-/Presence-Nachweis allein gibt ausdrücklich **keine** Remote-Jobs, Schreibrechte oder Admin-Befugnisse frei | Separater signierter, begrenzter Autorisierungs- und Ausführungs-Gate |
 
-**Verifizierter CI-Checkpoint:** Commit `eaeda348` – [native macOS-QA erfolgreich](https://github.com/NMKato/KatoSync/actions/runs/43947380091), PR Fast Gate und Attribution erfolgreich. Die darauf folgende **In-Process-Event/Heartbeat-Brücke** wird in Draft-PR #279 weiter getestet; ihr neuerer Quellstand ist **nicht bereits durch diesen älteren CI-Nachweis freigegeben**. Für die neuesten Prüfungen gilt jeweils der Commit-spezifische Status im PR.
+**Verifizierter CI-Checkpoint:** Commit `b5d6565d` – [native macOS-QA vollständig erfolgreich](https://github.com/NMKato/KatoSync/actions/runs/44035693844), PR Fast Gate und Attribution erfolgreich. Seitdem wird eine **echte passive Apple-Observer-stdout → Rust-Lease-Denial-QA** ergänzt: test-only, kein dauerhaftes OS-Event-Handling und keine neuen Rechte. Für neuere Änderungen gilt stets der Commit-spezifische Status im PR.
 
 **CI-Qualität:** Der JavaScript-Quellvertrag der OS-Ereignisbrücke wird bereits **vor der nativen macOS-Rust-Kompilierung** auf Syntax, Test-only-Grenzen und fehlende Remote-Autorisierung geprüft. Native Heartbeat- und Lease-Tests folgen separat; Freigaben gelten immer nur für den exakt geprüften Git-Commit.
 
