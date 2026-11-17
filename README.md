@@ -34,7 +34,7 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 > **Entwicklungsstatus (21.10.2026):** Die öffentlich verfügbaren Desktop-Betas und der neuere Project Work Hub haben unterschiedliche Freigabestände. Die Integration der neuen Projekt- und GPU-Funktionen ist erfolgreich getestet, aber **noch nicht in `dev` oder `main` gemergt oder als vollständig geprüfter Installer veröffentlicht**. Details: [Draft-PR #75](https://github.com/NMKato/KatoSync/pull/75).
 
-> **KatoSync 2.0 Private Beta – Integrationsfokus (17.11.2026):** Die M2-QA hat einen echten lokalen Gemma-Projektchat und Codex-/Claude-Read-only-Aufträge nachgewiesen ([Draft-PR #175](https://github.com/NMKato/KatoSync/pull/175)). Der neue zusammenhängende Beta-Core-Regressionstest ist `npm run test:beta-core`; der [Beta-Release-Gate-Plan](docs/KATOSYNC_V2_PRIVATE_BETA_CORE_GATE_20261117.md) trennt geprüfte Funktionen von offenen M3-/Windows-/Installer-Gates. **Kein Release-GO, kein Merge nach `main`/`dev` durch diese Dokumentation.**
+> **KatoSync 2.0 Private Beta – Integrationsfokus (17.11.2026):** Die M2-QA hat einen echten lokalen Gemma-Projektchat und Codex-/Claude-Read-only-Aufträge nachgewiesen ([Draft-PR #175](https://github.com/NMKato/KatoSync/pull/175)). Der neue zusammenhängende Beta-Core-Regressionstest ist `npm run test:beta-core`; der [Beta-Release-Gate-Plan](docs/KATOSYNC_V2_PRIVATE_BETA_CORE_GATE_20261117.md) und die [4.0-/Mesh-/MCP-RC67-Abgrenzung](docs/KATOSYNC_BETA4_MCP_RC67_INTEGRATION_AUDIT_20261117.md) trennen geprüfte Funktionen von offenen M3-/Windows-/Installer-/Agenten-Gates. **Kein Release-GO, kein Merge nach `main`/`dev` durch diese Dokumentation.**
 
 ## Was KatoSync zusammenbringt
 
