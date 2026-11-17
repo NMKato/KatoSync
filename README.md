@@ -36,7 +36,7 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 > **KatoSync 2.0 Private Beta – Integrationsfokus (17.11.2026):** Die M2-QA hat einen echten lokalen Gemma-Projektchat und Codex-/Claude-Read-only-Aufträge nachgewiesen ([Draft-PR #175](https://github.com/NMKato/KatoSync/pull/175)). Der neue zusammenhängende Beta-Core-Regressionstest ist `npm run test:beta-core`; der [Beta-Release-Gate-Plan](docs/KATOSYNC_V2_PRIVATE_BETA_CORE_GATE_20261117.md) und die [4.0-/Mesh-/MCP-RC67-Abgrenzung](docs/KATOSYNC_BETA4_MCP_RC67_INTEGRATION_AUDIT_20261117.md) trennen geprüfte Funktionen von offenen M3-/Windows-/Installer-/Agenten-Gates. **Kein Release-GO, kein Merge nach `main`/`dev` durch diese Dokumentation.**
 
-> **RC69 Desktop ↔ MCP (17.11.2026):** Der [native RC67/RC68 Presence-Code](docs/KATOSYNC_RC69_NATIVE_SIGNED_PRESENCE_CODEC_QA_20261117.md) bereitet den signierten Ed25519-Heartbeat im isolierten QA-Feature vor. Er ist **noch kein** ausgehender Cloudflare-WSS-Client und **kein** Live-Gerätezugriff in ChatGPT; die serverseitig geprüfte Challenge/Session und der DO-Transport stehen aus.
+> **RC69 Desktop ↔ MCP (17.11.2026):** Der [native RC67/RC68 Presence-Code und erste Git-Status-Read-only-Adapter](docs/KATOSYNC_RC69_NATIVE_SIGNED_PRESENCE_CODEC_QA_20261117.md) bereiten signierte Ed25519-Heartbeats und projektgebundene lesende Antworten im isolierten QA-Feature vor. Sie sind **noch kein** ausgehender Cloudflare-WSS-Client und **kein** Live-Gerätezugriff in ChatGPT; die serverseitig geprüfte Challenge/Session und der DO-Transport stehen aus.
 
 ## Was KatoSync zusammenbringt
 

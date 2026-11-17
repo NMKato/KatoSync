@@ -43,6 +43,10 @@ mod mesh_identity;
 #[cfg(feature = "katoos-auth-qa")]
 #[allow(dead_code)]
 mod mesh_rc67_presence_qa;
+// QA-only native Git read adapter; no IPC or MCP registration before live DO grant.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc69_readonly_qa;
 mod mesh_readiness;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.

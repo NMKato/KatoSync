@@ -29,3 +29,11 @@ Only after those contracts exist can the Desktop safely call `sign_presence_jws`
 - RC69 transport: physical M2 and M3 positive WSS, signed heartbeat, server-side admitted authenticated presence and negative wrong-key/owner/grant/replay/expiry/revoke tests.
 - Beta-0 tool: first genuine ChatGPT `devices.list/status` through DO native device result; no synthetic device readback, no hidden external Remote Desktop Commander proxy.
 - No automatic merge or app installation while the WSS handshake and native E2E remain open.
+
+## RC69 first native read-only handler (Beta-0 source gate)
+
+- `src-tauri/src/mesh_rc69_readonly_qa.rs` implements `read_registered_git_status_after_verified_grant` for a **locally registered active project only**. It reuses `project_registry_load` and the existing bounded, no-shell, fsmonitor-disabled `project_registry::run_git` helper.
+- The API has **no Tauri command, no current MCP registration, no incoming socket**. The future WSS dispatcher MUST independently verify server-side owner/tenant/client grant/device consent and exact project scope *before* calling it; matching two project-ID strings is not authorization.
+- A Git worktree must have the same canonical root as its registered path. Only `projectId`, sanitized branch, validated HEAD SHA, dirty boolean and provenance are returned; paths, diffs, filenames and file contents are excluded.
+- Native Rust tests use the same source file imported in `qa/rc69-presence-harness` and assert wrong grant, inactive/duplicate project, changed Git root, bad HEAD and bounded output. Node guard tests `tests/meshRc69ReadOnlyGitContract.test.ts` enforce that no runtime/IPC exposure is accidentally introduced.
+- Still **NO-GO** for a ChatGPT `katosync_git_status` tool until the real signed DO-WSS session and result ACK are integrated and tested on M2/M3.
