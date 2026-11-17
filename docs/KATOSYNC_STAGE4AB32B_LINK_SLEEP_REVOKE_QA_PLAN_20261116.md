@@ -370,3 +370,41 @@ PostgREST read or revocation propagation. Such a read-only session test
 requires a separate explicit owner opt-in with independent recovery and
 no production permission expansion. The following docs-only SHA remains
 distinct from the native code SHA.
+
+
+## Strict read-only live-check blocker and session-rotation permission (17 Nov 2026)
+
+During the controlled owner-session test review, the existing canonical
+`mesh_admission::recheck_after_probe` was traced into
+`github_app_auth::verified_katosync_user` and
+`ensure_supabase_access_token`. Those shared functions MAY call
+`refresh_supabase_session_under_lock` or retry with
+`replace_rejected_supabase_access_token` if a cached token is absent,
+expired or rejected by the issuer. These operations may rotate/rewrite the
+user session and therefore **are not strictly read-only** even if their
+authorization checks use HTTP GET. This live path was NOT executed.
+
+As a defense-in-depth correction, the test-only adapter now additionally
+requires the separate, exact human-entered QA consent
+`KATOSYNC_STAGE4AB32B_ALLOW_SESSION_ROTATION_QA` with value
+`OWNER_EXPLICITLY_APPROVES_QA_SESSION_TOKEN_ROTATION` **before** calling
+either canonical recheck. Its normal read-only-only opt-in, existing
+`SingleQaPermit`, stage4j/katoos-auth compile gates, and owner triple opt-ins
+are insufficient on their own. The separate session-rotation opt-in was
+NOT present on the connected M2; no tokens were read or generated and
+no auth/session settings changed. The updated CI tests only pure negative
+cases, including the additional no-rotation-consent regression. This is
+NOT a claim that the old canonical function has become non-rotating;
+rather, an explicit refusal until independently informed consent is given.
+For a STRICT read-only positive owner JWT test, implement and review a
+separate no-refresh token acquisition/validation path; do not silently
+reuse the canonical refresh-capable helper.
+
+**Live production RLS negative proof (read only):** In the current KatoOS
+Supabase project, a transaction was started `READ ONLY`, then executed
+with `SET LOCAL ROLE authenticated` but NO owner JWT/sub claim. The query
+counted (without selecting device rows) `katosync.mesh_devices`. Under
+this role `auth.uid() IS NULL` and the visible row count was **zero**.
+The transaction was ROLLBACKed; no data, policy, keys or session state
+were changed. This proves owner-absent RLS denial, not positive JWT
+signature authentication or owner-specific enrollment presence.

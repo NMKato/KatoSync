@@ -118,6 +118,10 @@ test("canonical owner/enrollment live-read adapter is test-only, opt-in and read
   assert.match(lib, /#\[cfg\(all\(test, feature = "stage4j-qa"\)\)\]\s*mod mesh_live_admission_recheck_qa;/);
   assert.ok(admissionBridge.includes('KATOSYNC_STAGE4AB32B_REAL_ADMISSION_READ_ONLY_QA'));
   assert.ok(admissionBridge.includes('OWNER_LAUNCHED_READ_ONLY_ADMISSION_RECHECK_ONLY'));
+  assert.ok(admissionBridge.includes('KATOSYNC_STAGE4AB32B_ALLOW_SESSION_ROTATION_QA'));
+  assert.ok(admissionBridge.includes('OWNER_EXPLICITLY_APPROVES_QA_SESSION_TOKEN_ROTATION'));
+  assert.ok(admissionBridge.includes('session_rotation_opt_in(session_rotation_permission.as_deref())'));
+  assert.ok(admissionBridge.includes('canonical_auth_may_rotate_tokens_so_read_only_opt_in_alone_is_insufficient'));
   assert.ok(admissionBridge.includes('SingleQaPermit'));
   assert.ok(admissionBridge.includes('require_owner_opt_ins()'));
   assert.ok(admissionBridge.includes('guarded_supervisor_cycle('));

@@ -1,11 +1,16 @@
 // Created by NMKato Solutions
-//! Stage4AB.3.2B – real read-only KatoOS/Torhaus admission recheck adapter.
+//! Stage4AB.3.2B – gated canonical KatoOS/Torhaus admission QA adapter.
 //!
 //! THIS MODULE IS COMPILED FOR TESTS ONLY under stage4j-qa. Its explicit,
 //! human-entered opt-in is never set by CI and there is no automatic caller.
 //! The canonical recheck already uses the locally held user JWT, owner-scoped
 //! RLS read of both enrollments, current Keychain identity and pinned peer.
 //! No new endpoint, bypass token, RLS mutation or remote job is permitted.
+//! SECURITY: the reused canonical auth helper can refresh/rotate an access
+//! token if its cache is empty or if the issuer rejects it. That is a session
+//! mutation and cannot be represented as a strict read-only live test.
+//! A SEPARATE explicit owner QA opt-in is required before this helper runs;
+//! a read-only-only request MUST fail closed.
 
 use crate::{
     mesh_admission::{self, NativeAdmission},
@@ -20,6 +25,10 @@ use tokio::{sync::mpsc, time::timeout};
 
 const ENV_NAME: &str = "KATOSYNC_STAGE4AB32B_REAL_ADMISSION_READ_ONLY_QA";
 const EXPECTED: &str = "OWNER_LAUNCHED_READ_ONLY_ADMISSION_RECHECK_ONLY";
+// The existing KatoOS issuer validation may refresh/rotate the current
+// session token. Never conceal that side effect behind "read only".
+const SESSION_ROTATION_ENV: &str = "KATOSYNC_STAGE4AB32B_ALLOW_SESSION_ROTATION_QA";
+const SESSION_ROTATION_EXPECTED: &str = "OWNER_EXPLICITLY_APPROVES_QA_SESSION_TOKEN_ROTATION";
 const DENIED: &str = "MESH_STAGE4AB32B_LIVE_RECHECK_NOT_AUTHORIZED";
 const BUDGET: Duration = Duration::from_secs(45);
 
@@ -27,6 +36,9 @@ const BUDGET: Duration = Duration::from_secs(45);
 /// In production this module does not exist, regardless of environment.
 fn read_only_opt_in(stage4j: bool, katoos_auth: bool, supplied: Option<&str>) -> bool {
     stage4j && katoos_auth && supplied == Some(EXPECTED)
+}
+fn session_rotation_opt_in(supplied: Option<&str>) -> bool {
+    supplied == Some(SESSION_ROTATION_EXPECTED)
 }
 
 /// Prevent a caller from swapping the specific approved peer in the
@@ -61,11 +73,13 @@ where
     Heartbeat: Future<Output = Result<(), String>>,
 {
     let permission = std::env::var(ENV_NAME).ok();
+    let session_rotation_permission = std::env::var(SESSION_ROTATION_ENV).ok();
     if !read_only_opt_in(
         cfg!(feature = "stage4j-qa"),
         cfg!(feature = "katoos-auth-qa"),
         permission.as_deref(),
-    ) || require_owner_opt_ins().is_err()
+    ) || !session_rotation_opt_in(session_rotation_permission.as_deref())
+        || require_owner_opt_ins().is_err()
         || !exact_previously_admitted_peer(admitted, requested_fingerprint)
     {
         lease.on_owner_or_peer_revoked();
@@ -126,6 +140,16 @@ mod tests {
         assert!(!read_only_opt_in(false, true, Some(EXPECTED)));
         assert!(!read_only_opt_in(true, false, Some(EXPECTED)));
         assert!(read_only_opt_in(true, true, Some(EXPECTED)));
+    }
+
+    #[test]
+    fn canonical_auth_may_rotate_tokens_so_read_only_opt_in_alone_is_insufficient() {
+        assert!(!session_rotation_opt_in(None));
+        assert!(!session_rotation_opt_in(Some("true")));
+        assert!(!session_rotation_opt_in(Some(EXPECTED)));
+        assert!(!session_rotation_opt_in(Some("OWNER_LAUNCHED_QA_ONLY")));
+        assert!(session_rotation_opt_in(Some(SESSION_ROTATION_EXPECTED)));
+        // This pure unit test NEVER invokes the auth helper or reads a token.
     }
 
     #[test]
