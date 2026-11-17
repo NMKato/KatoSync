@@ -29,3 +29,6 @@ mod mesh_rc70_outbound_wss_qa;
 #[path = "../../../src-tauri/src/mesh_rc71_rc69_ticket_qa.rs"]
 #[allow(dead_code)]
 mod mesh_rc71_rc69_ticket_qa;
+#[path = "../../../src-tauri/src/mesh_rc72_signed_server_qa.rs"]
+#[allow(dead_code)]
+mod mesh_rc72_signed_server_qa;
