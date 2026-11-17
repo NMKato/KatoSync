@@ -42,7 +42,7 @@ pub(crate) enum RelayTransportEvent {
 /// Connector RC69 (NOT the MCP Streamable HTTP `/mcp` endpoint).
 /// Remote production/QA only: wss://remote-mcp.katoos.de on default TLS 443.
 /// Cannot accept arbitrary target hosts, HTTP, credentials or query secrets.
-fn validate_endpoint(endpoint: &str) -> Result<(), &'static str> {
+pub(crate) fn validate_endpoint(endpoint: &str) -> Result<(), &'static str> {
     if endpoint.len() > 512 || endpoint.contains('#') || endpoint.contains('?') {
         return Err("RC70_UNVERIFIED_RELAY_ENDPOINT");
     }
@@ -69,7 +69,7 @@ fn validate_endpoint(endpoint: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn bounded_ws_config() -> WebSocketConfig {
+pub(crate) fn bounded_ws_config() -> WebSocketConfig {
     WebSocketConfig {
         max_message_size: Some(MAX_SIGNED_FRAME_BYTES),
         max_frame_size: Some(MAX_SIGNED_FRAME_BYTES),
@@ -77,7 +77,7 @@ fn bounded_ws_config() -> WebSocketConfig {
     }
 }
 
-async fn close_quarantined_socket(
+pub(crate) async fn close_quarantined_socket(
     socket: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,

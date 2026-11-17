@@ -55,6 +55,10 @@ mod mesh_rc69_result_qa;
 #[cfg(feature = "katoos-auth-qa")]
 #[allow(dead_code)]
 mod mesh_rc70_outbound_wss_qa;
+// RC71 private RC69 DO ticket/challenge contract probe: QA only, never auto-started.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc71_rc69_ticket_qa;
 mod mesh_readiness;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.
