@@ -10,6 +10,8 @@ const callbackNative = readFileSync(new URL("../scripts/qa-stage4ab32b-macos-nat
 const callbackRust = readFileSync(new URL("../src-tauri/src/mesh_os_event_native_ffi_qa.rs", import.meta.url), "utf8");
 const supervisor = readFileSync(new URL("../src-tauri/src/mesh_live_supervisor_qa.rs", import.meta.url), "utf8");
 const ownerGuard = readFileSync(new URL("../src-tauri/src/mesh_supervisor_guard_qa.rs", import.meta.url), "utf8");
+const admissionBridge = readFileSync(new URL("../src-tauri/src/mesh_live_admission_recheck_qa.rs", import.meta.url), "utf8");
+const canonicalAdmission = readFileSync(new URL("../src-tauri/src/mesh_admission.rs", import.meta.url), "utf8");
 
 test("in-flight OS event bridge is only compiled as QA tests, not app runtime", () => {
   assert.match(lib, /#\[cfg\(all\(test, feature = "stage4j-qa"\)\)\]\s*mod mesh_os_event_channel_qa;/);
@@ -109,5 +111,29 @@ test("supervisor owner/enrollment rechecks and OS denial share a QA-only cycle",
     'tauri::command', 'invoke_handler', 'keyring::',
   ]) {
     assert.ok(!ownerGuard.includes(forbidden), 'unexpected QA authority source: ' + forbidden);
+  }
+});
+
+test("canonical owner/enrollment live-read adapter is test-only, opt-in and read-only", () => {
+  assert.match(lib, /#\[cfg\(all\(test, feature = "stage4j-qa"\)\)\]\s*mod mesh_live_admission_recheck_qa;/);
+  assert.ok(admissionBridge.includes('KATOSYNC_STAGE4AB32B_REAL_ADMISSION_READ_ONLY_QA'));
+  assert.ok(admissionBridge.includes('OWNER_LAUNCHED_READ_ONLY_ADMISSION_RECHECK_ONLY'));
+  assert.ok(admissionBridge.includes('SingleQaPermit'));
+  assert.ok(admissionBridge.includes('require_owner_opt_ins()'));
+  assert.ok(admissionBridge.includes('guarded_supervisor_cycle('));
+  assert.ok(admissionBridge.includes('Duration::from_secs(45)'));
+  assert.equal(admissionBridge.split('mesh_admission::recheck_after_probe(admitted, requested_fingerprint)').length - 1, 2);
+  assert.ok(canonicalAdmission.includes('pub(crate) async fn recheck_after_probe('));
+  assert.ok(canonicalAdmission.includes('same_account_still_verified(&admitted.owner_uid)'));
+  assert.ok(canonicalAdmission.includes('approved_peer_for_account('));
+  assert.ok(canonicalAdmission.includes('require_both_devices_enrolled('));
+  const implementation = admissionBridge.split('#[cfg(test)]')[0];
+  for (const forbidden of [
+    'tauri::command', 'TcpListener::bind', 'Command::new(',
+    'ensure_supabase_access_token', 'KATOSYNC_AUTH_ANON_KEY',
+    'set_password(', 'ensure_identity(', 'service_role',
+    'execute_sql', 'insert(', 'update(', 'delete(',
+  ]) {
+    assert.ok(!implementation.includes(forbidden), 'new authority or direct backend path: ' + forbidden);
   }
 });

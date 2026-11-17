@@ -60,6 +60,10 @@ mod mesh_os_event_fence_qa;
 // a previously authenticated TLS heartbeat and OS-event denial.
 #[cfg(all(test, feature = "stage4j-qa"))]
 mod mesh_supervisor_guard_qa;
+// Stage4AB.3.2B: canonical KatoOS read-only admission recheck adapter.
+// Compiles as QA tests only; NEVER a production Tauri or remote-job API.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_live_admission_recheck_qa;
 // Stage4AB.3.2B: native passive AppKit observer -> Rust cancellation QA only.
 #[cfg(all(test, feature = "stage4j-qa", target_os = "macos"))]
 mod mesh_os_event_native_pipe_qa;

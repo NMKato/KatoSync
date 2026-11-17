@@ -314,3 +314,37 @@ test-only and unmerged; there is no signed, long-running callback integration
 in the actual runtime and no real M2/M3 physical fault or remote execution
 permission. The next documentation-only Git SHA is distinct from this exact
 native source SHA; CI evidence must not be transferred between commits.
+
+
+## Canonical KatoOS admission read-only adapter – opt-in source binding (17 Nov 2026)
+
+The existing **production-tested-in-isolation** (but not live-operated here)
+`mesh_admission::recheck_after_probe(&NativeAdmission, fingerprint)` already
+performs current canonical account verification via KatoOS Auth, checks the
+same *existing* local Ed25519 device identity in Keychain, compares the exact
+locally approved peer fingerprint/public key against the originally admitted
+snapshot, queries the owner-scoped read-only `katosync.mesh_devices` roster
+under the **user's own JWT/RLS**, and requires both device enrollments to
+remain non-revoked. No service-role access or second authorization protocol
+is needed.
+
+`mesh_live_admission_recheck_qa.rs` binds that exact function TWICE into the
+existing atomic `guarded_supervisor_cycle` around the actual pre-existing
+supervisor heartbeat future, with a 45-second total deadline and final
+terminal lease denial on timeout. The adapter cannot be built outside
+`#[cfg(all(test, feature="stage4j-qa"))]`. It accepts an existing
+`SingleQaPermit` (never creates one), checks prior owner opt-ins and a
+**distinct exact** read-only QA env opt-in, and refuses swapped fingerprints
+or malformed owner scope before any access. It provides no IPC, backend
+configuration, remote job, new key, Tauri command, listener or production
+runtime integration.
+
+The CI executes only PURE negative unit tests for feature/opt-in gating,
+owner-peer binding and bounded error categories, plus a JS security contract
+asserting the exact canonical recheck references. CI must NEVER automatically
+set the read-only opt-in or request a production token. **No real KatoOS
+backend query or M2/M3 hardware fault was performed.** The native Rust CI
+result for the new source commit is pending; even after pass it only proves
+the safe source-level binding, not successful live Torhaus access, RLS, current
+enrollment, or a deployed supervisor. A separately authorized controlled
+read-only owner-session test is required for those claims.
