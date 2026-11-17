@@ -470,3 +470,32 @@ automatically callable in the released app. A positive JWT/RLS proof will
 require the owner to trigger a separate, authorized test *inside* a
 logged-in QA app process after the code and its dedicated gates pass.
 No M2/M3 network or sleep fault is used.
+
+
+## Verified native No-Refresh QA acceptance – 17 Nov 2026
+
+**Exact tested code SHA:** `9cb486ba91e089c72ab437c71681d443895c7457`.
+[Native macOS run 44101560727](https://github.com/NMKato/KatoSync/actions/runs/44101560727):
+**43/43 steps SUCCESS**, zero failed. CI logs explicitly prove
+**7/7** `mesh_live_admission_recheck_qa` tests, including **3/3**
+new no-refresh tests covering the separate exact consent, token cache
+stability/missing/replaced tokens and safe non-secret error. Existing
+supervisor, pinned TLS, Apple callback and revocation regressions passed.
+Matching [Fast Gate 44101577194](https://github.com/NMKato/KatoSync/actions/runs/44101577194)
+was **4/4 PASS** and [Attribution 44101577278](https://github.com/NMKato/KatoSync/actions/runs/44101577278)
+was **PASS**.
+
+An earlier source commit `fe490222` failed **the JS contract assertion only**
+because it expected a single-line expression that rustfmt split onto
+multiple lines. Corrected contract commit `9cb486ba` passed all checks.
+
+This evidence proves only a **test-only, in-memory cached-access-token
+NO-REFRESH** code path with deterministic negative cases, not successful
+real owner JWT validation or RLS response under a logged-in owner account.
+There was **no owner access-token read, token-refresh, login, Keychain
+mutation, database write, real hardware link/sleep fault, remote job or
+deployment** during acceptance. The path cannot yet be called from an
+already-running QA-app session; any positive user-session test requires
+a separately reviewed owner-initiated in-process runner and consent.
+This following docs-only Git SHA must remain distinct from the exact
+native-tested source SHA.
