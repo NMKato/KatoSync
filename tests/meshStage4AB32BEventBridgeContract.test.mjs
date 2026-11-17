@@ -17,7 +17,7 @@ test("in-flight OS event bridge is only compiled as QA tests, not app runtime", 
 });
 
 test("no OS mutation, CLI, runtime IPC, remote execution or authority minting", () => {
-  const code = bridge.split("\n").filter(line => !/^\s*\/\/|^\s*\/\//!/.test(line)).join("\n");
+  const code = bridge.split("\n").filter(line => !line.trimStart().startsWith("//")).join("\n");
   for (const denied of [
     /std::process::Command|tokio::process::Command|Command::new/,
     /std::fs::|File::create|std::env::set_var/,

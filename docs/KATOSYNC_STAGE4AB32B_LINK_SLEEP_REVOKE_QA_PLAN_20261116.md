@@ -101,3 +101,16 @@ change. The native AppKit observer and this channel are **not yet connected**;
 the QA event input is deliberately synthetic pending a reviewed, signed
 in-process macOS event source and independent recovery. Physical sleep/wake,
 M2/M3 link loss and live enrollment revoke acceptance all remain OPEN.
+
+## CI fail-fast fence for the synthetic event-to-heartbeat QA bridge
+
+A JavaScript contract syntax error was detected **after** the expensive native
+Rust regressions in run [43966848932](https://github.com/NMKato/KatoSync/actions/runs/43966848932).
+The regression was in a malformed JavaScript regex on a test-source filtering
+line, **not** a failure of the previously executed native heartbeat tests.
+The contract now uses explicit `line.trimStart().startsWith("//")` filtering,
+and the native workflow performs both `node --check` and `node --test`
+**immediately after setup-node, before npm install, frontend build or Rust
+compilation**. The duplicate late invocation is removed to reduce runner cost.
+This preflight is purely read-only; it does not broaden device permissions,
+make the in-process QA bridge a production service, or authorize hardware faults.

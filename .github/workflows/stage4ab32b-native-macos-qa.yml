@@ -53,6 +53,11 @@ jobs:
           node-version: "24"
           cache: npm
 
+      - name: Fail fast on JavaScript event-bridge syntax and deny-only contract
+        run: |
+          node --check tests/meshStage4AB32BEventBridgeContract.test.mjs
+          node --test tests/meshStage4AB32BEventBridgeContract.test.mjs
+
       - name: Install locked frontend dependencies
         run: npm ci --ignore-scripts
 
@@ -133,9 +138,6 @@ jobs:
 
       - name: Verify queued macOS events cancel an in-flight QA TLS heartbeat
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_os_event_channel_qa --lib
-
-      - name: Verify in-process event-to-lease bridge cannot issue authority
-        run: node --test tests/meshStage4AB32BEventBridgeContract.test.mjs
 
       - name: Verify Stage4AB32B recovery gate never approves remote network fault
         run: |

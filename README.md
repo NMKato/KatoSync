@@ -104,6 +104,8 @@ Die SmartMesh-Sicherheitsentwicklung erfolgt **git-versioniert auf separaten QA-
 
 **Verifizierter CI-Checkpoint:** Commit `eaeda348` – [native macOS-QA erfolgreich](https://github.com/NMKato/KatoSync/actions/runs/43947380091), PR Fast Gate und Attribution erfolgreich. Die darauf folgende **In-Process-Event/Heartbeat-Brücke** wird in Draft-PR #279 weiter getestet; ihr neuerer Quellstand ist **nicht bereits durch diesen älteren CI-Nachweis freigegeben**. Für die neuesten Prüfungen gilt jeweils der Commit-spezifische Status im PR.
 
+**CI-Qualität:** Der JavaScript-Quellvertrag der OS-Ereignisbrücke wird bereits **vor der nativen macOS-Rust-Kompilierung** auf Syntax, Test-only-Grenzen und fehlende Remote-Autorisierung geprüft. Native Heartbeat- und Lease-Tests folgen separat; Freigaben gelten immer nur für den exakt geprüften Git-Commit.
+
 **Freigabeschranke:** Drafts bleiben ungemergt; keine produktiven Gerätezugriffe, unkontrollierten Netzwerk-/Sleep-Eingriffe, Keychain-Änderungen oder unbeaufsichtigten Remote-Jobs. Nach jedem geprüften Meilenstein werden Quellcode, Tests und Dokumentation gemeinsam in Git versioniert. Ein QA-Erfolg ist **keine** Produktiv- oder Release-Freigabe.
 
 ## KatoSync SmartMesh – gemeinsam arbeiten, Hardware sinnvoll nutzen
