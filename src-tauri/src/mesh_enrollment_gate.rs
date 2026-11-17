@@ -328,3 +328,30 @@ mod tests {
         );
     }
 }
+
+/// Read-only test helper shared by the strict no-refresh owner QA adapter.
+/// The production enrollment gate and its Auth/Keychain session behavior
+/// are unchanged. Decode and validate the EXACT canonical roster shape.
+#[cfg(all(test, feature = "stage4j-qa"))]
+pub(crate) fn qa_validate_owner_roster_no_refresh(
+    owner_uid: &str,
+    own: &VerifyingKey,
+    approved_peer: &ApprovedPeer,
+    body: &[u8],
+) -> Result<(), String> {
+    if body.len() > MAX_RESPONSE_BYTES {
+        return Err("MESH_ENROLLMENT_INVALID_ROSTER".into());
+    }
+    let owner =
+        Uuid::parse_str(owner_uid).map_err(|_| "MESH_ENROLLMENT_WRONG_OWNER".to_string())?;
+    let peer = parse_public_key(&approved_peer.public_key).map_err(str::to_string)?;
+    if peer == *own
+        || fingerprint(&peer) != approved_peer.fingerprint
+        || approved_peer.status != "locally_approved"
+    {
+        return Err("MESH_ENROLLMENT_PEER_NOT_APPROVED".into());
+    }
+    let rows: Vec<EnrollmentRecord> =
+        serde_json::from_slice(body).map_err(|_| "MESH_ENROLLMENT_INVALID_ROSTER".to_string())?;
+    validate_two_enrollments(&rows, owner, own, &peer, chrono::Utc::now()).map_err(str::to_string)
+}

@@ -34,6 +34,9 @@ mod local_brain;
 mod local_control;
 mod memory_fabric;
 mod mesh_agent_bootstrap;
+// QA-only clock discontinuity guard; never a production OS event observer.
+#[cfg(feature = "stage4j-qa")]
+mod mesh_clock_gap_qa;
 mod mesh_device_presence;
 mod mesh_directory;
 mod mesh_enrollment_client;
@@ -47,6 +50,26 @@ mod mesh_inbox;
 mod mesh_inbox_receiver;
 mod mesh_katoos_shared_preflight;
 mod mesh_native_issuer;
+// Stage4AB.3.2B: pure test-only OS-event in-flight heartbeat cancellation.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_os_event_channel_qa;
+// Stage4AB.3.2B: pure test-only deny-only macOS OS event frame fence.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_os_event_fence_qa;
+// Stage4AB.3.2B: test-only atomic owner/enrollment rechecks around
+// a previously authenticated TLS heartbeat and OS-event denial.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_supervisor_guard_qa;
+// Stage4AB.3.2B: canonical KatoOS read-only admission recheck adapter.
+// Compiles as QA tests only; NEVER a production Tauri or remote-job API.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_live_admission_recheck_qa;
+// Stage4AB.3.2B: native passive AppKit observer -> Rust cancellation QA only.
+#[cfg(all(test, feature = "stage4j-qa", target_os = "macos"))]
+mod mesh_os_event_native_pipe_qa;
+// Stage4AB.3.2B: bounded native in-process AppKit callback QA only.
+#[cfg(all(test, feature = "stage4j-qa", target_os = "macos"))]
+mod mesh_os_event_native_ffi_qa;
 mod mesh_owner_review_readback;
 mod mesh_preview_auth;
 mod mesh_private_lan_qa;
@@ -61,8 +84,23 @@ mod mesh_tailnet_qa;
 mod mesh_durable_lease_qa;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_fault_reconnect_qa;
+// Stage4AB.3.2B: QA-only deterministic fault and retry gate tests;
+// never an authenticated runtime producer or remote privilege source.
+#[cfg(feature = "stage4j-qa")]
+#[allow(dead_code)]
+mod mesh_fault_policy_qa;
+// Stage4AB.3.2B: test-only mutual TLS duplex and synthetic in-flight revoke.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_inflight_revocation_qa;
+// Stage4AB.3.2B: in-memory half-open TLS and simulated sleep/wake tests only.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_halfopen_fault_qa;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_live_supervisor_qa;
+// Stage4AB.3.2B: synthetic mutually pinned TLS on REAL localhost kernel TCP.
+// Not a production network listener or remote-capability source.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_loopback_tcp_fault_qa;
 #[cfg(feature = "stage4j-qa")]
 mod mesh_reconnect_qa;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
