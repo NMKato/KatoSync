@@ -5,10 +5,12 @@ on:
     paths:
       - "src-tauri/src/mesh_rc67_presence_qa.rs"
       - "src-tauri/src/mesh_rc69_readonly_qa.rs"
+      - "src-tauri/src/mesh_rc69_result_qa.rs"
       - "src-tauri/src/lib.rs"
       - "qa/rc69-presence-harness/**"
       - "tests/meshRc69PresenceWireContract.test.ts"
       - "tests/meshRc69ReadOnlyGitContract.test.ts"
+      - "tests/meshRc69SignedResultContract.test.ts"
       - ".github/workflows/rc69-native-presence-qa.yml"
   workflow_dispatch:
 

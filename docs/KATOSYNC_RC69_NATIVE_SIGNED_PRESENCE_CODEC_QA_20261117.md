@@ -37,3 +37,10 @@ Only after those contracts exist can the Desktop safely call `sign_presence_jws`
 - A Git worktree must have the same canonical root as its registered path. Only `projectId`, sanitized branch, validated HEAD SHA, dirty boolean and provenance are returned; paths, diffs, filenames and file contents are excluded.
 - Native Rust tests use the same source file imported in `qa/rc69-presence-harness` and assert wrong grant, inactive/duplicate project, changed Git root, bad HEAD and bounded output. Node guard tests `tests/meshRc69ReadOnlyGitContract.test.ts` enforce that no runtime/IPC exposure is accidentally introduced.
 - Still **NO-GO** for a ChatGPT `katosync_git_status` tool until the real signed DO-WSS session and result ACK are integrated and tested on M2/M3.
+
+## RC69 signed native `tool.result` receipt (QA-only)
+
+- `src-tauri/src/mesh_rc69_result_qa.rs` signs the actual `NativeGitStatus` typed result with the **same RC67 compact EdDSA/Ed25519 envelope encoder** as `presence.heartbeat`. Binds `ownerId`, `tenantId`, `grantId`, `deviceId`, `sessionId`, `requestId`, monotonic `sequence`, a 15-second `issuedAtMs/expiresAtMs` lease and registered `kid`.
+- The provisional `tool.result` body has `toolName: "katosync_git_status"`, `status: "completed"`, and a bounded `result` containing only native `projectId`, `headSha`, `branch`, `dirty`, `provenance`. It refuses non-advertised tool names, forged/invalid Git evidence and invalid session identifiers. This body format must be reconciled against the **real** Connector RC69 result-ACK implementation before activation.
+- Actual owner, tenant, grant, active consent, per-request project ACL, challenge validity and monotonic sequence CAS **must be verified outside this code** by the future DO-WSS connection and native dispatcher. The test inputs are not authenticated grants.
+- Signature/negative tests compile and exercise the exact production Rust source through `qa/rc69-presence-harness`; `tests/meshRc69SignedResultContract.test.ts` prevents accidental live IPC/tool exposure. No WebSocket is opened, no actual private device key is loaded and no outbound result is delivered by this QA code.

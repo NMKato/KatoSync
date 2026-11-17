@@ -47,6 +47,10 @@ mod mesh_rc67_presence_qa;
 #[cfg(feature = "katoos-auth-qa")]
 #[allow(dead_code)]
 mod mesh_rc69_readonly_qa;
+// Signed native tool.result codec; remains QA-only, with no runtime dispatcher.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc69_result_qa;
 mod mesh_readiness;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.

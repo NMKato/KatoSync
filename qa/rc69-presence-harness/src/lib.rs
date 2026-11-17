@@ -20,3 +20,6 @@ mod project_registry {
 #[path = "../../../src-tauri/src/mesh_rc69_readonly_qa.rs"]
 #[allow(dead_code)]
 mod mesh_rc69_readonly_qa;
+#[path = "../../../src-tauri/src/mesh_rc69_result_qa.rs"]
+#[allow(dead_code)]
+mod mesh_rc69_result_qa;

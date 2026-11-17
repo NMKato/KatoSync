@@ -137,11 +137,6 @@ pub(crate) fn sign_presence_jws(
     existing_device_key: &SigningKey,
 ) -> Result<String, &'static str> {
     validate(ctx)?;
-    let header = JwsHeader {
-        alg: "EdDSA",
-        kid: ctx.key_id,
-        typ: JWS_TYP,
-    };
     let frame = SignedFrame {
         version: 1,
         direction: "device_to_cloud",
@@ -164,8 +159,32 @@ pub(crate) fn sign_presence_jws(
             native_tool_names: ctx.native_tool_names,
         },
     };
+    sign_compact_wire_frame(&frame, ctx.key_id, existing_device_key)
+}
+
+/// Shared encoder for the already specified RC67 device_to_cloud JWS envelope.
+/// It does NOT attest a session, identify a remote caller or grant device access.
+/// The future WSS supervisor must verify the server challenge and signed request
+/// before passing either a heartbeat or a native result to this helper.
+pub(crate) fn sign_compact_wire_frame<T: Serialize>(
+    frame: &T,
+    pinned_key_id: &str,
+    existing_device_key: &SigningKey,
+) -> Result<String, &'static str> {
+    if !(8..=80).contains(&pinned_key_id.len())
+        || !pinned_key_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err("RC67_INVALID_PINNED_KID");
+    }
+    let header = JwsHeader {
+        alg: "EdDSA",
+        kid: pinned_key_id,
+        typ: JWS_TYP,
+    };
     let header = serde_json::to_vec(&header).map_err(|_| "RC67_SERIALIZATION_FAILED")?;
-    let payload = serde_json::to_vec(&frame).map_err(|_| "RC67_SERIALIZATION_FAILED")?;
+    let payload = serde_json::to_vec(frame).map_err(|_| "RC67_SERIALIZATION_FAILED")?;
     if payload.len() > 16_384 {
         return Err("RC67_FRAME_TOO_LARGE");
     }
