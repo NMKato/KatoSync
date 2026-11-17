@@ -69,7 +69,7 @@ test("native same-process callback is gated, bounded and denies only", () => {
   assert.equal(callbackRust.split('#[ignore = ').length - 1, 2);
   for (const forbidden of [
     /networksetup|systemsetup|pmset|tailscale/,
-    /NSTask|posix_spawn|fork\\(|execv\\(|system\\(/,
+    /NSTask|posix_spawn|fork\(|execv\(|system\(/,
     /Keychain|SecItem|NSURLSession|listener|remote_job/,
   ]) {
     const source = callbackNative.split("\n").filter(line => !line.trimStart().startsWith("//")).join("\n");
