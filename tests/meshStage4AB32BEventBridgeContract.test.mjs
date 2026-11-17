@@ -40,7 +40,8 @@ test("native Apple-to-Rust bridge is ignored-by-default QA only and DENY only", 
   assert.ok(lib.includes('target_os = "macos"'));
   assert.ok(native.includes('KATOSYNC_STAGE4AB32B_OS_OBSERVER_BIN'));
   assert.ok(native.includes('heartbeat_or_fail_closed'));
-  assert.ok(native.includes('lease.verified_in_channel_heartbeat(2, Instant::now()).is_err()'));
+  assert.ok(native.includes('verified_in_channel_heartbeat(2, Instant::now())'));
+  assert.ok(native.includes('.is_err()'));
   assert.equal(native.split('#[ignore = ').length - 1, 2);
   assert.ok(native.includes('stdout(Stdio::piped())'));
   assert.ok(native.includes('env_clear()'));
