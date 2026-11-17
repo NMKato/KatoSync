@@ -318,7 +318,7 @@ native source SHA; CI evidence must not be transferred between commits.
 
 ## Canonical KatoOS admission read-only adapter – opt-in source binding (17 Nov 2026)
 
-The existing **production-tested-in-isolation** (but not live-operated here)
+The existing **canonical QA-bound** (but not live-operated here)
 `mesh_admission::recheck_after_probe(&NativeAdmission, fingerprint)` already
 performs current canonical account verification via KatoOS Auth, checks the
 same *existing* local Ed25519 device identity in Keychain, compares the exact
@@ -343,8 +343,30 @@ The CI executes only PURE negative unit tests for feature/opt-in gating,
 owner-peer binding and bounded error categories, plus a JS security contract
 asserting the exact canonical recheck references. CI must NEVER automatically
 set the read-only opt-in or request a production token. **No real KatoOS
-backend query or M2/M3 hardware fault was performed.** The native Rust CI
-result for the new source commit is pending; even after pass it only proves
-the safe source-level binding, not successful live Torhaus access, RLS, current
-enrollment, or a deployed supervisor. A separately authorized controlled
-read-only owner-session test is required for those claims.
+backend query or M2/M3 hardware fault was performed.** **Native code acceptance completed for exact source SHA**
+`b70dbe98c221a989f7368485eee618070ff99770`.
+[macOS 44080826368](https://github.com/NMKato/KatoSync/actions/runs/44080826368):
+**43/43 CI steps SUCCESS**, no failed steps. Logs explicitly confirm
+**3/3** canonical read-only adapter unit tests passed; existing
+Owner/Enrollment/OS-Fence and native AppKit→pinned-TLS heartbeat
+regressions passed. Matching
+[PR Fast Gate 44080836816](https://github.com/NMKato/KatoSync/actions/runs/44080836816):
+**4/4 SUCCESS**; [Attribution 44080836976](https://github.com/NMKato/KatoSync/actions/runs/44080836976):
+**SUCCESS**. No CI step provided an owner JWT or executed this adapter's
+live KatoOS backend method. This is a **compile-wired, fail-closed QA proof,
+NOT a live authenticated Torhaus check**.
+
+Additional read-only metadata verification on the exact KatoOS Supabase
+project configured by `KATOSYNC_AUTH_URL`:
+`katosync.mesh_devices` exists, has RLS enabled and a single
+`authenticated` SELECT policy `mesh_devices_owner_read` including
+`auth.uid()` ownership filtering. The `authenticated` role has schema
+USAGE and table SELECT. The canonical source-required columns
+`owner_user_id`, `signing_public_key`, `fingerprint`,
+`membership_state`, `enrolled_at`, `revoked_at` all exist.
+No table/device rows, session tokens or private credentials were retrieved,
+and no SQL was modified. Metadata does NOT prove a current owner JWT/RLS
+PostgREST read or revocation propagation. Such a read-only session test
+requires a separate explicit owner opt-in with independent recovery and
+no production permission expansion. The following docs-only SHA remains
+distinct from the native code SHA.
