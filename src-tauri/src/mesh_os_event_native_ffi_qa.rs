@@ -171,3 +171,176 @@ async fn native_inprocess_callback_stopped_denies_pending_heartbeat() {
     assert!(frames.iter().any(|x| x == &format!("{PREFIX}STOPPED")));
     assert!(frames.iter().all(|x| x.len() <= 80 && x.is_ascii()));
 }
+
+/// This QA-only integration exercises the **existing supervisor heartbeat
+/// frame/timeout implementation** over real pinned mutual TLS 1.3, then
+/// verifies a genuine native Apple callback can preempt the *second* ACK.
+/// Only synthetic Ed25519 identities / local in-memory duplex are used.
+#[tokio::test]
+#[ignore = "requires owner-isolated, freshly compiled native QA dylib"]
+async fn genuine_pinned_tls13_supervisor_heartbeat_is_denied_by_native_callback() {
+    use crate::{
+        mesh_identity::fingerprint,
+        mesh_live_supervisor_qa::heartbeat_client_for_os_callback_qa,
+        mesh_tls::{
+            strict_client_config, strict_server_config, DeviceTlsIdentity, TLS_PEER_DNS_NAME,
+        },
+        mesh_trust::ApprovedPeer,
+    };
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use ed25519_dalek::SigningKey;
+    use std::sync::Arc;
+    use tokio_rustls::{TlsAcceptor, TlsConnector};
+
+    fn approved(key: &SigningKey) -> ApprovedPeer {
+        ApprovedPeer {
+            fingerprint: fingerprint(&key.verifying_key()),
+            public_key: URL_SAFE_NO_PAD.encode(key.verifying_key().as_bytes()),
+            approved_at: 1_780_000_000,
+            status: "locally_approved".into(),
+        }
+    }
+
+    let client_sign = SigningKey::from_bytes(&[91; 32]);
+    let server_sign = SigningKey::from_bytes(&[92; 32]);
+    let client_id = DeviceTlsIdentity::from_signing_key(&client_sign).unwrap();
+    let server_id = DeviceTlsIdentity::from_signing_key(&server_sign).unwrap();
+    let client_config = strict_client_config(
+        &client_id,
+        &approved(&server_sign),
+        server_id.certificate_der(),
+    )
+    .unwrap();
+    let server_config = strict_server_config(
+        &server_id,
+        &approved(&client_sign),
+        client_id.certificate_der(),
+    )
+    .unwrap();
+    let (client_io, server_io) = duplex(16_384);
+    let session = [93u8; 32]; // QA fixture; not production nonce/admission.
+
+    let client = async move {
+        let name = rustls::pki_types::ServerName::try_from(TLS_PEER_DNS_NAME).unwrap();
+        let mut tls = TlsConnector::from(Arc::new(client_config))
+            .connect(name, client_io)
+            .await
+            .expect("pinned mTLS client handshake");
+        assert_eq!(
+            tls.get_ref().1.protocol_version(),
+            Some(rustls::ProtocolVersion::TLSv1_3)
+        );
+        let mut lease = LiveTlsLease::after_verified_open_channel(
+            [1u8; 16],
+            client_sign.verifying_key().to_bytes(),
+            server_sign.verifying_key().to_bytes(),
+            session,
+            Instant::now(),
+        )
+        .unwrap();
+
+        // First real supervisor-format heartbeat obtains a real TLS ACK.
+        heartbeat_client_for_os_callback_qa(&mut tls, 1, &session)
+            .await
+            .expect("first real supervisor heartbeat ACK");
+        lease
+            .verified_in_channel_heartbeat(1, Instant::now())
+            .unwrap();
+        assert!(lease.is_live(Instant::now()));
+
+        let native = observer();
+        let (sender, mut events) = mpsc::channel::<String>(8);
+        let observed = Arc::new(Mutex::new(Vec::<String>::new()));
+        let evidence = Arc::clone(&observed);
+        let worker = tokio::task::spawn_blocking(move || {
+            let mut context = CallbackSink { sender, observed };
+            let permission = CString::new(OPT_IN).unwrap();
+            unsafe {
+                native(
+                    permission.as_ptr(),
+                    Some(receive),
+                    (&mut context as *mut CallbackSink).cast(),
+                )
+            }
+        });
+
+        let mut fence = OsEventLeaseFence::default();
+        // The server receives heartbeat #2 but intentionally gives NO ACK.
+        // STOPPED from the real native callback must win against this
+        // supervisor's normal 16-second frame timeout, denying the old lease.
+        let cancelled = timeout(
+            Duration::from_secs(14),
+            heartbeat_or_fail_closed(
+                &mut lease,
+                &mut fence,
+                &mut events,
+                heartbeat_client_for_os_callback_qa(&mut tls, 2, &session),
+            ),
+        )
+        .await
+        .expect("native event must beat supervisor frame timeout");
+        assert_eq!(cancelled.err().as_deref(), Some(LEASE_DENIED));
+        assert!(!lease.is_live(Instant::now()));
+        assert!(lease
+            .verified_in_channel_heartbeat(2, Instant::now())
+            .is_err());
+        // Returning a denial MUST physically drop the open pinned TLS stream.
+        drop(tls);
+        let finished = timeout(Duration::from_secs(8), worker)
+            .await
+            .expect("bounded native callback worker must finish")
+            .expect("native callback worker must join");
+        assert_eq!(finished, 0);
+        let frames = evidence.lock().unwrap();
+        assert!(frames.iter().any(|s| s == &format!("{PREFIX}OBSERVING")));
+        assert!(frames.iter().any(|s| s == &format!("{PREFIX}STOPPED")));
+    };
+
+    let server = async move {
+        let mut tls = TlsAcceptor::from(Arc::new(server_config))
+            .accept(server_io)
+            .await
+            .expect("pinned mTLS server handshake");
+        assert_eq!(
+            tls.get_ref().1.protocol_version(),
+            Some(rustls::ProtocolVersion::TLSv1_3)
+        );
+        let mut frame = [0u8; 48];
+        tls.read_exact(&mut frame)
+            .await
+            .expect("first supervisor heartbeat received");
+        assert_eq!(&frame[..8], b"KSM2PING");
+        assert_eq!(u64::from_be_bytes(frame[8..16].try_into().unwrap()), 1);
+        assert_eq!(&frame[16..], &session[..]);
+        frame[..8].copy_from_slice(b"KSM2PONG");
+        tls.write_all(&frame)
+            .await
+            .expect("first supervisor heartbeat ACK write");
+        tls.flush()
+            .await
+            .expect("first supervisor heartbeat ACK flush");
+
+        tls.read_exact(&mut frame)
+            .await
+            .expect("second supervisor heartbeat received");
+        assert_eq!(&frame[..8], b"KSM2PING");
+        assert_eq!(u64::from_be_bytes(frame[8..16].try_into().unwrap()), 2);
+        assert_eq!(&frame[16..], &session[..]);
+        // No ACK for #2. Client must tear down the underlying stream when
+        // the real macOS callback issues the deny-only STOPPED signal.
+        let mut extra = [0u8; 1];
+        let closed = timeout(Duration::from_secs(14), tls.read_exact(&mut extra))
+            .await
+            .expect("client must close original TLS before deadline");
+        assert!(
+            closed.is_err(),
+            "cancelled supervisor left old TLS stream readable"
+        );
+    };
+
+    timeout(Duration::from_secs(23), async {
+        tokio::join!(client, server)
+    })
+    .await
+    .expect("native callback/pinned TLS QA must have a hard deadline");
+}

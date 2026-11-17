@@ -8,6 +8,7 @@ const bridge = readFileSync(new URL("../src-tauri/src/mesh_os_event_channel_qa.r
 const native = readFileSync(new URL("../src-tauri/src/mesh_os_event_native_pipe_qa.rs", import.meta.url), "utf8");
 const callbackNative = readFileSync(new URL("../scripts/qa-stage4ab32b-macos-native-callback.m", import.meta.url), "utf8");
 const callbackRust = readFileSync(new URL("../src-tauri/src/mesh_os_event_native_ffi_qa.rs", import.meta.url), "utf8");
+const supervisor = readFileSync(new URL("../src-tauri/src/mesh_live_supervisor_qa.rs", import.meta.url), "utf8");
 
 test("in-flight OS event bridge is only compiled as QA tests, not app runtime", () => {
   assert.match(lib, /#\[cfg\(all\(test, feature = "stage4j-qa"\)\)\]\s*mod mesh_os_event_channel_qa;/);
@@ -66,7 +67,14 @@ test("native same-process callback is gated, bounded and denies only", () => {
   assert.ok(callbackRust.includes('heartbeat_or_fail_closed'));
   assert.ok(callbackRust.includes('blocking_send(event)'));
   assert.ok(callbackRust.includes('spawn_blocking'));
-  assert.equal(callbackRust.split('#[ignore = ').length - 1, 2);
+  assert.equal(callbackRust.split('#[ignore = ').length - 1, 3);
+  assert.ok(callbackRust.includes('genuine_pinned_tls13_supervisor_heartbeat_is_denied_by_native_callback'));
+  assert.ok(callbackRust.includes('heartbeat_client_for_os_callback_qa'));
+  assert.ok(callbackRust.includes('TlsConnector::from'));
+  assert.ok(callbackRust.includes('TlsAcceptor::from'));
+  assert.ok(callbackRust.includes('ProtocolVersion::TLSv1_3'));
+  assert.ok(supervisor.includes('#[cfg(test)]'));
+  assert.ok(supervisor.includes('pub(crate) async fn heartbeat_client_for_os_callback_qa'));
   for (const forbidden of [
     /networksetup|systemsetup|pmset|tailscale/,
     /NSTask|posix_spawn|fork\(|execv\(|system\(/,

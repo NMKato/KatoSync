@@ -234,3 +234,27 @@ The Objective-C callback code remains **unlinked from the production Tauri
 runtime**; its dylib exists only for the explicitly isolated CI tests. A
 subsequent documentation-only Git SHA does not retroactively replace the exact
 native source SHA used for this evidence.
+
+## Real pinned TLS1.3 supervisor heartbeat + native callback denial (QA-only)
+
+The QA-only `mesh_live_supervisor_qa::heartbeat_client_for_os_callback_qa`
+exports its existing heartbeat client implementation to Rust **unit tests
+only**, via `#[cfg(test)]`. There is NO new Tauri IPC, runtime listener,
+network control, or production command. In the same ignored-by-default
+macOS in-process callback QA module, a new test uses **real, mutually pinned
+TLS1.3** on Tokio memory duplex (strict approved synthetic Ed25519 peer
+pins, real TLS configuration, not real production account enrollment).
+The first supervisor-format 48-byte heartbeat receives a valid ACK. The
+second heartbeat is correctly received by the test server but the ACK is
+intentionally withheld; the genuine bounded Apple callback must emit
+`STOPPED`, interrupt the existing supervisor heartbeat future **before its
+16-second frame deadline**, invalidate the canonical synthetic
+`LiveTlsLease` and cause the original TLS client stream to be dropped.
+The peer is not permitted to accept a second ACK and no remote job API is
+involved. Timeout guards enclose both native callbacks and the two TLS
+participants. This extends the prior standalone Tokio-duplex cancellation
+QA by exercising actual pinned TLS and the existing supervisor heartbeat
+logic, but does **not** attach an event observer to the real admission/
+long-running production supervisor, perform remote device fault injection,
+or prove live KatoOS revocation. The CI run for the new source SHA must pass
+before this test can be called accepted.

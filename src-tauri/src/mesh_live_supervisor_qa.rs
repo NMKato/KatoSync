@@ -202,6 +202,17 @@ async fn heartbeat_client<T: AsyncRead + AsyncWrite + Unpin>(
     .map_err(|_| "MESH_STAGE4AB2_HEARTBEAT_TIMEOUT".to_string())?
     .map_err(str::to_string)
 }
+// Test-only adapter to the exact existing pinned-TLS supervisor heartbeat
+// parser / sequence / timeout. No QA CLI, Tauri command or runtime entry.
+#[cfg(test)]
+pub(crate) async fn heartbeat_client_for_os_callback_qa<T: AsyncRead + AsyncWrite + Unpin>(
+    tls: &mut T,
+    sequence: u64,
+    session: &[u8; 32],
+) -> Result<(), String> {
+    heartbeat_client(tls, sequence, session).await
+}
+
 async fn heartbeat_server<T: AsyncRead + AsyncWrite + Unpin>(
     tls: &mut T,
     sequence: u64,
