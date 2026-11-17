@@ -14,6 +14,13 @@ This is a private, non-production **source-only native QA** extension of the pre
 
 **The native fixture uses the original pinned `mesh_tls.rs` and canonical state machine source, but a minimal test-only `ApprovedPeer`/fingerprint stub in place of the real macOS Keychain owner registry.** It therefore does not establish real owner consent, current RC66K outbox records, Cloudflare data delivery or authorization to perform device commands.
 
+## Verified local QA results (17 November 2026)
+
+- **Native Rust: 30/30 PASS**, including original Mesh state machine tests, original pinned rustls/mTLS tests and five new Stage4AM native scenarios. The new RC66L-shaped signed frame was sent on the same locally opened, mutually authenticated TLS 1.3 loopback stream that carried the original in-channel heartbeat. The receiver's real canonical Mesh lease became revoked before its private 0600 journal was fsynced; an independently device-signed JWS receipt then crossed the same TLS socket and was verified by its sender.
+- **Node contract and regression: 69/69 PASS**, including the Stage4AL cross-repository RC66L JWS contract, with zero skipped tests.
+- Source-only Rust probe uses test-held ephemeral Ed25519 signer keys and a synthetic RC66K correlation digest; none originates from a current KatoOS authority, real RC66K outbox or physical remote Mac. The application is not running this test receiver as a production service.
+- Native parser accepts RC66L's JSON.stringify insertion-order payload while cryptographically verifying the exact signed input bytes. Rust's own map ordering is never treated as the server's canonical wire order.
+
 ## QA harness
 
 `src-tauri/src/mesh_durable_lease_qa/inchannel_qa/stage4am_rc66l_native_qa.rs` is included ONLY from the production-source `inchannel_qa.rs` through `#[cfg(test)]`.
