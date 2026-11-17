@@ -1,4 +1,5 @@
 // Stage4AM — native RC66L QA on the ORIGINAL pinned rustls/ChannelBinding.
+// Stage4AN physical two-host QA is a private test-only CHILD module.
 // Entire module is reachable only from #[cfg(test)] in inchannel_qa.rs.
 // No production service, Keychain mutation, Remote-MCP tool or OS command.
 use super::*;
@@ -677,3 +678,8 @@ fn corrupted_or_symlinked_marker_remains_poisoned_not_a_grant() {
         assert!(persist_revoke(&dir.0, 7, &hex_digest(b"msg")).is_err());
     }
 }
+
+// Stage4AN: physically separate M2 Pro and M3, no production runtime entry.
+#[cfg(test)]
+#[path = "stage4am_rc66l_native_qa/stage4an_physical_qa.rs"]
+mod stage4an_physical_qa;
