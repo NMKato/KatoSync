@@ -408,3 +408,29 @@ this role `auth.uid() IS NULL` and the visible row count was **zero**.
 The transaction was ROLLBACKed; no data, policy, keys or session state
 were changed. This proves owner-absent RLS denial, not positive JWT
 signature authentication or owner-specific enrollment presence.
+
+
+## Verified native no-hidden-session-refresh gate – 17 Nov 2026
+
+**Exact tested source SHA:** `e7e4b6912ef947b467f5ffa3ccc2ce50c30fdab3`.
+[Native macOS 44095890819](https://github.com/NMKato/KatoSync/actions/runs/44095890819)
+finished **43/43 SUCCESS**, 0 failed. The job log proves **4/4**
+`mesh_live_admission_recheck_qa::tests`, including
+`canonical_auth_may_rotate_tokens_so_read_only_opt_in_alone_is_insufficient`,
+passed without opening a user token, connecting to production sessions,
+or invoking the refresh-capable canonical backend.
+
+[PR Fast Gate 44095907947](https://github.com/NMKato/KatoSync/actions/runs/44095907947)
+completed **4/4 PASS** and
+[Attribution Policy 44095907856](https://github.com/NMKato/KatoSync/actions/runs/44095907856)
+completed **PASS**. This CI evidence is tied to the source SHA above;
+a subsequent docs-only commit does not inherit an independent native result.
+
+The live Postgres negative RLS proof remains **0 rows visible as
+`authenticated` without JWT `auth.uid()`**, in a read-only, rolled-back
+transaction. No positive, signed-in owner session was tested; no QA
+opt-in for possible token rotation was set on M2/M3. The next safe owner
+session test requires a **no-refresh authenticated read** in the existing
+logged-in QA app process, or informed explicit session-rotation consent
+for the existing canonical helper. Never silently turn a read-only
+verification into a token refresh, owner rebinding or remote job.
