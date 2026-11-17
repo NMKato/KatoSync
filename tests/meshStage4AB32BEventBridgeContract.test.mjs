@@ -150,7 +150,8 @@ test("strict owner QA uses ONLY existing process cache and two fixed GETs, never
   assert.ok(gate.includes('crate::cached_supabase_access_token()'));
   assert.ok(gate.includes('token_snapshot_is_current'));
   assert.ok(gate.includes('guarded_supervisor_cycle('));
-  assert.ok(gate.includes('recheck_existing_session_no_refresh(admitted, requested_fingerprint, snapshot.as_str())'));
+  assert.equal(gate.split('recheck_existing_session_no_refresh(').length - 1, 3);
+  assert.ok(gate.includes('snapshot.as_str(),'));
   assert.ok(gate.includes('get(format!("{}/auth/v1/user", crate::KATOSYNC_AUTH_URL))'));
   assert.ok(gate.includes('get(format!("{}/rest/v1/mesh_devices", crate::KATOSYNC_AUTH_URL))'));
   assert.ok(gate.includes('qa_validate_owner_roster_no_refresh'));
