@@ -10,6 +10,7 @@ on:
       - "tests/meshStage4AB32BRecoveryPreflight.test.mjs"
       - "scripts/qa-stage4ab32b-recovery-preflight.sh"
       - "scripts/qa-stage4ab32b-macos-os-events.m"
+      - "scripts/qa-stage4ab32b-macos-native-callback.m"
       - "tests/meshStage4AB32BOsObserverContract.test.mjs"
       - "tests/meshStage4AB32BEventBridgeContract.test.mjs"
       - "rust-toolchain.toml"
@@ -87,6 +88,20 @@ jobs:
           KATOSYNC_STAGE4AB32B_OS_OBSERVER_BIN="$qa_dir/qa-os-observer" \
             cargo test --locked --manifest-path src-tauri/Cargo.toml \
               --features stage4j-qa mesh_os_event_native_pipe_qa --lib -- --ignored
+
+      - name: Verify bounded native in-process AppKit callback denies an in-flight Rust QA heartbeat
+        # Test-only dylib from reviewed Objective-C source; no persistent
+        # daemon, child command, code-signing, Keychain or device changes.
+        run: |
+          qa_dir="$(mktemp -d "${RUNNER_TEMP}/katosync-stage4ab32b-ffi.XXXXXX")"
+          trap 'rm -rf "$qa_dir"' EXIT
+          clang -fobjc-arc -fblocks -dynamiclib \
+            -framework AppKit -framework Network -framework Foundation \
+            scripts/qa-stage4ab32b-macos-native-callback.m \
+            -o "$qa_dir/qa-native-callback.dylib"
+          KATOSYNC_STAGE4AB32B_OS_OBSERVER_DYLIB="$qa_dir/qa-native-callback.dylib" \
+            cargo test --locked --manifest-path src-tauri/Cargo.toml \
+              --features stage4j-qa mesh_os_event_native_ffi_qa --lib -- --ignored
 
       - name: Run native Stage4Y admission denial tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa stage4y_diagnostics_tests --lib

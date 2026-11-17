@@ -187,3 +187,38 @@ sleep/wake, a real owner/enrollment revocation, or a remote-execution grant.
 Draft PR #279 stays stacked on #278, unmerged and not deployed. Any subsequent
 documentation-only Git commit has its own branch SHA, distinct from the
 verified native source SHA; no new native-proof claim is made for it.
+
+## Native in-process callback QA candidate – 17 Nov 2026
+
+The new `scripts/qa-stage4ab32b-macos-native-callback.m` exports only
+`katosync_stage4ab32b_native_events_qa` as an explicit, owner-opted-in
+five-second **in-process** AppKit/NWPathMonitor source. No process starts
+outside the Rust QA test; no stdout framing or shell execution is needed.
+It makes no OS/network/power/Keychain changes. A serial dispatch queue plus
+synchronized `active = NO` and `dispatch_sync` drain callbacks before the
+borrowed Rust event context is released. The short-lived QA dylib is never
+unloaded before process exit because already queued OS callback code must not
+race dynamic unloading.
+
+`src-tauri/src/mesh_os_event_native_ffi_qa.rs` is **test-only on macOS**,
+`#[ignore]` and requires an exact CI-built unsigned native dylib path. Its
+negative test ensures missing opt-in returns 64 without events. Its positive
+test uses a real passive native in-process callback (without inducing sleep,
+wake or network loss) to record `OBSERVING`, possible Wi-Fi status and
+`STOPPED`, then passes bounded denial frames directly to the existing
+`heartbeat_or_fail_closed` Rust QA guard. A pending Tokio duplex heartbeat
+must be cancelled and a **synthetic** canonical lease invalidated by STOPPED.
+The separate, already verified frame-fence tests still cover link loss,
+sleep/wake, malformed frames and disconnection. A headless CI host might
+begin with `WIFI_PATH_LOST`; this specific STOPPED test records that hint
+but isolates the terminal observer-stop assertion.
+
+**Pre-CI hardware-safe evidence:** M2 compiled the native unsigned dylib,
+resolved the C entrypoint, and ran a passive pthread smoke test. Negative
+opt-in returned 64; the positive path returned zero with exactly one
+`OBSERVING`, one `STOPPED`, and one Wi-Fi path event. The Rust QA source
+passed `rustfmt --check` separately on the M2. There were NO physical
+sleep, wake, WLAN, Tailscale, system power or runtime privilege changes.
+The complete Rust FFI QA CI is pending, so no deployment/owner/recovery
+acceptance is claimed. The source is not linked into the production Tauri
+app and does not create a persistent runtime observer.
