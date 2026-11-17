@@ -15,7 +15,7 @@ Stage4AK binds those prerequisites through **two independent, isolated QA contra
 
 - **55/55 Node tests:** Stage4AC–Stage4AK contracts, including Stage4AK real Ed25519 control-plane ACK + independent device notice/receipt + wrong-key/wrong-scope/replay/TTL negatives.
 - **16/16 native Rust tests:** standalone Stage4AK harness compiles the **actual canonical Mesh state machine source**, using a build-script-created *temporary copy* that omits only unrelated Tauri network and signed-job child modules. Five new Stage4AK tests cover signed revocation of a live canonical session, forgery and scope mismatch, duplicate revokes, restart with absent journal, and unsafe journal failure. Other canonical lease regressions remain included.
-- Native Stage4AF source-only suite was **56/56 PASS** at Stage4AJ, and must remain a separate regression whenever the shared execution fence changes.
+- **56/56 Stage4AF native Rust regression PASS in Stage4AK** (re-run locally with `cargo test --offline --locked --manifest-path tests/native/stage4af/Cargo.toml`), preserving signed read-only execution-time safety fences without enabling any runtime remote command.
 - Stage4AJ's physical Tailscale mTLS transfer remains a **separate prior result**. Stage4AK itself has **not** yet delivered a live RC66K event over the regular KatoSync Mesh runtime.
 
 The isolated native QA compilation is:
