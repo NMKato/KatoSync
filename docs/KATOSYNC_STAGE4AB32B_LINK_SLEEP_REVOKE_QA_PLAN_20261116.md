@@ -219,6 +219,18 @@ opt-in returned 64; the positive path returned zero with exactly one
 `OBSERVING`, one `STOPPED`, and one Wi-Fi path event. The Rust QA source
 passed `rustfmt --check` separately on the M2. There were NO physical
 sleep, wake, WLAN, Tailscale, system power or runtime privilege changes.
-The complete Rust FFI QA CI is pending, so no deployment/owner/recovery
-acceptance is claimed. The source is not linked into the production Tauri
-app and does not create a persistent runtime observer.
+The exact Rust FFI QA source SHA `3170975748c37792dd3dfcc90f3a980b8c9d93b3`
+passed the [native macOS workflow 44056486038](https://github.com/NMKato/KatoSync/actions/runs/44056486038)
+with **41/41 successful CI steps**. Both ignored-by-default native callback tests
+passed inside the full Rust QA test process; the original out-of-process
+Apple observer and all denial/reconnect regressions also passed. The matching
+[PR Fast Gate 44056493956](https://github.com/NMKato/KatoSync/actions/runs/44056493956)
+passed all four jobs, and
+[Attribution 44056493902](https://github.com/NMKato/KatoSync/actions/runs/44056493902)
+passed. This establishes a limited native callback-to-lease QA milestone only:
+no production owner/recovery acceptance, signed runtime event listener, real
+hardware sleep/network fault, remote job authorization, merge or deployment.
+The Objective-C callback code remains **unlinked from the production Tauri
+runtime**; its dylib exists only for the explicitly isolated CI tests. A
+subsequent documentation-only Git SHA does not retroactively replace the exact
+native source SHA used for this evidence.
