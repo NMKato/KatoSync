@@ -90,7 +90,7 @@ Kato AI kombiniert eine austauschbare lokale Modell-Runtime mit Status-, Speiche
 
 Der macOS-Test auf einem **M2 Pro** hat eine funktionierende lokale Inferenz mit **Metal** bestätigt. Die angezeigte GPU-Auslastung beschreibt dabei das **gesamte Gerät**, nicht die eindeutig gemessene GPU-Auslastung eines einzelnen Modells. Die Windows-Tests beweisen noch **keine** verpackte CUDA- oder Intel-GPU-Inferenz. Fremde Modellprozesse werden nicht automatisch beendet.
 
-## SmartMesh – aktueller QA-Entwicklungsstand (16.11.2026)
+## SmartMesh – aktueller QA-Entwicklungsstand (17.11.2026)
 
 Die SmartMesh-Sicherheitsentwicklung erfolgt **git-versioniert auf separaten QA-Branches**, nicht als unkontrollierte Änderung von `main`. Der aktuelle Nachweis ist in [Roadmap #269](https://github.com/NMKato/KatoSync/issues/269), dem Basis-[Draft-PR #278](https://github.com/NMKato/KatoSync/pull/278) und dem darauf aufbauenden [Draft-PR #279](https://github.com/NMKato/KatoSync/pull/279) dokumentiert.
 
@@ -102,9 +102,9 @@ Die SmartMesh-Sicherheitsentwicklung erfolgt **git-versioniert auf separaten QA-
 | **Betriebssicherheit** | Passive Checks auf M2/M3; riskante Hardware-Faults werden mangels unabhängig geprüfter Recovery-Verbindung verweigert | Nachgewiesener unabhängiger Wiederherstellungsweg und beaufsichtigte Hardware-Abnahme |
 | **Fernausführung** | TLS-/Presence-Nachweis allein gibt ausdrücklich **keine** Remote-Jobs, Schreibrechte oder Admin-Befugnisse frei | Separater signierter, begrenzter Autorisierungs- und Ausführungs-Gate |
 
-**Verifizierter CI-Checkpoint:** Commit `b5d6565d` – [native macOS-QA vollständig erfolgreich](https://github.com/NMKato/KatoSync/actions/runs/44035693844), PR Fast Gate und Attribution erfolgreich. Seitdem wird eine **echte passive Apple-Observer-stdout → Rust-Lease-Denial-QA** ergänzt: test-only, kein dauerhaftes OS-Event-Handling und keine neuen Rechte. Für neuere Änderungen gilt stets der Commit-spezifische Status im PR.
+**Verifizierter CI-Checkpoint (17.11.2026):** Commit `4b901f7a97b4d13b10697259d0838bf0a99e5c68` – [native macOS Stage4AB.3.2B QA: 40/40 CI-Schritte PASS](https://github.com/NMKato/KatoSync/actions/runs/44053584992), [PR Fast Gate: 4/4 PASS](https://github.com/NMKato/KatoSync/actions/runs/44053595162), Attribution Policy PASS. Die **echte passive Apple-Observer-stdout → Rust-Lease-Denial-Testkette** ist damit für diesen exakten Code-Commit erfolgreich geprüft. Der kurzlebige Observer benötigt weiterhin ein ausdrücklich gesetztes QA-Opt-in; ohne dieses bleibt der Start verweigert.
 
-**Aktuelle native Integrationsprüfung (17.11.2026):** Ein zusätzlicher macOS-Observer→Rust-Test wird unter anderem darauf geprüft, dass sein reguläres Ende tatsächlich den wartenden Heartbeat beendet. Ein vorheriger Testlauf scheiterte an der zeitlichen Abfolge von WLAN-Statusmeldung und Observer-Ende; die Testfälle sind jetzt getrennt, ohne die Sperrregeln zu verändern. Der neue Code ist **erst nach eigenem erfolgreichem CI-Lauf abgenommen**.
+**Abgrenzung:** Erfolgreich geprüft ist der test-only Beobachter-Prozess, der regulär endet und eine *synthetische* Rust-TLS-Lease in einem wartenden Test-Heartbeat sperrt. **Nicht** nachgewiesen sind ein echter Wi-Fi-Abbruch oder Sleep/Wake auf M2/M3, ein langlebiger signierter In-Process-macOS-Callback, ein produktiver Mesh-Supervisor, eine Live-Enrollment-Revocation oder Remote-Jobs. Diese Freigaben bleiben offen.
 
 **CI-Qualität:** Der JavaScript-Quellvertrag der OS-Ereignisbrücke wird bereits **vor der nativen macOS-Rust-Kompilierung** auf Syntax, Test-only-Grenzen und fehlende Remote-Autorisierung geprüft. Native Heartbeat- und Lease-Tests folgen separat; Freigaben gelten immer nur für den exakt geprüften Git-Commit.
 

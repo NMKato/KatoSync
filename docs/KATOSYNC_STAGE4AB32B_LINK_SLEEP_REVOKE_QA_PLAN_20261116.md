@@ -166,3 +166,24 @@ The native observer integration CI step has moved directly after the initial
 Rust compilation and before the long legacy admission/fault regressions, so
 future failures are discovered sooner. No production process or hardware
 state is affected; the next native CI result is necessary for acceptance.
+
+## Verified CI checkpoint – 17 Nov 2026
+
+The exact QA source commit `4b901f7a97b4d13b10697259d0838bf0a99e5c68`
+completed [native macOS workflow 44053584992](https://github.com/NMKato/KatoSync/actions/runs/44053584992)
+with **40/40 successful steps, zero failed**. The specifically gated,
+ignored-by-default AppKit/NWPathMonitor observer integration test passed on a
+native macOS runner: it compiled the Objective-C source, asserted missing
+opt-in is denied, consumed genuine bounded `OBSERVING`/`STOPPED` frames,
+cancelled a still-pending Tokio heartbeat and invalidated a synthetic
+`LiveTlsLease`. The rest of the native QA regression suite and unsigned
+compile-only artifact passed. The matching PR Fast Gate
+[44053595162](https://github.com/NMKato/KatoSync/actions/runs/44053595162)
+was **4/4 SUCCESS**; matching Attribution Policy 44053595181 was SUCCESS.
+
+This success is specific to the tested code SHA. It is not a signed or
+production OS event source, evidence of physical M2/M3 network loss or
+sleep/wake, a real owner/enrollment revocation, or a remote-execution grant.
+Draft PR #279 stays stacked on #278, unmerged and not deployed. Any subsequent
+documentation-only Git commit has its own branch SHA, distinct from the
+verified native source SHA; no new native-proof claim is made for it.
