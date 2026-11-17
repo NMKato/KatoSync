@@ -27,6 +27,11 @@ const ACCEPT: &[u8; 8] = b"KAB2ACPT";
 const BEAT: &[u8; 8] = b"KAB2BEAT";
 const REPLY: &[u8; 8] = b"KAB2RPLY";
 const WAIT: Duration = Duration::from_secs(6);
+// Stage4AM: only a test-only native RC66L receive proof on the SAME pinned
+// rustls channel. No production caller, listener, IPC or remote job path.
+#[cfg(test)]
+#[path = "inchannel_qa/stage4am_rc66l_native_qa.rs"]
+mod stage4am_rc66l_native_qa;
 fn deny() -> String {
     "STAGE4AB2_INCHANNEL_DENIED".into()
 }
