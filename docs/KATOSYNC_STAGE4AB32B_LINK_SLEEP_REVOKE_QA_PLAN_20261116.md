@@ -296,4 +296,21 @@ checks: on the native STOPPED denial, precheck must have run exactly once
 and postcheck must not run. This is a hardware-safe test-only adaptation
 with **synthetic** owner/enrollment responses, not a live KatoOS database
 revalidation, production event listener, remote job gate or M2/M3 fault.
-The exact new source SHA still requires its own native CI acceptance.
+**Native acceptance completed** for exact code SHA
+`1810793dadabce727e220df9fe53a3fc6a5982a1`:
+[native macOS run 44061654948](https://github.com/NMKato/KatoSync/actions/runs/44061654948)
+finished **42/42 steps SUCCESS**, no failures. The job log explicitly
+confirms **7/7** supervisor recheck/event-guard tests and **3/3** native
+AppKit in-process callback tests, including the true mutual pinned TLS1.3
+heartbeat fixture. Corresponding
+[PR Fast Gate 44061666438](https://github.com/NMKato/KatoSync/actions/runs/44061666438)
+finished **4/4 SUCCESS** and
+[Attribution 44061666349](https://github.com/NMKato/KatoSync/actions/runs/44061666349)
+was **SUCCESS**.
+
+The recheck values remain **synthetic only**, and no production KatoOS
+admission or live enrollment-revoke has been validated. The code remains
+test-only and unmerged; there is no signed, long-running callback integration
+in the actual runtime and no real M2/M3 physical fault or remote execution
+permission. The next documentation-only Git SHA is distinct from this exact
+native source SHA; CI evidence must not be transferred between commits.
