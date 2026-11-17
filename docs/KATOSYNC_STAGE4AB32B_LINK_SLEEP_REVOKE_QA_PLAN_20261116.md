@@ -256,5 +256,19 @@ participants. This extends the prior standalone Tokio-duplex cancellation
 QA by exercising actual pinned TLS and the existing supervisor heartbeat
 logic, but does **not** attach an event observer to the real admission/
 long-running production supervisor, perform remote device fault injection,
-or prove live KatoOS revocation. The CI run for the new source SHA must pass
-before this test can be called accepted.
+or prove live KatoOS revocation. **Native macOS acceptance completed** for exact source SHA
+`ed5affb0c1a4803119281a46411ec05f9130e940`:
+[workflow 44058718624](https://github.com/NMKato/KatoSync/actions/runs/44058718624)
+was **41/41 successful, zero failed**. The CI job log explicitly shows
+three passing ignored-by-default native callback unit tests, including
+`genuine_pinned_tls13_supervisor_heartbeat_is_denied_by_native_callback`
+(3 passed, 0 failed, completed in 5.01 seconds). Matching
+[PR Fast Gate 44058731305](https://github.com/NMKato/KatoSync/actions/runs/44058731305)
+was 4/4 successful and Attribution Policy
+[44058731255](https://github.com/NMKato/KatoSync/actions/runs/44058731255)
+was successful. This proves the **synthetic pinned mTLS supervisor heartbeat
+fixture is interruptible by a real passive native callback**, not that a
+signed long-running production supervisor handles real physical sleep/network
+loss, live enrollment revocation, owner consent, or remote execution.
+Separate release/recovery/security gates remain open. This documentation
+commit is distinct from the exact native code SHA that generated the proof.
