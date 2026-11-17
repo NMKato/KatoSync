@@ -180,7 +180,7 @@ mod tests {
         let output = serde_json::to_string(&result).unwrap();
         assert!(!output.contains(dir.to_string_lossy().as_ref()));
         assert!(!output.contains("hidden-source-file"));
-        fs::remove_dir_all(dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -202,7 +202,7 @@ mod tests {
             inspect_registered_git_status(&registry, "alpha", "alpha", sample_runner(&dir)),
             Err("RC69_RO_PROJECT_NOT_GRANTED")
         );
-        fs::remove_dir_all(dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -222,6 +222,6 @@ mod tests {
             runner(root, args)
         });
         assert_eq!(blocked, Err("RC69_RO_GIT_INVALID"));
-        fs::remove_dir_all(dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
