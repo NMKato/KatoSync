@@ -9,6 +9,7 @@ const native = readFileSync(new URL("../src-tauri/src/mesh_os_event_native_pipe_
 const callbackNative = readFileSync(new URL("../scripts/qa-stage4ab32b-macos-native-callback.m", import.meta.url), "utf8");
 const callbackRust = readFileSync(new URL("../src-tauri/src/mesh_os_event_native_ffi_qa.rs", import.meta.url), "utf8");
 const supervisor = readFileSync(new URL("../src-tauri/src/mesh_live_supervisor_qa.rs", import.meta.url), "utf8");
+const ownerGuard = readFileSync(new URL("../src-tauri/src/mesh_supervisor_guard_qa.rs", import.meta.url), "utf8");
 
 test("in-flight OS event bridge is only compiled as QA tests, not app runtime", () => {
   assert.match(lib, /#\[cfg\(all\(test, feature = "stage4j-qa"\)\)\]\s*mod mesh_os_event_channel_qa;/);
@@ -70,6 +71,7 @@ test("native same-process callback is gated, bounded and denies only", () => {
   assert.equal(callbackRust.split('#[ignore = ').length - 1, 3);
   assert.ok(callbackRust.includes('genuine_pinned_tls13_supervisor_heartbeat_is_denied_by_native_callback'));
   assert.ok(callbackRust.includes('heartbeat_client_for_os_callback_qa'));
+  assert.ok(callbackRust.includes('guarded_supervisor_cycle('));
   assert.ok(callbackRust.includes('TlsConnector::from'));
   assert.ok(callbackRust.includes('TlsAcceptor::from'));
   assert.ok(callbackRust.includes('ProtocolVersion::TLSv1_3'));
@@ -82,5 +84,30 @@ test("native same-process callback is gated, bounded and denies only", () => {
   ]) {
     const source = callbackNative.split("\n").filter(line => !line.trimStart().startsWith("//")).join("\n");
     assert.doesNotMatch(source, forbidden);
+  }
+});
+
+test("supervisor owner/enrollment rechecks and OS denial share a QA-only cycle", () => {
+  assert.ok(lib.includes('mod mesh_supervisor_guard_qa;'));
+  assert.ok(lib.includes('#[cfg(all(test, feature = "stage4j-qa"))]'));
+  for (const required of [
+    'precheck()', 'postcheck()', 'heartbeat_or_fail_closed(',
+    'lease.on_owner_or_peer_revoked()',
+    'lease.verified_in_channel_heartbeat(sequence, Instant::now())',
+    'revoked_owner_before_heartbeat_never_sends_or_renews',
+    'revoked_enrollment_after_valid_tls_ack_still_denies_renewal',
+    'queued_sleep_preempts_valid_owner_checks_and_ready_heartbeat',
+    'native_link_loss_interrupts_pending_real_io_and_postcheck_never_runs',
+    'vanished_native_event_producer_denies_even_with_fresh_owner_checks',
+    'old_denied_lease_cannot_resume_after_wifi_available',
+  ]) {
+    assert.ok(ownerGuard.includes(required), 'missing QA safety control: ' + required);
+  }
+  for (const forbidden of [
+    'TcpListener::bind', 'std::process::Command',
+    'networksetup', 'systemsetup', 'pmset',
+    'tauri::command', 'invoke_handler', 'keyring::',
+  ]) {
+    assert.ok(!ownerGuard.includes(forbidden), 'unexpected QA authority source: ' + forbidden);
   }
 });

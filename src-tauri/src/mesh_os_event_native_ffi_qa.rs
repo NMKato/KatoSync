@@ -182,6 +182,7 @@ async fn genuine_pinned_tls13_supervisor_heartbeat_is_denied_by_native_callback(
     use crate::{
         mesh_identity::fingerprint,
         mesh_live_supervisor_qa::heartbeat_client_for_os_callback_qa,
+        mesh_supervisor_guard_qa::guarded_supervisor_cycle,
         mesh_tls::{
             strict_client_config, strict_server_config, DeviceTlsIdentity, TLS_PEER_DNS_NAME,
         },
@@ -268,17 +269,32 @@ async fn genuine_pinned_tls13_supervisor_heartbeat_is_denied_by_native_callback(
         // The server receives heartbeat #2 but intentionally gives NO ACK.
         // STOPPED from the real native callback must win against this
         // supervisor's normal 16-second frame timeout, denying the old lease.
+        let prechecks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let postchecks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let pre = Arc::clone(&prechecks);
+        let post = Arc::clone(&postchecks);
         let cancelled = timeout(
             Duration::from_secs(14),
-            heartbeat_or_fail_closed(
+            guarded_supervisor_cycle(
                 &mut lease,
                 &mut fence,
                 &mut events,
+                2,
+                || async move {
+                    pre.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                },
                 heartbeat_client_for_os_callback_qa(&mut tls, 2, &session),
+                || async move {
+                    post.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                },
             ),
         )
         .await
         .expect("native event must beat supervisor frame timeout");
+        assert_eq!(prechecks.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(postchecks.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(cancelled.err().as_deref(), Some(LEASE_DENIED));
         assert!(!lease.is_live(Instant::now()));
         assert!(lease

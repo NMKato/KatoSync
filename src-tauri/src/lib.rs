@@ -56,6 +56,10 @@ mod mesh_os_event_channel_qa;
 // Stage4AB.3.2B: pure test-only deny-only macOS OS event frame fence.
 #[cfg(all(test, feature = "stage4j-qa"))]
 mod mesh_os_event_fence_qa;
+// Stage4AB.3.2B: test-only atomic owner/enrollment rechecks around
+// a previously authenticated TLS heartbeat and OS-event denial.
+#[cfg(all(test, feature = "stage4j-qa"))]
+mod mesh_supervisor_guard_qa;
 // Stage4AB.3.2B: native passive AppKit observer -> Rust cancellation QA only.
 #[cfg(all(test, feature = "stage4j-qa", target_os = "macos"))]
 mod mesh_os_event_native_pipe_qa;

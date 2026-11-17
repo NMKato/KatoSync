@@ -272,3 +272,28 @@ signed long-running production supervisor handles real physical sleep/network
 loss, live enrollment revocation, owner consent, or remote execution.
 Separate release/recovery/security gates remain open. This documentation
 commit is distinct from the exact native code SHA that generated the proof.
+
+
+## Owner/enrollment recheck + deny-only native OS events as one QA cycle (17 Nov 2026)
+
+The new pure test-only `mesh_supervisor_guard_qa.rs` models a bounded
+supervisor heartbeat cycle with separately supplied owner/both-enrollment
+checks **before and after** a pinned TLS heartbeat ACK. Those checks and
+the actual authenticated supervisor heartbeat future run within the same
+`heartbeat_or_fail_closed` denial fence. On a failed precheck, postcheck,
+incomplete heartbeat, OS denial, lost event producer or stale old lease,
+the canonical `LiveTlsLease` is permanently invalidated; on denial the
+caller must also drop the old TLS stream.
+
+Seven additional native Rust regressions cover pre/ACK/post success order,
+owner revoked before I/O, enrollment revoked after an ACK, queued sleep
+denial, in-flight link-loss cancellation of Tokio read with no postcheck,
+lost native producer, and Wi-Fi return not reactivating an old lease.
+
+The passive native macOS callback/pinned TLS test now wraps the **existing
+supervisor heartbeat** in this same gate. It counts synthetic pre/post
+checks: on the native STOPPED denial, precheck must have run exactly once
+and postcheck must not run. This is a hardware-safe test-only adaptation
+with **synthetic** owner/enrollment responses, not a live KatoOS database
+revalidation, production event listener, remote job gate or M2/M3 fault.
+The exact new source SHA still requires its own native CI acceptance.
