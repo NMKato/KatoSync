@@ -38,6 +38,11 @@ mod mesh_enrollment_gate;
 mod mesh_handshake;
 mod mesh_hub;
 mod mesh_identity;
+// RC67/RC68 signed Device Presence codec, isolated to owner-authenticated QA.
+// No WebSocket/IPC/remote job is enabled by including this source module.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc67_presence_qa;
 mod mesh_readiness;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.
