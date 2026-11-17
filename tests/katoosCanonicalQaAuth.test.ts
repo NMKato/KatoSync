@@ -9,7 +9,11 @@ const cargo=read("../src-tauri/Cargo.toml");
 const app=read("../src/App.tsx");
 const mesh=read("../src-tauri/src/mesh_identity.rs");
 test("isolated KATOOS QA issuer and publishable client key, no shadow registration",()=>{
- assert.match(cargo,/katoos-auth-qa = \["github-login-qa"\]/);
+ // RC70 may add optional transport dependencies, but only within isolated QA.
+ assert.match(cargo,/katoos-auth-qa = \["github-login-qa"(?:, "dep:[a-z0-9-]+")*\]/);
+ assert.match(cargo,/katoos-auth-qa = \[[^\n]+dep:tokio-tungstenite/);
+ assert.match(cargo,/tokio-tungstenite = \{[^\n]+optional = true/);
+ assert.match(cargo,/default = \["custom-protocol"\]/);
  assert.match(rust,/#\[cfg\(feature = "katoos-auth-qa"\)\]\s*const KATOSYNC_AUTH_URL: &str = "https:\/\/xbnnlyyxiilklsygxcof.supabase.co"/);
  assert.match(rust,/#\[cfg\(not\(feature = "katoos-auth-qa"\)\)\]\s*const KATOSYNC_AUTH_URL: &str = "https:\/\/wspcuiylctlrvvpnwufk.supabase.co"/);
  assert.match(rust,/sb_publishable_/);
