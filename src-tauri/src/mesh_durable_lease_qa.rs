@@ -13,6 +13,11 @@ mod inchannel_qa;
 // Stage4AC: private signed read-only admission candidate, NOT an executor.
 #[allow(dead_code)]
 mod signed_job_qa;
+// Stage4AK: source-only canonical Mesh revocation integration tests.
+// This has NO production caller, transport route, or remote execution rights.
+#[cfg(test)]
+#[path = "mesh_durable_lease_qa/stage4ak_revoke_qa.rs"]
+mod stage4ak_revoke_qa;
 
 use serde::Serialize;
 use std::time::{Duration, Instant};
