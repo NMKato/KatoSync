@@ -104,6 +104,8 @@ Die SmartMesh-Sicherheitsentwicklung erfolgt **git-versioniert auf separaten QA-
 
 **Verifizierter CI-Checkpoint:** Commit `b5d6565d` – [native macOS-QA vollständig erfolgreich](https://github.com/NMKato/KatoSync/actions/runs/44035693844), PR Fast Gate und Attribution erfolgreich. Seitdem wird eine **echte passive Apple-Observer-stdout → Rust-Lease-Denial-QA** ergänzt: test-only, kein dauerhaftes OS-Event-Handling und keine neuen Rechte. Für neuere Änderungen gilt stets der Commit-spezifische Status im PR.
 
+**Aktuelle native Integrationsprüfung (17.11.2026):** Ein zusätzlicher macOS-Observer→Rust-Test wird unter anderem darauf geprüft, dass sein reguläres Ende tatsächlich den wartenden Heartbeat beendet. Ein vorheriger Testlauf scheiterte an der zeitlichen Abfolge von WLAN-Statusmeldung und Observer-Ende; die Testfälle sind jetzt getrennt, ohne die Sperrregeln zu verändern. Der neue Code ist **erst nach eigenem erfolgreichem CI-Lauf abgenommen**.
+
 **CI-Qualität:** Der JavaScript-Quellvertrag der OS-Ereignisbrücke wird bereits **vor der nativen macOS-Rust-Kompilierung** auf Syntax, Test-only-Grenzen und fehlende Remote-Autorisierung geprüft. Native Heartbeat- und Lease-Tests folgen separat; Freigaben gelten immer nur für den exakt geprüften Git-Commit.
 
 **Freigabeschranke:** Drafts bleiben ungemergt; keine produktiven Gerätezugriffe, unkontrollierten Netzwerk-/Sleep-Eingriffe, Keychain-Änderungen oder unbeaufsichtigten Remote-Jobs. Nach jedem geprüften Meilenstein werden Quellcode, Tests und Dokumentation gemeinsam in Git versioniert. Ein QA-Erfolg ist **keine** Produktiv- oder Release-Freigabe.

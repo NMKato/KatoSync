@@ -140,3 +140,29 @@ only by an ignored test**, not an authenticated/signed in-process OS callback
 and not a live M2/M3 shared-TLS supervisor. It does not demonstrate a real
 Wi-Fi loss, power sleep/wake event or production enrollment revocation. Those
 remain blocked until independently verified recovery and explicit approval.
+
+## Native stdout-test timing and CI gate – 17 Nov 2026
+
+The first native CI for the out-of-process observer QA fixture, [run
+44048303434](https://github.com/NMKato/KatoSync/actions/runs/44048303434),
+passed 33 steps and all six Tokio event-channel tests, but the native
+STOPPED-to-Rust test failed at the **child-exit deadline**. It did **not**
+show a failed pinned-TLS handshake, runtime network change, or escaped grant.
+The test previously forwarded the observer's *first* emitted denial to the
+Rust channel. On CI hosts without an active Wi-Fi interface, an immediate
+`WIFI_PATH_LOST` can legitimately abort the pending heartbeat **before** the
+five-second observer has finished, leading to a subsequent three-second
+`child.wait()` deadline failure. This is a test sequencing ambiguity; the
+actual observed event was not logged, so this remains an inferred cause.
+
+The scoped **observer-STOPPED integration test** now records every native
+frame, but forwards only `OBSERVING` and `STOPPED` into the heartbeat
+cancellation channel, requiring a genuinely observed `STOPPED` before it
+accepts the lease denial. It also allows up to eight seconds for the child
+exit after the STOPPED frame. The **separate** Rust event-fence/channel tests
+still prove that `WIFI_PATH_LOST`, sleep and wake cause immediate fail-closed
+invalidations; no runtime source or security policy has been weakened.
+The native observer integration CI step has moved directly after the initial
+Rust compilation and before the long legacy admission/fault regressions, so
+future failures are discovered sooner. No production process or hardware
+state is affected; the next native CI result is necessary for acceptance.

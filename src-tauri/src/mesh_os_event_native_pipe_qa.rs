@@ -98,8 +98,19 @@ async fn genuine_bounded_apple_observer_termination_cancels_pending_rust_heartbe
                 "no arbitrary stdout content"
             );
             frames.push(frame.clone());
-            if tx.send(frame.clone()).await.is_err() {
-                break;
+            // This is deliberately the STOPPED-source integration test.
+            // A macOS CI host may have no Wi-Fi interface, so its initial
+            // WIFI_PATH_LOST status can legitimately arrive immediately.
+            // Record those path frames for evidence, but do not let them
+            // preempt the separate bounded observer-exit assertion.
+            // In the real deny-only bridge all events still go to the
+            // lease fence; link-loss denial is tested independently.
+            if frame == format!("{FRAME_PREFIX}OBSERVING\n")
+                || frame == format!("{FRAME_PREFIX}STOPPED\n")
+            {
+                if tx.send(frame.clone()).await.is_err() {
+                    break;
+                }
             }
             if frame == format!("{FRAME_PREFIX}STOPPED\n") {
                 break;
@@ -138,7 +149,7 @@ async fn genuine_bounded_apple_observer_termination_cancels_pending_rust_heartbe
         .verified_in_channel_heartbeat(2, Instant::now())
         .is_err());
 
-    let exit = timeout(Duration::from_secs(3), child.wait())
+    let exit = timeout(Duration::from_secs(8), child.wait())
         .await
         .expect("native passive observer must end within its deadline")
         .expect("observer wait");
