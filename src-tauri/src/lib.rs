@@ -51,6 +51,10 @@ mod mesh_rc69_readonly_qa;
 #[cfg(feature = "katoos-auth-qa")]
 #[allow(dead_code)]
 mod mesh_rc69_result_qa;
+// RC70 QA transport supervisor: outbound only, quarantined until signed DO challenge.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc70_outbound_wss_qa;
 mod mesh_readiness;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.
