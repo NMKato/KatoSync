@@ -12,6 +12,7 @@ const supervisor = readFileSync(new URL("../src-tauri/src/mesh_live_supervisor_q
 const ownerGuard = readFileSync(new URL("../src-tauri/src/mesh_supervisor_guard_qa.rs", import.meta.url), "utf8");
 const admissionBridge = readFileSync(new URL("../src-tauri/src/mesh_live_admission_recheck_qa.rs", import.meta.url), "utf8");
 const canonicalAdmission = readFileSync(new URL("../src-tauri/src/mesh_admission.rs", import.meta.url), "utf8");
+const canonicalEnrollment = readFileSync(new URL("../src-tauri/src/mesh_enrollment_gate.rs", import.meta.url), "utf8");
 
 test("in-flight OS event bridge is only compiled as QA tests, not app runtime", () => {
   assert.match(lib, /#\[cfg\(all\(test, feature = "stage4j-qa"\)\)\]\s*mod mesh_os_event_channel_qa;/);
@@ -139,5 +140,29 @@ test("canonical owner/enrollment live-read adapter is test-only, opt-in and read
     'execute_sql', 'insert(', 'update(', 'delete(',
   ]) {
     assert.ok(!implementation.includes(forbidden), 'new authority or direct backend path: ' + forbidden);
+  }
+});
+
+test("strict owner QA uses ONLY existing process cache and two fixed GETs, never refresh", () => {
+  const gate = admissionBridge.split('// Strict no-refresh QA adapter.')[1] || '';
+  assert.ok(gate.includes('KATOSYNC_STAGE4AB32B_NO_REFRESH_OWNER_READ_QA'));
+  assert.ok(gate.includes('OWNER_LAUNCHED_EXISTING_SESSION_READ_ONLY_NO_REFRESH'));
+  assert.ok(gate.includes('crate::cached_supabase_access_token()'));
+  assert.ok(gate.includes('token_snapshot_is_current'));
+  assert.ok(gate.includes('guarded_supervisor_cycle('));
+  assert.ok(gate.includes('recheck_existing_session_no_refresh(admitted, requested_fingerprint, snapshot.as_str())'));
+  assert.ok(gate.includes('get(format!("{}/auth/v1/user", crate::KATOSYNC_AUTH_URL))'));
+  assert.ok(gate.includes('get(format!("{}/rest/v1/mesh_devices", crate::KATOSYNC_AUTH_URL))'));
+  assert.ok(gate.includes('qa_validate_owner_roster_no_refresh'));
+  assert.ok(canonicalEnrollment.includes('pub(crate) fn qa_validate_owner_roster_no_refresh('));
+  assert.ok(canonicalEnrollment.includes('validate_two_enrollments(&rows, owner, own, &peer, chrono::Utc::now())'));
+  for (const denied of [
+    'ensure_supabase_access_token(', 'verified_katosync_user(',
+    'refresh_supabase_session', 'replace_rejected_supabase_access_token',
+    '.post(', '.put(', '.patch(', '.delete(', 'set_password(',
+    'create_identity(', 'tauri::command', 'TcpListener::bind',
+  ]) {
+    const runnable = gate.split('#[cfg(test)]')[0];
+    assert.ok(!runnable.includes(denied), 'unexpected no-refresh side effect: ' + denied);
   }
 });

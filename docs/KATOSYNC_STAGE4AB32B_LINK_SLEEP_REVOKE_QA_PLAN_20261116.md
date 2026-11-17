@@ -434,3 +434,39 @@ session test requires a **no-refresh authenticated read** in the existing
 logged-in QA app process, or informed explicit session-rotation consent
 for the existing canonical helper. Never silently turn a read-only
 verification into a token refresh, owner rebinding or remote job.
+
+
+## Strict no-refresh owner-session RLS QA path – 17 Nov 2026
+
+The separate test-only `guarded_cycle_with_no_refresh_owner_qa` now
+provides a NO-REFRESH alternative to the previously implemented canonical
+helper that may rotate sessions. It requires the existing exclusive QA
+permit, owner/manual/read-only gates and the additional exact
+`KATOSYNC_STAGE4AB32B_NO_REFRESH_OWNER_READ_QA` opt-in. It snapshots the
+access token **only from the same process's already-populated access-token
+cache**, never reads the refresh token or requests a new one. If no cached
+token exists, it fails closed BEFORE network access. It does not run in
+CI as a live owner-session check.
+
+Within the QA-only code path, two fixed HTTPS GETs are made per recheck
+via the existing first-party `KATOSYNC_AUTH_URL`: `/auth/v1/user`
+(owner bound to the already admitted UID) and `/rest/v1/mesh_devices`
+(issuer-authorized user's JWT, owner filter, Accept-Profile katosync,
+max 11 records). The latter is parsed using the **same existing**
+`validate_two_enrollments` logic via a narrow test-only bytes adapter:
+exact signing keys, owner UID, fingerprint, enrollment time, membership
+and non-revocation. It rechecks the existing local Keychain identity and
+approved peer pin before and after network I/O. Original token snapshot
+must remain identical throughout; an issuer 401/403 is a hard denial
+without refresh, and every failure permanently denies the prior lease.
+The fixed 45-second cycle deadline and in-flight OS-event fence continue
+to apply.
+
+The new tests are purely deterministic opt-in and cache-stability negative
+cases. The code remains `#[cfg(all(test, feature="stage4j-qa"))]`
+only and exposes no product Tauri IPC, remote task, session writer,
+new network listener or credential-printing route. This QA API is not
+automatically callable in the released app. A positive JWT/RLS proof will
+require the owner to trigger a separate, authorized test *inside* a
+logged-in QA app process after the code and its dedicated gates pass.
+No M2/M3 network or sleep fault is used.

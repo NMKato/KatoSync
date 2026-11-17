@@ -92,9 +92,9 @@ jobs:
       - name: Verify supervisor owner/enrollment checks and OS denial fail closed
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_supervisor_guard_qa --lib
 
-      - name: Verify canonical KatoOS adapter refuses access and session rotation without opt-ins
-        # Pure negative tests only; no user JWT, Keychain or backend access.
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_live_admission_recheck_qa::tests --lib
+      - name: Verify canonical and strict no-refresh owner QA contracts deny without opt-in
+        # Pure negative tests; no user JWT, Keychain, network session or backend.
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa mesh_live_admission_recheck_qa --lib
 
       - name: Verify bounded native in-process AppKit callback denies an in-flight Rust QA heartbeat
         # Test-only dylib from reviewed Objective-C source; no persistent
