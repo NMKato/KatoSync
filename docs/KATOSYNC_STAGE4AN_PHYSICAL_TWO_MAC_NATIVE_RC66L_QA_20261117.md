@@ -38,7 +38,7 @@ M2 STAGE4AN_M2_NATIVE_TLS_TWO_SIGNED_DEVICE_RECEIPTS_PASS
 M3 STAGE4AN_M3_NEW_PROCESS_PERSISTENT_REVOKE_PASS_NO_REMOTE
 ```
 
-The success marker on M3 is a mode-0600 synthetic QA file. Observed marker SHA-256: `ea71b7470981a7a39153d32607dca94cca9d64b3c079c11c488c7c28e7b2f5bf`. This is not a production device/grant state or a real server ACK ledger.
+The success marker on M3 is a mode-0600 synthetic QA file. Observed latest marker SHA-256 after a fresh authorized QA run: `51d2efe0d8f2995af9bb8a01311a01ddc7050e63e1db3267f476c6147878ec6e`. A previously recorded physical run produced a different per-session marker hash, as expected because test identity and notice bytes change. This is not a production device/grant state or a real server ACK ledger.
 
 ## Clock-skew issue found and fixed
 
