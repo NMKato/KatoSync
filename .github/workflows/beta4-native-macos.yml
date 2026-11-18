@@ -37,7 +37,9 @@ jobs:
     timeout-minutes: 60
     env:
       BETA4_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
-      BETA4_BUILD_PACKAGE: ${{ (github.event_name == 'workflow_dispatch' && inputs.build_package) || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'beta-package')) }}
+      # The dedicated private-beta branch produces its executable in this same
+      # verified run, without a second label-triggered or manual build cycle.
+      BETA4_BUILD_PACKAGE: ${{ (github.event_name == 'workflow_dispatch' && inputs.build_package) || (github.event_name == 'pull_request' && (github.head_ref == 'beta/4.0-integration-20261118' || contains(github.event.pull_request.labels.*.name, 'beta-package'))) }}
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       CARGO_TERM_COLOR: always

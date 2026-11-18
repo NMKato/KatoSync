@@ -125,11 +125,15 @@ bindet den lesenden Aufruf an eine frische Clientfreigabe und die lokal
 ausgewählten Projekte. Terminal-/CLI-Fernsteuerung, Computersteuerung und
 automatischer Providerwechsel auf das lokale Modell sind damit nicht freigegeben.
 
-**Prüfstand:** 990 vollständige Node-Tests vor der Export-Erweiterung;
-44 gezielte Chat-/Export-Tests sowie TypeScript und Webbuild nach der
-Erweiterung bestanden. Die Connector-Integration bestand beide isolierten
-PostgreSQL-17-Modi. Produktionsmigrationen sind weiterhin nicht angewendet.
-Der finale Mac-App-Build, die tatsächlichen neuen UI-/MCP-/Offline-Läufe
+**Prüfstand:** Am zusammengeführten Code-Stand `65f664a` bestanden
+**997 vollständige Node-Tests** ohne übersprungene Tests sowie der tatsächliche
+TypeScript-/Vite-Build auf dem M2. Der lokale native Build erreichte beim
+Kompilieren der Abhängigkeiten sein Zeitlimit; daraus folgt kein nativer PASS.
+Der abschließende GitHub-Lauf bündelt native Tests und App-Binärdatei.
+Die Connector-Integration bestand beide isolierten PostgreSQL-17-Modi.
+Produktiv sind die ersten **zwei von vier** Migrationen angewendet; die dritte
+Ausführung wurde abgebrochen und nicht erneut gestartet. Client- und
+Gerätefreigaben bleiben leer. Der finale Mac-App-Build, die neuen UI-/MCP-/Offline-Läufe
 und das vollständige 4.0-Go bleiben offen. Die neuen Quelländerungen sind
 kein nachträglicher Funktionsnachweis für das Candidate-3-Paket.
 

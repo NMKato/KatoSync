@@ -24,8 +24,8 @@ erhalten erst nach ihrem eigenen App-/Gerätetest eine entsprechende Abnahme.
 | Projektwissen | Projektgebundenes RAG; sichtbarer manueller Refresh mit geprüfter Sicherung und erneuter Quellen-/Git-Bindung | Ausführung der vier neuen echten Git-/SQLite-Nativtests im finalen Mac-Build und aktueller Offline-Inferenzlauf |
 | Obsidian / Markdown | Export der gespeicherten Projektion über bestehenden nativen Befehl und Ordnerdialog; sieben neue Verhaltenstests bestanden | Nativer Klickpfad und Dateiexport im finalen Paket; keine automatische oder bidirektionale Synchronisation |
 | Nativer Git-Status | Explizite Clientfreigabe und lokale Projektauswahl, signierter lesender Vertrag, gezielte native Harness-Nachweise | Voller Mac-App-Build und tatsächlicher ChatGPT-Aufruf mit frischer Freigabe |
-| Desktop-QA | **990 Node-Tests** am Stand `aeb171d` vor Export; danach **44 gezielte Chat-/Export-Tests**, TypeScript und Vite-Build bestanden | Vollständiger finaler Node-/Mac-/Paketlauf für den zusammengeführten Quellstand |
-| Connector-QA | Beide isolierten **PostgreSQL-17-Modi** bestanden: Gerätefreigabe sowie zusätzliche explizite Git-Status-Freigabe | Produktionsmigrationen weiterhin **nicht angewendet** (`productionMigrationsApplied=false`); produktive Worker-/MFA-/Geräte-/WSS-Abnahme |
+| Desktop-QA | **997 Node-Tests**, keine übersprungenen Tests, am zusammengeführten Code-Stand `65f664a`; TypeScript und Vite-Build auf M2 bestanden | Native M2-Kompilierung nach 55 Minuten bei Abhängigkeiten abgebrochen, kein nativer PASS; abschließender CI-/Paketlauf offen |
+| Connector-QA | Beide isolierten **PostgreSQL-17-Modi** bestanden; **658 Node-, 32 Worker- und 14 Workerd-Tests** bestanden | Produktiv **2/4 Migrationen angewendet**; dritte Ausführung abgebrochen, kein erneuter Versuch; Produktfreigabe, Worker, echte MFA, Gerät und WSS offen |
 | Abhängigkeiten | Frischer Registry-Audit um **17:52 UTC: Exit 0, null Befunde** auf Linux und M3 | Abschließender CI-Gate für den finalen Release-Quellstand; ältere rote CI-Ergebnisse bleiben historisch |
 
 Details: [Projektwissen und Export](KATOSYNC_BETA4_PROJECT_KNOWLEDGE_20261118.md),
@@ -70,9 +70,22 @@ Cloud-Heartbeat ersetzen den kryptografischen Peer-Nachweis nicht.
 Die nachfolgenden nativen Mesh-Gerätetests ersetzen diese Freigabe nicht.
 Die historische lesende Supabase-Migrationsabfrage am 18. November um **17:05 Uhr MEZ**
 zeigte weiterhin `20261117172610` als letzten angewendeten Stand. Keine
-der damals drei Beta4-Migrationen war angewendet. Auch für die inzwischen
-ergänzte vierte Git-Status-Migration liegt noch kein Produktionsnachweis vor;
-der aktuelle Freigabestand bleibt `productionMigrationsApplied=false`.
+der damals drei Beta4-Migrationen war angewendet. Dieser historische Stand
+ist inzwischen teilweise fortgeschritten: Die tatsächliche Leseprüfung am
+18. November um **19:50 UTC** bestätigt `beta4_private_owner_runtime`
+(`20261118185351`) und `beta4_native_owner_mfa_bridge` (`20261118185500`).
+Die Ausführung der dritten Migration wurde abgebrochen und nicht erneut
+gestartet; Geräte-Consent- und Git-Scope-Migration fehlen. Client-Grants und
+Geräte-Consents sind weiterhin **0**. Es wurde kein Gerätezugriff erteilt.
+
+Der bestätigte Owner besitzt noch keinen verifizierten TOTP-Faktor. Zusätzlich
+fehlt eine nach dem bestehenden Produktvertrag gültige Remote-MCP-Freigabe;
+eine ältere Business-Statusanzeige allein erfüllt diesen Vertrag nicht.
+Weder ein Ablaufdatum noch eine Genehmigung wurde dafür erfunden. Der aktuelle
+Worker bleibt beim authentifizierten synthetischen Ping. Neue unabhängige
+Signer sind auf dem Operator-Gerät vorbereitet; nur ihre öffentlichen Pins
+sind im Desktop-/Connector-Quellcode enthalten. Provider-Secrets und Deployment
+sind damit noch nicht erfolgt.
 
 Die registrierte ChatGPT-Verbindung stellt zunächst eine authentifizierte
 MCP-Verbindung her. Der bisherige synthetische Ping allein beweist weder

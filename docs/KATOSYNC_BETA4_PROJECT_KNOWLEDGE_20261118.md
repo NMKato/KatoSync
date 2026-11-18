@@ -35,6 +35,11 @@ anderen Projekt zugeordnet.
   37 bestehende Prüfungen und sieben neue Verhaltenstests für Auswahl,
   Abbruch, Projektwechsel, Ergebnisbindung und Fehler. TypeScript und
   Vite-Produktionsbuild bestanden ebenfalls.
+- Der zusammengeführte Code-Stand `65f664a` bestand anschließend **997/997
+  Node-Tests** ohne übersprungene Tests. Sein tatsächlicher TypeScript-/Vite-
+  Build bestand auf dem M2. Die native Kompilierung erreichte beim Aufbau
+  der Abhängigkeiten das 55-Minuten-Limit; die Git-/SQLite-Tests gelten
+  deshalb weiterhin nicht als auf macOS ausgeführt.
 - Vier neue native Tests verwenden echte temporäre Git-Repositories und
   SQLite: Revisionen/RAG/Chat-Erhalt, Änderungen am selben HEAD, fremde
   Repository-Bindung und lesende Schema-Diagnose. Ihre Ausführung im finalen
@@ -55,7 +60,16 @@ uncommitted Daten werden durch einen Refresh nicht automatisch verifizierte
 Fakten. Der Export ist eine Projektion und keine bidirektionale Obsidian-Synchronisation.
 
 Local Brain benötigt eine tatsächlich installierte und gestartete lokale
-Runtime samt Modell. Der vorhandene Provider-Fallback-Planer startet bei
+Runtime samt Modell. Auf dem M3 wurden Runtime, Modell und Bildprojektor mit
+dem vorhandenen prüfsummengebundenen Installer eingerichtet. Wegen zu wenig
+internem Speicher liegt der neue Paketbestand auf der vorhandenen externen
+SSD. Der automatische Start wurde von der unveränderten Speicherreserve-
+Prüfung abgewiesen (macOS-Indikator: 29 Prozent); der lokale Health-Endpunkt
+ist nicht bereit. Das ist ein erfolgreicher Installationsschritt, **kein
+Offline-Inferenz-PASS**. Es wurden keine fremden Anwendungen beendet und
+keine Ressourcenprüfung abgeschwächt.
+
+Der vorhandene Provider-Fallback-Planer startet bei
 einem Provider-Ausfall keinen automatischen lokalen Ersatzrunner. Auch der
 separat implementierte lesende Git-Status erteilt keine allgemeine
 Terminal-/CLI-/Computersteuerung. Diese Integrationen sowie die vollständige
