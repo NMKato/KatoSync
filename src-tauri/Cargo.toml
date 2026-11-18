@@ -19,6 +19,9 @@ argon2 = "0.5"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
+# RC70 outbound WSS transport: QA feature only, not used in default releases.
+futures-util = { version = "0.3", optional = true }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"], optional = true }
 ed25519-dalek = { version = "2.2", features = ["pkcs8"] }
 keyring = { version = "3.6", features = ["apple-native"] }
 lopdf = "0.34"
@@ -47,6 +50,6 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 
 [features]
 github-login-qa = [] # Isolated local test app; never include in production builds
-katoos-auth-qa = ["github-login-qa"] # Canonical KATOOS Auth only in isolated QA; legacy KatoSync unchanged
+katoos-auth-qa = ["github-login-qa", "dep:futures-util", "dep:tokio-tungstenite"] # Canonical KATOOS Auth; RC70 transport QA-only, never auto-started
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

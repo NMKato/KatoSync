@@ -38,6 +38,31 @@ mod mesh_enrollment_gate;
 mod mesh_handshake;
 mod mesh_hub;
 mod mesh_identity;
+// RC67/RC68 signed Device Presence codec, isolated to owner-authenticated QA.
+// No WebSocket/IPC/remote job is enabled by including this source module.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc67_presence_qa;
+// QA-only native Git read adapter; no IPC or MCP registration before live DO grant.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc69_readonly_qa;
+// Signed native tool.result codec; remains QA-only, with no runtime dispatcher.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc69_result_qa;
+// RC70 QA transport supervisor: outbound only, quarantined until signed DO challenge.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc70_outbound_wss_qa;
+// RC71 private RC69 DO ticket/challenge contract probe: QA only, never auto-started.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc71_rc69_ticket_qa;
+// RC72 independently pinned Connector RC70 server JWS verifier; QA only.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc72_signed_server_qa;
 mod mesh_readiness;
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.

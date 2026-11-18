@@ -1,0 +1,54 @@
+name: KatoSync RC69 Native Signed Presence QA
+
+on:
+  pull_request:
+    paths:
+      - "src-tauri/src/mesh_rc67_presence_qa.rs"
+      - "src-tauri/src/mesh_rc69_readonly_qa.rs"
+      - "src-tauri/src/mesh_rc69_result_qa.rs"
+      - "src-tauri/src/mesh_rc70_outbound_wss_qa.rs"
+      - "src-tauri/src/mesh_rc71_rc69_ticket_qa.rs"
+      - "src-tauri/src/mesh_rc72_signed_server_qa.rs"
+      - "tests/meshRc71TicketedRelayContract.test.ts"
+      - "tests/meshRc72SignedServerNotice.test.ts"
+      - "tests/meshRc73PinnedWssInterop.test.ts"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/src/lib.rs"
+      - "qa/rc69-presence-harness/**"
+      - "tests/meshRc69PresenceWireContract.test.ts"
+      - "tests/meshRc69ReadOnlyGitContract.test.ts"
+      - "tests/meshRc69SignedResultContract.test.ts"
+      - "tests/meshRc70OutboundWssSupervisor.test.ts"
+      - ".github/workflows/rc69-native-presence-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc69-native-presence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-jws-compatibility:
+    name: Native Ed25519 wire contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95.0"
+      - name: Compile exact Desktop source and test RC67/RC69/RC70 native contracts
+        run: cargo test --locked --manifest-path qa/rc69-presence-harness/Cargo.toml --lib
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify RC69/RC70 source-level isolation contracts
+        run: node --experimental-strip-types --test tests/meshRc69PresenceWireContract.test.ts tests/meshRc69ReadOnlyGitContract.test.ts tests/meshRc69SignedResultContract.test.ts tests/meshRc70OutboundWssSupervisor.test.ts tests/meshRc71TicketedRelayContract.test.ts tests/meshRc72SignedServerNotice.test.ts tests/meshRc73PinnedWssInterop.test.ts

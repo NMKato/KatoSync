@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:beta-core": "node scripts/qa-beta-core.mjs",
     "test:mesh-postgres-local": "bash scripts/qa-mesh-postgres-local.sh",
     "test:katosync-schema-local": "bash scripts/qa-mesh-postgres-local.sh katosync",
     "test:autoq-acceptance": "node --experimental-strip-types --test tests/autoQRuntimeAcceptance.test.ts",
