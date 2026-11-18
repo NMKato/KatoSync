@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { evaluateFocus } from "../lib/projectFocus";
+import { buildRepoMap, canonicalProjectId, repoPathFor } from "../lib/projectRegistry";
+import type { ProjectRegistry } from "../types";
+import { useProjectRegistryViewModel } from "./useProjectRegistryViewModel";
 import {
   askConfirm,
   buildCodexPromptFromBriefing,
@@ -6,7 +10,21 @@ import {
   chooseFolders,
   chooseRepoFolder,
   checkCodexTask,
+  cancelProviderLogin,
+  connectProvider,
   dirExists,
+  disconnectProvider,
+  discoverLocalProviders,
+  getLocalBrainStatus,
+  installLocalBrain,
+  startLocalBrain,
+  stopLocalBrain,
+  removeLocalBrain,
+  listenLocalBrainProgress,
+  listenProviderLoginUrls,
+  openProviderLoginUrl,
+  saveLocalProviderKey,
+  submitProviderLoginCode,
   listenCodexEvents,
   listenSyncEvents,
   NO_PROJECT_ID,
@@ -17,7 +35,9 @@ import {
   generateConnectorToken,
   getApiKeyStatus,
   getLaunchAgentStatus,
+  getLocalControlSnapshot,
   getMcpConnectorTokenStatus,
+  getProviderStatuses,
   getSupabaseSession,
   installLaunchAgent,
   loadActionPlans,
@@ -42,18 +62,68 @@ import {
   scanProject,
   testConnection,
   testLibrary,
+  testProvider,
+  getProviderWarmupState,
+  warmUpProvider,
   updateActionPlanStatus,
   updateActionTaskStatus,
   updateBriefingStatus,
   archiveBriefing,
   deleteBriefing
 } from "../repositories/katoSyncRepository";
+import {
+  mergeCheapProviderHealth,
+  mergeProviderStatus,
+  moveProvider,
+  normalizeProviderPriority,
+  providerRecheckPlan,
+  providerTransitions,
+  validateLocalEndpointInput
+} from "../lib/providerPolicy";
+import { agentWorkWaiting, normalizeAgentSyncState } from "../lib/agentJobModel";
+import { providerWarmupPlan, warmupSuppressedByWork } from "../lib/providerWarmupPolicy";
+import {
+  AUTO_LANE_PLAN_REFRESH_MS,
+  AUTO_LANE_TICK_MS,
+  addAutoLaneClaim,
+  hasAutoLaneClaimConflict,
+  pruneAutoLaneClaims,
+  pruneAutoLaneClaimsInScope,
+  releaseAutoLaneClaim
+} from "../lib/autoLanePlanner";
+import { autoQRefreshReason } from "../lib/autoQRuntime";
+import {
+  readAutoLaneClaims,
+  readAutoLaneMode,
+  readBoardSelection,
+  writeAutoLaneClaims,
+  writeAutoLaneMode,
+  writeBoardSelection,
+  type AutoLaneMode
+} from "../lib/autoLaneStore";
+import { defaultConfig } from "../lib/defaults";
+import {
+  buildProjectWorkSync,
+  isProjectWorkPlan,
+  projectWorkTruthSignature,
+  readProjectWorkPlans,
+  updateProjectWorkTask,
+  writeProjectWorkPlans,
+  type ProjectWorkSyncReport
+} from "../lib/projectWorkSync";
+import { localBrainProviderConfig, shouldAdoptLocalBrain } from "../lib/localBrainCatalog";
+import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
+import { modeForStep } from "../lib/workspaceMode";
 import type { Notice } from "../components/Primitives";
 import type {
   ActionPlan,
+  AgentSyncState,
   ActionPlanStatus,
   ActionTask,
+  ActionTaskStatus,
   AppConfig,
+  AutoLaneClaim,
+  AutoLaneRunner,
   Briefing,
   CodexEvent,
   CodexRunResult,
@@ -61,6 +131,14 @@ import type {
   RateLimitMetric,
   KeyStatus,
   LaunchAgentStatus,
+  LocalControlMonitorSnapshot,
+  DiscoveredLocalProvider,
+  LocalProviderConfig,
+  ProviderAction,
+  ProviderId,
+  ProviderStatus,
+  ProviderWarmupState,
+  ProviderTransition,
   ScanSummary,
   SupabaseSessionStatus,
   SyncReport
@@ -94,7 +172,18 @@ export type StepId =
   | "projectBoard"
   | "briefings"
   | "settings"
-  | "logs";
+  | "logs"
+  // Agent-Sync-Workspace (eigener Navigationsbaum, siehe lib/workspaceMode.ts)
+  | "agentDashboard"
+  // Vision: visueller Systemgraph (nicht die spaetere multimodale Sight-Runtime)
+  | "agentVision"
+  | "agentJobs"
+  | "agentMasterChat"
+  | "agentProviders"
+  | "agentMonitor"
+  | "agentProjects"
+  | "agentHistory"
+  | "agentSettings";
 
 // Rate-Limits deduplizieren: pro Kategorie NUR ein Eintrag (knappster Rest = aktuellster Stand).
 // Sonst haengt der Sync pro hochgeladener Datei denselben Eintrag mit fallendem Rest an (9/10, 8/10 …).
@@ -153,13 +242,38 @@ export function useKatoSyncViewModel() {
   const [connectionOk, setConnectionOk] = useState(false);
   const [libraryOk, setLibraryOk] = useState(false);
   const [logs, setLogs] = useState("");
+  const [localControlMonitor, setLocalControlMonitor] = useState<LocalControlMonitorSnapshot | null>(null);
+  const [localControlMonitorError, setLocalControlMonitorError] = useState<string | null>(null);
   const [actionPlans, setActionPlans] = useState<ActionPlan[]>([]);
+  const [projectWorkPlans, setProjectWorkPlans] = useState<ActionPlan[]>(() => readProjectWorkPlans());
+  const projectWorkPlansRef = useRef<ActionPlan[]>(projectWorkPlans);
+  projectWorkPlansRef.current = projectWorkPlans;
+  const [projectWorkSyncReport, setProjectWorkSyncReport] = useState<ProjectWorkSyncReport | null>(null);
+  const [projectWorkSyncBusy, setProjectWorkSyncBusy] = useState(false);
+  const projectWorkSyncingRef = useRef(false);
   const [briefings, setBriefings] = useState<Briefing[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [providerStatuses, setProviderStatuses] = useState<ProviderStatus[]>([]);
+  const [providerHistory, setProviderHistory] = useState<ProviderTransition[]>([]);
+  const [providerBusy, setProviderBusy] = useState<Partial<Record<ProviderId, ProviderAction>>>({});
+  const [providerLoginUrls, setProviderLoginUrls] = useState<Partial<Record<ProviderId, string>>>({});
+  // Entwurf des lokalen Endpunkts: wird erst mit "Speichern & testen" persistiert.
+  const [localProviderDraft, setLocalProviderDraft] = useState<LocalProviderConfig | null>(null);
+  const [localKeyInput, setLocalKeyInput] = useState("");
+  const [localKeyError, setLocalKeyError] = useState<string | null>(null);
+  const [discoveredLocal, setDiscoveredLocal] = useState<DiscoveredLocalProvider[] | null>(null);
+  const [localBrainStatus, setLocalBrainStatus] = useState<LocalBrainStatus | null>(null);
+  const [localBrainProgress, setLocalBrainProgress] = useState<LocalBrainProgress | null>(null);
+  const [localBrainBusy, setLocalBrainBusy] = useState<"install" | "start" | "stop" | "remove" | null>(null);
+  const providerStatusesRef = useRef<ProviderStatus[]>([]);
+  // Kanonischer Agent-Sync-Zustand fuer Timer/Handler, die vor dem useMemo definiert sind.
+  const agentSyncRef = useRef<AgentSyncState | null>(null);
+  const providerSmokeCheckedRef = useRef(false);
   // Projekt-Board
-  const [boardSelection, setBoardSelection] = useState<string[]>([]);
-  const [boardOrder, setBoardOrder] = useState<string[]>([]);
+  // Auswahl + Reihenfolge ueberleben einen Neustart: Auto Mode arbeitet nur ausgewaehlte Tasks ab.
+  const [boardSelection, setBoardSelection] = useState<string[]>(() => readBoardSelection());
+  const [boardOrder, setBoardOrder] = useState<string[]>(() => readBoardSelection());
   const [queueRunning, setQueueRunning] = useState(false);
   const [currentQueueTaskId, setCurrentQueueTaskId] = useState<string | null>(null);
   const [dailyCount, setDailyCount] = useState<number>(() => readDailyCount());
@@ -168,9 +282,43 @@ export function useKatoSyncViewModel() {
   // await (Repo-Auswahl) gesetzt, ein zweiter Klick in diesem Fenster wuerde sonst einen zweiten
   // parallelen Lauf starten (TOCTOU). Dieser Ref greift synchron, vor jedem await.
   const queueStartingRef = useRef(false);
+  // Auto-Lane-Planer: persistierter Modus + Claims, sitzungslokaler Lauf-/Repo-Zustand.
+  const [autoMode, setAutoMode] = useState<AutoLaneMode>(() => readAutoLaneMode());
+  const [autoClaims, setAutoClaims] = useState<AutoLaneClaim[]>(() => readAutoLaneClaims());
+  const [autoInFlight, setAutoInFlight] = useState<string[]>([]);
+  const [autoMissingRepos, setAutoMissingRepos] = useState<string[]>([]);
+  const [autoLastDispatch, setAutoLastDispatch] = useState<Record<string, string>>({});
+  const [autoTickSeq, setAutoTickSeq] = useState(0);
+  // Synchrone Locks: Auto-Dispatch und manuelle Einzel-Laeufe schliessen sich vor jedem await aus.
+  const autoDispatchingRef = useRef(false);
+  const manualRunRef = useRef(0);
   // Letzte in die Cloud gesicherte library_id -> Push beim Speichern nur, wenn sie sich aenderte.
 
   const show = useCallback((kind: Notice["kind"], text: string) => setNotice({ kind, text }), []);
+
+  // Project Registry + Focus Portfolio (eigener ViewModel, hier nur komponiert).
+  const projects = useProjectRegistryViewModel({ config, notify: show });
+  const projectsRegistryRef = useRef<ProjectRegistry>(projects.registry);
+  projectsRegistryRef.current = projects.registry;
+  const focusPolicyRef = useRef(projects.focusPolicy);
+  focusPolicyRef.current = projects.focusPolicy;
+
+  const commitProjectWorkPlans = useCallback((update: (plans: ActionPlan[]) => ActionPlan[]) => {
+    const next = update(projectWorkPlansRef.current);
+    projectWorkPlansRef.current = next;
+    writeProjectWorkPlans(next);
+    setProjectWorkPlans(next);
+    return next;
+  }, []);
+
+  const applyProviderSnapshot = useCallback((next: ProviderStatus[]) => {
+    const transitions = providerTransitions(providerStatusesRef.current, next);
+    providerStatusesRef.current = next;
+    setProviderStatuses(next);
+    if (transitions.length) {
+      setProviderHistory((current) => [...current, ...transitions].slice(-20));
+    }
+  }, []);
 
   const boot = useCallback(async () => {
     try {
@@ -192,14 +340,47 @@ export function useKatoSyncViewModel() {
       setSessionStatus(loadedSession);
       setActionPlans(loadedPlans);
       setBriefings(loadedBriefings);
+      try {
+        applyProviderSnapshot(await getProviderStatuses(loadedConfig, false));
+      } catch {
+        // Der restliche App-Start bleibt nutzbar; Agent Sync zeigt den Fehler beim manuellen Test.
+      }
     } catch (error) {
       show("error", getMessage(error));
     }
-  }, [show]);
+  }, [applyProviderSnapshot, show]);
 
   useEffect(() => {
     void boot();
   }, [boot]);
+
+  const refreshLocalControlMonitor = useCallback(async () => {
+    try {
+      const snapshot = await getLocalControlSnapshot();
+      setLocalControlMonitor(snapshot);
+      setLocalControlMonitorError(null);
+    } catch (error) {
+      setLocalControlMonitorError(getMessage(error));
+    }
+  }, []);
+
+  // Nur im Agent-Sync-Workspace pollen (Readiness-Leiste braucht ueberall frische Heartbeats):
+  // lokal, billig und ohne GitHub/LLM-Traffic.
+  const pollLocalControl = modeForStep(activeStep) === "agentSync";
+  useEffect(() => {
+    if (!pollLocalControl) return undefined;
+    let active = true;
+    const refresh = async () => {
+      if (!active) return;
+      await refreshLocalControlMonitor();
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [pollLocalControl, refreshLocalControlMonitor]);
 
   // Live-Feed: gestreamte Codex-Events sammeln (letzte 300).
   useEffect(() => {
@@ -208,10 +389,14 @@ export function useKatoSyncViewModel() {
     let unlistenSync: (() => void) | undefined;
     void (async () => {
       const un = await listenCodexEvents((event) => {
+        const received = { ...event, at: event.at ?? new Date().toISOString() };
         setCodexEvents((prev) => {
-          const next = [...prev, event];
+          const next = [...prev, received];
           return next.length > 300 ? next.slice(next.length - 300) : next;
         });
+        setCodexRun((current) => current.status === "running"
+          ? { ...current, lastActivityAt: received.at }
+          : current);
       });
       const unSync = await listenSyncEvents((event) => {
         if (event.phase === "rate_limit") {
@@ -319,6 +504,12 @@ export function useKatoSyncViewModel() {
     setQueueRunning(false);
     setCurrentQueueTaskId(null);
     setDailyCount(0);
+    setBoardSelection([]);
+    setBoardOrder([]);
+    setAutoMode({ enabled: false, updatedAt: null });
+    setAutoClaims([]);
+    setAutoMissingRepos([]);
+    setAutoLastDispatch({});
     setLogs("");
     stopRef.current = false;
     // Tageszaehler-Schluessel des heutigen Tages entfernen, damit das Quota nicht "geerbt" wird.
@@ -383,6 +574,482 @@ export function useKatoSyncViewModel() {
       setBusy(null);
     }
   }, [config, show]);
+
+  // ── Agent Sync: Provider-Manager ────────────────────────────────────────────────────
+  // Provider-Aktionen haben einen eigenen Busy-Zustand pro Karte: ein offener Browser-Login
+  // (bis 5 Min.) darf nicht die gesamte App blockieren.
+  const setProviderAction = useCallback((provider: ProviderId, action: ProviderAction | null) => {
+    setProviderBusy((current) => {
+      const next = { ...current };
+      if (action) next[provider] = action;
+      else delete next[provider];
+      return next;
+    });
+  }, []);
+
+  const mergeProvider = useCallback(
+    (status: ProviderStatus, priority: ProviderId[]) => {
+      applyProviderSnapshot(mergeProviderStatus(providerStatusesRef.current, status, priority));
+    },
+    [applyProviderSnapshot]
+  );
+
+  // Speichert NUR Provider-Felder auf die Platten-Config. Andere ungespeicherte Formular-
+  // Aenderungen bleiben unangetastet und weiterhin "dirty".
+  const persistProviderFields = useCallback(
+    async (patch: Partial<Pick<AppConfig, "providerPriority" | "disabledProviders" | "localProvider">>) => {
+      const onDisk = await loadConfig();
+      const saved = await saveConfig({ ...onDisk, ...patch });
+      setConfig((current) =>
+        current
+          ? {
+              ...current,
+              providerPriority: saved.providerPriority,
+              disabledProviders: saved.disabledProviders,
+              localProvider: saved.localProvider
+            }
+          : saved
+      );
+      return saved;
+    },
+    []
+  );
+
+  const handleRefreshProviders = useCallback(
+    async (runSmoke = true) => {
+      if (!config) return;
+      const cards: ProviderId[] = ["codex", "claude", "local"];
+      cards.forEach((provider) => setProviderAction(provider, "test"));
+      try {
+        const snapshot = await getProviderStatuses(config, runSmoke);
+        // Wurde die lokale Lane waehrenddessen neu konfiguriert (z. B. Local-Brain-Uebernahme),
+        // bleibt deren frischerer Status statt des Snapshots der alten Konfiguration.
+        const latestLocal = configRef.current?.localProvider;
+        const localChanged =
+          latestLocal &&
+          (latestLocal.baseUrl !== config.localProvider.baseUrl || latestLocal.model !== config.localProvider.model);
+        const currentLocal = providerStatusesRef.current.find((status) => status.provider === "local");
+        applyProviderSnapshot(
+          localChanged && currentLocal
+            ? snapshot.map((status) => (status.provider === "local" ? currentLocal : status))
+            : snapshot
+        );
+        if (runSmoke) providerSmokeCheckedRef.current = true;
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        cards.forEach((provider) => setProviderAction(provider, null));
+      }
+    },
+    [applyProviderSnapshot, config, setProviderAction, show]
+  );
+
+  const handleConnectProvider = useCallback(
+    async (provider: ProviderId, forceLogin = false) => {
+      if (!config || provider === "local_control" || providerBusy[provider]) return;
+      const draft = localProviderDraft ?? config.localProvider;
+      if (provider === "local" && validateLocalEndpointInput(draft.baseUrl)) return;
+      setProviderAction(provider, "connect");
+      setProviderLoginUrls((current) => ({ ...current, [provider]: undefined }));
+      try {
+        const saved = await persistProviderFields({
+          disabledProviders: config.disabledProviders.filter((entry) => entry !== provider),
+          ...(provider === "local" ? { localProvider: draft } : {})
+        });
+        if (provider === "local") setLocalProviderDraft(null);
+        const status =
+          provider === "local"
+            ? await testProvider(saved, provider)
+            : await connectProvider(provider, forceLogin);
+        mergeProvider(status, saved.providerPriority);
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setProviderAction(provider, null);
+        setProviderLoginUrls((current) => ({ ...current, [provider]: undefined }));
+      }
+    },
+    [config, localProviderDraft, mergeProvider, persistProviderFields, providerBusy, setProviderAction, show]
+  );
+
+  const handleOpenProviderLoginUrl = useCallback(
+    async (provider: ProviderId, url: string) => {
+      try {
+        await openProviderLoginUrl(provider, url);
+        return true;
+      } catch (error) {
+        show("error", getMessage(error));
+        return false;
+      }
+    },
+    [show]
+  );
+
+  const handleCancelProviderLogin = useCallback(
+    async (provider: ProviderId) => {
+      try {
+        await cancelProviderLogin(provider);
+      } catch (error) {
+        show("error", getMessage(error));
+      }
+    },
+    [show]
+  );
+
+  const handleSubmitProviderLoginCode = useCallback(
+    async (provider: ProviderId, code: string) => {
+      const value = code.trim();
+      if (!value) return false;
+      try {
+        await submitProviderLoginCode(provider, value);
+        return true;
+      } catch (error) {
+        show("error", getMessage(error));
+        return false;
+      }
+    },
+    [show]
+  );
+
+  const testProviderSilently = useCallback(
+    async (provider: ProviderId, source: AppConfig) => {
+      setProviderAction(provider, "test");
+      try {
+        mergeProvider(await testProvider(source, provider), source.providerPriority);
+      } finally {
+        setProviderAction(provider, null);
+      }
+    },
+    [mergeProvider, setProviderAction]
+  );
+
+  const handleTestProvider = useCallback(
+    async (provider: ProviderId) => {
+      if (!config || providerBusy[provider]) return;
+      try {
+        await testProviderSilently(provider, config);
+      } catch (error) {
+        show("error", getMessage(error));
+      }
+    },
+    [config, providerBusy, show, testProviderSilently]
+  );
+
+  const handleDisconnectProvider = useCallback(
+    async (provider: ProviderId) => {
+      if (!config || provider === "local_control" || providerBusy[provider]) return;
+      setProviderAction(provider, "disconnect");
+      try {
+        // Nur KatoSync-eigene Secrets/Metadaten; die CLI-Anmeldung bleibt beim Provider.
+        await disconnectProvider(provider);
+        const saved = await persistProviderFields({
+          disabledProviders: Array.from(new Set([...config.disabledProviders, provider]))
+        });
+        const status = (await getProviderStatuses(saved, false)).find((entry) => entry.provider === provider);
+        if (status) mergeProvider(status, saved.providerPriority);
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setProviderAction(provider, null);
+      }
+    },
+    [config, mergeProvider, persistProviderFields, providerBusy, setProviderAction, show]
+  );
+
+  const handleMoveProvider = useCallback(
+    async (provider: ProviderId, direction: "up" | "down") => {
+      if (!config) return;
+      const next = moveProvider(config.providerPriority, provider, direction);
+      if (next.join() === normalizeProviderPriority(config.providerPriority).join()) return;
+      setConfig((current) => (current ? { ...current, providerPriority: next } : current));
+      try {
+        await persistProviderFields({ providerPriority: next });
+      } catch (error) {
+        show("error", getMessage(error));
+      }
+    },
+    [config, persistProviderFields, show]
+  );
+
+  const updateLocalProviderDraft = useCallback(
+    (patch: Partial<LocalProviderConfig>) => {
+      setLocalProviderDraft((current) => {
+        const base = current ?? config?.localProvider ?? defaultConfig.localProvider;
+        return { ...base, ...patch };
+      });
+    },
+    [config]
+  );
+
+  const handleDiscoverLocalProviders = useCallback(async () => {
+    setProviderAction("local", "test");
+    try {
+      const found = await discoverLocalProviders();
+      setDiscoveredLocal(found);
+      const first = found[0];
+      if (first && !(localProviderDraft ?? config?.localProvider)?.baseUrl) {
+        updateLocalProviderDraft({ kind: first.kind, baseUrl: first.baseUrl, model: first.models[0] ?? "" });
+      }
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setProviderAction("local", null);
+    }
+  }, [config, localProviderDraft, setProviderAction, show, updateLocalProviderDraft]);
+
+  const handleSaveLocalProviderKey = useCallback(async () => {
+    if (!config || providerBusy.local) return;
+    const draft = localProviderDraft ?? config.localProvider;
+    setLocalKeyError(null);
+    setProviderAction("local", "key");
+    try {
+      await saveLocalProviderKey(draft.baseUrl, localKeyInput);
+      setLocalKeyInput("");
+      const saved = await persistProviderFields({ localProvider: draft });
+      setLocalProviderDraft(null);
+      mergeProvider(await testProvider(saved, "local"), saved.providerPriority);
+    } catch (error) {
+      setLocalKeyInput("");
+      setLocalKeyError(getMessage(error));
+    } finally {
+      setProviderAction("local", null);
+    }
+  }, [config, localKeyInput, localProviderDraft, mergeProvider, persistProviderFields, providerBusy.local, setProviderAction]);
+
+  const handleRemoveLocalProviderKey = useCallback(async () => {
+    if (!config || providerBusy.local) return;
+    setProviderAction("local", "key");
+    try {
+      await disconnectProvider("local");
+      mergeProvider(await testProvider(config, "local"), config.providerPriority);
+    } catch (error) {
+      setLocalKeyError(getMessage(error));
+    } finally {
+      setProviderAction("local", null);
+    }
+  }, [config, mergeProvider, providerBusy.local, setProviderAction]);
+
+  const registerLocalBrainProvider = useCallback(
+    async (brain: LocalBrainStatus) => {
+      const localProvider = localBrainProviderConfig(brain);
+      if (!config || !localProvider) return;
+      const saved = await persistProviderFields({ localProvider });
+      setLocalProviderDraft(null);
+      mergeProvider(await testProvider(saved, "local"), saved.providerPriority);
+    },
+    [config, mergeProvider, persistProviderFields]
+  );
+
+  const handleInstallLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    setLocalBrainBusy("install");
+    setLocalBrainProgress(null);
+    try {
+      const installed = await installLocalBrain();
+      setLocalBrainStatus(installed);
+      setLocalBrainBusy("start");
+      const started = await startLocalBrain();
+      setLocalBrainStatus(started);
+      if(!started.running)throw Error("Lokales Modell ist installiert, aber der Health-Check ist noch nicht bereit.");
+      await registerLocalBrainProvider(started);
+      show("ok", "Setup abgeschlossen: Kato Local Brain läuft. Für die Agenten-Geburt fehlen noch Persona und sichere Agentenlaufzeit.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, registerLocalBrainProvider, show]);
+
+  const handleStartLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    setLocalBrainBusy("start");
+    try {
+      const started = await startLocalBrain();
+      setLocalBrainStatus(started);
+      await registerLocalBrainProvider(started);
+      show("ok", "Kato Local Brain läuft lokal.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, registerLocalBrainProvider, show]);
+
+  const handleStopLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    setLocalBrainBusy("stop");
+    try {
+      setLocalBrainStatus(await stopLocalBrain());
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, show]);
+
+  const handleRemoveLocalBrain = useCallback(async () => {
+    if (localBrainBusy) return;
+    const approved = await askConfirm(
+      "Kato Local Brain inklusive Modell und verwalteter llama.cpp-Runtime von diesem Rechner entfernen?",
+      { title: "Local Brain entfernen", okLabel: "Entfernen", cancelLabel: "Abbrechen" }
+    );
+    if (!approved) return;
+    setLocalBrainBusy("remove");
+    try {
+      setLocalBrainStatus(await removeLocalBrain());
+      setLocalBrainProgress(null);
+      show("ok", "Kato Local Brain wurde von diesem Rechner entfernt.");
+    } catch (error) {
+      show("error", getMessage(error));
+    } finally {
+      setLocalBrainBusy(null);
+    }
+  }, [localBrainBusy, show]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void getLocalBrainStatus()
+      .then((brain) => {
+        if (!disposed && brain) setLocalBrainStatus(brain);
+      })
+      .catch(() => {
+        // Nicht unterstuetzte Browser-/Testumgebung: lokale Anbieter bleiben weiterhin manuell nutzbar.
+      });
+    void listenLocalBrainProgress((progress) => {
+      if (!disposed) setLocalBrainProgress(progress);
+    }).then((un) => {
+      if (disposed) un();
+      else unlisten = un;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Ein bereits gesund laufender Local Brain (z. B. aus einer frueheren Sitzung) wird einmal pro
+  // Sitzung als lokale Lane uebernommen, sonst bliebe Agent Sync faelschlich "Nicht eingerichtet".
+  const localBrainAdoptedRef = useRef(false);
+  useEffect(() => {
+    if (!config || localBrainBusy || localBrainAdoptedRef.current) return;
+    if (!localBrainStatus || !shouldAdoptLocalBrain(localBrainStatus, config.localProvider)) return;
+    localBrainAdoptedRef.current = true;
+    void registerLocalBrainProvider(localBrainStatus).catch((error) => show("error", getMessage(error)));
+  }, [config, localBrainBusy, localBrainStatus, registerLocalBrainProvider, show]);
+
+  // Einmal pro App-Sitzung beim Oeffnen des Agent-Sync-Workspace real pruefen (Auth + READY).
+  useEffect(() => {
+    if (modeForStep(activeStep) !== "agentSync" || providerSmokeCheckedRef.current || !config) return;
+    providerSmokeCheckedRef.current = true;
+    void handleRefreshProviders(true);
+    void getLocalBrainStatus()
+      .then((brain) => {
+        if (brain) setLocalBrainStatus(brain);
+      })
+      .catch(() => undefined);
+  }, [activeStep, config, handleRefreshProviders]);
+
+  // Fallback-Link, falls der Browser beim offiziellen Login nicht automatisch aufgeht.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void listenProviderLoginUrls((event) => {
+      setProviderLoginUrls((current) => ({ ...current, [event.provider]: event.url }));
+    }).then((un) => {
+      if (disposed) un();
+      else unlisten = un;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Sparsamer Auto-Re-Check (providerPolicy.providerRecheckPlan): billige Auth-/Status-Checks
+  // halten Provider-Karten hoechstens 10 Minuten alt; teure READY-Tests laufen nur fuer wartende
+  // Arbeit am gemeldeten Reset-Zeitpunkt (ohne Hinweis hoechstens alle 30 Minuten).
+  const configRef = useRef<AppConfig | null>(null);
+  configRef.current = config;
+  const providerBusyRef = useRef(providerBusy);
+  providerBusyRef.current = providerBusy;
+  const lastReadyProbeRef = useRef<Partial<Record<ProviderId, string>>>({});
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const source = configRef.current;
+      if (!source) return;
+      const nowMs = Date.now();
+      const plan = providerRecheckPlan(providerStatusesRef.current, {
+        nowMs,
+        waitingWork: agentWorkWaiting(agentSyncRef.current),
+        lastReadyProbeAt: lastReadyProbeRef.current
+      });
+      const idle = (provider: ProviderId) => !providerBusyRef.current[provider];
+      for (const provider of plan.ready.filter(idle)) {
+        lastReadyProbeRef.current = { ...lastReadyProbeRef.current, [provider]: new Date(nowMs).toISOString() };
+        void testProviderSilently(provider, source).catch(() => undefined);
+      }
+      const cheap = plan.cheap.filter(idle);
+      if (!cheap.length) return;
+      void getProviderStatuses(source, false)
+        .then((probe) => {
+          const next = providerStatusesRef.current.map((current) => {
+            if (!cheap.includes(current.provider)) return current;
+            const health = probe.find((entry) => entry.provider === current.provider);
+            return health ? mergeCheapProviderHealth(current, health) : current;
+          });
+          applyProviderSnapshot(next);
+        })
+        .catch(() => undefined);
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [applyProviderSnapshot, testProviderSilently]);
+
+  // Begrenzter Abo-Provider-Warm-up (providerWarmupPolicy): hoechstens ein winziger READY-Prompt je
+  // Provider und ~5-h-Fenster, nur ohne laufende/wartende Arbeit. Das Ergebnis aendert weder
+  // Provider-Karten noch Routing – ein Fehlschlag ist folgenlos und loest nie Failover aus.
+  const warmupStateRef = useRef<ProviderWarmupState | null>(null);
+  const warmupInFlightRef = useRef(false);
+  const tryProviderWarmup = useCallback(async () => {
+    const source = configRef.current;
+    if (!source || warmupInFlightRef.current) return;
+    if (!warmupStateRef.current) {
+      try {
+        warmupStateRef.current = await getProviderWarmupState();
+      } catch {
+        return;
+      }
+    }
+    const plan = providerWarmupPlan(providerStatusesRef.current, {
+      enabled: source.providerWarmupEnabled,
+      workBusy: warmupSuppressedByWork(
+        agentSyncRef.current,
+        autoDispatchingRef.current || queueStartingRef.current || manualRunRef.current > 0
+      ),
+      inFlight: warmupInFlightRef.current,
+      state: warmupStateRef.current,
+      providerBusy: providerBusyRef.current
+    });
+    if (!plan.provider) return;
+    warmupInFlightRef.current = true;
+    try {
+      const report = await warmUpProvider(plan.provider);
+      if (report) warmupStateRef.current = report.state;
+    } catch {
+      // Warm-up ist best effort; der naechste Takt liest den persistierten Zustand neu.
+      warmupStateRef.current = null;
+    } finally {
+      warmupInFlightRef.current = false;
+    }
+  }, []);
+  useEffect(() => {
+    const timer = window.setInterval(() => void tryProviderWarmup(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [tryProviderWarmup]);
+  // Sobald ein Abo-Provider angemeldet/verfuegbar wird, nicht erst auf den naechsten Takt warten.
+  useEffect(() => {
+    void tryProviderWarmup();
+  }, [providerStatuses, tryProviderWarmup]);
 
   const saveDraftKeyIfNeeded = useCallback(async () => {
     const draft = keyInput.trim();
@@ -748,7 +1415,7 @@ export function useKatoSyncViewModel() {
   const resolveRepoForProject = useCallback(
     async (projectId: string): Promise<string | null> => {
       if (!config) return null;
-      const stored = config.projectRepos?.[projectId];
+      const stored = repoPathFor(projectsRegistryRef.current, config.projectRepos, projectId) ?? undefined;
       if (stored && (await dirExists(stored))) return stored;
       // Sicherheit (Multi-Rechner): kein gemerkter Ordner auf DIESEM Rechner. Statt still den
       // Ordner-Dialog zu oeffnen (und ggf. im falschen Ordner loszulaufen) erst bewusst rueckfragen —
@@ -802,12 +1469,67 @@ export function useKatoSyncViewModel() {
     [config, show]
   );
 
+  // Registry-Projekt bzw. einen konkreten Worktree ausdruecklich als Arbeitsordner festlegen.
+  // Die Registry waehlt nie still einen Ausfuehrungsordner; bei mehreren Targets entscheidet der Mensch sichtbar.
+  const handleUseProjectFolder = useCallback(
+    async (projectId: string, worktreePath?: string, targetLabel?: string, dirtyCount = 0) => {
+      const source = configRef.current;
+      const project = projectsRegistryRef.current.projects.find((entry) => entry.id === projectId);
+      if (!source || !project) return;
+      const path = worktreePath ?? project.rootPath;
+      const target = targetLabel ? `\n\nTarget: ${targetLabel}` : "";
+      const dirtyWarning =
+        dirtyCount > 0
+          ? `\n\nAchtung: Dieser Worktree hat aktuell ${dirtyCount} lokale Änderung${dirtyCount === 1 ? "" : "en"}. KatoSync wird sie nicht löschen, aber ein sauberer Worktree ist für automatische Aufgaben sicherer.`
+          : "";
+      const confirmed = await askConfirm(
+        `„${project.name}“ als Arbeitsordner für Aufgaben verwenden?${target}\n\nOrdner: ${path}${dirtyWarning}\n\nBeim Start einer Aufgabe arbeitet der Runner in genau diesem Ordner. Verwende für Auto-Lanes möglichst einen sauberen, passend zum Zielsystem ausgewählten Worktree.`,
+        { title: "Arbeitsordner festlegen", okLabel: "Festlegen", cancelLabel: "Abbrechen" }
+      );
+      if (!confirmed) return;
+      const nextConfig: AppConfig = {
+        ...source,
+        projectRepos: { ...(source.projectRepos ?? {}), [project.id]: path }
+      };
+      try {
+        setConfig(await saveConfig(nextConfig));
+      } catch {
+        setConfig(nextConfig);
+      }
+      show("ok", `Arbeitsordner für ${project.name}${targetLabel ? ` · ${targetLabel}` : ""} festgelegt.`);
+    },
+    [show]
+  );
+
   // Kern-Codex-Lauf OHNE Ordnerdialog (vom Einzel-Button UND vom Board-Executor genutzt).
   const runCodexForTaskWithRepo = useCallback(
-    async (plan: ActionPlan, task: ActionTask, repoPath: string): Promise<CodexRunResult> => {
+    async (
+      plan: ActionPlan,
+      task: ActionTask,
+      repoPath: string,
+      runner?: AutoLaneRunner,
+      trackPrimaryRun = true
+    ): Promise<CodexRunResult> => {
       if (!config) throw new Error("Keine Konfiguration geladen.");
-      setCodexEvents([]);
-      setCodexRun({ status: "running" });
+      const selectedRunner = runner ?? config.codexPreferredRunner;
+      const startedAt = new Date().toISOString();
+      if (trackPrimaryRun) {
+        setCodexEvents([]);
+        setCodexRun({
+          status: "running",
+          startedAt,
+          lastActivityAt: startedAt,
+          context: {
+            jobId: task.taskId,
+            projectId: task.projectId,
+            task: task.title,
+            source: "action_plan",
+            planId: plan.planId,
+            createdAt: plan.createdAt,
+            runner: selectedRunner
+          }
+        });
+      }
       const result = await runCodexTask({
         baseUrl: config.mcp.baseUrl,
         repoPath,
@@ -831,15 +1553,39 @@ export function useKatoSyncViewModel() {
           projectId: task.projectId,
           riskLevel: task.riskLevel
         },
-        runner: config.codexPreferredRunner
+        runner: selectedRunner
       });
-      setCodexRun({ status: result.status === "completed" ? "completed" : "failed", result });
+      if (trackPrimaryRun) {
+        setCodexRun((current) => ({
+          ...current,
+          status: result.status === "completed" ? "completed" : "failed",
+          lastActivityAt: new Date().toISOString(),
+          result
+        }));
+      }
       return result;
     },
     [config]
   );
 
-  const handleRunCodexForTask = useCallback(
+  // Manuelle Einzel-Laeufe und der Auto-Dispatcher teilen sich den einen Runner-Writer.
+  const guardManualRun = useCallback(
+    async (run: () => Promise<void>) => {
+      if (autoDispatchingRef.current) {
+        show("warn", "Auto Mode führt gerade eine Aufgabe aus. Bitte warten, bis sie fertig ist.");
+        return;
+      }
+      manualRunRef.current += 1;
+      try {
+        await run();
+      } finally {
+        manualRunRef.current -= 1;
+      }
+    },
+    [show]
+  );
+
+  const runCodexForTaskManually = useCallback(
     async (plan: ActionPlan, task: ActionTask) => {
       if (!config) return;
       const repoPath = await resolveRepoForProject(task.projectId);
@@ -866,7 +1612,7 @@ export function useKatoSyncViewModel() {
             : `Codex-Lauf fehlgeschlagen: ${result.error ?? "unbekannt"}`
         );
       } catch (error) {
-        setCodexRun({ status: "failed", error: getMessage(error) });
+        setCodexRun((current) => ({ ...current, status: "failed", lastActivityAt: new Date().toISOString(), error: getMessage(error) }));
         await updateActionTaskStatus(config, task.taskId, "failed").catch(() => undefined);
         setActionPlans(await loadActionPlans(config));
         show("error", getMessage(error));
@@ -877,14 +1623,31 @@ export function useKatoSyncViewModel() {
     [config, resolveRepoForProject, runCodexForTaskWithRepo, show]
   );
 
-  const handleRunCodexForBriefing = useCallback(
+  const handleRunCodexForTask = useCallback(
+    (plan: ActionPlan, task: ActionTask) => guardManualRun(() => runCodexForTaskManually(plan, task)),
+    [guardManualRun, runCodexForTaskManually]
+  );
+
+  const runCodexForBriefingManually = useCallback(
     async (briefing: Briefing) => {
       if (!config) return;
       const repoPath = await resolveRepoForProject("katosync");
       if (!repoPath) return;
+      const startedAt = new Date().toISOString();
       setBusy("codex-run");
       setCodexEvents([]);
-      setCodexRun({ status: "running" });
+      setCodexRun({
+        status: "running",
+        startedAt,
+        lastActivityAt: startedAt,
+        context: {
+          jobId: briefing.briefingId,
+          projectId: "katosync",
+          task: briefing.title,
+          source: "briefing",
+          createdAt: briefing.createdAt
+        }
+      });
       try {
         const result = await runCodexTask({
           baseUrl: config.mcp.baseUrl,
@@ -907,7 +1670,12 @@ export function useKatoSyncViewModel() {
           },
           runner: config.codexPreferredRunner
         });
-        setCodexRun({ status: result.status === "completed" ? "completed" : "failed", result });
+        setCodexRun((current) => ({
+          ...current,
+          status: result.status === "completed" ? "completed" : "failed",
+          lastActivityAt: new Date().toISOString(),
+          result
+        }));
         show(
           result.status === "completed" ? "ok" : "warn",
           result.status === "completed"
@@ -916,7 +1684,7 @@ export function useKatoSyncViewModel() {
         );
         setBriefings(await updateBriefingStatus(config, briefing.briefingId, "queued"));
       } catch (error) {
-        setCodexRun({ status: "failed", error: getMessage(error) });
+        setCodexRun((current) => ({ ...current, status: "failed", lastActivityAt: new Date().toISOString(), error: getMessage(error) }));
         show("error", getMessage(error));
       } finally {
         setBusy(null);
@@ -925,31 +1693,53 @@ export function useKatoSyncViewModel() {
     [config, resolveRepoForProject, show]
   );
 
-  // ===== Projekt-Board =====
+  const handleRunCodexForBriefing = useCallback(
+    (briefing: Briefing) => guardManualRun(() => runCodexForBriefingManually(briefing)),
+    [guardManualRun, runCodexForBriefingManually]
+  );
+
+  // ===== Projekt-Board / lokale Project-Work-Pläne =====
+  const effectiveActionPlans = useMemo(
+    () => [...actionPlans, ...projectWorkPlans],
+    [actionPlans, projectWorkPlans]
+  );
+
+  // Das alte Mistral-Projektboard bleibt serverseitig. Lokale AutoQ-Pläne erscheinen nur
+  // in Agent Sync/Auto-Lanes und werden nie versehentlich über MCP-Board-Mutationen geschrieben.
   const boardGroups = useMemo<BoardGroup[]>(
-    () => groupTasksByProject(actionPlans, boardSelection, boardOrder),
-    [actionPlans, boardSelection, boardOrder]
+    () => groupTasksByProject(actionPlans, boardSelection, boardOrder, projects.registry),
+    [actionPlans, boardSelection, boardOrder, projects.registry]
   );
 
   const boardDailyLimit = useMemo(() => {
-    const limits = actionPlans
+    const limits = effectiveActionPlans
       .filter((plan) => plan.status === "approved")
       .map((plan) => plan.dailyLimit)
       .filter((value) => Number.isFinite(value) && value > 0);
     return limits.length ? Math.max(...limits) : 3;
-  }, [actionPlans]);
+  }, [effectiveActionPlans]);
 
-  // Selektion/Reihenfolge bereinigen, sobald ein Task das aktive Board verlaesst.
+  // Selektion/Reihenfolge bereinigen, sobald ein Task das aktive Board verlaesst ODER heute
+  // keinem aktuellen Fokusprojekt mehr zugeordnet ist. Manuelle aktuelle Projekte bleiben fuer
+  // bewusste Handarbeit sichtbar; parked/archived/unmapped Altarbeit (z. B. Telefon/Twilio) fliegt raus.
   useEffect(() => {
+    // Vor dem ersten Laden sind keine Plans da: die persistierte Auswahl nicht leerraeumen.
+    if (!effectiveActionPlans.length) return;
     const activeIds = new Set<string>();
-    for (const plan of actionPlans) {
+    for (const plan of effectiveActionPlans) {
       for (const task of plan.tasks) {
-        if (task.status !== "completed" && task.status !== "rejected") activeIds.add(task.taskId);
+        if (task.status === "completed" || task.status === "rejected") continue;
+        const focus = evaluateFocus(projects.focusPolicy, task.projectId);
+        if (focus.allowed || focus.reason === "project_manual") activeIds.add(task.taskId);
       }
     }
     setBoardSelection((prev) => prev.filter((id) => activeIds.has(id)));
     setBoardOrder((prev) => prev.filter((id) => activeIds.has(id)));
-  }, [actionPlans]);
+  }, [effectiveActionPlans, projects.focusPolicy]);
+
+  useEffect(() => {
+    writeBoardSelection(boardOrder);
+  }, [boardOrder]);
 
   const handleSelectTask = useCallback((taskId: string) => {
     setBoardSelection((prev) =>
@@ -1065,7 +1855,7 @@ export function useKatoSyncViewModel() {
       if (!config) return;
       setBusy("check-completions");
       try {
-        const repoPath = config.projectRepos?.[task.projectId] ?? "";
+        const repoPath = repoPathFor(projectsRegistryRef.current, config.projectRepos, task.projectId) ?? "";
         const state = await checkCodexTask(repoPath, task.branch ?? "", task.prUrl ?? "");
         if (state === "merged") {
           setActionPlans(await updateActionTaskStatus(config, task.taskId, "completed"));
@@ -1087,9 +1877,14 @@ export function useKatoSyncViewModel() {
   const handleCheckCompletions = useCallback(
     async (manual = false) => {
       if (!config) return;
-      const executed = actionPlans
-        .flatMap((plan) => plan.tasks)
-        .filter((task) => task.status === "executed" && (task.prUrl || task.branch));
+      const executed = effectiveActionPlans
+        .flatMap((plan) =>
+          plan.tasks.map((task) => ({
+            task,
+            localProjectWork: isProjectWorkPlan(plan)
+          }))
+        )
+        .filter(({ task }) => task.status === "executed" && (task.prUrl || task.branch));
       if (!executed.length) {
         if (manual) show("info", "Keine ausgeführten Aufgaben mit PR/Branch zu prüfen.");
         return;
@@ -1097,19 +1892,22 @@ export function useKatoSyncViewModel() {
       if (manual) setBusy("check-completions");
       try {
         let changed = 0;
-        for (const task of executed) {
-          const repoPath = config.projectRepos?.[task.projectId] ?? "";
+        let remoteChanged = false;
+        for (const { task, localProjectWork } of executed) {
+          const repoPath = repoPathFor(projectsRegistryRef.current, config.projectRepos, task.projectId) ?? "";
           const state = await checkCodexTask(repoPath, task.branch ?? "", task.prUrl ?? "");
-          if (state === "merged") {
-            await updateActionTaskStatus(config, task.taskId, "completed");
-            changed += 1;
-          } else if (state === "closed") {
-            await updateActionTaskStatus(config, task.taskId, "rejected");
-            changed += 1;
+          const finalStatus = state === "merged" ? "completed" : state === "closed" ? "rejected" : null;
+          if (!finalStatus) continue;
+          if (localProjectWork) {
+            commitProjectWorkPlans((plans) => updateProjectWorkTask(plans, task.taskId, finalStatus));
+          } else {
+            await updateActionTaskStatus(config, task.taskId, finalStatus);
+            remoteChanged = true;
           }
+          changed += 1;
         }
+        if (remoteChanged) setActionPlans(await loadActionPlans(config));
         if (changed) {
-          setActionPlans(await loadActionPlans(config));
           show("ok", `${changed} Aufgabe(n) aktualisiert (gemerged/geschlossen).`);
         } else if (manual) {
           show("info", "Noch nichts gemerged/geschlossen.");
@@ -1118,7 +1916,7 @@ export function useKatoSyncViewModel() {
         if (manual) setBusy(null);
       }
     },
-    [actionPlans, config, show]
+    [commitProjectWorkPlans, config, effectiveActionPlans, show]
   );
 
   // On-demand: beim Betreten des Projekt-Boards einmal automatisch pruefen.
@@ -1138,6 +1936,16 @@ export function useKatoSyncViewModel() {
   const handleStartBoardQueue = useCallback(
     async (projectId: string) => {
       if (!config || queueRunning || queueStartingRef.current) return;
+      if (autoDispatchingRef.current) {
+        show("warn", "Auto Mode führt gerade eine Aufgabe aus. Die Queue startet danach.");
+        return;
+      }
+      // Ein Writer zur Zeit: laeuft bereits ein Handoff/Orchestrator/Writer, startet nichts Zweites.
+      const safety = agentSyncRef.current?.startSafety;
+      if (safety && !safety.safe) {
+        show("warn", `Start gesperrt (${safety.reason}): ein anderer Agent-Job arbeitet bereits oder keine Lane ist frei.`);
+        return;
+      }
       queueStartingRef.current = true;
       try {
       const group = boardGroups.find((entry) => entry.projectId === projectId);
@@ -1228,6 +2036,369 @@ export function useKatoSyncViewModel() {
     ]
   );
 
+  // ===== Auto-Lane-Dispatcher =====
+  // Startet ausschliesslich den vom Planer (agentSync.autoLanes.dispatch) freigegebenen Kopf-Task ueber
+  // den bestehenden Runner. Claim wird synchron VOR jedem await persistiert und erst nach dem finalen
+  // Task-Status freigegeben; kann ein Status nicht gespeichert werden, bleibt die Lane sichtbar gesperrt.
+  const actionPlansRef = useRef(effectiveActionPlans);
+  actionPlansRef.current = effectiveActionPlans;
+  const autoModeRef = useRef(autoMode);
+  autoModeRef.current = autoMode;
+  const autoTickRef = useRef<() => Promise<void>>(async () => undefined);
+  const autoQRefreshRef = useRef<(announce: boolean, armAutoMode: boolean) => Promise<ProjectWorkSyncReport | null>>(
+    async () => null
+  );
+  const lastAutoPlanRefreshRef = useRef(0);
+  const lastAutoQRefreshRef = useRef(0);
+  const lastAutoQTruthSignatureRef = useRef("");
+
+  const commitAutoClaims = useCallback((update: (claims: AutoLaneClaim[]) => AutoLaneClaim[]) => {
+    const next = update(readAutoLaneClaims());
+    writeAutoLaneClaims(next);
+    setAutoClaims(next);
+    return next;
+  }, []);
+
+  const dispatchAutoLane = useCallback(async () => {
+    const source = configRef.current;
+    const state = agentSyncRef.current;
+    const planned = state?.autoLanes.dispatch ?? [];
+    if (!source || !state?.autoLanes.enabled || !autoModeRef.current.enabled || !planned.length) return;
+    if (autoDispatchingRef.current || queueStartingRef.current || manualRunRef.current > 0 || !state.startSafety.safe) return;
+    if (readDailyCount() >= boardDailyLimit) return;
+    autoDispatchingRef.current = true;
+    const claimedAt = new Date().toISOString();
+    // Alle Batch-Claims werden synchron vor dem ersten await reserviert. Dadurch koennen weder ein
+    // zweiter Tick noch zwei Kandidaten denselben Task/Worktree als Writer uebernehmen.
+    const candidates: Array<{
+      dispatch: (typeof planned)[number];
+      plan: ActionPlan;
+      task: ActionTask;
+      repoPath: string;
+      localProjectWork: boolean;
+    }> = [];
+    let reserved = readAutoLaneClaims();
+    for (const dispatch of planned) {
+      const repoPath = repoPathFor(projectsRegistryRef.current, source.projectRepos, dispatch.projectId);
+      const plan = actionPlansRef.current.find((entry) => entry.planId === dispatch.planId);
+      const task = plan?.tasks.find((entry) => entry.taskId === dispatch.taskId);
+      if (!repoPath || !plan || !task || hasAutoLaneClaimConflict(reserved, dispatch.taskId, repoPath)) continue;
+      // Defense in depth: Fokuswechsel zwischen Planung und Claim startet nie autonom.
+      if (!evaluateFocus(focusPolicyRef.current, task.projectId).allowed) continue;
+      reserved = addAutoLaneClaim(reserved, {
+        taskId: task.taskId,
+        projectId: task.projectId,
+        repoKey: repoPath,
+        runner: dispatch.runner,
+        claimedAt
+      });
+      candidates.push({ dispatch, plan, task, repoPath, localProjectWork: isProjectWorkPlan(plan) });
+    }
+    const committedClaims = commitAutoClaims((claims) =>
+      candidates.reduce(
+        (ledger, candidate) => addAutoLaneClaim(ledger, {
+          taskId: candidate.task.taskId,
+          projectId: candidate.task.projectId,
+          repoKey: candidate.repoPath,
+          runner: candidate.dispatch.runner,
+          claimedAt
+        }),
+        claims
+      )
+    );
+    const accepted = candidates.filter((candidate) => committedClaims.some((claim) =>
+      claim.taskId === candidate.task.taskId &&
+      claim.repoKey === candidate.repoPath &&
+      claim.runner === candidate.dispatch.runner
+    ));
+    if (!accepted.length) {
+      autoDispatchingRef.current = false;
+      return;
+    }
+    setCodexEvents([]);
+    setAutoLastDispatch((current) => ({
+      ...current,
+      ...Object.fromEntries(accepted.map(({ task }) => [task.projectId, claimedAt]))
+    }));
+    setAutoInFlight(accepted.map(({ task }) => task.taskId));
+
+    const runCandidate = async ({ dispatch, plan, task, repoPath, localProjectWork }: (typeof accepted)[number]) => {
+      let releaseClaim = true;
+      try {
+        if (!(await dirExists(repoPath))) {
+          setAutoMissingRepos((current) => (current.includes(task.projectId) ? current : [...current, task.projectId]));
+          show("warn", `Auto Mode: Projektordner für ${task.projectId} fehlt auf diesem Rechner. Lane gesperrt.`);
+          return;
+        }
+        try {
+          if (localProjectWork) {
+            commitProjectWorkPlans((plans) => updateProjectWorkTask(plans, task.taskId, "running"));
+          } else {
+            await updateActionTaskStatus(source, task.taskId, "running");
+          }
+        } catch {
+          releaseClaim = false;
+          show("warn", `Auto Mode: Status für „${task.title}“ nicht gespeichert. Lane bleibt gesperrt.`);
+          return;
+        }
+        let finalStatus: ActionTaskStatus = "failed";
+        let extra: { prUrl: string | null; branch: string | null } | undefined;
+        try {
+          // Auto-Jobs leben im kanonischen Claim-/In-Flight-Ledger. Der manuelle Singleton-Runstate
+          // bleibt frei, damit zwei Provider nicht gegenseitig Besitzer/Events ueberschreiben.
+          const result = await runCodexForTaskWithRepo(plan, task, repoPath, dispatch.runner, false);
+          if (result.status === "completed") {
+            const isFileMode = result.fileMode ?? !source.codexCodingMode;
+            finalStatus = isFileMode ? "completed" : "executed";
+            extra = { prUrl: result.prUrl ?? null, branch: result.branch ?? null };
+            const done = readDailyCount() + 1;
+            writeDailyCount(done);
+            setDailyCount(done);
+          } else {
+            // Jobfehler: kein Providerwechsel; nur diese Projekt-Lane pausiert sichtbar.
+            show("warn", `Auto Mode: „${task.title}“ fehlgeschlagen. Diese Projekt-Lane pausiert, andere laufen weiter.`);
+          }
+        } catch (error) {
+          show("warn", `Auto Mode: „${task.title}“ abgebrochen (${getMessage(error)}). Diese Projekt-Lane pausiert, andere laufen weiter.`);
+        }
+        try {
+          if (localProjectWork) {
+            commitProjectWorkPlans((plans) =>
+              updateProjectWorkTask(plans, task.taskId, finalStatus, {
+                prUrl: extra?.prUrl ?? null,
+                branch: extra?.branch ?? null
+              })
+            );
+          } else {
+            await updateActionTaskStatus(source, task.taskId, finalStatus, extra);
+          }
+        } catch {
+          releaseClaim = false;
+          show("warn", `Auto Mode: Endstatus für „${task.title}“ nicht gespeichert. Lane bleibt gesperrt.`);
+        }
+      } finally {
+        if (releaseClaim) commitAutoClaims((claims) => releaseAutoLaneClaim(claims, task.taskId));
+        setAutoInFlight((current) => current.filter((taskId) => taskId !== task.taskId));
+      }
+    };
+
+    try {
+      // allSettled: der Batch-Lock faellt erst, wenn wirklich jeder Provider-Lauf beendet ist.
+      await Promise.allSettled(accepted.map((candidate) => runCandidate(candidate)));
+    } finally {
+      if (accepted.some((candidate) => !candidate.localProjectWork)) {
+        try {
+          setActionPlans(await loadActionPlans(source));
+        } catch {
+          // Server nicht erreichbar: der naechste Takt laedt erneut.
+        }
+      }
+      autoDispatchingRef.current = false;
+      // Nach Abschluss/Fehler des Batches sofort neu bewerten, ohne erneuten Klick.
+      void autoTickRef.current();
+    }
+  }, [boardDailyLimit, commitAutoClaims, commitProjectWorkPlans, runCodexForTaskWithRepo, show]);
+
+  const handleCheckCompletionsRef = useRef(handleCheckCompletions);
+  handleCheckCompletionsRef.current = handleCheckCompletions;
+
+  // Ein Takt: frische Local-Control-Evidenz (Writer/Leases), gelegentlich Plans + Merge-Status,
+  // dann Dispatch-Bewertung im naechsten Render (agentSyncRef ist dann aktuell).
+  autoTickRef.current = async () => {
+    if (!autoModeRef.current.enabled) return;
+    await refreshLocalControlMonitor();
+    setDailyCount(readDailyCount());
+    const source = configRef.current;
+    if (source && !autoDispatchingRef.current && Date.now() - lastAutoPlanRefreshRef.current >= AUTO_LANE_PLAN_REFRESH_MS) {
+      lastAutoPlanRefreshRef.current = Date.now();
+      try {
+        setActionPlans(await loadActionPlans(source));
+      } catch {
+        // Server nicht erreichbar: Planer arbeitet mit dem letzten Stand.
+      }
+      if (agentSyncRef.current?.autoLanes.lanes.some((lane) => lane.reason === "merge_pending")) {
+        await handleCheckCompletionsRef.current(false).catch(() => undefined);
+      }
+    }
+    const state = agentSyncRef.current;
+    const ownershipBusy =
+      autoDispatchingRef.current ||
+      queueStartingRef.current ||
+      manualRunRef.current > 0 ||
+      state?.startSafety.reason === "runner_busy" ||
+      state?.startSafety.reason === "worktree_lease_active" ||
+      state?.startSafety.reason === "handoff_in_flight" ||
+      state?.startSafety.reason === "orchestrator_lease";
+    const refreshReason = autoQRefreshReason({
+      // Vor geladener Registry/Config ist ein leerer Stand keine autoritative Projektwahrheit.
+      enabled: autoModeRef.current.enabled && projects.loaded && Boolean(source),
+      syncing: projectWorkSyncingRef.current,
+      writerActive: ownershipBusy,
+      laneCount: state?.autoLanes.lanes.length ?? 0,
+      projectTruthChanged: source
+        ? projectWorkTruthSignature(projectsRegistryRef.current, source.projectRepos) !== lastAutoQTruthSignatureRef.current
+        : false,
+      lastRefreshAt: lastAutoQRefreshRef.current,
+      now: Date.now()
+    });
+    if (refreshReason) await autoQRefreshRef.current(false, false);
+    setAutoTickSeq((value) => value + 1);
+  };
+
+  const handleSetAutoMode = useCallback(
+    (enabled: boolean) => {
+      const mode: AutoLaneMode = { enabled, updatedAt: new Date().toISOString() };
+      writeAutoLaneMode(mode);
+      autoModeRef.current = mode;
+      setAutoMode(mode);
+      show(
+        "info",
+        enabled
+          ? "Auto Mode an: ausgewählte, freigegebene Aufgaben starten automatisch, sobald es sicher ist."
+          : "Auto Mode pausiert: eine laufende Aufgabe endet normal, danach startet nichts Neues."
+      );
+    },
+    [show]
+  );
+
+  const syncProjectWork = useCallback(async (announce: boolean, armAutoMode: boolean): Promise<ProjectWorkSyncReport | null> => {
+    if (projectWorkSyncingRef.current) return null;
+    projectWorkSyncingRef.current = true;
+    setProjectWorkSyncBusy(true);
+    try {
+      const source = configRef.current;
+      if (!source || !projects.loaded) return null;
+      let registry = projectsRegistryRef.current;
+      const previousProjectPlans = projectWorkPlansRef.current;
+
+      // Vor jeder AutoQ-Planung wird der explizit gewählte Runner-Worktree READ-ONLY neu geprüft.
+      // So liest AutoQ nicht den alten kanonischen Main/Audit-Stand, wenn der Nutzer einen frischeren
+      // THEORG-/Beta-/Feature-Worktree als tatsächliches Arbeitsziel festgelegt hat.
+      if (source?.projectRepos) {
+        for (const project of registry.projects) {
+          if (project.focus.status !== "active") continue;
+          const mappedPath = source.projectRepos[project.id];
+          if (!mappedPath) continue;
+          const refreshed = await projects.rescanAtPath(project.id, mappedPath);
+          if (refreshed) registry = refreshed;
+        }
+      }
+      projectsRegistryRef.current = registry;
+
+      const { plans, selectedTaskIds, report } = buildProjectWorkSync(
+        registry,
+        source?.projectRepos,
+        previousProjectPlans,
+        new Date().toISOString()
+      );
+      projectWorkPlansRef.current = plans;
+      writeProjectWorkPlans(plans);
+      setProjectWorkPlans(plans);
+      setProjectWorkSyncReport(report);
+      setBoardSelection(selectedTaskIds);
+      setBoardOrder(selectedTaskIds);
+      writeBoardSelection(selectedTaskIds);
+
+      // Dieser Scan ist autoritativ: Claims erledigter oder aus der aktuellen Wahrheit entfernter
+      // Tasks werden freigegeben. Nicht geladene Planstaende ausserhalb dieses Pfads bleiben konservativ.
+      const currentClaims = readAutoLaneClaims();
+      const projectTaskIds = [...previousProjectPlans, ...plans].flatMap((plan) => plan.tasks.map((task) => task.taskId));
+      const prunedClaims = pruneAutoLaneClaimsInScope(currentClaims, plans, projectTaskIds);
+      if (prunedClaims.length !== currentClaims.length) {
+        writeAutoLaneClaims(prunedClaims);
+        setAutoClaims(prunedClaims);
+      }
+
+      lastAutoQRefreshRef.current = Date.now();
+      lastAutoQTruthSignatureRef.current = projectWorkTruthSignature(registry, source.projectRepos);
+
+      if (armAutoMode) {
+        const mode: AutoLaneMode = { enabled: true, updatedAt: new Date().toISOString() };
+        writeAutoLaneMode(mode);
+        autoModeRef.current = mode;
+        setAutoMode(mode);
+      }
+
+      if (announce && report.readyCount > 0) {
+        show(
+          "ok",
+          `AutoQ: ${report.readyCount} ausführbare Aufgabe${report.readyCount === 1 ? "" : "n"} synchronisiert. ${report.gatedCount ? `${report.gatedCount} Projekt-Gate${report.gatedCount === 1 ? "" : "s"} bleiben geschützt.` : ""}`
+        );
+      } else if (announce) {
+        show(
+          "warn",
+          `AutoQ: keine sofort ausführbare Arbeit gefunden. ${report.gatedCount} Gate${report.gatedCount === 1 ? "" : "s"}, ${report.emptyCount} Projekt${report.emptyCount === 1 ? "" : "e"} ohne explizites Next Safe Work.`
+        );
+      }
+      return report;
+    } finally {
+      projectWorkSyncingRef.current = false;
+      setProjectWorkSyncBusy(false);
+    }
+  }, [projects.loaded, projects.rescanAtPath, show]);
+
+  autoQRefreshRef.current = syncProjectWork;
+
+  const handleStartAutoQ = useCallback(async () => {
+    const report = await syncProjectWork(true, true);
+    if (report) window.setTimeout(() => void autoTickRef.current(), 0);
+  }, [syncProjectWork]);
+
+  // Auto Mode ist ein dauerhafter Wunsch, kein Einmal-Klick. Nach App-Start oder einer geaenderten
+  // Runner-Zuordnung synchronisiert AutoQ deshalb einmal selbststaendig die aktuelle Projektwahrheit.
+  // Der Signatur-Guard verhindert Schleifen, wenn die READ-ONLY-Scans die Registry aktualisieren.
+  const autoQSyncSignatureRef = useRef("");
+  useEffect(() => {
+    if (!autoMode.enabled || !projects.loaded || projectWorkSyncBusy || !config) return undefined;
+    const entries = Object.entries(config.projectRepos ?? {}).sort(([a], [b]) => a.localeCompare(b));
+    if (!entries.length) return undefined;
+    const signature = JSON.stringify(entries);
+    if (autoQSyncSignatureRef.current === signature) return undefined;
+    autoQSyncSignatureRef.current = signature;
+    const timer = window.setTimeout(() => void handleStartAutoQ(), 250);
+    return () => window.clearTimeout(timer);
+  }, [autoMode.enabled, config, handleStartAutoQ, projectWorkSyncBusy, projects.loaded]);
+
+  // Unterbrochene Lane (Claim/„running“ ohne laufenden Besitzer) bewusst freigeben: der Task wird
+  // zurückgestellt und startet erst wieder, wenn er im Board bewusst neu eingeplant wird.
+  const handleReleaseAutoLane = useCallback(
+    async (taskId: string) => {
+      if (autoInFlight.includes(taskId) || agentSyncRef.current?.currentJob?.id === taskId) return;
+      setBusy("board");
+      try {
+        const plan = actionPlansRef.current.find((entry) => entry.tasks.some((task) => task.taskId === taskId));
+        if (isProjectWorkPlan(plan)) {
+          commitProjectWorkPlans((plans) => updateProjectWorkTask(plans, taskId, "deferred"));
+        } else {
+          setActionPlans(await updateActionTaskStatus(config, taskId, "deferred"));
+        }
+        commitAutoClaims((claims) => releaseAutoLaneClaim(claims, taskId));
+        show("info", "Unterbrochene Aufgabe zurückgestellt. Im Projekt-Board kannst du sie bewusst wieder einplanen.");
+      } catch (error) {
+        show("error", getMessage(error));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [autoInFlight, commitAutoClaims, commitProjectWorkPlans, config, show]
+  );
+
+  // Erledigte Claims (Endstatus erreicht) aus dem Ledger entfernen.
+  useEffect(() => {
+    if (autoDispatchingRef.current) return;
+    const current = readAutoLaneClaims();
+    const pruned = pruneAutoLaneClaims(current, effectiveActionPlans);
+    if (pruned.length !== current.length) {
+      writeAutoLaneClaims(pruned);
+      setAutoClaims(pruned);
+    }
+  }, [effectiveActionPlans]);
+
+  // Neue Repo-Zuordnung -> fehlende Ordner erneut pruefen.
+  useEffect(() => {
+    setAutoMissingRepos([]);
+  }, [config?.projectRepos]);
+
   const handleAcceptBriefing = useCallback(
     async (briefingId: string) => {
       setBriefings(await updateBriefingStatus(config, briefingId, "accepted"));
@@ -1314,9 +2485,106 @@ export function useKatoSyncViewModel() {
     [setupGates]
   );
 
+  const planProjectIds = useMemo(
+    () => [...new Set(effectiveActionPlans.flatMap((plan) => plan.tasks.map((task) => task.projectId)).filter(Boolean))],
+    [effectiveActionPlans]
+  );
+
+  // Defense in depth: Auto-Lanes sehen ausschliesslich aktuell Auto-erlaubte Fokus-Tasks.
+  // Persistierte Alt-Auswahl darf nie ueber einen spaeteren Registry-/Fokuswechsel wieder anlaufen.
+  const autoSelectedOrder = useMemo(() => {
+    const projectByTask = new Map(
+      effectiveActionPlans.flatMap((plan) => plan.tasks.map((task) => [task.taskId, task.projectId] as const))
+    );
+    return boardOrder.filter((taskId) => {
+      const projectId = projectByTask.get(taskId);
+      return Boolean(projectId && evaluateFocus(projects.focusPolicy, projectId).allowed);
+    });
+  }, [effectiveActionPlans, boardOrder, projects.focusPolicy]);
+
+  const agentSync = useMemo(
+    () => normalizeAgentSyncState({
+      actionPlans: effectiveActionPlans,
+      codexRun,
+      codexEvents,
+      currentQueueTaskId,
+      queueRunning,
+      localControl: localControlMonitor,
+      providerStatuses,
+      providerTransitions: providerHistory,
+      providerPriority: config?.providerPriority ?? [],
+      preferredRunner: config?.codexPreferredRunner,
+      codexModel: config?.codexModel,
+      claudeModel: config?.claudeModel,
+      localModel: config?.localProvider.model,
+      device: config?.device.deviceName,
+      focus: projects.focusPolicy,
+      autoLane: {
+        enabled: autoMode.enabled,
+        selectedOrder: autoSelectedOrder,
+        repos: buildRepoMap(projects.registry, config?.projectRepos, planProjectIds),
+        missingRepos: autoMissingRepos,
+        claims: autoClaims,
+        inFlightTaskIds: autoInFlight,
+        dailyCount,
+        dailyLimit: boardDailyLimit,
+        lastDispatchAt: autoLastDispatch
+      },
+      now: new Date().toISOString()
+    }),
+    [
+      effectiveActionPlans,
+      autoClaims,
+      autoInFlight,
+      autoLastDispatch,
+      autoMissingRepos,
+      autoMode.enabled,
+      boardDailyLimit,
+      autoSelectedOrder,
+      codexEvents,
+      codexRun,
+      config?.claudeModel,
+      config?.codexModel,
+      config?.codexPreferredRunner,
+      config?.device.deviceName,
+      config?.localProvider.model,
+      config?.projectRepos,
+      config?.providerPriority,
+      currentQueueTaskId,
+      planProjectIds,
+      projects.focusPolicy,
+      projects.registry,
+      dailyCount,
+      localControlMonitor,
+      providerHistory,
+      providerStatuses,
+      queueRunning
+    ]
+  );
+
+  agentSyncRef.current = agentSync;
+
+  // Auto-Mode-Takt (nur bei offener App und eingeschaltetem Modus): begrenzt, kein Busy-Loop.
+  useEffect(() => {
+    if (!autoMode.enabled) return undefined;
+    void autoTickRef.current();
+    const timer = window.setInterval(() => void autoTickRef.current(), AUTO_LANE_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [autoMode.enabled]);
+
+  // Dispatch nur direkt nach einem Takt mit frischer Evidenz bewerten.
+  useEffect(() => {
+    // Bewusst nur am Takt haengend: dispatchAutoLane stammt aus genau diesem Render.
+    if (autoTickSeq > 0) void dispatchAutoLane();
+  }, [autoTickSeq]);
+
   return {
     activeStep,
+    agentSync,
     actionPlans,
+    agentActionPlans: effectiveActionPlans,
+    projectWorkSyncReport,
+    projectWorkSyncBusy,
     boardDailyLimit,
     boardGroups,
     boardSelection,
@@ -1334,12 +2602,28 @@ export function useKatoSyncViewModel() {
     keyStatus,
     libraryOk,
     launchStatus,
+    localControlMonitor,
+    localControlMonitorError,
     logs,
     loginEmail,
     loginPassword,
     mcpTokenInput,
     mcpTokenStatus,
     notice,
+    providerBusy,
+    providerHistory,
+    providerLoginUrls,
+    handleOpenProviderLoginUrl,
+    providerStatuses,
+    localProviderDraft: localProviderDraft ?? config?.localProvider ?? null,
+    localKeyInput,
+    localKeyError,
+    discoveredLocal,
+    localBrainStatus,
+    localBrainProgress,
+    localBrainBusy,
+    setLocalKeyInput,
+    updateLocalProviderDraft,
     generatedToken,
     codexRun,
     codexEvents,
@@ -1352,11 +2636,15 @@ export function useKatoSyncViewModel() {
     handleCheckCompletions,
     handleCheckTaskCompletion,
     handleCopyToken,
+    handleConnectProvider,
     handleDeferTask,
     handleDeleteKey,
     handleMarkTaskDone,
     handleDeleteMcpConnectorToken,
+    handleDisconnectProvider,
     handleForgetProjectRepo,
+    handleUseProjectFolder,
+    projects,
     handleChooseReferenceRoot,
     handleGenerateConnectorToken,
     handleRejectTask,
@@ -1366,7 +2654,21 @@ export function useKatoSyncViewModel() {
     handleSelectTask,
     handleStartBoardQueue,
     handleStopBoardQueue,
+    handleSetAutoMode,
+    handleStartAutoQ,
+    handleReleaseAutoLane,
+    autoMode,
     handleLogin,
+    handleMoveProvider,
+    handleCancelProviderLogin,
+    handleSubmitProviderLoginCode,
+    handleDiscoverLocalProviders,
+    handleSaveLocalProviderKey,
+    handleRemoveLocalProviderKey,
+    handleInstallLocalBrain,
+    handleStartLocalBrain,
+    handleStopLocalBrain,
+    handleRemoveLocalBrain,
     handleRegister,
     logoutFlow,
     requestLogout,
@@ -1381,6 +2683,7 @@ export function useKatoSyncViewModel() {
     handleLaunchInstall,
     handleLaunchRemove,
     handleLogs,
+    refreshLocalControlMonitor,
     handleQuitApp,
     handleRefreshActionPlans,
     handleRefreshBriefings,
@@ -1400,6 +2703,8 @@ export function useKatoSyncViewModel() {
     handleRunCodexForBriefing,
     handleTestConnection,
     handleTestLibrary,
+    handleTestProvider,
+    handleRefreshProviders,
     openOutputDir,
     persist,
     setActiveStep,
@@ -1449,7 +2754,8 @@ const BOARD_PLAN_STATUSES: ActionPlanStatus[] = [
 function groupTasksByProject(
   plans: ActionPlan[],
   selection: string[],
-  order: string[]
+  order: string[],
+  registry: ProjectRegistry | null = null
 ): BoardGroup[] {
   const selectionSet = new Set(selection);
   const groups = new Map<string, BoardTask[]>();
@@ -1469,7 +2775,8 @@ function groupTasksByProject(
         selected: selectionSet.has(task.taskId),
         orderIndex: order.indexOf(task.taskId)
       };
-      const key = task.projectId || NO_PROJECT_ID;
+      // Registry-Aufloesung: bekannte Alias-/Repo-IDs landen unter ihrer kanonischen ID, "Ohne Projekt" nur bei echt Unbekanntem.
+      const key = task.projectId ? canonicalProjectId(registry, task.projectId) : NO_PROJECT_ID;
       const bucket = groups.get(key) ?? [];
       bucket.push(boardTask);
       groups.set(key, bucket);

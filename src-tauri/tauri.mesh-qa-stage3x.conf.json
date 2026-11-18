@@ -1,0 +1,20 @@
+{
+  "productName": "KatoSync Mesh QA Stage3X",
+  "identifier": "com.nmkato.katosync.meshqa.stage3x",
+  "build": {
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "KatoSync · Mesh QA Stage3X (KATOOS, isoliert)",
+        "width": 1240,
+        "height": 820,
+        "minWidth": 1040,
+        "minHeight": 720,
+        "resizable": true,
+        "center": true
+      }
+    ]
+  }
+}

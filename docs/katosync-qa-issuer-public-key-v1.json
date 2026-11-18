@@ -1,0 +1,9 @@
+{
+  "fingerprintSha256": "c87f5292dc37eddc0fc67f6d085b7b0c87ed31c44c54830f6cd4de66bf6f544b",
+  "keyAlgorithm": "Ed25519",
+  "projectRef": "xbnnlyyxiilklsygxcof",
+  "protocol": "katosync-qa-issuer-pin/v1",
+  "publicKeyBase64Url": "0YMIKm_iKp1TxRFSpVJ5PG5o1ooFZcGosZyInUY_wy8",
+  "stage": "qa",
+  "status": "issuer_secret_stored_not_owner_authorized"
+}

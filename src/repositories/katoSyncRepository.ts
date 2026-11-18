@@ -21,10 +21,22 @@ import type {
   GeneratedConnectorToken,
   KeyStatus,
   LaunchAgentStatus,
+  LocalControlMonitorSnapshot,
+  MemoryFabricOverview,
+  DiscoveredLocalProvider,
+  ProviderId,
+  ProviderLoginUrlEvent,
+  ProviderSettings,
+  ProviderStatus,
+  ProviderWarmupState,
+  WarmupReport,
   ScanSummary,
   SupabaseSessionStatus,
   SyncReport
 } from "../types";
+import { normalizeProviderPriority, toProviderSettings } from "../lib/providerPolicy";
+import { emptyWarmupState } from "../lib/providerWarmupPolicy";
+import type { LocalBrainProgress, LocalBrainStatus } from "../lib/localBrainCatalog";
 
 const mockConfigKey = "katosync.config";
 // v2: Projekt-Board fuegt Tasks ein Pflichtfeld 'status' hinzu -> Key-Bump verwirft Alt-Caches ohne status.
@@ -34,6 +46,22 @@ const mockMcpConnectorTokenKey = "katosync.mcpConnectorToken";
 // Projekt-Board: Tasks ohne project_external_id landen in einer neutralen "Ohne Projekt"-Gruppe.
 export const NO_PROJECT_ID = "__no_project__";
 const isTauri = () => Boolean(window.__TAURI_INTERNALS__);
+
+export async function getLocalControlSnapshot(): Promise<LocalControlMonitorSnapshot> {
+  if (isTauri()) {
+    return invoke<LocalControlMonitorSnapshot>("local_control_snapshot");
+  }
+  return {
+    available: false,
+    state: null,
+    feed: [],
+    activeLanes: [],
+    queuedJobs: [],
+    recentJobs: [],
+    stats: { total: 0, completed: 0, failed: 0, timeout: 0, avgDurationMs: 0 },
+    orchestration: { fallbackJobs: [] }
+  };
+}
 
 export async function loadConfig(): Promise<AppConfig> {
   if (isTauri()) {
@@ -152,7 +180,7 @@ export async function logoutSupabase(): Promise<SupabaseSessionStatus> {
   return { loggedIn: false, email: null };
 }
 
-// ── Cloud-Profil (Zero-Knowledge): Zugangsdaten folgen dem KatoOS-Konto ──────────────
+// ── Cloud-Profil (Zero-Knowledge): derzeit separate KatoSync-Auth-Identitaet ────────────
 
 export interface CloudProfileSyncResult {
   status: "restored" | "created" | "empty" | "unreadable";
@@ -227,6 +255,10 @@ export function clearLocalTenantCaches(): void {
     localStorage.removeItem(mockMcpConnectorTokenKey);
     localStorage.removeItem(mockConfigKey);
     localStorage.removeItem("katosync.runHistory.v1"); // spiegelt STORAGE_KEY in lib/runHistory.ts
+    // Auto-Lane-Modus, Dispatch-Claims und Board-Auswahl (Keys in lib/autoLaneStore.ts) sind tenant-bezogen.
+    localStorage.removeItem("katosync.autoLane.mode.v1");
+    localStorage.removeItem("katosync.autoLane.claims.v1");
+    localStorage.removeItem("katosync.board.selection.v1");
     // Tages-Zaehler ALLER Tage entfernen (Codex-Quota nicht vom Vortenant erben; Key in
     // useKatoSyncViewModel.dailyCountKey = katosync.board.completed.<datum>).
     for (const key of Object.keys(localStorage)) {
@@ -262,6 +294,195 @@ export async function dirExists(path: string): Promise<boolean> {
     }
   }
   return true; // Browser-Demo: keine echte FS-Pruefung
+}
+
+// ── Agent Sync: Provider-Adapter (Rust) ───────────────────────────────────────────────
+// Alle Provider-Kommandos laufen im Rust-Core mit festen Argumentvektoren. Das Frontend sendet
+// nur nicht-geheime Metadaten; ein optionaler Endpoint-API-Key geht direkt in den OS-Schluesselbund.
+
+function providerSettings(config: AppConfig): ProviderSettings {
+  return toProviderSettings(config.disabledProviders, config.localProvider);
+}
+
+function demoStatus(provider: ProviderId, patch: Partial<ProviderStatus>): ProviderStatus {
+  const now = new Date().toISOString();
+  return {
+    provider,
+    label: { codex: "OpenAI Codex", claude: "Anthropic Claude Code", local: "Local Model", local_control: "Local Control / RDC" }[provider],
+    state: "unknown",
+    reason: "not_checked",
+    installed: false,
+    authenticated: false,
+    available: false,
+    enabled: true,
+    failoverAllowed: true,
+    capabilities: [],
+    checkedAt: now,
+    secretStored: false,
+    ...patch
+  };
+}
+
+// Browser-Demo: realistische, aber eindeutig ungepruefte Zustaende (keine echten CLI-Aufrufe).
+function demoProviderStatuses(config: AppConfig): ProviderStatus[] {
+  const enabled = (provider: ProviderId) => !config.disabledProviders.includes(provider);
+  const cloud = ["text_code_agent", "workspace_write", "cloud"];
+  return [
+    demoStatus("codex", { state: "authenticated", reason: "ready_test_pending", installed: true, authenticated: true, enabled: enabled("codex"), version: "demo", capabilities: cloud }),
+    demoStatus("claude", { state: "auth_unavailable", reason: "sign_in_required", installed: true, enabled: enabled("claude"), version: "demo", capabilities: cloud }),
+    demoStatus("local", {
+      state: config.localProvider.baseUrl ? "offline" : "unknown",
+      reason: config.localProvider.baseUrl ? "offline" : "not_configured",
+      installed: Boolean(config.localProvider.baseUrl),
+      enabled: enabled("local"),
+      model: config.localProvider.model || null,
+      capabilities: ["text_code_agent", "no_cloud_account"]
+    }),
+    demoStatus("local_control", {
+      state: "available",
+      reason: "local_control_queue_only",
+      installed: true,
+      authenticated: true,
+      available: true,
+      failoverAllowed: false,
+      capabilities: ["deterministic_local_control", "queue_preserved"]
+    })
+  ];
+}
+
+export async function getProviderStatuses(config: AppConfig, runSmoke = false): Promise<ProviderStatus[]> {
+  if (isTauri()) {
+    return invoke<ProviderStatus[]>("provider_statuses", {
+      settings: providerSettings(config),
+      runSmoke
+    });
+  }
+  return demoProviderStatuses(config);
+}
+
+// Persistierte Warm-up-Zeitstempel. Browser-Demo: leer (es wird dort nie aufgewaermt).
+export async function getProviderWarmupState(): Promise<ProviderWarmupState> {
+  if (isTauri()) return invoke<ProviderWarmupState>("provider_warmup_state");
+  return emptyWarmupState();
+}
+
+// Ein begrenzter Warm-up; Rust prueft Config, Runner, Cooldown und Abo-Login erneut.
+export async function warmUpProvider(provider: ProviderId): Promise<WarmupReport | null> {
+  if (!isTauri()) return null;
+  return invoke<WarmupReport>("warm_up_provider", { provider });
+}
+
+export async function connectProvider(provider: ProviderId, forceLogin = false): Promise<ProviderStatus> {
+  if (isTauri()) {
+    return invoke<ProviderStatus>("connect_provider", { provider, forceLogin });
+  }
+  throw new Error("Provider-Login ist nur in der Desktop-App verfügbar.");
+}
+
+export async function cancelProviderLogin(provider: ProviderId): Promise<boolean> {
+  if (isTauri()) return invoke<boolean>("cancel_provider_login", { provider });
+  return false;
+}
+
+export async function testProvider(config: AppConfig, provider: ProviderId): Promise<ProviderStatus> {
+  if (isTauri()) {
+    return invoke<ProviderStatus>("test_provider", {
+      provider,
+      settings: providerSettings(config)
+    });
+  }
+  const status = demoProviderStatuses(config).find((entry) => entry.provider === provider);
+  if (!status) throw new Error("Provider-Status fehlt.");
+  return status;
+}
+
+// Öffnet eine vom Rust-Backend erneut validierte offizielle Provider-Login-URL im OS-Browser.
+export async function openProviderLoginUrl(provider: ProviderId, url: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("open_provider_login_url", { provider, url });
+}
+
+// Übergibt ausschließlich einen flüchtigen OAuth-Einmalcode an einen bereits laufenden Login.
+export async function submitProviderLoginCode(provider: ProviderId, code: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke("submit_provider_login_code", { provider, code });
+}
+
+// Loescht nur KatoSync-eigene Secrets (lokaler Endpoint-Key). CLI-Logins bleiben unberuehrt.
+export async function disconnectProvider(provider: ProviderId): Promise<void> {
+  if (isTauri()) await invoke("disconnect_provider", { provider });
+}
+
+export async function saveLocalProviderKey(baseUrl: string, apiKey: string): Promise<void> {
+  if (!isTauri()) throw new Error("secret_store_unavailable");
+  await invoke("save_local_provider_key", { baseUrl, apiKey });
+}
+
+export async function discoverLocalProviders(): Promise<DiscoveredLocalProvider[]> {
+  if (isTauri()) return invoke<DiscoveredLocalProvider[]>("discover_local_providers");
+  return [];
+}
+
+/** Laeuft KatoSync als Desktop-App (Tauri)? Im Browser-Preview sind Live-Quellen nicht verfuegbar. */
+export function isNativeRuntime(): boolean {
+  return isTauri();
+}
+
+/** Read-only Memory-Fabric-Uebersicht (nur Zaehler/Wahrheitsstufen); Browser-Preview: null. */
+export async function getMemoryFabricOverview(): Promise<MemoryFabricOverview | null> {
+  if (!isTauri()) return null;
+  return invoke<MemoryFabricOverview>("memory_fabric_overview");
+}
+
+export async function getLocalBrainStatus(): Promise<LocalBrainStatus | null> {
+  if (!isTauri()) return null;
+  return invoke<LocalBrainStatus>("local_brain_status");
+}
+
+export async function installLocalBrain(): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("install_local_brain");
+}
+
+export async function startLocalBrain(): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("start_local_brain");
+}
+
+export async function stopLocalBrain(): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("stop_local_brain");
+}
+
+export async function removeLocalBrain(): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("remove_local_brain");
+}
+
+export async function rollbackLocalBrainModel(): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("rollback_local_brain_model");
+}
+
+export async function setLocalBrainModelPin(version: string | null): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("set_local_brain_model_pin", { version });
+}
+
+export async function removeLocalBrainModelVersion(version: string): Promise<LocalBrainStatus> {
+  if (!isTauri()) throw new Error("local_brain_unavailable");
+  return invoke<LocalBrainStatus>("remove_local_brain_model_version", { version });
+}
+
+export async function listenLocalBrainProgress(cb: (progress: LocalBrainProgress) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<LocalBrainProgress>("local-brain-progress", (event) => cb(event.payload));
+}
+
+// Fallback, falls der Browser beim offiziellen Login nicht automatisch aufgeht.
+export async function listenProviderLoginUrls(cb: (event: ProviderLoginUrlEvent) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<ProviderLoginUrlEvent>("provider-login-url", (event) => cb(event.payload));
 }
 
 // Live-Feed: abonniert gestreamte Codex-Events. Gibt eine Unsubscribe-Funktion zurueck.
@@ -1339,7 +1560,19 @@ function normalizeConfig(config: AppConfig): AppConfig {
     codexCodingMode: config.codexCodingMode ?? defaultConfig.codexCodingMode,
     codexPreferredRunner: config.codexPreferredRunner === "claude_cli" ? "claude_cli" : "codex_cli",
     referenceRoot: config.referenceRoot ?? "",
-    projectRepos: config.projectRepos ?? {}
+    projectRepos: config.projectRepos ?? {},
+    providerPriority: normalizeProviderPriority(config.providerPriority),
+    disabledProviders: (config.disabledProviders ?? []).filter((provider) => provider !== "local_control"),
+    localProvider: {
+      kind:
+        config.localProvider?.kind === "lm_studio" || config.localProvider?.kind === "open_ai_compatible"
+          ? config.localProvider.kind
+          : "ollama",
+      baseUrl: config.localProvider?.baseUrl ?? "",
+      model: config.localProvider?.model ?? ""
+    },
+    // Alt-Configs ohne Feld: Warm-up an (Rust-Default identisch).
+    providerWarmupEnabled: config.providerWarmupEnabled ?? defaultConfig.providerWarmupEnabled
   };
 }
 

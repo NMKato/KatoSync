@@ -1,0 +1,9 @@
+{
+  "productName": "KatoSync GitHub Login QA",
+  "identifier": "com.nmkato.katosync.github-login-qa",
+  "app": {"windows": [
+    {"title":"KatoSync · GitHub Login QA (isoliert)",
+     "width":1040,"height":820,"minWidth":800,"minHeight":620,
+     "resizable":true,"center":true}
+  ]}
+}

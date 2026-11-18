@@ -1,0 +1,2067 @@
+// Created by NMKato Solutions
+// KatoSync connections: isolated Mesh QA controller.
+// UI is independent of Vision graph. Peer trust and remote jobs remain fail-closed.
+import { ShieldCheck, RefreshCcw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useT, type TKey } from "../i18n";
+import { classifyMeshIdentityFailure, type MeshIdentityFailure } from "../lib/meshIdentityDiagnosis";
+import { activeMeshInvitations, nextMeshInboxExpiryDelay } from "../lib/meshInboxExpiry";
+import {selectMeshColleague} from "../lib/meshAgentIntroduction35";
+import {meshRegistrationAgentName,presentMeshRegistrations} from "../lib/meshDirectoryPresentation35";
+import {canConfirmRelayPeerLocally} from "../lib/meshRelayLocalApproval35F";
+import {matchEasyRelayMessage,canQuickApproveSameCode,validEasyMeshSession,
+  type EasyMeshSession,type EasyMeshStage} from "../lib/meshEasyPairing";
+import {EASY_RELAY_POLL_MS,canPollEasyMeshRelay} from "../lib/meshRelayFlowPolicy4U";
+import {deriveLocalPairingStatus} from "../lib/meshPairingStatus4V";
+import {canSelectLocallyApprovedPeerForQa} from "../lib/meshPairedSelection4X";
+import {MeshLiveConnectionPanel} from "./MeshLiveConnectionPanel";
+import {isMeshConnectionLive,retainedMeshSelection,type MeshConnectionSnapshot} from "../lib/meshConnectionState";
+
+function relativeTime(value: string | null | undefined, lang: string): string | null {
+  if (!value) return null;
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return null;
+  const seconds = Math.round((at - Date.now()) / 1000);
+  const format = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
+  const abs = Math.abs(seconds);
+  if (abs < 60) return format.format(seconds, "second");
+  if (abs < 3600) return format.format(Math.round(seconds / 60), "minute");
+  if (abs < 86_400) return format.format(Math.round(seconds / 3600), "hour");
+  return format.format(Math.round(seconds / 86_400), "day");
+}
+
+type MeshAgentBootstrapSnapshot = {
+  protocol:"katosync-mesh-agent-bootstrap-v35";
+  agentName:string;
+  fingerprint:string;
+  hardware:{
+    platform:string;architecture:string;chipFamily:string|null;logicalCpuCores:number;
+    memoryGibBucket:number|null;recommendedRole:string;
+    localModelStatus:"not_verified";
+  };
+  ownerSessionVerified:true;rosterDiscoveryAllowed:true;
+  trustedPeers:0;transportReady:false;remoteJobsEnabled:false;
+};
+
+type MeshPresenceReceipt = {
+  accepted:true;reportedRecently:true;paired:false;transportReady:false;
+  remoteJobsEnabled:false;nextPollSeconds:number;
+};
+
+type MeshLocalReadiness = {
+  protocol: string;
+  platform: string;
+  architecture: string;
+  localControl: "fresh" | "stale" | "unknown";
+  deviceIdentity: "not_paired";
+  peerTransport: "not_connected";
+  verifiedPeers: number;
+  remoteReadOnlyDispatch: boolean;
+  crossDeviceWrites: boolean;
+};
+
+type MeshNativeIssuerReadiness = {
+  protocol:"mesh-native-issuer-boundary-v1";
+  compiledIssuer:"katoos_shared_qa"|"katosync_legacy"|"unknown_fail_closed";
+  isolatedPreviewSession:"independent_login_required";
+  currentSessionReusableForPreview:false;
+  previewTokenStoreIsolated:false;
+  previewCloudProbeEnabled:false;
+  onlinePreviewVerified:false;
+  devicePairingEnabled:false;
+  remoteJobsEnabled:false;
+};
+
+type MeshNativePeerPreflight = {
+  protocol:"katosync-mesh-native-peer-preflight-v1";
+  admissionEligible:true;
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+  verifiedPeers:0;
+};
+
+type MeshKatoosSharedPreflight = {
+  protocol:"mesh-katoos-shared-preflight-v1";
+  sharedIssuerVerified:true;
+  schemaAccessible:true;
+  membership:"active"|"not_member";
+  discoveryAuthorized:boolean;
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
+
+type MeshPreviewAuthStatus = {
+  protocol:"mesh-preview-auth-v1";
+  configured:boolean;
+  previewIssuerOnly:boolean;
+  independentKeychain:boolean;
+  sessionVerified:boolean;
+  accountEmail:string|null;
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
+
+type MeshHubPreference = {
+  preferred: boolean;
+  hubActive: false;
+  transportReady: false;
+  remoteJobsEnabled: false;
+  status: "preference_only";
+};
+
+type MeshAccountDevice = {
+  deviceId:string;
+  ownerUserId:string;
+  displayName:string;
+  personaName:string|null;
+  platformOs:"macos"|"windows"|"linux";
+  membershipState:"discovered"|"pending"|"trusted"|"revoked";
+  fingerprint:string;
+  lastSeenAt:string|null;
+};
+type MeshAccountDirectory = {
+  devices:MeshAccountDevice[];
+  accountVerified:true;
+  discoveryOnly:true;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
+
+type MeshIdentityStatus = {
+  fingerprint: string;
+  algorithm: string;
+  paired: false;
+  peerCount: 0;
+  transportReady: false;
+};
+type MeshSignedOffer = {
+  protocol: string;
+  publicKey: string;
+  nonce: string;
+  expiresAt: number;
+  accountScope: string;
+  signature: string;
+};
+type MeshInboxSentReceipt = {
+  requestId:string;
+  expiresAt:string;
+  deliveryOnly:true;
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
+type MeshReceivedItem = {
+  requestId:string;
+  sourceDeviceId:string;
+  expiresAt:string;
+  fingerprint:string;
+  // Public sender offer, verified by Rust before crossing IPC.
+  signedOffer:MeshSignedOffer;
+};
+type MeshReceivedInbox = {
+  invitations:MeshReceivedItem[];
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
+type MeshReceivedDecision = {
+  requestId:string;
+  state:"accepted"|"rejected";
+  decisionOnly:true;
+  paired:false;
+  transportReady:false;
+  remoteJobsEnabled:false;
+};
+type RelayPublicMessage = {
+  requestId:string; senderDeviceId:string; recipientDeviceId:string;
+  kind:"challenge"|"response";payloadJson:string;expiresAt:number;
+};
+type RelayRead = {
+  messages:RelayPublicMessage[];deliveryOnly:true;paired:false;
+  transportReady:false;remoteJobsEnabled:false;
+};
+type RelayDelivery = {
+  messageId:string;deliveryOnly:true;paired:false;
+  transportReady:false;remoteJobsEnabled:false;
+};
+type RelayWork = {requestId:string;deviceId:string;payloadJson:string};
+type NativeInboxInvite = {
+  protocol:"katosync-mesh-inbox-send-v1";
+  sourceDeviceId:string;
+  targetDeviceId:string;
+  signedOffer:MeshSignedOffer;
+  dispatchSignature:string;
+};
+// Public signatures only. Stage 2M deliberately does not send anything.
+type MeshPairingProof = {
+  fingerprint: string;
+  comparisonCode: string;
+  paired: false;
+  peerCount: 0;
+  transportReady: false;
+};
+type MeshApprovedPeer = {
+  fingerprint: string;
+  publicKey: string;
+  approvedAt: number;
+  status: "locally_approved";
+};
+type MeshPeerInventory = {
+  approvalOnly: true;
+  transportReady: false;
+  remoteJobsEnabled: false;
+  peers: MeshApprovedPeer[];
+};
+
+// No peer registration or network request: only a Tauri read of local daemon
+// state. RDC connectivity is intentionally NOT counted as trusted Mesh peers.
+export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
+  const {t,lang}=useT();
+  const [detailsOpen,setDetailsOpen]=useState(false);
+  // A user-visible pairing guide is NOT an authenticated transport session.
+  const [guideOpen,setGuideOpen]=useState(import.meta.env.VITE_MESH_EASY_PAIR_QA==="1");
+  const [easyAdvancedOpen,setEasyAdvancedOpen]=useState(false);
+  const [selectedDeviceId,setSelectedDeviceId]=useState<string|null>(null);
+  const [connectionSnapshot,setConnectionSnapshot]=useState<MeshConnectionSnapshot|null>(null);
+  // Stage4W: opt-in engineering QA, never automatic pairing/remote execution.
+  const [lanQaLocalIp,setLanQaLocalIp]=useState("");
+  const [lanQaPeerIp,setLanQaPeerIp]=useState("");
+  const [lanQaPort,setLanQaPort]=useState("39402");
+  const [lanQaConsent,setLanQaConsent]=useState(false);
+  const [lanQaBusy,setLanQaBusy]=useState(false);
+  const [lanQaResult,setLanQaResult]=useState<"passed"|"failed"|null>(null);
+  // Stage4I: explicit read-only admission report, never an active connection.
+  const [nativePreflight,setNativePreflight]=useState<{
+    deviceId:string;fingerprint:string;eligible:true;
+  }|null>(null);
+  const [nativePreflightError,setNativePreflightError]=useState(false);
+  const [nativePreflightBusy,setNativePreflightBusy]=useState(false);
+  const nativePreflightInFlight=useRef(false);
+  const nativePreflightOperation=useRef(0);
+  // Readiness is an ephemeral observation, never a durable permission.
+  useEffect(()=>{
+    if(!nativePreflight)return;
+    const timeout=window.setTimeout(()=>setNativePreflight(null),30_000);
+    return ()=>window.clearTimeout(timeout);
+  },[nativePreflight]);
+  // Synchronous guards survive double-clicks before React can re-render.
+  // Epochs invalidate late async results after an account/surface refresh.
+  const rosterOperation=useRef(0);
+  const rosterInFlight=useRef(false);
+  const inboxOperation=useRef(0);
+  const inboxInFlight=useRef(false);
+  const recipientOperation=useRef(0);
+  const recipientInFlight=useRef(false);
+  const [hubPreference,setHubPreference]=useState<MeshHubPreference|null>(null);
+  const [hubBusy,setHubBusy]=useState(false);
+  const [hubError,setHubError]=useState(false);
+  useEffect(()=>{
+    let active=true;
+    invoke<MeshHubPreference>("mesh_hub_preference_get")
+      .then(preference=>{if(active){setHubPreference(preference);setHubError(false);}})
+      .catch(()=>{if(active)setHubError(true);});
+    return ()=>{active=false;};
+  },[refreshEpoch]);
+  const setHubPreferred=async(preferred:boolean)=>{
+    setHubBusy(true);
+    setHubError(false);
+    try {
+      const confirmed=await invoke<MeshHubPreference>("mesh_hub_preference_set",{preferred});
+      if(confirmed.hubActive || confirmed.transportReady || confirmed.remoteJobsEnabled ||
+          confirmed.status!=="preference_only" || confirmed.preferred!==preferred){
+        setHubError(true);
+      }else{
+        setHubPreference(confirmed);
+      }
+    }catch{
+      setHubError(true);
+    }finally{
+      setHubBusy(false);
+    }
+  };
+
+  const [reauthOpen,setReauthOpen]=useState(false);
+  const [snapshot,setSnapshot]=useState<MeshLocalReadiness|null>(null);
+  const [issuerSnapshot,setIssuerSnapshot]=useState<MeshNativeIssuerReadiness|null>(null);
+  const [previewStatus,setPreviewStatus]=useState<MeshPreviewAuthStatus|null>(null);
+  const [sharedPreflight,setSharedPreflight]=useState<MeshKatoosSharedPreflight|null>(null);
+  const [sharedBusy,setSharedBusy]=useState(false);
+  const [sharedError,setSharedError]=useState(false);
+  const sharedRequest=useRef(0);
+  const [previewEmail,setPreviewEmail]=useState("");
+  const [previewPassword,setPreviewPassword]=useState("");
+  const [previewBusy,setPreviewBusy]=useState(false);
+  const [previewError,setPreviewError]=useState(false);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState(false);
+  const [identity,setIdentity]=useState<MeshIdentityStatus|null>(null);
+  const [offer,setOffer]=useState("");
+  const [incoming,setIncoming]=useState("");
+  const [inspected,setInspected]=useState<MeshIdentityStatus|null>(null);
+  const [identityError,setIdentityError]=useState(false);
+  const [identityFailure,setIdentityFailure]=useState<MeshIdentityFailure|null>(null);
+  const [pairingBusy,setPairingBusy]=useState(false);
+  const [challengeIncoming,setChallengeIncoming]=useState("");
+  const [challengeOutgoing,setChallengeOutgoing]=useState("");
+  const [responseIncoming,setResponseIncoming]=useState("");
+  const [responseOutgoing,setResponseOutgoing]=useState("");
+  const [pairingProof,setPairingProof]=useState<MeshPairingProof|null>(null);
+  const [pairingVerified,setPairingVerified]=useState<MeshPairingProof|null>(null);
+  const [confirmedCode,setConfirmedCode]=useState("");
+  const [approvedPeers,setApprovedPeers]=useState<MeshApprovedPeer[]|null>(null);
+  const trustReadEpoch=useRef(0);
+  const [approvalError,setApprovalError]=useState(false);
+  const [reauthEmail,setReauthEmail]=useState("");
+  const [reauthPassword,setReauthPassword]=useState("");
+  const [reauthBusy,setReauthBusy]=useState(false);
+  const [reauthResult,setReauthResult]=useState<"success"|"failed"|null>(null);
+  useEffect(()=>{
+    if(import.meta.env.VITE_KATOOS_AUTH_QA!=="1")return;
+    let alive=true;
+    void invoke<{loggedIn:boolean;email:string|null}>("supabase_session_status")
+      .then(status=>{if(alive&&status.email)setReauthEmail(status.email);})
+      .catch(()=>{});
+    return ()=>{alive=false;};
+  },[]);
+  const renewSession=async()=>{
+    if(!reauthEmail.trim()||!reauthPassword||reauthBusy)return;
+    setReauthBusy(true);setReauthResult(null);
+    try{
+      const result=await invoke<{loggedIn:boolean;email:string|null}>(
+        "renew_katoos_qa_session",{email:reauthEmail.trim(),password:reauthPassword}
+      );
+      if(result.loggedIn!==true)throw new Error("issuer_rejected");
+      setIdentityFailure(null);
+      setIdentityError(false);
+      // Only prepare local identity after the verified reauthentication.
+      const actual=await invoke<MeshIdentityStatus>("mesh_device_identity_prepare");
+      if(actual.paired||actual.peerCount||actual.transportReady)throw new Error("unexpected_trust_claim");
+      setIdentity(actual);
+      // Success is a durable claim ONLY if a fresh issuer lookup and native
+      // device identity check both succeeded. Never show stale green success.
+      setReauthResult("success");
+    }catch{
+      setIdentity(null);
+      setOffer("");
+      setReauthResult("failed");
+    }finally{
+      setReauthPassword("");
+      setReauthBusy(false);
+      // Reauth can switch the verified account, even when a subsequent
+      // identity check fails. Never display an old account's device names.
+      rosterOperation.current++;rosterInFlight.current=false;
+      inboxOperation.current++;inboxInFlight.current=false;
+      recipientOperation.current++;recipientInFlight.current=false;
+      setDirectory(null);setSelectedDeviceId(null);setGuideOpen(false);
+      setLanQaConsent(false);setLanQaResult(null);
+      trustReadEpoch.current++;setApprovedPeers(null);
+      nativePreflightOperation.current++;nativePreflightInFlight.current=false;
+      setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
+      setDirectoryError(false);setDirectoryIssue(null);
+      setNativeInboxPrepared(null);setNativeInboxSent(null);
+      setRecipientInbox(null);setRecipientDecision(null);
+      resetRelay();
+      challengeOperation.current++;challengeInFlight.current=false;
+      setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeError(false);setChallengeBusy(false);
+      setDirectoryBusy(false);setNativeInboxBusy(false);setRecipientBusy(false);
+    }
+  };
+  const [directory,setDirectory]=useState<MeshAccountDirectory|null>(null);
+  const [agentBootstrap,setAgentBootstrap]=useState<MeshAgentBootstrapSnapshot|null>(null);
+  const [bootstrapRefreshEpoch,setBootstrapRefreshEpoch]=useState(0);
+  const lastPresenceAttempt=useRef(0);
+  const presenceIdentity=useRef("");
+  const [nativeInboxBusy,setNativeInboxBusy]=useState(false);
+  const [nativeInboxError,setNativeInboxError]=useState(false);
+  const [nativeInboxPrepared,setNativeInboxPrepared]=useState<string|null>(null);
+  const [nativeInboxSent,setNativeInboxSent]=useState<string|null>(null);
+  const [sentRequest,setSentRequest]=useState<{requestId:string;deviceId:string;expiresAt:string}|null>(null);
+  const [recipientInbox,setRecipientInbox]=useState<MeshReceivedItem[]|null>(null);
+  const [recipientBusy,setRecipientBusy]=useState(false);
+  const [recipientError,setRecipientError]=useState(false);
+  const [recipientDecision,setRecipientDecision]=useState<"accepted"|"rejected"|null>(null);
+  const [acceptedInboxOffer,setAcceptedInboxOffer]=useState<MeshReceivedItem|null>(null);
+  const [acceptedChallenge,setAcceptedChallenge]=useState<string|null>(null);
+  const [challengeRelayWork,setChallengeRelayWork]=useState<RelayWork|null>(null);
+  const [responseRelayWork,setResponseRelayWork]=useState<RelayWork|null>(null);
+  const [relayMessages,setRelayMessages]=useState<RelayPublicMessage[]|null>(null);
+  const [relayReceipt,setRelayReceipt]=useState<"challenge"|"response"|null>(null);
+  const [relayProof,setRelayProof]=useState<MeshPairingProof|null>(null);
+  const [relayBusy,setRelayBusy]=useState(false);
+  const [relayError,setRelayError]=useState(false);
+  // Stage4S: a single bounded, explicitly initiated pairing session.
+  // The public messages may travel automatically; Keychain approval cannot.
+  const easyEnabled=import.meta.env.VITE_MESH_EASY_PAIR_QA==="1"&&
+    import.meta.env.VITE_KATOOS_AUTH_QA==="1"&&
+    import.meta.env.VITE_MESH_INBOX_SEND_QA==="1"&&
+    import.meta.env.VITE_MESH_INBOX_RECEIVE_QA==="1"&&
+    import.meta.env.VITE_MESH_RELAY_QA==="1";
+  const [easySession,setEasySession]=useState<EasyMeshSession|null>(null);
+  const [easyStage,setEasyStage]=useState<EasyMeshStage>("idle");
+  const easyHandled=useRef(new Set<string>());
+  const relayInFlight=useRef(false);
+  const relayOperation=useRef(0);
+  const resetRelay=()=>{
+    easyHandled.current.clear();
+    setEasySession(null);setEasyStage("idle");
+    relayOperation.current++;relayInFlight.current=false;
+    setSentRequest(null);setChallengeRelayWork(null);setResponseRelayWork(null);
+    setRelayMessages(null);setRelayReceipt(null);setRelayProof(null);
+    setConfirmedCode("");
+    setRelayBusy(false);setRelayError(false);
+  };
+  const [challengeError,setChallengeError]=useState(false);
+  const [challengeBusy,setChallengeBusy]=useState(false);
+  const challengeInFlight=useRef(false);
+  const challengeOperation=useRef(0);
+  const loadRecipientInbox=async(quiet=false)=>{
+    if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientInFlight.current)return;
+    recipientInFlight.current=true;
+    const operation=++recipientOperation.current;
+    if(!quiet){setRecipientBusy(true);setRecipientInbox(null);setRecipientDecision(null);}
+    setRecipientError(false);
+    // Only a deliberate fresh scan invalidates an earlier accepted offer.
+    if(!quiet){
+      challengeOperation.current++;challengeInFlight.current=false;
+      setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
+      setChallengeRelayWork(null);
+    }
+    try{
+      const result=await invoke<MeshReceivedInbox>("mesh_inbox_recipient_list");
+      if(result.paired!==false||result.transportReady!==false||result.remoteJobsEnabled!==false||
+         !Array.isArray(result.invitations)||result.invitations.length>10||
+         result.invitations.some(item=>!item.requestId||!item.sourceDeviceId||
+            !Number.isFinite(Date.parse(item.expiresAt))||
+            !/^[0-9A-F]{2}(-[0-9A-F]{2}){15}$/.test(item.fingerprint)||
+            item.signedOffer?.protocol!=="katosync-mesh-pairing-v1"||
+            !/^[A-Za-z0-9_-]{43}$/.test(item.signedOffer.publicKey)||
+            !/^[A-Za-z0-9_-]{43}$/.test(item.signedOffer.nonce)||
+            !/^[A-Za-z0-9_-]{43}$/.test(item.signedOffer.accountScope)||
+            !/^[A-Za-z0-9_-]{86}$/.test(item.signedOffer.signature)||
+            item.signedOffer.expiresAt*1000!==Date.parse(item.expiresAt)))
+        throw new Error("invalid_recipient_inbox");
+      if(operation!==recipientOperation.current)return;
+      // A message that expired while in flight is not a broken inbox.
+      // It must never be selectable, even if the server list was once valid.
+      setRecipientInbox(activeMeshInvitations(result.invitations));
+    }catch{if(operation===recipientOperation.current)setRecipientError(true);}
+    finally{if(operation===recipientOperation.current){
+      recipientInFlight.current=false;if(!quiet)setRecipientBusy(false);
+    }}
+  };
+  useEffect(()=>{
+    if(!recipientInbox?.length)return;
+    const delay=nextMeshInboxExpiryDelay(recipientInbox);
+    if(delay===null)return;
+    // One cancellable expiry event, never a background inbox poll.
+    const timer=window.setTimeout(()=>{
+      setRecipientInbox(items=>items?activeMeshInvitations(items):null);
+    },delay);
+    return ()=>window.clearTimeout(timer);
+  },[recipientInbox]);
+  const decideRecipientInvite=async(item:MeshReceivedItem,action:"accept"|"reject")=>{
+    if(import.meta.env.VITE_MESH_INBOX_RECEIVE_QA!=="1"||recipientInFlight.current||
+       (easyEnabled&&easySession!==null)||
+       !recipientInbox?.some(x=>x.requestId===item.requestId)||Date.parse(item.expiresAt)<=Date.now())return;
+    recipientInFlight.current=true;
+    const operation=++recipientOperation.current;
+    setRecipientBusy(true);setRecipientError(false);setRecipientDecision(null);
+    try{
+      const result=await invoke<MeshReceivedDecision>("mesh_inbox_recipient_decide",
+        {requestId:item.requestId,action});
+      if(result.requestId!==item.requestId||
+         result.state!==(action==="accept"?"accepted":"rejected")||
+         result.decisionOnly!==true||result.paired!==false||
+         result.transportReady!==false||result.remoteJobsEnabled!==false)
+        throw new Error("invalid_recipient_decision");
+      if(operation!==recipientOperation.current)return;
+      setRecipientInbox(list=>list?.filter(x=>x.requestId!==item.requestId)??null);
+      if(result.state==="accepted"&&item.signedOffer.expiresAt*1000>Date.now()){
+        setAcceptedInboxOffer(item);
+        if(easyEnabled){
+          const own=directory?.devices.find(d=>d.fingerprint===agentBootstrap?.fingerprint);
+          const sender=directory?.devices.find(d=>d.deviceId===item.sourceDeviceId&&
+            d.fingerprint===item.fingerprint&&d.membershipState!=="revoked");
+          if(own&&sender){
+            setSelectedDeviceId(sender.deviceId);
+            setEasySession({role:"recipient",requestId:item.requestId,
+              localDeviceId:own.deviceId,peerDeviceId:sender.deviceId,
+              peerFingerprint:sender.fingerprint,expiresAtMs:Date.parse(item.expiresAt)});
+            setEasyStage("verifying");
+          }else{
+            // The inbox was signed, but UI registration identity is stale.
+            // Fail closed: a new explicit discovery is required for local pin.
+            setEasyStage("error");
+          }
+        }
+      }else{
+        setAcceptedInboxOffer(null);
+      }
+      setAcceptedChallenge(null);setChallengeRelayWork(null);setChallengeError(false);
+      setRecipientDecision(result.state);
+    }catch{if(operation===recipientOperation.current)setRecipientError(true);}
+    finally{if(operation===recipientOperation.current){
+      recipientInFlight.current=false;setRecipientBusy(false);
+    }}
+  };
+
+  // The recipient may consciously move an ALREADY ACCEPTED, RUST-VERIFIED
+  // public offer into the existing signed possession-challenge protocol.
+  // No native command is invoked by merely receiving or accepting a request.
+  const prepareAcceptedChallenge=async()=>{
+    const accepted=acceptedInboxOffer;
+    if(challengeInFlight.current||!accepted||accepted.signedOffer.expiresAt*1000<=Date.now())return;
+    challengeInFlight.current=true;
+    const operation=++challengeOperation.current;
+    setChallengeBusy(true);setChallengeError(false);setAcceptedChallenge(null);
+    try{
+      const raw=await invoke<string>("mesh_pairing_challenge_create",
+        {offerJson:JSON.stringify(accepted.signedOffer)});
+      const challenge=JSON.parse(raw);
+      if(challenge.protocol!=="katosync-mesh-challenge-v1"||
+         challenge.offer?.protocol!==accepted.signedOffer.protocol||
+         challenge.offer?.publicKey!==accepted.signedOffer.publicKey||
+         challenge.offer?.nonce!==accepted.signedOffer.nonce||
+         challenge.offer?.signature!==accepted.signedOffer.signature||
+         challenge.offer?.accountScope!==accepted.signedOffer.accountScope||
+         challenge.offer?.expiresAt!==accepted.signedOffer.expiresAt||
+         !/^[A-Za-z0-9_-]{86}$/.test(challenge.signature)||
+         !Number.isFinite(challenge.expiresAt)||
+         challenge.expiresAt*1000<=Date.now()||
+         challenge.expiresAt>accepted.signedOffer.expiresAt)
+        throw new Error("unverified_native_challenge_receipt");
+      if(operation===challengeOperation.current){
+        setAcceptedChallenge(raw);
+        setChallengeRelayWork({requestId:accepted.requestId,deviceId:accepted.sourceDeviceId,payloadJson:raw});
+        setAcceptedInboxOffer(null);
+      }
+    }catch{if(operation===challengeOperation.current)setChallengeError(true);}
+    finally{if(operation===challengeOperation.current){
+      challengeInFlight.current=false;setChallengeBusy(false);
+    }}
+  };
+  useEffect(()=>{
+    if(!acceptedInboxOffer)return;
+    const delay=nextMeshInboxExpiryDelay([acceptedInboxOffer]);
+    if(delay===null){setAcceptedInboxOffer(null);return;}
+    const timeout=window.setTimeout(()=>setAcceptedInboxOffer(null),delay);
+    return ()=>window.clearTimeout(timeout);
+  },[acceptedInboxOffer]);
+
+  const [directoryBusy,setDirectoryBusy]=useState(false);
+  const [directoryError,setDirectoryError]=useState(false);
+  const [directoryIssue,setDirectoryIssue]=useState<"quota"|"rate"|"plan"|null>(null);
+  const sendNativeInbox=async(targetDeviceId:string,directClick=false)=>{
+    // A click on a registered target is an explicit request, not implicit discovery.
+    if(import.meta.env.VITE_MESH_INBOX_SEND_QA!=="1"||inboxInFlight.current||
+       nativeInboxSent===targetDeviceId||(!directClick&&selectedDeviceId!==targetDeviceId)||
+       !directory?.devices.some(d=>d.deviceId===targetDeviceId&&d.membershipState==="discovered"))return;
+    const own=directory?.devices.find(d=>d.fingerprint===agentBootstrap?.fingerprint);
+    const peer=directory?.devices.find(d=>d.deviceId===targetDeviceId&&
+      d.fingerprint!==agentBootstrap?.fingerprint);
+    if(approvedPeers===null||approvedPeers.some(pin=>
+      pin.status==="locally_approved"&&pin.fingerprint===peer?.fingerprint))return;
+    if(easyEnabled&&(!own||!peer||own.deviceId===peer.deviceId))return;
+    inboxInFlight.current=true;
+    const operation=++inboxOperation.current;
+    setNativeInboxBusy(true);setNativeInboxError(false);setNativeInboxSent(null);setNativeInboxPrepared(null);
+    try{
+      const result=await invoke<MeshInboxSentReceipt>("mesh_inbox_invite_send",{targetDeviceId});
+      if(!result.requestId||!Number.isFinite(Date.parse(result.expiresAt))||
+         Date.parse(result.expiresAt)<=Date.now()||
+         result.deliveryOnly!==true||result.paired!==false||
+         result.transportReady!==false||result.remoteJobsEnabled!==false)
+        throw new Error("invalid_delivery_receipt");
+      if(operation===inboxOperation.current){
+        setNativeInboxSent(targetDeviceId);
+        setSentRequest({requestId:result.requestId,deviceId:targetDeviceId,expiresAt:result.expiresAt});
+        if(easyEnabled&&own&&peer){
+          setSelectedDeviceId(targetDeviceId);
+          setEasySession({role:"sender",requestId:result.requestId,
+            localDeviceId:own.deviceId,peerDeviceId:peer.deviceId,
+            peerFingerprint:peer.fingerprint,expiresAtMs:Date.parse(result.expiresAt)});
+          setEasyStage("waiting");
+          easyHandled.current.clear();
+        }
+      }
+    }catch{if(operation===inboxOperation.current)setNativeInboxError(true);}
+    finally{if(operation===inboxOperation.current){
+      inboxInFlight.current=false;setNativeInboxBusy(false);
+    }}
+  };
+  const prepareNativeInbox=async(targetDeviceId:string)=>{
+    if(inboxInFlight.current||selectedDeviceId!==targetDeviceId||
+       !directory?.devices.some(d=>d.deviceId===targetDeviceId&&d.membershipState==="discovered"))return;
+    inboxInFlight.current=true;
+    const operation=++inboxOperation.current;
+    setNativeInboxBusy(true);setNativeInboxError(false);setNativeInboxPrepared(null);
+    try {
+      const result=await invoke<NativeInboxInvite>("mesh_inbox_invite_prepare",{targetDeviceId});
+      if(result.protocol!=="katosync-mesh-inbox-send-v1"||
+         result.targetDeviceId!==targetDeviceId||
+         !result.sourceDeviceId||result.sourceDeviceId===targetDeviceId||
+         result.signedOffer?.protocol!=="katosync-mesh-pairing-v1"||
+         !/^[A-Za-z0-9_-]{86}$/.test(result.dispatchSignature)||
+         result.signedOffer.expiresAt*1000<=Date.now()){
+        throw new Error("invalid_native_inbox_receipt");
+      }
+      // No Edge call, no auto-trust, no remote job. Only a native public signed draft.
+      if(operation===inboxOperation.current)setNativeInboxPrepared(targetDeviceId);
+    }catch{if(operation===inboxOperation.current)setNativeInboxError(true);}
+    finally{if(operation===inboxOperation.current){
+      inboxInFlight.current=false;setNativeInboxBusy(false);
+    }}
+  };
+  const loadAccountDirectory=async(mode:"list"|"discover"="discover")=>{
+    if(rosterInFlight.current)return;
+    rosterInFlight.current=true;
+    const operation=++rosterOperation.current;
+    const previousDevices=directory?.devices??[];
+    const previousSelection=selectedDeviceId;
+    let rosterReadSucceeded=false;
+    setDirectoryBusy(true);setDirectoryError(false);setDirectoryIssue(null);
+    nativePreflightOperation.current++;nativePreflightInFlight.current=false;
+    setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
+    try{
+      // Opening the guide only READS the signed-in account's existing roster.
+      // The explicit "Find devices" button alone performs enrollment.
+      const command=mode==="list"?"mesh_account_devices_list":"mesh_account_device_discover";
+      const roster=await invoke<MeshAccountDirectory>(command);
+      if(roster.accountVerified!==true || roster.discoveryOnly!==true ||
+         roster.transportReady!==false || roster.remoteJobsEnabled!==false ||
+         !Array.isArray(roster.devices) || roster.devices.length>10 ||
+         roster.devices.some(d=>!d.deviceId||!d.ownerUserId||!d.displayName||!d.fingerprint||
+           !["macos","windows","linux"].includes(d.platformOs)||
+           !["discovered","pending","trusted","revoked"].includes(d.membershipState)))
+        throw new Error("invalid_directory_contract");
+      if(operation===rosterOperation.current){
+        const retained=retainedMeshSelection({selectedId:previousSelection,
+          previous:previousDevices,next:roster.devices,
+          ownFingerprint:agentBootstrap?.fingerprint??null});
+        setDirectory(roster);
+        setSelectedDeviceId(retained);
+        // A read refresh never restarts a signed handshake. Only a changed
+        // account/key or removed/revoked participant invalidates that attempt.
+        if(easySession&&(!retained||retained!==easySession.peerDeviceId)){
+          resetRelay();
+          challengeOperation.current++;challengeInFlight.current=false;
+          setAcceptedInboxOffer(null);setAcceptedChallenge(null);
+          setChallengeBusy(false);setChallengeError(false);
+          setNativeInboxSent(null);setNativeInboxPrepared(null);
+        }
+        rosterReadSucceeded=true;
+      }
+    }catch(cause){
+      if(operation===rosterOperation.current){
+        const code=String(cause);
+        setDirectoryIssue(code.includes("MESH_DISCOVERY_DEVICE_QUOTA")?"quota":
+          code.includes("MESH_DISCOVERY_RATE_LIMIT")?"rate":
+          code.includes("MESH_DISCOVERY_PRO_REQUIRED")?"plan":null);
+        setDirectoryError(true);
+      }
+    }
+    finally{if(operation===rosterOperation.current){
+      rosterInFlight.current=false;setDirectoryBusy(false);
+      // A foreground read can invalidate the initial bootstrap. Refresh only
+      // after success, using the same owner/epoch checks as initial load.
+      if(rosterReadSucceeded)setBootstrapRefreshEpoch(value=>value+1);
+    }}
+  };
+  const recoverPairing=()=>{
+    if(nativeInboxBusy||recipientBusy||relayBusy||pairingBusy||directoryBusy)return;
+    inboxOperation.current++;inboxInFlight.current=false;
+    recipientOperation.current++;recipientInFlight.current=false;
+    challengeOperation.current++;challengeInFlight.current=false;
+    resetRelay();
+    setNativeInboxError(false);setNativeInboxSent(null);setNativeInboxPrepared(null);
+    setRecipientDecision(null);setRecipientError(false);
+    setAcceptedInboxOffer(null);setAcceptedChallenge(null);
+    setChallengeError(false);setChallengeBusy(false);
+    // Existing invitations expire server-side; no remote cancellation or new
+    // trust is claimed. Recheck the roster/inbox before another explicit send.
+    void loadAccountDirectory("list");
+    void loadRecipientInbox(true);
+  };
+  // Stage 3.5: authenticated first-start auto-introduction, read-only roster refresh.
+  // Never enroll silently, accept an invitation, connect TLS or transmit job data.
+  useEffect(()=>{
+    if(import.meta.env.VITE_KATOOS_AUTH_QA!=="1")return;
+    let active=true;
+    let checking=false;
+    let timer:number|undefined;
+    const checkColleagues=async()=>{
+      if(checking)return;
+      if(rosterInFlight.current || inboxInFlight.current ||
+         recipientInFlight.current || relayInFlight.current){
+        // Retry after a foreground Mesh operation. Never let a busy one-off
+        // leave the background roster/heartbeat scheduler permanently stopped.
+        timer=window.setTimeout(()=>void checkColleagues(),30_000);
+        return;
+      }
+      checking=true;
+      try{
+        const status=await invoke<{loggedIn:boolean}>("supabase_session_status");
+        if(!active)return;
+        if(status.loggedIn!==true){
+          setAgentBootstrap(null);
+          setDirectory(null);
+          lastPresenceAttempt.current=0;
+          presenceIdentity.current="";
+          return;
+        }
+        const myAgent=await invoke<MeshAgentBootstrapSnapshot>("mesh_agent_bootstrap_snapshot");
+        if(!active)return;
+        if(myAgent.protocol!=="katosync-mesh-agent-bootstrap-v35"||
+           myAgent.ownerSessionVerified!==true||
+           myAgent.rosterDiscoveryAllowed!==true||
+           myAgent.transportReady!==false||myAgent.remoteJobsEnabled!==false||
+           !myAgent.fingerprint||!myAgent.agentName)throw Error("invalid_bootstrap");
+        const rosterOperationAtStart=rosterOperation.current;
+        const roster=await invoke<MeshAccountDirectory>("mesh_account_devices_list");
+        // A manual discovery or account refresh invalidates this background read.
+        if(!active||rosterOperationAtStart!==rosterOperation.current)return;
+        // Revalidate the identity after I/O to guard against account switching.
+        const stillMe=await invoke<MeshAgentBootstrapSnapshot>("mesh_agent_bootstrap_snapshot");
+        if(!active || rosterOperationAtStart!==rosterOperation.current ||
+           stillMe.fingerprint!==myAgent.fingerprint)return;
+        if(roster.accountVerified!==true || roster.discoveryOnly!==true ||
+           roster.transportReady!==false || roster.remoteJobsEnabled!==false ||
+           !Array.isArray(roster.devices) || roster.devices.length>10 ||
+           roster.devices.some(d=>!d.deviceId||!d.ownerUserId||!d.displayName||
+             !d.fingerprint||!["discovered","pending","trusted","revoked"].includes(d.membershipState)))
+          return;
+        setAgentBootstrap(myAgent);
+        setDirectory(roster);
+        if(presenceIdentity.current!==myAgent.fingerprint){
+          presenceIdentity.current=myAgent.fingerprint;
+          lastPresenceAttempt.current=0;
+        }
+        // Optional signed QA heartbeat; never claims P2P connectivity.
+        // No implicit registration: native refuses unknown/revoked identities.
+        const presenceEnabled=import.meta.env.VITE_STAGE35_HEARTBEAT_QA==="1";
+        const enrolled=roster.devices.some(d=>d.fingerprint===myAgent.fingerprint &&
+          d.membershipState!=="revoked");
+        if(presenceEnabled&&enrolled&&Date.now()-lastPresenceAttempt.current>=600_000){
+          lastPresenceAttempt.current=Date.now();
+          try{
+            const receipt=await invoke<MeshPresenceReceipt>("mesh_device_presence_report");
+            if(!receipt.accepted||!receipt.reportedRecently||receipt.paired||
+               receipt.transportReady||receipt.remoteJobsEnabled||
+               receipt.nextPollSeconds<300||receipt.nextPollSeconds>3600)
+              throw Error("invalid_presence_receipt");
+          }catch{
+            // Network errors do not imply the peer is offline or trusted.
+            // Keep the last verified directory, retry after a bounded pause.
+          }
+        }
+      }catch{
+        // A failed background check is not proof of lost peer trust.
+        // Keep any manually verified pairing state; never auto-create access.
+      }finally{
+        checking=false;
+        // A single future read, never an overlapping interval.
+        if(active)timer=window.setTimeout(()=>void checkColleagues(),120_000);
+      }
+    };
+    void checkColleagues();
+    return ()=>{active=false;if(timer!==undefined)window.clearTimeout(timer);};
+    // Session checks happen inside the native command, not using a JS token.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[refreshEpoch,bootstrapRefreshEpoch]);
+
+  const startConnectionGuide=()=>{
+    setGuideOpen(true);
+    if(!directoryBusy)void loadAccountDirectory("list");
+  };
+  const discoverDevices=()=>{
+    setGuideOpen(true);
+    void loadAccountDirectory("discover");
+  };
+  // Stage 3I is available only with BOTH the QA Web flag and the QA native
+  // build flag; the actual Edge endpoint has an independent server opt-in.
+  const relayQa=import.meta.env.VITE_KATOOS_AUTH_QA==="1"&&
+    import.meta.env.VITE_MESH_RELAY_QA==="1";
+  const sendRelay=async(work:RelayWork,kind:"challenge"|"response")=>{
+    if(!relayQa||relayInFlight.current)return;
+    let expires:number;
+    try {
+      const payload=JSON.parse(work.payloadJson);
+      expires=kind==="challenge"?payload.expiresAt:payload.challenge?.expiresAt;
+    }catch{return;}
+    if(!Number.isSafeInteger(expires)||expires*1000<=Date.now())return;
+    relayInFlight.current=true;const operation=++relayOperation.current;
+    setRelayBusy(true);setRelayError(false);setRelayReceipt(null);
+    try{
+      const result=await invoke<RelayDelivery>("mesh_pairing_relay_send",{
+        requestId:work.requestId,recipientDeviceId:work.deviceId,
+        kind,payloadJson:work.payloadJson
+      });
+      if(!/^[0-9a-f-]{36}$/i.test(result.messageId)||result.deliveryOnly!==true||
+         result.paired!==false||result.transportReady!==false||result.remoteJobsEnabled!==false)
+        throw new Error("invalid_relay_receipt");
+      if(operation===relayOperation.current){
+        setRelayReceipt(kind);
+        if(kind==="challenge")setChallengeRelayWork(null);
+        else setResponseRelayWork(null);
+      }
+    }catch{if(operation===relayOperation.current)setRelayError(true);}
+    finally{if(operation===relayOperation.current){
+      relayInFlight.current=false;setRelayBusy(false);
+    }}
+  };
+  const loadRelay=async()=>{
+    if(!relayQa||relayInFlight.current)return;
+    relayInFlight.current=true;const operation=++relayOperation.current;
+    setRelayBusy(true);setRelayError(false);setRelayMessages(null);
+    try{
+      const data=await invoke<RelayRead>("mesh_pairing_relay_list");
+      if(data.deliveryOnly!==true||data.paired!==false||
+         data.transportReady!==false||data.remoteJobsEnabled!==false||
+         !Array.isArray(data.messages)||data.messages.length>10||
+         data.messages.some(m=>!["challenge","response"].includes(m.kind)||
+           !/^[0-9a-f-]{36}$/i.test(m.requestId)||m.expiresAt*1000<=Date.now()||
+           !m.senderDeviceId||!m.recipientDeviceId||
+           m.payloadJson.length>8192))throw new Error("invalid_relay_list");
+      if(operation===relayOperation.current)setRelayMessages(data.messages);
+    }catch{if(operation===relayOperation.current)setRelayError(true);}
+    finally{if(operation===relayOperation.current){
+      relayInFlight.current=false;setRelayBusy(false);
+    }}
+  };
+  const prepareRelayResponse=async(item:RelayPublicMessage)=>{
+    if(!relayQa||relayInFlight.current||item.kind!=="challenge"||
+       !relayMessages?.includes(item)||item.expiresAt*1000<=Date.now())return;
+    relayInFlight.current=true;const operation=++relayOperation.current;
+    setRelayBusy(true);setRelayError(false);setResponseRelayWork(null);setRelayProof(null);
+    try{
+      const [publicJson,proof]=await invoke<[string,MeshPairingProof]>(
+        "mesh_pairing_response_create",{challengeJson:item.payloadJson}
+      );
+      if(JSON.parse(publicJson)?.protocol!=="katosync-mesh-response-v1"||
+         proof.paired!==false||proof.peerCount!==0||proof.transportReady!==false||
+         !/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(proof.comparisonCode))
+        throw new Error("invalid_relay_response");
+      if(operation===relayOperation.current){
+        setResponseRelayWork({requestId:item.requestId,deviceId:item.senderDeviceId,payloadJson:publicJson});
+        setRelayProof(proof);
+        setRelayMessages(null);
+      }
+    }catch{if(operation===relayOperation.current)setRelayError(true);}
+    finally{if(operation===relayOperation.current){
+      relayInFlight.current=false;setRelayBusy(false);
+    }}
+  };
+  const verifyRelayResponse=async(item:RelayPublicMessage)=>{
+    if(!relayQa||relayInFlight.current||item.kind!=="response"||
+       !relayMessages?.includes(item)||item.expiresAt*1000<=Date.now())return;
+    relayInFlight.current=true;const operation=++relayOperation.current;
+    setRelayBusy(true);setRelayError(false);setRelayProof(null);
+    try{
+      const proof=await invoke<MeshPairingProof>("mesh_pairing_response_verify",
+        {responseJson:item.payloadJson});
+      if(proof.paired!==false||proof.peerCount!==0||proof.transportReady!==false||
+        !/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(proof.comparisonCode))
+        throw new Error("invalid_relay_proof");
+      if(operation===relayOperation.current){
+        setConfirmedCode("");
+        setRelayProof(proof);
+        setRelayMessages(null);
+      }
+    }catch{if(operation===relayOperation.current)setRelayError(true);}
+    finally{if(operation===relayOperation.current){
+      relayInFlight.current=false;setRelayBusy(false);
+    }}
+  };
+  // Stage4S: background only AFTER explicit device request and recipient acceptance.
+  // Bound every poll to a signed request and its expiry; never auto-approve a key.
+  useEffect(()=>{
+    if(!easyEnabled||!guideOpen||easySession||acceptedInboxOffer||acceptedChallenge||relayProof)return;
+    void loadRecipientInbox(true);
+    const timer=window.setInterval(()=>void loadRecipientInbox(true),8_000);
+    return ()=>window.clearInterval(timer);
+    // No account enroll, polling only while the owner keeps Mesh guide open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,guideOpen,easySession,acceptedInboxOffer,acceptedChallenge,relayProof]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession||!validEasyMeshSession(easySession,Date.now()))return;
+    if(easySession.role!=="recipient"||!acceptedInboxOffer||
+       acceptedInboxOffer.requestId!==easySession.requestId)return;
+    void prepareAcceptedChallenge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,easySession,acceptedInboxOffer]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession||!challengeRelayWork||relayBusy||relayError||
+       easyStage==="error"||relayInFlight.current||
+       easySession.role!=="recipient"||
+       challengeRelayWork.requestId!==easySession.requestId||
+       challengeRelayWork.deviceId!==easySession.peerDeviceId)return;
+    void sendRelay(challengeRelayWork,"challenge");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,easySession,challengeRelayWork,relayBusy,relayError,easyStage]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession||!responseRelayWork||relayBusy||relayError||
+       easyStage==="error"||relayInFlight.current||
+       easySession.role!=="sender"||
+       responseRelayWork.requestId!==easySession.requestId||
+       responseRelayWork.deviceId!==easySession.peerDeviceId)return;
+    void sendRelay(responseRelayWork,"response");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,easySession,responseRelayWork,relayBusy,relayError,easyStage]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession||
+       !canPollEasyMeshRelay({
+         sessionValid:validEasyMeshSession(easySession,Date.now()),
+         stage:easyStage,hasProof:relayProof!==null,
+         hasOutboundWork:challengeRelayWork!==null||responseRelayWork!==null,
+         hasAcceptedOffer:acceptedInboxOffer!==null,
+         failed:challengeError||relayError
+       }))return;
+    // Stage4U: server permits at most 12 signed reads/min/device.
+    // 12 seconds leaves headroom for the immediate first read and manual QA.
+    // Outbound signed messages ALWAYS take priority over a background poll.
+    const refresh=()=>{
+      if(!relayInFlight.current&&!challengeRelayWork&&!responseRelayWork)void loadRelay();
+    };
+    const timer=window.setInterval(refresh,EASY_RELAY_POLL_MS);
+    refresh();
+    return ()=>window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,easySession,relayProof,easyStage,challengeRelayWork,
+     responseRelayWork,acceptedInboxOffer,challengeError,relayError]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession||!relayMessages||relayInFlight.current||
+       relayError||challengeError||easyStage==="error")return;
+    const now=Date.now();
+    const item=relayMessages.find(message=>matchEasyRelayMessage(easySession,message,now));
+    if(!item)return;
+    const id=item.requestId+"/"+item.kind+"/"+item.senderDeviceId;
+    if(easyHandled.current.has(id))return;
+    easyHandled.current.add(id);
+    setEasyStage("verifying");
+    // Rust validates exact signed challenge/response and account-bound nonces.
+    if(easySession.role==="sender")void prepareRelayResponse(item);
+    else void verifyRelayResponse(item);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[easyEnabled,easySession,relayMessages,relayError,challengeError,easyStage]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!relayProof||!easySession)return;
+    if(relayProof.fingerprint===easySession.peerFingerprint&&
+       validEasyMeshSession(easySession,Date.now()))setEasyStage("compare");
+    else setEasyStage("error");
+  },[easyEnabled,relayProof,easySession]);
+
+  useEffect(()=>{
+    if(easyEnabled&&easySession&&(challengeError||relayError)){
+      setEasyStage("error");
+    }
+  },[easyEnabled,easySession,challengeError,relayError]);
+
+  useEffect(()=>{
+    if(!easyEnabled||!easySession)return;
+    const ms=easySession.expiresAtMs-Date.now();
+    if(ms<=0||ms>10*60_000){setEasySession(null);setEasyStage("expired");return;}
+    const expiry=window.setTimeout(()=>{
+      setEasySession(null);setEasyStage("expired");
+      setNativeInboxSent(null);setSentRequest(null);
+      setAcceptedInboxOffer(null);setAcceptedChallenge(null);
+      setChallengeRelayWork(null);setResponseRelayWork(null);
+      setRelayProof(null);setRelayMessages(null);
+      easyHandled.current.clear();
+    },ms);
+    return ()=>window.clearTimeout(expiry);
+  },[easyEnabled,easySession]);
+
+  const selectedDevice=directory?.devices.find(d=>d.deviceId===selectedDeviceId &&
+    d.fingerprint!==agentBootstrap?.fingerprint)??null;
+  // A manual preflight checks existing Keychain pin + current owner + RLS
+  // enrollment. It never creates a key, pairs a device or opens a socket.
+  const runNativePeerPreflight=async(device:MeshAccountDevice)=>{
+    if(!qaAuthEnabled||nativePreflightInFlight.current||
+       selectedDeviceId!==device.deviceId||device.membershipState==="revoked"||
+       !/^[0-9A-F]{2}(-[0-9A-F]{2}){15}$/.test(device.fingerprint))return;
+    nativePreflightInFlight.current=true;
+    const operation=++nativePreflightOperation.current;
+    setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(true);
+    try{
+      const result=await invoke<MeshNativePeerPreflight>(
+        "mesh_native_peer_preflight",{requestedFingerprint:device.fingerprint});
+      if(result.protocol!=="katosync-mesh-native-peer-preflight-v1"||
+         result.admissionEligible!==true||result.paired!==false||
+         result.transportReady!==false||result.remoteJobsEnabled!==false||
+         result.verifiedPeers!==0)throw Error("unexpected_mesh_trust");
+      if(operation===nativePreflightOperation.current){
+        setNativePreflight({deviceId:device.deviceId,
+          fingerprint:device.fingerprint,eligible:true});
+      }
+    }catch{
+      if(operation===nativePreflightOperation.current)setNativePreflightError(true);
+    }finally{
+      if(operation===nativePreflightOperation.current){
+        nativePreflightInFlight.current=false;setNativePreflightBusy(false);
+      }
+    }
+  };
+  // Relay proof alone never grants trust. Selected target and independently
+  // entered OTHER device's SAS must match the locally verified public key.
+  const relayApprovalEligible=canConfirmRelayPeerLocally({
+    proof:relayProof,selectedPeer:selectedDevice,
+    codeFromOtherDevice:confirmedCode.trim().toUpperCase(),
+    busy:pairingBusy||relayBusy||directoryBusy
+  });
+  const qaAuthEnabled=import.meta.env.VITE_KATOOS_AUTH_QA==="1";
+  const lanQaEnabled=qaAuthEnabled&&import.meta.env.VITE_STAGE4W_LAN_QA==="1";
+  const runLanQa=async(role:"listen"|"connect")=>{
+    if(!lanQaEnabled||lanQaBusy||!lanQaConsent||
+       !selectedDevice||!approvedPeers?.some(peer=>
+         peer.status==="locally_approved"&&peer.fingerprint===selectedDevice.fingerprint)||
+       !lanQaLocalIp.trim()||!lanQaPeerIp.trim()||!/^[0-9]{4,5}$/.test(lanQaPort))return;
+    const port=Number(lanQaPort);
+    if(!Number.isInteger(port)||port<1025||port>65535)return;
+    setLanQaBusy(true);setLanQaResult(null);
+    try{
+      const result=await invoke<{
+        protocol:"katosync-stage4w-private-lan-once-v1";
+        peerAuthenticatedOnce:true;channelStillActive:false;
+        remoteJobsEnabled:false;crossDeviceWrites:false;
+      }>(role==="listen"?
+        "mesh_private_lan_listen_once_qa":"mesh_private_lan_connect_once_qa",{
+        localIp:lanQaLocalIp.trim(),peerIp:lanQaPeerIp.trim(),
+        port,requestedFingerprint:selectedDevice.fingerprint
+      });
+      if(result.protocol!=="katosync-stage4w-private-lan-once-v1"||
+         result.peerAuthenticatedOnce!==true||
+         result.channelStillActive!==false||
+         result.remoteJobsEnabled!==false||
+         result.crossDeviceWrites!==false)throw new Error("invalid_native_qa_claim");
+      setLanQaResult("passed");
+    }catch{
+      setLanQaResult("failed");
+    }finally{
+      setLanQaBusy(false);setLanQaConsent(false);
+    }
+  };
+  const inboxSendEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_SEND_QA==="1";
+  const inboxReceiveEnabled=qaAuthEnabled&&import.meta.env.VITE_MESH_INBOX_RECEIVE_QA==="1";
+  const [clipboardStatus,setClipboardStatus]=useState<"ok"|"failed"|null>(null);
+  const copyPublicMessage=async(payload:string)=>{
+    // Es werden nur signierte, oeffentliche Pairing-Nachrichten kopiert.
+    // Niemals Konto-Tokens, Keychain-Seeds oder unverifizierte Geraete-Freigaben.
+    setClipboardStatus(null);
+    try{
+      if(!navigator.clipboard?.writeText)throw new Error("clipboard_unavailable");
+      await navigator.clipboard.writeText(payload);
+      setClipboardStatus("ok");
+    }catch{setClipboardStatus("failed");}
+  };
+  const prepareAndInvite=async()=>{
+    setPairingBusy(true);setIdentityError(false);setIdentityFailure(null);
+    setOffer("");setClipboardStatus(null);
+    try{
+      const actual=await invoke<MeshIdentityStatus>("mesh_device_identity_prepare");
+      if(actual.paired||actual.peerCount||actual.transportReady)throw new Error("unexpected_trust_claim");
+      setIdentity(actual);
+      const invite=await invoke<MeshSignedOffer>("mesh_pairing_offer_create");
+      if(invite.protocol!=="katosync-mesh-pairing-v1"||!invite.signature||!invite.publicKey)
+        throw new Error("invalid_public_invite");
+      setOffer(JSON.stringify(invite));
+    }catch(error:unknown){
+      setIdentityError(true);
+      const failure=classifyMeshIdentityFailure(error);
+      setIdentityFailure(failure);
+      if(["account","session","refresh","changed","invalid","network"].includes(failure)){
+        setReauthResult(null);
+        setIdentity(null);
+        setOffer("");
+      }
+    }finally{setPairingBusy(false);}
+  };
+  const checkAndPrepareReply=async()=>{
+    if(!incoming.trim())return;
+    setPairingBusy(true);setIdentityError(false);setIdentityFailure(null);
+    setChallengeOutgoing("");setInspected(null);setClipboardStatus(null);
+    try{
+      const checked=await invoke<MeshIdentityStatus>("mesh_pairing_offer_inspect",{offerJson:incoming});
+      if(checked.paired||checked.peerCount||checked.transportReady)
+        throw new Error("unexpected_trust_claim");
+      setInspected(checked);
+      // Herausforderung ist nur ein signierter Besitznachweis, KEINE Peer-Freigabe.
+      const challenge=await invoke<string>("mesh_pairing_challenge_create",{offerJson:incoming});
+      if(JSON.parse(challenge)?.protocol!=="katosync-mesh-challenge-v1")
+        throw new Error("invalid_challenge");
+      setChallengeOutgoing(challenge);
+    }catch{setIdentityError(true);}
+    finally{setPairingBusy(false);}
+  };
+  const checkInventory=(value:MeshPeerInventory)=>{
+    if(!value.approvalOnly||value.transportReady||value.remoteJobsEnabled||
+      !Array.isArray(value.peers)||value.peers.length>10||
+      value.peers.some(p=>p.status!=="locally_approved")) {
+      throw new Error("unexpected_peer_permission");
+    }
+    setApprovedPeers(value.peers);
+    // An updated local pin inventory invalidates any earlier admission result.
+    nativePreflightOperation.current++;nativePreflightInFlight.current=false;
+    setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
+  };
+  const loadApproved=async()=>{
+    setPairingBusy(true);setApprovalError(false);
+    try {checkInventory(await invoke<MeshPeerInventory>("mesh_local_approved_peers"));}
+    catch{setApprovedPeers(null);setApprovalError(true);}
+    finally{setPairingBusy(false);}
+  };
+  const approvePeer=async()=>{
+    setPairingBusy(true);setApprovalError(false);
+    try{
+      checkInventory(await invoke<MeshPeerInventory>("mesh_local_approve_peer",
+        {confirmedCode:confirmedCode.toUpperCase().trim()}));
+      setConfirmedCode("");
+      setPairingProof(null);setPairingVerified(null);setRelayProof(null);
+    }catch{setApprovalError(true);}
+    finally{setPairingBusy(false);}
+  };
+  // The click is a human assertion that BOTH screens show the SAME code.
+  // Supplying the local code to native is permitted only on that explicit
+  // acknowledgment; a mere account match or relay proof never pins a key.
+  const approveEasyPeer=async()=>{
+    if(!easyEnabled||!canQuickApproveSameCode({
+      proof:relayProof,peer:selectedDevice,session:easySession,
+      explicitOwnerConfirmation:true,busy:pairingBusy||relayBusy||directoryBusy,
+      nowMs:Date.now()
+    }))return;
+    const code=relayProof!.comparisonCode;
+    const fingerprint=relayProof!.fingerprint;
+    setPairingBusy(true);setApprovalError(false);
+    try{
+      const result=await invoke<MeshPeerInventory>("mesh_local_approve_peer",
+        {confirmedCode:code});
+      if(result.approvalOnly!==true||result.transportReady!==false||
+         result.remoteJobsEnabled!==false||!result.peers.some(peer=>
+           peer.fingerprint===fingerprint&&peer.status==="locally_approved"))
+        throw Error("unexpected_local_trust_result");
+      checkInventory(result);
+      setEasySession(null);setEasyStage("approved");
+      setRelayProof(null);setConfirmedCode("");
+    }catch{setApprovalError(true);setEasyStage("error");}
+    finally{setPairingBusy(false);}
+  };
+
+  const revokePeer=async(fingerprint:string)=>{
+    setPairingBusy(true);setApprovalError(false);
+    try{checkInventory(await invoke<MeshPeerInventory>("mesh_local_revoke_peer",{fingerprint}));}
+    catch{setApprovalError(true);}
+    finally{setPairingBusy(false);}
+  };
+  const checkProof=(value:MeshPairingProof)=>{
+    if(value.paired||value.peerCount!==0||value.transportReady||
+      !/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(value.comparisonCode)) {
+      throw new Error("invalid_pairing_proof");
+    }
+  };
+  const createChallenge=async()=>{
+    setPairingBusy(true);setIdentityError(false);setChallengeOutgoing("");setPairingVerified(null);
+    try {
+      const raw=await invoke<string>("mesh_pairing_challenge_create",{offerJson:incoming});
+      if(JSON.parse(raw)?.protocol!=="katosync-mesh-challenge-v1")throw new Error("invalid_challenge");
+      setChallengeOutgoing(raw);
+    }catch{setIdentityError(true);}finally{setPairingBusy(false);}
+  };
+  const createResponse=async()=>{
+    setPairingBusy(true);setIdentityError(false);setResponseOutgoing("");setPairingProof(null);
+    try {
+      const [raw,value]=await invoke<[string,MeshPairingProof]>("mesh_pairing_response_create",
+        {challengeJson:challengeIncoming});
+      if(JSON.parse(raw)?.protocol!=="katosync-mesh-response-v1")throw new Error("invalid_response");
+      checkProof(value);setResponseOutgoing(raw);setPairingProof(value);
+    }catch{setIdentityError(true);}finally{setPairingBusy(false);}
+  };
+  const verifyResponse=async()=>{
+    setPairingBusy(true);setIdentityError(false);setPairingVerified(null);
+    try{
+      const result=await invoke<MeshPairingProof>("mesh_pairing_response_verify",
+        {responseJson:responseIncoming});
+      checkProof(result);setPairingVerified(result);
+    }catch{setIdentityError(true);}finally{setPairingBusy(false);}
+  };
+  const prepareIdentity=async()=>{
+    setPairingBusy(true);setIdentityError(false);setIdentityFailure(null);
+    try {
+      const actual=await invoke<MeshIdentityStatus>("mesh_device_identity_prepare");
+      if(actual.paired||actual.peerCount||actual.transportReady)throw new Error("unexpected_trust_claim");
+      setIdentity(actual);
+    } catch(e:unknown) {
+      setIdentityError(true);
+      setIdentityFailure(classifyMeshIdentityFailure(e));
+    }
+    finally {setPairingBusy(false);}
+  };
+  const createOffer=async()=>{
+    setPairingBusy(true);setIdentityError(false);setOffer("");
+    try{
+      const invite=await invoke<MeshSignedOffer>("mesh_pairing_offer_create");
+      if(invite.protocol!=="katosync-mesh-pairing-v1")throw new Error("bad_version");
+      setOffer(JSON.stringify(invite));
+    }catch{setIdentityError(true);}finally{setPairingBusy(false);}
+  };
+  const inspectOffer=async()=>{
+    setPairingBusy(true);setIdentityError(false);setInspected(null);
+    try{
+      const actual=await invoke<MeshIdentityStatus>("mesh_pairing_offer_inspect",{offerJson:incoming});
+      if(actual.paired||actual.peerCount||actual.transportReady)throw new Error("unexpected_trust_claim");
+      setInspected(actual);
+    }catch{setIdentityError(true);}finally{setPairingBusy(false);}
+  };
+  const refresh=useCallback(async()=>{
+    const request=++trustReadEpoch.current;
+    setApprovedPeers(null);
+    sharedRequest.current++;
+    setSharedPreflight(null);setSharedError(false);setSharedBusy(false);
+    setLoading(true);
+    try {
+      if(!window.__TAURI_INTERNALS__) {
+        setSnapshot(null);
+        setIssuerSnapshot(null);
+        setPreviewStatus(null);
+        setError(false);
+        return;
+      }
+      const [actual,issuer,preview,pins]=await Promise.all([
+        invoke<MeshLocalReadiness>("mesh_local_readiness"),
+        invoke<MeshNativeIssuerReadiness>("mesh_native_issuer_readiness").catch(()=>null),
+        invoke<MeshPreviewAuthStatus>("mesh_preview_auth_status").catch(()=>null),
+        // Account-verified native Keychain read only. No discovery, no approval.
+        invoke<MeshPeerInventory>("mesh_local_approved_peers").catch(()=>null)
+      ]);
+      if(request!==trustReadEpoch.current)return;
+      if(actual.protocol!=="mesh-readonly-v0" || actual.deviceIdentity!=="not_paired" ||
+        actual.peerTransport!=="not_connected" || actual.verifiedPeers!==0 ||
+        actual.remoteReadOnlyDispatch || actual.crossDeviceWrites) {
+        throw new Error("unexpected_mesh_security_contract");
+      }
+      const issuerValid=issuer?.protocol==="mesh-native-issuer-boundary-v1"&&
+        issuer.isolatedPreviewSession==="independent_login_required"&&
+        issuer.currentSessionReusableForPreview===false&&
+        issuer.previewTokenStoreIsolated===false&&
+        issuer.previewCloudProbeEnabled===false&&
+        issuer.onlinePreviewVerified===false&&
+        issuer.devicePairingEnabled===false&&issuer.remoteJobsEnabled===false;
+      setIssuerSnapshot(issuerValid?issuer:null);
+      const previewValid=preview?.protocol==="mesh-preview-auth-v1"&&
+        preview.paired===false&&preview.transportReady===false&&
+        preview.remoteJobsEnabled===false&&preview.sessionVerified===false&&
+        (!preview.configured||(preview.previewIssuerOnly&&preview.independentKeychain));
+      setPreviewStatus(previewValid?preview:null);
+      const pinInventoryValid=pins?.approvalOnly===true &&
+        pins.transportReady===false && pins.remoteJobsEnabled===false &&
+        Array.isArray(pins.peers) && pins.peers.length<=10 &&
+        pins.peers.every(peer=>peer.status==="locally_approved" &&
+          peer.approvedAt>0 &&
+          /^[0-9A-F]{2}(-[0-9A-F]{2}){15}$/.test(peer.fingerprint));
+      setApprovedPeers(pinInventoryValid?pins.peers:null);
+      setSnapshot(actual);
+      setError(false);
+    } catch {
+      if(request!==trustReadEpoch.current)return;
+      setSnapshot(null);
+      setIssuerSnapshot(null);
+      setPreviewStatus(null);
+      setError(true);
+    } finally {setLoading(false);}
+  },[]);
+  useEffect(()=>{
+    // A status refresh is deliberately read-only: do NOT invoke
+    // mesh_account_device_discover (which registers the local device).
+    // Old discovered roster rows must not look freshly verified.
+    // Any response started before this refresh must not revive an old
+    // account's roster, pending send or incoming invitations.
+    rosterOperation.current++;rosterInFlight.current=false;
+    inboxOperation.current++;inboxInFlight.current=false;
+    recipientOperation.current++;recipientInFlight.current=false;
+    challengeOperation.current++;challengeInFlight.current=false;
+    setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
+    resetRelay();
+    setDirectory(null);
+    setSelectedDeviceId(null);
+    setNativeInboxSent(null);setNativeInboxPrepared(null);
+    setRecipientInbox(null);setRecipientDecision(null);
+    setDirectoryBusy(false);setNativeInboxBusy(false);setRecipientBusy(false);
+    setGuideOpen(import.meta.env.VITE_MESH_EASY_PAIR_QA==="1");
+    setDirectoryError(false);setDirectoryIssue(null);
+    void refresh();
+  },[refresh,refreshEpoch]);
+  const checkSharedKatoos=async()=>{
+    if(sharedBusy||issuerSnapshot?.compiledIssuer!=="katoos_shared_qa")return;
+    const current=++sharedRequest.current;
+    setSharedBusy(true);setSharedError(false);setSharedPreflight(null);
+    try{
+      const result=await invoke<MeshKatoosSharedPreflight>("mesh_katoos_shared_preflight");
+      if(result.protocol!=="mesh-katoos-shared-preflight-v1"||
+        result.sharedIssuerVerified!==true||result.schemaAccessible!==true||
+        !["active","not_member"].includes(result.membership)||
+        result.discoveryAuthorized!==(result.membership==="active")||
+        result.paired!==false||result.transportReady!==false||
+        result.remoteJobsEnabled!==false)throw new Error("invalid_shared_sso_contract");
+      if(current===sharedRequest.current)setSharedPreflight(result);
+    }catch{
+      if(current===sharedRequest.current)setSharedError(true);
+    }finally{
+      if(current===sharedRequest.current)setSharedBusy(false);
+    }
+  };
+  const previewAuthAction=async(action:"login"|"verify"|"logout")=>{
+    if(previewBusy||!previewStatus?.configured)return;
+    setPreviewBusy(true);
+    setPreviewError(false);
+    try {
+      const command=action==="login"?"mesh_preview_auth_login":
+        action==="verify"?"mesh_preview_auth_verify_session":"mesh_preview_auth_logout";
+      const args=action==="login"?{email:previewEmail.trim(),password:previewPassword}:{};
+      const result=await invoke<MeshPreviewAuthStatus>(command,args);
+      if(result.protocol!=="mesh-preview-auth-v1"||!result.configured||
+        !result.previewIssuerOnly||!result.independentKeychain||
+        result.paired||result.transportReady||result.remoteJobsEnabled||
+        (action==="logout"&&result.sessionVerified)||
+        (action!=="logout"&&(!result.sessionVerified||!result.accountEmail))) {
+        throw new Error("preview_contract_mismatch");
+      }
+      setPreviewStatus(result);
+    }catch{
+      setPreviewError(true);
+      setPreviewStatus(previous=>previous?{...previous,sessionVerified:false,accountEmail:null}:null);
+    }finally{
+      setPreviewPassword("");
+      setPreviewBusy(false);
+    }
+  };
+  const presentation=directory&&agentBootstrap?presentMeshRegistrations({
+    devices:directory.devices,
+    localFingerprint:agentBootstrap.fingerprint,
+    nowMs:Date.now()
+  }):null;
+  const myRosterDevice=presentation?.own||
+    directory?.devices.find(d=>d.fingerprint===agentBootstrap?.fingerprint);
+  const colleagueRecommendation=agentBootstrap&&myRosterDevice?
+    selectMeshColleague({
+      accountVerified:true,ownerUserId:myRosterDevice.ownerUserId,
+      ownDeviceId:myRosterDevice.deviceId,
+      devices:directory?.devices.map(d=>({
+        deviceId:d.deviceId,ownerUserId:d.ownerUserId,displayName:d.displayName,
+        agentName:d.personaName||d.displayName,fingerprint:d.fingerprint,
+        membershipState:d.membershipState,
+        // Only the native Keychain + authenticated SAS proof can authorize trust.
+        locallyPinned:false,peerProofVerified:false,secureTransportReady:false
+      }))||[]
+    }):null;
+  const authRejected=identityError&&
+    ["account","session","refresh","invalid","changed"].includes(identityFailure??"");
+  const revealReauth=()=>{
+    setDetailsOpen(true);
+    setReauthOpen(true);
+  };
+  const displayRegistrationName=(device:MeshAccountDevice)=>
+    device.personaName||meshRegistrationAgentName(device.fingerprint,device.platformOs)||
+    device.displayName;
+  const registeredPlatform=(os:MeshAccountDevice["platformOs"])=>
+    t(os==="macos"?"mesh.directory.deviceMac":
+      os==="windows"?"mesh.directory.deviceWindows":"mesh.directory.deviceLinux");
+  const manualMeshControls=!easyEnabled||
+    (easyAdvancedOpen&&(!easySession||easyStage==="error"));
+  const readiness=snapshot?.localControl??"unknown";
+  const pairingStatus=deriveLocalPairingStatus({
+    pins:approvedPeers,devices:directory?.devices??null,
+    ownFingerprint:agentBootstrap?.fingerprint??null,
+    transport:snapshot?.peerTransport??null,
+    remoteReadOnlyDispatch:snapshot?.remoteReadOnlyDispatch??null,
+    crossDeviceWrites:snapshot?.crossDeviceWrites??null
+  });
+  const locallyPaired=pairingStatus==="locally_paired";
+  const liveConnected=isMeshConnectionLive(connectionSnapshot,Date.now());
+  const renderRegistration=(device:MeshAccountDevice)=>{
+    const lastSeen=Date.parse(device.lastSeenAt??"");
+    const recent=Number.isFinite(lastSeen)&&lastSeen<=Date.now()+5*60_000&&
+      lastSeen>=Date.now()-2*60*60_000;
+    const canSelectPinned=canSelectLocallyApprovedPeerForQa({
+      enabled:lanQaEnabled,peer:device,approvedPeers,
+      ownFingerprint:agentBootstrap?.fingerprint??null
+    });
+    // Local approval blocks repeat invitations even in builds where the
+    // advanced QA selector is completely disabled.
+    const alreadyPinned=approvedPeers?.some(pin=>
+      pin.status==="locally_approved"&&pin.fingerprint===device.fingerprint)===true;
+    // An unreadable Keychain inventory must fail closed rather than offer
+    // a new invite for an already approved peer.
+    const canRequest=easyEnabled&&approvedPeers!==null&&!alreadyPinned&&recent&&
+      device.membershipState==="discovered"&&
+      device.fingerprint!==agentBootstrap?.fingerprint&&!easySession&&
+      !recipientInbox?.length&&!acceptedInboxOffer&&
+      easyStage!=="approved"&&!nativeInboxSent;
+    return <button type="button"
+    className="vision-mesh-guide-device" key={device.deviceId}
+    data-selected={selectedDeviceId===device.deviceId}
+    disabled={directoryBusy||directoryError||nativeInboxBusy||recipientBusy||lanQaBusy||
+      (easyEnabled&&!canRequest&&!canSelectPinned)}
+    onClick={()=>{
+      nativePreflightOperation.current++;nativePreflightInFlight.current=false;
+      setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
+      setSelectedDeviceId(device.deviceId);
+      if(canRequest&&!alreadyPinned)void sendNativeInbox(device.deviceId,true);
+      if(canSelectPinned){setLanQaConsent(false);setLanQaResult(null);}
+    }}>
+    <span className="vision-mesh-guide-device-name"><strong>{displayRegistrationName(device)}</strong>
+      {!easyEnabled?<small>{device.displayName}</small>:null}
+      <small>{registeredPlatform(device.platformOs)} · {t("mesh.directory.identitySuffix",{id:device.fingerprint.slice(-8)})}</small>
+      {!easyEnabled?<small>{t("mesh.directory.modelUnverified")} · {t(("mesh.directory."+device.membershipState) as TKey)}</small>:null}
+      <small>{device.lastSeenAt?
+        t("mesh.directory.lastSeen",{time:relativeTime(device.lastSeenAt,lang)||"—"}):
+        t("mesh.directory.notSeen")}</small>
+    </span>
+    <span className="vision-mesh-guide-select">{t(canSelectPinned?
+      selectedDeviceId===device.deviceId?"mesh.stage4x.selectedPaired":"mesh.stage4x.selectPaired":
+      alreadyPinned?"mesh.stage4x.alreadyPaired":
+      easyEnabled?
+      canRequest?"mesh.easy.connect":
+      easySession?.peerDeviceId===device.deviceId?"mesh.easy.requestInProgress":
+      recent?"mesh.easy.notAvailable":"mesh.easy.history":
+      selectedDeviceId===device.deviceId?"mesh.guide.selected":"mesh.guide.choose")}</span>
+  </button>;
+  };
+  return <section className="vision-mesh-readiness vision-mesh-compact provider-mesh-card glass" aria-label={t("mesh.simple.title")}>
+    <div className="vision-mesh-compact-top">
+      <div className="vision-mesh-compact-identity">
+        <span className="vision-mesh-compact-icon"><ShieldCheck size={19} aria-hidden="true"/></span>
+        <div className="vision-mesh-compact-status">
+          <strong>{t("mesh.simple.title")}</strong>
+          <span className="vision-mesh-compact-state"
+            data-pairing-status={pairingStatus}>
+            <span className={liveConnected?"vision-mesh-connected-dot":locallyPaired?"vision-mesh-locally-paired-dot":"vision-mesh-offline-dot"}/>
+            {liveConnected?t("mesh.connection.state.connected"):error?t("mesh.simple.unavailable"):
+              locallyPaired?t("mesh.status.locallyPaired"):
+              pairingStatus==="checking"?t("mesh.status.checking"):
+              t("mesh.simple.disconnected")}
+          </span>
+          <small>{liveConnected?t("mesh.connection.scope"):
+            locallyPaired?t("mesh.status.noTransport"):t("mesh.simple.noPeers")}</small>
+        </div>
+        <button type="button" className="ghost compact-button mesh-status-refresh"
+          aria-label={t("connections.refreshMesh")} title={t("connections.refreshMesh")}
+          onClick={()=>void refresh()} disabled={loading||pairingBusy||directoryBusy}>
+          <RefreshCcw size={16} className={loading?"spin":""}/>
+        </button>
+      </div>
+      <div className="vision-mesh-compact-actions">
+        <button type="button" className="ghost compact-button" disabled={directoryBusy||!snapshot}
+          onClick={discoverDevices}>
+          <RefreshCcw size={15} className={directoryBusy?"spin":""}/>
+          {t("mesh.directory.refresh")}
+        </button>
+        <button type="button" className="primary compact-button"
+          disabled={pairingBusy||directoryBusy||!snapshot}
+          onClick={startConnectionGuide}>{t("mesh.simple.connect")}</button>
+        <button type="button" className="ghost compact-button" aria-expanded={detailsOpen}
+          aria-controls="vision-mesh-technical-details"
+          onClick={()=>setDetailsOpen(value=>!value)}>{t("mesh.simple.details")}</button>
+      </div>
+    </div>
+    <section className="vision-mesh-readiness-lanes" aria-label={t("mesh.stage4x.heading")}>
+      <div className="vision-mesh-readiness-lane" data-ready={locallyPaired?"yes":"no"}>
+        <span className="vision-mesh-readiness-step">01 · {t("mesh.stage4x.local")}</span>
+        <strong>{t(locallyPaired?"mesh.stage4x.paired":"mesh.stage4x.notPaired")}</strong>
+        <small>{t("mesh.stage4x.localHint")}</small>
+      </div>
+      <div className="vision-mesh-readiness-lane" data-ready={liveConnected?"yes":"no"}>
+        <span className="vision-mesh-readiness-step">02 · {t("mesh.stage4x.tunnel")}</span>
+        <strong>{t(liveConnected?"mesh.connection.state.connected":"mesh.stage4x.notOnline")}</strong>
+        <small>{t(liveConnected?"mesh.connection.freshHeartbeat":"mesh.stage4x.tunnelHint")}</small>
+      </div>
+      <div className="vision-mesh-readiness-lane" data-ready="no">
+        <span className="vision-mesh-readiness-step">03 · {t("mesh.stage4x.control")}</span>
+        <strong>{t("mesh.stage4x.locked")}</strong>
+        <small>{t("mesh.stage4x.controlHint")}</small>
+      </div>
+    </section>
+    <MeshLiveConnectionPanel enabled={lanQaEnabled}
+      peerFingerprint={selectedDevice?.fingerprint??null}
+      peerName={selectedDevice?displayRegistrationName(selectedDevice):null}
+      peerLabels={(directory?.devices??[]).map(device=>({fingerprint:device.fingerprint,name:displayRegistrationName(device)}))}
+      ownFingerprint={agentBootstrap?.fingerprint??null}
+      canStart={!directoryBusy&&!directoryError&&!pairingBusy&&!easySession&&
+        canSelectLocallyApprovedPeerForQa({enabled:lanQaEnabled,peer:selectedDevice,
+          approvedPeers,ownFingerprint:agentBootstrap?.fingerprint??null})}
+      preferredServer={hubPreference?.preferred??false} refreshEpoch={refreshEpoch}
+      onSnapshot={setConnectionSnapshot}/>
+    {agentBootstrap?<div className="vision-mesh-compact-notice" role="status">
+      <strong>{t("mesh.agent35.identity",{name:agentBootstrap.agentName})}</strong>
+      <small>{t("mesh.agent35.hardware",{
+        cores:agentBootstrap.hardware.logicalCpuCores,
+        memory:agentBootstrap.hardware.memoryGibBucket??"?",
+        platform:agentBootstrap.hardware.chipFamily||agentBootstrap.hardware.platform
+      })}</small>
+      <small>{colleagueRecommendation?.stage==="ready_for_hello"?
+        t("mesh.agent35.colleague",{name:colleagueRecommendation.peerName||"KAI"}):
+        presentation?.registeredPeers?
+          t("mesh.agent35.accountRecords",{count:presentation.registeredPeers}):
+          t("mesh.agent35.noColleagues")}</small>
+      <small>{liveConnected?t("mesh.connection.scope"):t(locallyPaired?"mesh.status.helloBlocked":"mesh.agent35.pendingTrust")}</small>
+    </div>:null}
+    {offer?<div className="vision-mesh-compact-notice" role="status">
+      <span>{t("mesh.simple.offerReady")}</span>
+      <button type="button" className="ghost compact-button"
+        onClick={()=>void copyPublicMessage(offer)}>{t("mesh.quick.copyPublicInvite")}</button>
+    </div>:null}
+    {directoryError&&!guideOpen?<p className="vision-mesh-compact-notice" role="status">
+      {directoryIssue==="quota"?t("mesh.directory.quotaReached"):
+       directoryIssue==="rate"?t("mesh.directory.rateLimited"):
+       directoryIssue==="plan"?t("mesh.directory.proRequired"):
+       t("mesh.simple.discoveryNotReady")}</p>:null}
+    {directory?.devices.length===0&&!guideOpen?<p className="vision-mesh-compact-notice" role="status">
+      {t("mesh.directory.empty")}</p>:null}
+    {identityError?<p role="alert" className="vision-mesh-compact-notice vision-mesh-error">
+      {t("mesh.v1.failed")}
+      {identityFailure?" "+t(("mesh.identity.diag."+identityFailure) as TKey):null}
+      {authRejected&&import.meta.env.VITE_KATOOS_AUTH_QA==="1"?
+        <button type="button" className="ghost compact-button"
+          onClick={revealReauth}>{t("mesh.simple.renewAction")}</button>:null}
+    </p>:null}
+    {clipboardStatus?<p className="vision-mesh-compact-notice" role="status">
+      {t(clipboardStatus==="ok"?"mesh.quick.copied":"mesh.quick.copyFailed")}
+    </p>:null}
+    {guideOpen?<div className="vision-mesh-guide" role="region"
+      aria-label={t("mesh.guide.heading")}>
+      <div className="vision-mesh-guide-heading">
+        <strong>{t(easyEnabled?"mesh.easy.title":"mesh.guide.heading")}</strong>
+        <small>{t(liveConnected?"mesh.connection.state.connected":locallyPaired?"mesh.status.locallyPaired":"mesh.guide.notConnected")}</small>
+      </div>
+      <p>{t(easyEnabled?"mesh.easy.description":"mesh.guide.description")}</p>
+      {easyEnabled?<div className="vision-mesh-simple-steps"
+        aria-label={t("mesh.easy.stepsLabel")}>
+        <div className="vision-mesh-simple-step"
+          data-state={easySession||locallyPaired?"complete":"active"}>
+          <span aria-hidden="true" className="vision-mesh-step-number">1</span>
+          <span>{t("mesh.easy.stepFind")}</span>
+        </div>
+        <div className="vision-mesh-simple-step"
+          data-state={locallyPaired||easyStage==="verifying"||easyStage==="compare"||easyStage==="approved"?"complete":
+            easyStage==="waiting"||recipientInbox?.length?"active":"pending"}>
+          <span aria-hidden="true" className="vision-mesh-step-number">2</span>
+          <span>{t("mesh.easy.stepAccept")}</span>
+        </div>
+        <div className="vision-mesh-simple-step"
+          data-state={locallyPaired||easyStage==="approved"?"complete":
+            easyStage==="compare"?"active":"pending"}>
+          <span aria-hidden="true" className="vision-mesh-step-number">3</span>
+          <span>{t("mesh.easy.stepCompare")}</span>
+        </div>
+      </div>:null}
+      {!inboxSendEnabled?<p className="vision-mesh-compact-notice" role="status">
+        {t("mesh.guide.deliveryDisabled")}</p>:null}
+      {!inboxReceiveEnabled?<p className="vision-mesh-compact-notice" role="status">
+        {t("mesh.recipient.disabled")}</p>:null}
+      {easyEnabled?<section className="vision-mesh-easy-panel"
+          data-stage={easyStage}
+          aria-label={t("mesh.easy.title")} role="status">
+        <strong>{t("mesh.easy.progressTitle")}</strong>
+        {easyStage==="waiting"?<p>{t("mesh.easy.waiting")}</p>:
+         easyStage==="verifying"?<p>{t("mesh.easy.verifying")}</p>:
+         easyStage==="compare"&&relayProof?<div className="vision-mesh-easy-check">
+           <p>{t("mesh.easy.compare")}</p>
+           <code className="vision-mesh-sas-approval-code">{relayProof.comparisonCode}</code>
+           <small>{t("mesh.easy.compareOnlyOnDevices")}</small>
+           <button type="button" className="primary compact-button"
+             disabled={!canQuickApproveSameCode({
+               proof:relayProof,peer:selectedDevice,session:easySession,
+               explicitOwnerConfirmation:true,
+               busy:pairingBusy||relayBusy||directoryBusy,
+               nowMs:Date.now()
+             })||(easySession?.role==="sender"&&relayReceipt!=="response")}
+             onClick={()=>void approveEasyPeer()}>
+             {t("mesh.easy.codesMatch")}
+           </button>
+           {!selectedDevice||selectedDevice.fingerprint!==relayProof.fingerprint?
+             <p role="alert" className="vision-mesh-warning">{t("mesh.easy.peerNotVerified")}</p>:null}
+         </div>:
+         locallyPaired||easyStage==="approved"?<p>{t(liveConnected?"mesh.connection.state.connected":"mesh.easy.approvedLocalOnly")}</p>:
+         easyStage==="expired"?<p>{t("mesh.easy.expired")}</p>:
+         easyStage==="error"?<p role="alert">{t("mesh.easy.failed")}</p>:
+         <p>{t("mesh.easy.ready")}</p>}
+        <small>{t(liveConnected?"mesh.connection.scope":"mesh.easy.noTransport")}</small>
+        {easyStage==="error"||easyStage==="expired"||nativeInboxError||recipientError?
+          <div className="mesh-pairing-recovery">
+            <p>{t("mesh.connection.pairingRecoveryHint")}</p>
+            <button type="button" className="ghost compact-button"
+              disabled={nativeInboxBusy||recipientBusy||relayBusy||pairingBusy||directoryBusy}
+              onClick={recoverPairing}>{t("mesh.connection.checkRequests")}</button>
+          </div>:null}
+        <button type="button" className="ghost compact-button vision-mesh-easy-advanced-toggle"
+          aria-expanded={easyAdvancedOpen} onClick={()=>setEasyAdvancedOpen(v=>!v)}>
+          {t("mesh.easy.advanced")}
+        </button>
+      </section>:null}
+    <section className="vision-mesh-account-directory" aria-label={t("mesh.directory.heading")}>
+      <div className="vision-mesh-directory-heading">
+        <strong>{t(easyEnabled?"mesh.easy.devices":"mesh.directory.heading")}</strong>
+        <span className="vision-mesh-directory-note">{t(liveConnected?"mesh.connection.state.connected":"mesh.simple.discoveryStatus")}</span>
+      </div>
+      {!easyEnabled?<p>{t("mesh.directory.notice")}</p>:null}
+      {directory===null&&!directoryBusy&&!directoryError?
+        <p>{t("mesh.guide.notLoaded")}</p>:null}
+      {directoryBusy?<p role="status">{t("mesh.guide.loading")}</p>:null}
+      {directory?.devices.length===0?<p role="status">{t("mesh.directory.empty")}</p>:null}
+      {directory?
+        <p className="vision-mesh-registration-summary" role="status">
+          {t("mesh.connection.accountSummary",{count:presentation?.totalIdentities??directory.devices.length})}
+        </p>:null}
+      {presentation?<>
+        {presentation.own?<div className="vision-mesh-own-registration">
+          <strong>{t("mesh.directory.own")}</strong>
+          <small>{displayRegistrationName(presentation.own)} · {t("mesh.directory.registered")}</small>
+          <small>{registeredPlatform(presentation.own.platformOs)} · {agentBootstrap?.hardware.chipFamily||t("mesh.directory.modelUnverified")}</small>
+        </div>:null}
+        {presentation.recentlyReported.length>0?
+          <p className="vision-mesh-registration-section-label">
+            {t("mesh.directory.recent")}
+          </p>:null}
+        {presentation.recentlyReported.map(renderRegistration)}
+        {easyEnabled&&presentation.recentlyReported.length===0?
+          <p className="vision-mesh-compact-notice">{t("mesh.easy.otherMacFind")}</p>:null}
+        {presentation.olderEntries.length>0?<details className="vision-mesh-older-registrations">
+          <summary>{t("mesh.directory.older",{count:presentation.olderEntries.length})}</summary>
+          <p>{t("mesh.directory.olderNotice")}</p>
+          {presentation.olderEntries.map(renderRegistration)}
+        </details>:null}
+      </>:directory?.devices.map(renderRegistration)}
+      {manualMeshControls&&selectedDevice?<div className="vision-mesh-guide-target" role="group"
+        aria-label={t("mesh.guide.target")}>
+        <strong>{selectedDevice.personaName||selectedDevice.displayName}</strong>
+        {approvedPeers?.some(pin=>pin.fingerprint===selectedDevice.fingerprint&&pin.status==="locally_approved")?
+          <small>{t("mesh.stage4x.alreadyPaired")}</small>:
+          selectedDevice.membershipState==="discovered"&&qaAuthEnabled?
+          inboxSendEnabled?
+            <button type="button" className="primary compact-button"
+              disabled={nativeInboxBusy||directoryBusy||recipientBusy||
+                nativeInboxSent===selectedDevice.deviceId}
+              onClick={()=>void sendNativeInbox(selectedDevice.deviceId)}>{t("mesh.inbox.send")}</button>:
+            <details className="vision-mesh-older-registrations">
+              <summary>{t("mesh.guide.advancedPreparation")}</summary>
+              <p>{t("mesh.guide.preparationDoesNotSend")}</p>
+              <button type="button" className="ghost compact-button"
+                disabled={nativeInboxBusy||directoryBusy||recipientBusy}
+                onClick={()=>void prepareNativeInbox(selectedDevice.deviceId)}>{t("mesh.inbox.prepare")}</button>
+            </details>:
+          <small>{t("mesh.guide.sendUnavailable")}</small>}
+        {qaAuthEnabled&&selectedDevice.membershipState!=="revoked"?<>
+          <button type="button" className="ghost compact-button"
+            disabled={nativePreflightBusy||directoryBusy||pairingBusy}
+            onClick={()=>void runNativePeerPreflight(selectedDevice)}>
+            <RefreshCcw size={14} className={nativePreflightBusy?"spin":""}/>
+            {t("mesh.nativePreflight.check")}
+          </button>
+          {nativePreflight?.deviceId===selectedDevice.deviceId&&
+           nativePreflight.fingerprint===selectedDevice.fingerprint?
+            <small role="status">{t("mesh.nativePreflight.eligible")}</small>:null}
+          {nativePreflightError?<small role="alert" className="vision-mesh-error">
+            {t("mesh.nativePreflight.blocked")}</small>:null}
+          <small>{t("mesh.nativePreflight.noTrust")}</small>
+        </>:null}
+        <small>{t("mesh.inbox.noTrust")}</small>
+      </div>:null}
+      {nativeInboxSent?<p role="status" className="vision-mesh-compact-notice">
+        {t("mesh.inbox.sent")} {t("mesh.inbox.noTrust")}
+      </p>:null}
+      {nativeInboxPrepared?<p role="status" className="vision-mesh-compact-notice">
+        {t("mesh.inbox.prepared")} {t("mesh.inbox.notSent")}
+      </p>:null}
+      {nativeInboxError?<p role="alert" className="vision-mesh-error">
+        {t("mesh.inbox.failed")}
+      </p>:null}
+      {directoryError?<p role="alert">{directoryIssue==="quota"?t("mesh.directory.quotaReached"):
+        directoryIssue==="rate"?t("mesh.directory.rateLimited"):
+        directoryIssue==="plan"?t("mesh.directory.proRequired"):
+        t("mesh.directory.unavailable")}</p>:null}
+      {inboxReceiveEnabled?<section className="vision-mesh-recipient-inbox"
+         aria-label={t("mesh.recipient.heading")}>
+        <strong>{t(easyEnabled?"mesh.easy.incoming":"mesh.recipient.heading")}</strong>
+        <p>{t(easyEnabled?"mesh.easy.incomingHint":"mesh.recipient.notice")}</p>
+        {!easyEnabled?<button type="button" className="ghost compact-button"
+          disabled={recipientBusy||directoryBusy}
+          onClick={()=>void loadRecipientInbox()}>{t("mesh.recipient.refresh")}</button>:null}
+        {recipientInbox?.length===0&&!acceptedInboxOffer&&recipientDecision!=="accepted"?
+          <p role="status" className="vision-mesh-inbox-empty">{t("mesh.recipient.empty")}</p>:null}
+        {recipientInbox?.map(item=><div className="vision-mesh-directory-row vision-mesh-invite-card" key={item.requestId}>
+          <div className="vision-mesh-invite-summary">
+            <small className="vision-mesh-invite-eyebrow">{t("mesh.easy.incomingFrom")}</small>
+            <strong>{(()=>{
+              const source=directory?.devices.find(d=>d.deviceId===item.sourceDeviceId&&
+                d.fingerprint===item.fingerprint);
+              return source?displayRegistrationName(source):t("mesh.recipient.unknownSource");
+            })()}</strong>
+            <small>{t("mesh.recipient.expires")}: {relativeTime(item.expiresAt,lang)||"—"}</small>
+            {!easyEnabled?<small>{item.fingerprint}</small>:null}
+          </div>
+          <div className="vision-mesh-invite-actions">
+            <button type="button" className="primary compact-button vision-mesh-accept"
+              disabled={recipientBusy||(easyEnabled&&easySession!==null)}
+              onClick={()=>void decideRecipientInvite(item,"accept")}>
+              {t("mesh.recipient.accept")}
+            </button>
+            <button type="button" className="ghost compact-button vision-mesh-decline"
+              disabled={recipientBusy||(easyEnabled&&easySession!==null)}
+              onClick={()=>void decideRecipientInvite(item,"reject")}>
+              {t("mesh.recipient.reject")}
+            </button>
+          </div>
+        </div>)}
+        {recipientDecision?<p role="status" className="vision-mesh-received-confirmation">
+          <strong>{t(recipientDecision==="accepted"?"mesh.recipient.accepted":"mesh.recipient.rejected")}</strong>
+          <span>{recipientDecision==="accepted"?
+            t("mesh.easy.acceptedHint"):t("mesh.recipient.notConnected")}</span>
+        </p>:null}
+        {manualMeshControls&&acceptedInboxOffer?<div className="vision-mesh-guide-target" role="group"
+           aria-label={t("mesh.handoff.heading")}>
+          <strong>{t("mesh.handoff.heading")}</strong>
+          <p>{t("mesh.handoff.description")}</p>
+          <button type="button" className="ghost compact-button"
+             disabled={challengeBusy||recipientBusy||acceptedInboxOffer.signedOffer.expiresAt*1000<=Date.now()}
+             onClick={()=>void prepareAcceptedChallenge()}>
+            {t("mesh.handoff.createChallenge")}</button>
+          <small>{t("mesh.inbox.noTrust")}</small>
+        </div>:null}
+        {manualMeshControls&&acceptedChallenge?<div className="vision-mesh-guide-target" role="status">
+          <strong>{t("mesh.handoff.ready")}</strong>
+          <p>{t(relayQa?"mesh.relay.signedReady":"mesh.handoff.next")}</p>
+          {relayQa&&challengeRelayWork?
+            <button type="button" className="primary compact-button"
+               disabled={relayBusy} onClick={()=>void sendRelay(challengeRelayWork,"challenge")}>
+              {t("mesh.relay.sendChallenge")}</button>:null}
+          <button type="button" className="ghost compact-button"
+             onClick={()=>void copyPublicMessage(acceptedChallenge)}>
+            {t("mesh.handoff.copyChallenge")}</button>
+          <small>{t("mesh.recipient.notConnected")}</small>
+        </div>:null}
+        {challengeError?<p role="alert" className="vision-mesh-error">
+          {t("mesh.handoff.failed")}</p>:null}
+        {recipientError?<p role="alert" className="vision-mesh-error">
+          {t("mesh.recipient.failed")}
+        </p>:null}
+        {easyEnabled&&(challengeError||relayError||approvalError)?
+          <p role="alert" className="vision-mesh-error">{t("mesh.easy.failed")}</p>:null}
+      </section>:null}
+      {relayQa&&manualMeshControls?<section className="vision-mesh-recipient-inbox"
+        aria-label={t("mesh.relay.heading")}>
+        <strong>{t("mesh.relay.heading")}</strong>
+        <p>{t("mesh.relay.notice")}</p>
+        {sentRequest?<small>{t("mesh.relay.sentInvite")}: {sentRequest.requestId}</small>:null}
+        <button type="button" className="ghost compact-button"
+          disabled={relayBusy||directoryBusy||recipientBusy}
+          onClick={()=>void loadRelay()}>{t("mesh.relay.check")}</button>
+        {relayMessages?.length===0?<p role="status">{t("mesh.relay.empty")}</p>:null}
+        {relayMessages?.map(item=><div className="vision-mesh-guide-target" key={item.requestId+item.kind}>
+          <strong>{t(item.kind==="challenge"?"mesh.relay.challengeReceived":"mesh.relay.responseReceived")}</strong>
+          <small>{t("mesh.recipient.expires")}: {relativeTime(new Date(item.expiresAt*1000).toISOString(),lang)||"—"}</small>
+          <button type="button" className="ghost compact-button"
+            disabled={relayBusy||item.expiresAt*1000<=Date.now()}
+            onClick={()=>void(item.kind==="challenge"?
+              prepareRelayResponse(item):verifyRelayResponse(item))}>
+            {t(item.kind==="challenge"?"mesh.relay.prepareResponse":"mesh.relay.verifyResponse")}
+          </button>
+        </div>)}
+        {responseRelayWork?<div className="vision-mesh-guide-target" role="status">
+          <strong>{t("mesh.relay.responseReady")}</strong>
+          <button type="button" className="primary compact-button"
+            disabled={relayBusy} onClick={()=>void sendRelay(responseRelayWork,"response")}>
+              {t("mesh.relay.sendResponse")}</button>
+          <small>{t("mesh.recipient.notConnected")}</small>
+        </div>:null}
+        {relayReceipt?<p role="status">{t("mesh.relay.delivered")} {t("mesh.recipient.notConnected")}</p>:null}
+        {relayProof?<div className="vision-mesh-guide-target vision-mesh-sas-approval">
+          <strong>{t("mesh.relay.sas")}</strong>
+          <code className="vision-mesh-sas-approval-code" aria-label={t("mesh.relay.sas")}>
+            {relayProof.comparisonCode}
+          </code>
+          <small>{t("mesh.relay.compare")}</small>
+          {selectedDevice&&selectedDevice.fingerprint===relayProof.fingerprint?
+            <small>{t("mesh.relay.target")}: {selectedDevice.personaName||selectedDevice.displayName}</small>:
+            <p role="alert" className="vision-mesh-warning">{t("mesh.relay.selectVerifiedPeer")}</p>}
+          <label className="vision-mesh-field">{t("mesh.v3.confirmCode")}
+            <input value={confirmedCode} maxLength={14} autoComplete="off"
+              placeholder="AB12-34CD-EF09"
+              onChange={e=>setConfirmedCode(e.target.value.toUpperCase())}/>
+          </label>
+          <button type="button" className="primary compact-button"
+            disabled={!relayApprovalEligible}
+            onClick={()=>void approvePeer()}>
+              {t("mesh.v3.confirmButton")}
+          </button>
+          <small>{t("mesh.relay.localOnly")}</small>
+          {approvalError?<p role="alert" className="vision-mesh-error">
+            {t("mesh.v3.error")}</p>:null}
+        </div>:null}
+        {relayError?<p role="alert" className="vision-mesh-error">{t("mesh.relay.failed")}</p>:null}
+      </section>:null}
+    </section>
+    </div>:null}
+    <div className="vision-mesh-technical" id="vision-mesh-technical-details" hidden={!detailsOpen}>
+      {lanQaEnabled?<details className="vision-mesh-advanced vision-mesh-lan-qa">
+        <summary>{t("mesh.stage4w.title")}</summary>
+        <p>{t("mesh.stage4w.explanation")}</p>
+        <p className="vision-mesh-warning" role="note">{t("mesh.stage4w.noRemote")}</p>
+        {!selectedDevice?<p role="status">{t("mesh.stage4x.pickPaired")}</p>:
+          <p className="vision-mesh-lan-peer" role="status">
+            {t("mesh.stage4x.qaSelected")}: <strong>{displayRegistrationName(selectedDevice)}</strong>
+          </p>}
+        <div className="vision-mesh-lan-fields">
+          <label className="vision-mesh-field">{t("mesh.stage4w.localIp")}
+            <input value={lanQaLocalIp} autoComplete="off" spellCheck={false}
+              placeholder="192.168.178.97" maxLength={15}
+              onChange={e=>setLanQaLocalIp(e.target.value)}/></label>
+          <label className="vision-mesh-field">{t("mesh.stage4w.peerIp")}
+            <input value={lanQaPeerIp} autoComplete="off" spellCheck={false}
+              placeholder="192.168.178.162" maxLength={15}
+              onChange={e=>setLanQaPeerIp(e.target.value)}/></label>
+          <label className="vision-mesh-field">{t("mesh.stage4w.port")}
+            <input value={lanQaPort} inputMode="numeric" maxLength={5}
+              onChange={e=>setLanQaPort(e.target.value)}/></label>
+        </div>
+        <label className="vision-mesh-lan-confirm">
+          <input type="checkbox" checked={lanQaConsent}
+            disabled={lanQaBusy||!selectedDevice}
+            onChange={e=>setLanQaConsent(e.target.checked)}/>
+          {t("mesh.stage4w.confirm")}
+        </label>
+        <div className="vision-mesh-invite-actions">
+          <button type="button" className="ghost compact-button" disabled={
+            lanQaBusy||!lanQaConsent||!selectedDevice||
+            !approvedPeers?.some(peer=>peer.fingerprint===selectedDevice.fingerprint)
+          } onClick={()=>void runLanQa("listen")}>
+            {t("mesh.stage4w.listen")}</button>
+          <button type="button" className="ghost compact-button" disabled={
+            lanQaBusy||!lanQaConsent||!selectedDevice||
+            !approvedPeers?.some(peer=>peer.fingerprint===selectedDevice.fingerprint)
+          } onClick={()=>void runLanQa("connect")}>
+            {t("mesh.stage4w.connect")}</button>
+        </div>
+        {lanQaBusy?<p role="status">{t("mesh.stage4w.running")}</p>:null}
+        {lanQaResult?<p role="status">{t(lanQaResult==="passed"?
+           "mesh.stage4w.passed":"mesh.stage4w.failed")}</p>:null}
+      </details>:null}
+      <section className="mesh-hub-preference" aria-label={t("mesh.hub.heading")}>
+        <label className="mesh-hub-preference-option">
+          <input type="checkbox" checked={hubPreference?.preferred??false}
+            disabled={!hubPreference||hubBusy}
+            onChange={e=>void setHubPreferred(e.target.checked)}/>
+          <span>
+            <strong>{t("mesh.hub.prefer")}</strong>
+            <small>{t("mesh.hub.description")}</small>
+          </span>
+        </label>
+        <p className="mesh-hub-preference-note" role="status">{t("mesh.hub.notActive")}</p>
+        {hubError?<p className="vision-mesh-error" role="alert">{t("mesh.hub.error")}</p>:null}
+      </section>
+      <div className="vision-mesh-technical-status">
+        <strong>{t("mesh.simple.diagnostics")}</strong>
+        <span>{t("mesh.v0.title")} · {snapshot?(snapshot.platform+" · "+snapshot.architecture):t("mesh.v0.localUnknown")}</span>
+        <span>{t("mesh.v0.control")}: {t(("mesh.v0."+readiness) as TKey)}</span>
+        <span>{t("mesh.v0.notPaired")} · {t("mesh.v0.noDispatch")}</span>
+        <strong>{t("mesh.issuer.title")}</strong>
+        <span>{issuerSnapshot?
+          t(issuerSnapshot.compiledIssuer==="katoos_shared_qa"?"mesh.issuer.shared":
+            issuerSnapshot.compiledIssuer==="katosync_legacy"?"mesh.issuer.legacy":"mesh.issuer.unknown"):
+          t("mesh.issuer.olderBuild")}</span>
+        {issuerSnapshot?.compiledIssuer==="katoos_shared_qa"?<details className="vision-mesh-reauth">
+          <summary>{t("mesh.shared.title")}</summary>
+          <p>{t("mesh.shared.description")}</p>
+          <p role="status">{sharedError?t("mesh.shared.error"):
+            sharedPreflight?.membership==="active"?t("mesh.shared.active"):
+            sharedPreflight?.membership==="not_member"?t("mesh.shared.notMember"):
+            t("mesh.shared.unchecked")}</p>
+          <button type="button" className="ghost compact-button"
+            onClick={()=>void checkSharedKatoos()} disabled={sharedBusy}>
+            <RefreshCcw size={14} className={sharedBusy?"spin":""}/>
+            {t("mesh.shared.check")}
+          </button>
+          <small>{t("mesh.shared.noTrust")}</small>
+        </details>:null}
+        <small>{t("mesh.issuer.separateLogin")}</small>
+        <details className="vision-mesh-reauth">
+          <summary>{t("mesh.preview.title")}</summary>
+          <p>{t("mesh.preview.description")}</p>
+          <p role="status">{!previewStatus?t("mesh.preview.oldBuild"):
+            !previewStatus.configured?t("mesh.preview.notConfigured"):
+            previewStatus.sessionVerified?t("mesh.preview.verified"):
+            t("mesh.preview.notLoggedIn")}</p>
+          {previewStatus?.sessionVerified&&previewStatus.accountEmail?
+            <small>{previewStatus.accountEmail}</small>:null}
+          {previewStatus?.configured?<form onSubmit={e=>{
+            e.preventDefault();void previewAuthAction("login");
+          }}>
+            <label className="vision-mesh-field">{t("mesh.reauth.email")}
+              <input type="email" autoComplete="username" value={previewEmail}
+                onChange={e=>setPreviewEmail(e.target.value)} required/>
+            </label>
+            <label className="vision-mesh-field">{t("mesh.reauth.password")}
+              <input type="password" autoComplete="current-password" value={previewPassword}
+                onChange={e=>setPreviewPassword(e.target.value)} required/>
+            </label>
+            <button type="submit" className="secondary"
+              disabled={previewBusy||!previewEmail.trim()||!previewPassword}>
+              {t("mesh.preview.login")}
+            </button>
+          </form>:null}
+          {previewStatus?.configured?<div className="vision-mesh-compact-actions">
+            <button type="button" className="ghost compact-button" disabled={previewBusy}
+              onClick={()=>void previewAuthAction("verify")}>{t("mesh.preview.verify")}</button>
+            <button type="button" className="ghost compact-button" disabled={previewBusy}
+              onClick={()=>void previewAuthAction("logout")}>{t("mesh.preview.logout")}</button>
+          </div>:null}
+          {previewError?<p role="alert" className="vision-mesh-error">
+            {t("mesh.preview.error")}</p>:null}
+          <small>{t("mesh.preview.noTrust")}</small>
+        </details>
+        <span>{t("mesh.simple.qualityUnknown")} · {t("mesh.simple.uptimeUnknown")}</span>
+        <small>{error?t("mesh.v0.unavailable"):t("mesh.v0.trustBoundary")}</small>
+        <button type="button" className="ghost compact-button"
+          onClick={()=>void refresh()} disabled={loading}>
+          <RefreshCcw size={14} className={loading?"spin":""}/>{t("mesh.v0.check")}
+        </button>
+      </div>
+    {import.meta.env.VITE_KATOOS_AUTH_QA==="1"?<details className="vision-mesh-reauth"
+      open={reauthOpen} onToggle={e=>setReauthOpen(e.currentTarget.open)}>
+      <summary>{t("mesh.reauth.title")}</summary>
+      <p>{t("mesh.reauth.description")}</p>
+      <form onSubmit={e=>{e.preventDefault();void renewSession();}}>
+        <label className="vision-mesh-field">{t("mesh.reauth.email")}
+          <input type="email" autoComplete="username" value={reauthEmail} required
+            onChange={e=>setReauthEmail(e.target.value)}/>
+        </label>
+        <label className="vision-mesh-field">{t("mesh.reauth.password")}
+          <input type="password" autoComplete="current-password" value={reauthPassword} required
+            onChange={e=>setReauthPassword(e.target.value)}/>
+        </label>
+        <button type="submit" className="secondary" disabled={!reauthEmail.trim()||!reauthPassword||reauthBusy}>
+          {t(reauthBusy?"mesh.reauth.working":"mesh.reauth.submit")}
+        </button>
+      </form>
+      {reauthResult?<p role="status">{t(reauthResult==="success"?"mesh.reauth.success":"mesh.reauth.failed")}</p>:null}
+    </details>:null}
+    <details className="vision-mesh-pairing">
+      <summary>{t("mesh.v1.heading")}</summary>
+      <p>{t("mesh.quick.description")}</p>
+      <div className="vision-mesh-quick-panel" aria-label={t("mesh.quick.heading")}>
+        <strong>{t("mesh.quick.heading")}</strong>
+        <button type="button" className="ghost compact-button"
+          onClick={()=>void prepareAndInvite()} disabled={pairingBusy||!snapshot}>
+          {t("mesh.quick.connect")}</button>
+        <p>{t("mesh.quick.accountSafety")}</p>
+
+        {offer?<div className="vision-mesh-quick-result">
+          <p role="status">{t("mesh.quick.publicInviteReady")}</p>
+          <button type="button" className="ghost compact-button"
+            onClick={()=>void copyPublicMessage(offer)}>{t("mesh.quick.copyPublicInvite")}</button>
+          <small>{t("mesh.quick.transferNotice")}</small>
+        </div>:null}
+        <label className="vision-mesh-field">{t("mesh.quick.receivedInvite")}
+          <textarea value={incoming} maxLength={2048} rows={2}
+            onChange={e=>setIncoming(e.target.value)} placeholder={t("mesh.v1.paste")}/>
+        </label>
+        <button type="button" className="ghost compact-button"
+          disabled={pairingBusy||!incoming.trim()||!snapshot}
+          onClick={()=>void checkAndPrepareReply()}>{t("mesh.quick.checkInvite")}</button>
+        {challengeOutgoing?<div className="vision-mesh-quick-result">
+          <p role="status">{t("mesh.quick.replyReady")}</p>
+          <button type="button" className="ghost compact-button"
+            onClick={()=>void copyPublicMessage(challengeOutgoing)}>{t("mesh.quick.copyPublicReply")}</button>
+          <small>{t("mesh.quick.notPaired")}</small>
+        </div>:null}
+        {clipboardStatus?<p role="status">{t(clipboardStatus==="ok"?"mesh.quick.copied":"mesh.quick.copyFailed")}</p>:null}
+        <p className="vision-mesh-warning">{t("mesh.quick.discoveryPending")}</p>
+      </div>
+      <details className="vision-mesh-advanced">
+      <summary>{t("mesh.quick.technicalOptions")}</summary>
+      <p>{t("mesh.v1.description")}</p>
+      <div className="vision-mesh-actions">
+        <button type="button" className="ghost compact-button" onClick={()=>void prepareIdentity()}
+          disabled={pairingBusy||!snapshot}>{t("mesh.v1.prepare")}</button>
+        <button type="button" className="ghost compact-button" onClick={()=>void createOffer()}
+          disabled={pairingBusy||!identity}>{t("mesh.v1.invite")}</button>
+      </div>
+      {identity?<p className="vision-mesh-fingerprint">{t("mesh.v1.ownKey")}: <code>{identity.fingerprint}</code></p>:null}
+      {offer?<label className="vision-mesh-field">{t("mesh.v1.offer")}
+        <textarea readOnly value={offer} rows={3} onFocus={e=>e.currentTarget.select()}/>
+      </label>:null}
+      <label className="vision-mesh-field">{t("mesh.v1.inspect")}
+        <textarea value={incoming} maxLength={2048} rows={3} onChange={e=>setIncoming(e.target.value)}
+          placeholder={t("mesh.v1.paste")}/>
+      </label>
+      <button type="button" className="ghost compact-button" onClick={()=>void inspectOffer()}
+        disabled={pairingBusy||!incoming.trim()||!snapshot}>{t("mesh.v1.verify")}</button>
+      {inspected?<p className="vision-mesh-fingerprint">{t("mesh.v1.verifiedNotPaired")}: <code>{inspected.fingerprint}</code></p>:null}
+      </details>
+      <details className="vision-mesh-advanced">
+        <summary>{t("mesh.v2.title")}</summary>
+      <p>{t("mesh.v2.notice")}</p>
+      <div className="vision-mesh-stage-title">{t("mesh.v2.stepB")}</div>
+      <button type="button" className="ghost compact-button" disabled={!incoming.trim()||pairingBusy||!snapshot}
+        onClick={()=>void createChallenge()}>{t("mesh.v2.challengeButton")}</button>
+      {challengeOutgoing?<label className="vision-mesh-field">{t("mesh.v2.challengeOutbound")}
+        <textarea readOnly value={challengeOutgoing} rows={3} onFocus={e=>e.currentTarget.select()}/>
+      </label>:null}
+      <div className="vision-mesh-stage-title">{t("mesh.v2.stepA")}</div>
+      <label className="vision-mesh-field">{t("mesh.v2.challengeInbound")}
+        <textarea rows={3} maxLength={8192} value={challengeIncoming}
+          onChange={e=>setChallengeIncoming(e.target.value)} placeholder={t("mesh.v2.pasteChallenge")}/>
+      </label>
+      <button type="button" className="ghost compact-button" disabled={!challengeIncoming.trim()||pairingBusy||!snapshot}
+        onClick={()=>void createResponse()}>{t("mesh.v2.answerButton")}</button>
+      {responseOutgoing?<label className="vision-mesh-field">{t("mesh.v2.responseOutbound")}
+        <textarea readOnly rows={4} value={responseOutgoing} onFocus={e=>e.currentTarget.select()}/>
+      </label>:null}
+      {pairingProof?<p className="vision-mesh-sas"><strong>{t("mesh.v2.code")}:</strong> <code>{pairingProof.comparisonCode}</code></p>:null}
+      <div className="vision-mesh-stage-title">{t("mesh.v2.stepBVerify")}</div>
+      <label className="vision-mesh-field">{t("mesh.v2.responseInbound")}
+        <textarea rows={4} maxLength={8192} value={responseIncoming}
+          onChange={e=>setResponseIncoming(e.target.value)} placeholder={t("mesh.v2.pasteResponse")}/>
+      </label>
+      <button type="button" className="ghost compact-button" disabled={!responseIncoming.trim()||pairingBusy||!snapshot}
+        onClick={()=>void verifyResponse()}>{t("mesh.v2.verifyButton")}</button>
+      {pairingVerified?<p className="vision-mesh-sas"><strong>{t("mesh.v2.code")}:</strong> <code>{pairingVerified.comparisonCode}</code></p>:null}
+      {(pairingProof||pairingVerified)?<p className="vision-mesh-warning">{t("mesh.v2.noTrust")}</p>:null}
+      {(pairingProof||pairingVerified)?<div className="vision-mesh-approval">
+        <strong>{t("mesh.v3.confirmTitle")}</strong>
+        <p>{t("mesh.v3.confirmDescription")}</p>
+        <label className="vision-mesh-field">{t("mesh.v3.confirmCode")}
+          <input value={confirmedCode} maxLength={14}
+            placeholder="AB12-34CD-EF09"
+            autoComplete="off" onChange={e=>setConfirmedCode(e.target.value.toUpperCase())}/>
+        </label>
+        <button type="button" className="ghost compact-button"
+          disabled={pairingBusy||!/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(confirmedCode)}
+          onClick={()=>void approvePeer()}>{t("mesh.v3.confirmButton")}</button>
+      </div>:null}
+      </details>
+      <details className="vision-mesh-approved">
+        <summary>{t("mesh.v3.listTitle")}</summary>
+        <p>{t("mesh.v3.listDisclaimer")}</p>
+        <button type="button" className="ghost compact-button" disabled={pairingBusy||!snapshot}
+          onClick={()=>void loadApproved()}>{t("mesh.v3.refresh")}</button>
+        {approvedPeers && approvedPeers.length===0?<p>{t("mesh.v3.empty")}</p>:null}
+        {approvedPeers?.map(peer=><div className="vision-mesh-peer" key={peer.fingerprint}>
+          <div><small>{t("mesh.v3.locallyApproved")}</small>
+            <code>{peer.fingerprint}</code></div>
+          <button type="button" className="ghost compact-button"
+            disabled={pairingBusy}
+            onClick={()=>void revokePeer(peer.fingerprint)}>{t("mesh.v3.revoke")}</button>
+        </div>)}
+      </details>
+      {approvalError?<p role="alert" className="vision-mesh-error">{t("mesh.v3.error")}</p>:null}
+    </details>
+    </div>
+  </section>;
+}

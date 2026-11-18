@@ -1,0 +1,666 @@
+// Created by NMKato Solutions
+//! Offline, manually exchanged two-way possession proof. Explicitly NO peer trust.
+//! Peer authorization, transport, dispatch and write privileges remain disabled.
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use chrono::Utc;
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use keyring::Entry;
+use rand::RngCore;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use zeroize::Zeroize;
+
+use crate::mesh_identity::{
+    ensure_identity, fingerprint, same_account_still_verified, verify_offer, MeshOffer,
+    OFFER_LIFETIME_SECS,
+};
+
+const CHALLENGE_PROTOCOL: &str = "katosync-mesh-challenge-v1";
+const RESPONSE_PROTOCOL: &str = "katosync-mesh-response-v1";
+const STATE_OFFER: &str = "mesh-outbound-offer-v1";
+const STATE_CHALLENGE: &str = "mesh-pending-challenge-v1";
+const MAX_MESSAGE_BYTES: usize = 8192;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PairingChallenge {
+    protocol: String,
+    offer: MeshOffer,
+    responder_public_key: String,
+    responder_nonce: String,
+    expires_at: i64,
+    signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PairingResponse {
+    protocol: String,
+    challenge: PairingChallenge,
+    signature: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingProof {
+    fingerprint: String,
+    comparison_code: String,
+    /// Always false until independent user approval plus authenticated transport.
+    paired: bool,
+    peer_count: u8,
+    transport_ready: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Pending {
+    digest: String,
+    expires_at: i64,
+}
+
+fn pending_entry(uid: &str, kind: &str) -> Result<Entry, String> {
+    let id = uuid::Uuid::parse_str(uid).map_err(|_| "Benutzerkonto nicht verifiziert.")?;
+    Entry::new(crate::KEYCHAIN_SERVICE, &format!("{kind}:{id}"))
+        .map_err(|_| "Schlüsselbund nicht verfügbar.".to_string())
+}
+fn digest(value: &[u8]) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(value))
+}
+fn pending_read(uid: &str, kind: &str) -> Result<Option<Pending>, String> {
+    let entry = pending_entry(uid, kind)?;
+    let raw = match entry.get_password() {
+        Ok(x) => x,
+        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(_) => return Err("Pairing-Status im Schlüsselbund nicht lesbar.".into()),
+    };
+    serde_json::from_str(&raw)
+        .map(Some)
+        .map_err(|_| "Pairing-Status im Schlüsselbund beschädigt.".into())
+}
+fn pending_save(uid: &str, kind: &str, data: &Pending) -> Result<(), String> {
+    let entry = pending_entry(uid, kind)?;
+    let mut json = serde_json::to_string(data).map_err(|_| "Ungültiger Pairing-Status.")?;
+    let outcome = entry
+        .set_password(&json)
+        .map_err(|_| "Pairing-Status konnte nicht sicher gespeichert werden.".to_string());
+    json.zeroize();
+    outcome
+}
+fn pending_consume(uid: &str, kind: &str, expected: &str, now: i64) -> Result<(), String> {
+    let prior = pending_read(uid, kind)?
+        .ok_or_else(|| "Keine offene Einladung für dieses Gerät.".to_string())?;
+    if prior.expires_at <= now || prior.digest != expected {
+        return Err("Pairing-Einladung stimmt nicht überein oder ist abgelaufen.".into());
+    }
+    pending_entry(uid, kind)?
+        .delete_credential()
+        .map_err(|_| "Einmalige Pairing-Einladung konnte nicht verbraucht werden.".to_string())
+}
+fn pending_verify(uid: &str, kind: &str, expected: &str, now: i64) -> Result<(), String> {
+    let prior = pending_read(uid, kind)?
+        .ok_or_else(|| "Keine offene Pairing-Prüfung vorhanden.".to_string())?;
+    if prior.expires_at <= now || prior.digest != expected {
+        return Err("Pairing-Prüfung abgelaufen oder bereits ersetzt.".into());
+    }
+    Ok(())
+}
+pub(crate) fn store_outbound_offer(uid: &str, offer: &MeshOffer) -> Result<(), String> {
+    pending_save(
+        uid,
+        STATE_OFFER,
+        &Pending {
+            digest: digest(&serde_json::to_vec(offer).map_err(|_| "Ungültige Einladung.")?),
+            expires_at: offer.expires_at,
+        },
+    )
+}
+fn fresh_nonce() -> String {
+    let mut random = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut random);
+    let encoded = URL_SAFE_NO_PAD.encode(random);
+    random.zeroize();
+    encoded
+}
+fn get_key(encoded: &str) -> Result<VerifyingKey, String> {
+    let decoded = URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|_| "Ungültiger öffentlicher Schlüssel.")?;
+    let raw: [u8; 32] = decoded
+        .try_into()
+        .map_err(|_| "Ungültiger öffentlicher Schlüssel.")?;
+    VerifyingKey::from_bytes(&raw).map_err(|_| "Ungültiger öffentlicher Schlüssel.".into())
+}
+fn challenge_payload(challenge: &PairingChallenge) -> Vec<u8> {
+    // Fixed typed fields with version/domain separation; never sign arbitrary JS/JSON.
+    format!(
+        "{}|{}|{}|{}|{}|{}",
+        challenge.protocol,
+        digest(&serde_json::to_vec(&challenge.offer).unwrap_or_default()),
+        challenge.offer.account_scope,
+        challenge.responder_public_key,
+        challenge.responder_nonce,
+        challenge.expires_at
+    )
+    .into_bytes()
+}
+fn response_payload(challenge: &PairingChallenge) -> Vec<u8> {
+    format!(
+        "{RESPONSE_PROTOCOL}|{}",
+        digest(&serde_json::to_vec(challenge).unwrap_or_default())
+    )
+    .into_bytes()
+}
+fn safety_code(challenge: &PairingChallenge) -> String {
+    let mut sha = Sha256::new();
+    sha.update(b"katosync-mesh-human-sas-v1:");
+    sha.update(response_payload(challenge));
+    let bytes = sha.finalize();
+    format!(
+        "{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]
+    )
+}
+fn generate_challenge(offer: MeshOffer, responder: &SigningKey, now: i64) -> PairingChallenge {
+    let mut value = PairingChallenge {
+        protocol: CHALLENGE_PROTOCOL.to_string(),
+        responder_public_key: URL_SAFE_NO_PAD.encode(responder.verifying_key().as_bytes()),
+        responder_nonce: fresh_nonce(),
+        expires_at: offer.expires_at.min(now + OFFER_LIFETIME_SECS),
+        offer,
+        signature: String::new(),
+    };
+    value.signature = URL_SAFE_NO_PAD.encode(responder.sign(&challenge_payload(&value)).to_bytes());
+    value
+}
+// Stage 3J: generate a real Rust/Serde Ed25519 transcript for cross-language
+// protocol tests. Test-only, synthetic identities; never touches OS Keychain.
+#[cfg(test)]
+pub(crate) fn qa_relay_test_transcript(
+    offer: MeshOffer,
+    responder: &SigningKey,
+    initiator: &SigningKey,
+    now: i64,
+) -> (PairingChallenge, PairingResponse) {
+    let challenge = generate_challenge(offer, responder, now);
+    let response = generate_response(challenge.clone(), initiator);
+    (challenge, response)
+}
+
+fn verify_challenge(
+    challenge: &PairingChallenge,
+    uid: &str,
+    now: i64,
+) -> Result<(VerifyingKey, VerifyingKey), String> {
+    if challenge.protocol != CHALLENGE_PROTOCOL {
+        return Err("Unbekanntes Pairing-Protokoll.".into());
+    }
+    let initiator = verify_offer(&challenge.offer, uid, now)
+        .map_err(|_| "Einladung abgelaufen oder ungültig.".to_string())?;
+    if challenge.expires_at <= now
+        || challenge.expires_at > challenge.offer.expires_at
+        || challenge.expires_at > now + OFFER_LIFETIME_SECS + 10
+    {
+        return Err("Challenge abgelaufen oder unplausibel.".into());
+    }
+    let nonce = URL_SAFE_NO_PAD
+        .decode(&challenge.responder_nonce)
+        .map_err(|_| "Challenge-Nonce ungültig.")?;
+    if nonce.len() != 32 {
+        return Err("Challenge-Nonce ungültig.".into());
+    }
+    let responder = get_key(&challenge.responder_public_key)?;
+    if initiator == responder {
+        return Err("Ein Gerät kann sich nicht selbst koppeln.".into());
+    }
+    let raw = URL_SAFE_NO_PAD
+        .decode(&challenge.signature)
+        .map_err(|_| "Challenge-Signatur ungültig.")?;
+    let signature = Signature::from_slice(&raw).map_err(|_| "Challenge-Signatur ungültig.")?;
+    responder
+        .verify(&challenge_payload(challenge), &signature)
+        .map_err(|_| "Challenge-Signatur ungültig.")?;
+    Ok((initiator, responder))
+}
+fn generate_response(challenge: PairingChallenge, initiator: &SigningKey) -> PairingResponse {
+    PairingResponse {
+        signature: URL_SAFE_NO_PAD.encode(initiator.sign(&response_payload(&challenge)).to_bytes()),
+        protocol: RESPONSE_PROTOCOL.to_string(),
+        challenge,
+    }
+}
+fn verify_response(
+    response: &PairingResponse,
+    uid: &str,
+    now: i64,
+) -> Result<VerifyingKey, String> {
+    if response.protocol != RESPONSE_PROTOCOL {
+        return Err("Unbekanntes Pairing-Protokoll.".into());
+    }
+    let (initiator, responder) = verify_challenge(&response.challenge, uid, now)?;
+    let raw = URL_SAFE_NO_PAD
+        .decode(&response.signature)
+        .map_err(|_| "Antwortsignatur ungültig.")?;
+    let signature = Signature::from_slice(&raw).map_err(|_| "Antwortsignatur ungültig.")?;
+    initiator
+        .verify(&response_payload(&response.challenge), &signature)
+        .map_err(|_| "Antwortsignatur ungültig.")?;
+    Ok(responder)
+}
+/// Stage 3I: pure validation for public relay payloads. This never consumes
+/// challenges, creates device identities, stages trust, or changes the Keychain.
+pub(crate) fn relay_public_peer_keys(
+    uid: &str,
+    kind: &str,
+    json: &str,
+    now: i64,
+) -> Result<(String, String, i64), String> {
+    if json.len() > MAX_MESSAGE_BYTES {
+        return Err("MESH_RELAY_INVALID_MESSAGE".into());
+    }
+    let challenge = match kind {
+        "challenge" => serde_json::from_str::<PairingChallenge>(json)
+            .map_err(|_| "MESH_RELAY_INVALID_MESSAGE")?,
+        "response" => {
+            let response: PairingResponse =
+                serde_json::from_str(json).map_err(|_| "MESH_RELAY_INVALID_MESSAGE")?;
+            verify_response(&response, uid, now)?;
+            response.challenge
+        }
+        _ => return Err("MESH_RELAY_INVALID_KIND".into()),
+    };
+    let (initiator, responder) = verify_challenge(&challenge, uid, now)?;
+    Ok((
+        URL_SAFE_NO_PAD.encode(initiator.as_bytes()),
+        URL_SAFE_NO_PAD.encode(responder.as_bytes()),
+        challenge.expires_at,
+    ))
+}
+
+fn proof(peer: VerifyingKey, challenge: &PairingChallenge) -> PairingProof {
+    PairingProof {
+        fingerprint: fingerprint(&peer),
+        comparison_code: safety_code(challenge),
+        paired: false,
+        peer_count: 0,
+        transport_ready: false,
+    }
+}
+
+/// On B: pasting A's invite creates and securely records a one-time signed reply.
+#[tauri::command]
+pub async fn mesh_pairing_challenge_create(offer_json: String) -> Result<String, String> {
+    if offer_json.len() > MAX_MESSAGE_BYTES {
+        return Err("Einladung zu lang.".into());
+    }
+    let uid = crate::github_app_auth::verified_katosync_user().await?;
+    let offer: MeshOffer = serde_json::from_str(&offer_json).map_err(|_| "Einladung ungültig.")?;
+    let initiator = verify_offer(&offer, &uid, Utc::now().timestamp())
+        .map_err(|_| "Einladung abgelaufen oder ungültig.".to_string())?;
+    let signing = ensure_identity(&uid)?;
+    if signing.verifying_key() == initiator {
+        return Err("Ein Gerät kann nicht seine eigene Einladung beantworten.".into());
+    }
+    let challenge = generate_challenge(offer, &signing, Utc::now().timestamp());
+    same_account_still_verified(&uid).await?;
+    pending_save(
+        &uid,
+        STATE_CHALLENGE,
+        &Pending {
+            digest: digest(&serde_json::to_vec(&challenge).map_err(|_| "Ungültige Challenge.")?),
+            expires_at: challenge.expires_at,
+        },
+    )?;
+    serde_json::to_string(&challenge).map_err(|_| "Challenge konnte nicht erzeugt werden.".into())
+}
+
+/// On A: B's signed challenge is valid only for A's locally issued, unused offer.
+#[tauri::command]
+pub async fn mesh_pairing_response_create(
+    challenge_json: String,
+) -> Result<(String, PairingProof), String> {
+    if challenge_json.len() > MAX_MESSAGE_BYTES {
+        return Err("Challenge zu lang.".into());
+    }
+    let uid = crate::github_app_auth::verified_katosync_user().await?;
+    let challenge: PairingChallenge =
+        serde_json::from_str(&challenge_json).map_err(|_| "Challenge ungültig.")?;
+    let (initiator, responder) = verify_challenge(&challenge, &uid, Utc::now().timestamp())?;
+    let signing = ensure_identity(&uid)?;
+    if initiator != signing.verifying_key() {
+        return Err("Einladung gehört nicht zu diesem lokalen Gerät.".into());
+    }
+    let issued_digest =
+        digest(&serde_json::to_vec(&challenge.offer).map_err(|_| "Einladung ungültig.")?);
+    pending_verify(&uid, STATE_OFFER, &issued_digest, Utc::now().timestamp())?;
+    let response = generate_response(challenge.clone(), &signing);
+    let public_response = serde_json::to_string(&response).map_err(|_| "Antwort ungültig.")?;
+    same_account_still_verified(&uid).await?;
+    pending_consume(&uid, STATE_OFFER, &issued_digest, Utc::now().timestamp())?;
+    let proven = proof(responder, &challenge);
+    crate::mesh_trust::stage_after_mutual_proof(
+        &uid,
+        &responder,
+        &proven.comparison_code,
+        challenge.expires_at,
+    )?;
+    Ok((public_response, proven))
+}
+
+/// On B: verifies A's fresh possession proof against B's OWN pending challenge.
+/// Consumes the challenge, so a replay fails even before any transport exists.
+#[tauri::command]
+pub async fn mesh_pairing_response_verify(response_json: String) -> Result<PairingProof, String> {
+    if response_json.len() > MAX_MESSAGE_BYTES {
+        return Err("Antwort zu lang.".into());
+    }
+    let uid = crate::github_app_auth::verified_katosync_user().await?;
+    let response: PairingResponse =
+        serde_json::from_str(&response_json).map_err(|_| "Antwort ungültig.")?;
+    let responder = verify_response(&response, &uid, Utc::now().timestamp())?;
+    let signing = ensure_identity(&uid)?;
+    if responder != signing.verifying_key() {
+        return Err("Challenge stammt nicht von diesem lokalen Gerät.".into());
+    }
+    let challenge_digest =
+        digest(&serde_json::to_vec(&response.challenge).map_err(|_| "Challenge ungültig.")?);
+    pending_verify(
+        &uid,
+        STATE_CHALLENGE,
+        &challenge_digest,
+        Utc::now().timestamp(),
+    )?;
+    let initiator = get_key(&response.challenge.offer.public_key)?;
+    same_account_still_verified(&uid).await?;
+    pending_consume(
+        &uid,
+        STATE_CHALLENGE,
+        &challenge_digest,
+        Utc::now().timestamp(),
+    )?;
+    let proven = proof(initiator, &response.challenge);
+    crate::mesh_trust::stage_after_mutual_proof(
+        &uid,
+        &initiator,
+        &proven.comparison_code,
+        response.challenge.expires_at,
+    )?;
+    Ok(proven)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const USER: &str = "819d749b-f932-44b9-90b7-8b27684e5efe";
+    const OTHER: &str = "9a1ee918-6af6-4109-a50f-31c01abf789c";
+    fn signing(seed: u8) -> SigningKey {
+        SigningKey::from_bytes(&[seed; 32])
+    }
+    fn invitation(initiator: &SigningKey, now: i64) -> MeshOffer {
+        // Reuse the exact signed fixture from the previous stage.
+        super::super::mesh_identity::make_test_offer(initiator, USER, now)
+    }
+    #[test]
+    fn mutual_keys_both_prove_possession_and_sas_matches() {
+        let a = signing(1);
+        let b = signing(2);
+        let c = generate_challenge(invitation(&a, 1_800_000_000), &b, 1_800_000_001);
+        let (verified_a, verified_b) = verify_challenge(&c, USER, 1_800_000_002).unwrap();
+        assert_eq!(verified_a, a.verifying_key());
+        assert_eq!(verified_b, b.verifying_key());
+        let response = generate_response(c.clone(), &a);
+        assert_eq!(
+            verify_response(&response, USER, 1_800_000_003).unwrap(),
+            b.verifying_key()
+        );
+        let proof_a = proof(b.verifying_key(), &c);
+        let proof_b = proof(a.verifying_key(), &c);
+        assert_eq!(proof_a.comparison_code, proof_b.comparison_code);
+        assert!(!proof_a.paired);
+        assert_eq!(proof_b.peer_count, 0);
+        assert!(!proof_b.transport_ready);
+    }
+    #[test]
+    fn relay_public_validation_accepts_only_original_signed_offers_and_challenges() {
+        let a = signing(46);
+        let b = signing(47);
+        let now = 1_800_000_100i64;
+        let challenge = generate_challenge(invitation(&a, now), &b, now + 1);
+        let challenge_json = serde_json::to_string(&challenge).unwrap();
+        let initiator = URL_SAFE_NO_PAD.encode(a.verifying_key().as_bytes());
+        let responder = URL_SAFE_NO_PAD.encode(b.verifying_key().as_bytes());
+        let got = relay_public_peer_keys(USER, "challenge", &challenge_json, now + 2).unwrap();
+        assert_eq!(
+            got,
+            (initiator.clone(), responder.clone(), challenge.expires_at)
+        );
+        let response = generate_response(challenge.clone(), &a);
+        let response_json = serde_json::to_string(&response).unwrap();
+        assert_eq!(
+            relay_public_peer_keys(USER, "response", &response_json, now + 2).unwrap(),
+            (initiator, responder, challenge.expires_at)
+        );
+        assert!(relay_public_peer_keys(OTHER, "challenge", &challenge_json, now + 2).is_err());
+        assert!(relay_public_peer_keys(USER, "wrong", &challenge_json, now + 2).is_err());
+        assert!(
+            relay_public_peer_keys(USER, "challenge", &challenge_json, challenge.expires_at)
+                .is_err()
+        );
+        let mut forged = challenge.clone();
+        forged.responder_nonce = URL_SAFE_NO_PAD.encode([0u8; 32]);
+        assert!(relay_public_peer_keys(
+            USER,
+            "challenge",
+            &serde_json::to_string(&forged).unwrap(),
+            now + 2
+        )
+        .is_err());
+        let mut fake = response;
+        fake.signature = URL_SAFE_NO_PAD.encode([0u8; 64]);
+        assert!(relay_public_peer_keys(
+            USER,
+            "response",
+            &serde_json::to_string(&fake).unwrap(),
+            now + 2
+        )
+        .is_err());
+    }
+
+    /// Stage 3D exercises a continuous SYNTHETIC chain of existing native
+    /// production predicates: signed owner-scoped offer -> two signed possession
+    /// proofs -> identical human SAS -> explicit two-sided local pin approval ->
+    /// pinned TLS 1.3 mTLS over OS TCP -> revocation denies new admission.
+    /// It never calls keyring, cloud enrollment, a Tauri IPC or production jobs.
+    #[tokio::test]
+    async fn synthetic_signed_sas_to_explicit_two_sided_pin_and_real_mtls_is_fail_closed() {
+        use crate::{
+            mesh_tls::DeviceTlsIdentity,
+            mesh_transport::{client_probe, server_probe},
+            mesh_trust::{qa_confirm_synthetic_peer, qa_synthetic_admission},
+        };
+        use tokio::net::{TcpListener, TcpStream};
+
+        let now = 1_800_000_010_i64;
+        let a = signing(21);
+        let b = signing(22);
+        let outsider = signing(23);
+        let offer = invitation(&a, now);
+        let challenge = generate_challenge(offer, &b, now + 1);
+        assert_eq!(
+            verify_challenge(&challenge, USER, now + 2).unwrap().0,
+            a.verifying_key()
+        );
+        assert!(verify_challenge(&challenge, OTHER, now + 2).is_err());
+        let response = generate_response(challenge.clone(), &a);
+        assert_eq!(
+            verify_response(&response, USER, now + 2).unwrap(),
+            b.verifying_key()
+        );
+        assert!(verify_response(&response, OTHER, now + 2).is_err());
+
+        // Both sides compute the SAME SAS from the exact signed transcript.
+        let a_proof = proof(b.verifying_key(), &challenge);
+        let b_proof = proof(a.verifying_key(), &challenge);
+        assert_eq!(a_proof.comparison_code, b_proof.comparison_code);
+        assert_eq!(a_proof.fingerprint, fingerprint(&b.verifying_key()));
+        assert_eq!(b_proof.fingerprint, fingerprint(&a.verifying_key()));
+        assert!(!a_proof.paired && !b_proof.paired);
+        assert!(!a_proof.transport_ready && !b_proof.transport_ready);
+
+        // Signature/SAS verification is NOT sufficient to admit either peer:
+        // explicit local confirmation must occur on EACH device.
+        let mut a_pins = Vec::new();
+        let mut b_pins = Vec::new();
+        assert!(
+            qa_synthetic_admission(&a_pins, &a.verifying_key(), &b.verifying_key(), now + 3)
+                .is_err()
+        );
+        assert!(
+            qa_synthetic_admission(&b_pins, &b.verifying_key(), &a.verifying_key(), now + 3)
+                .is_err()
+        );
+        assert!(qa_confirm_synthetic_peer(
+            &mut a_pins,
+            &a.verifying_key(),
+            &b.verifying_key(),
+            &a_proof.comparison_code,
+            "0000-0000-0000",
+            challenge.expires_at,
+            now + 3
+        )
+        .is_err());
+        assert!(a_pins.is_empty());
+        // Approval cannot extend the expiry of an already signed challenge.
+        let mut expired_pins = Vec::new();
+        assert!(qa_confirm_synthetic_peer(
+            &mut expired_pins,
+            &a.verifying_key(),
+            &b.verifying_key(),
+            &a_proof.comparison_code,
+            &a_proof.comparison_code,
+            challenge.expires_at,
+            challenge.expires_at
+        )
+        .is_err());
+        assert!(expired_pins.is_empty());
+        assert!(qa_confirm_synthetic_peer(
+            &mut b_pins,
+            &b.verifying_key(),
+            &a.verifying_key(),
+            &b_proof.comparison_code,
+            "AAAA-AAAA-AAAA",
+            challenge.expires_at,
+            now + 3
+        )
+        .is_err());
+        assert!(b_pins.is_empty());
+        assert!(qa_confirm_synthetic_peer(
+            &mut a_pins,
+            &a.verifying_key(),
+            &b.verifying_key(),
+            &a_proof.comparison_code,
+            &a_proof.comparison_code,
+            challenge.expires_at,
+            now + 3
+        )
+        .is_ok());
+        assert!(
+            qa_synthetic_admission(&b_pins, &b.verifying_key(), &a.verifying_key(), now + 3)
+                .is_err(),
+            "one-sided approval must not admit the other direction"
+        );
+        assert!(qa_confirm_synthetic_peer(
+            &mut b_pins,
+            &b.verifying_key(),
+            &a.verifying_key(),
+            &b_proof.comparison_code,
+            &b_proof.comparison_code,
+            challenge.expires_at,
+            now + 3
+        )
+        .is_ok());
+        assert_eq!(a_pins.len(), 1);
+        assert_eq!(b_pins.len(), 1);
+
+        // An unrelated Ed25519 key cannot reuse someone else's SAS/pin.
+        assert!(qa_synthetic_admission(
+            &a_pins,
+            &a.verifying_key(),
+            &outsider.verifying_key(),
+            now + 4
+        )
+        .is_err());
+        assert!(qa_confirm_synthetic_peer(
+            &mut a_pins,
+            &a.verifying_key(),
+            &a.verifying_key(),
+            &a_proof.comparison_code,
+            &a_proof.comparison_code,
+            challenge.expires_at,
+            now + 4
+        )
+        .is_err());
+        let approved_server =
+            qa_synthetic_admission(&a_pins, &a.verifying_key(), &b.verifying_key(), now + 4)
+                .unwrap();
+        let approved_client =
+            qa_synthetic_admission(&b_pins, &b.verifying_key(), &a.verifying_key(), now + 4)
+                .unwrap();
+        let a_tls = DeviceTlsIdentity::from_signing_key(&a).unwrap();
+        let b_tls = DeviceTlsIdentity::from_signing_key(&b).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
+        let client = client.unwrap();
+        let server = accepted.unwrap().0;
+        let (client_outcome, server_outcome) = tokio::join!(
+            client_probe(client, &a_tls, &approved_server, b_tls.certificate_der()),
+            server_probe(server, &b_tls, &approved_client, a_tls.certificate_der())
+        );
+        assert!(
+            client_outcome.is_ok(),
+            "SAS-approved client mTLS failed: {client_outcome:?}"
+        );
+        assert!(
+            server_outcome.is_ok(),
+            "SAS-approved server mTLS failed: {server_outcome:?}"
+        );
+
+        // Revocation removes exactly the local in-memory pin. New admission
+        // must fail despite the prior SUCCESSFUL proof and socket exchange.
+        a_pins.clear();
+        assert!(
+            qa_synthetic_admission(&a_pins, &a.verifying_key(), &b.verifying_key(), now + 5)
+                .is_err()
+        );
+        // No fake pairing status or remote execution emerges from the probe.
+        let readiness =
+            serde_json::to_value(crate::mesh_readiness::mesh_local_readiness()).unwrap();
+        assert_eq!(readiness["verifiedPeers"], 0);
+        assert_eq!(readiness["remoteReadOnlyDispatch"], false);
+        assert_eq!(readiness["crossDeviceWrites"], false);
+    }
+
+    #[test]
+    fn tampered_challenge_and_answer_fail_closed() {
+        let a = signing(3);
+        let b = signing(4);
+        let c = generate_challenge(invitation(&a, 1_800_000_000), &b, 1_800_000_001);
+        let mut tampered = c.clone();
+        tampered.responder_nonce = URL_SAFE_NO_PAD.encode([3u8; 32]);
+        assert!(verify_challenge(&tampered, USER, 1_800_000_002).is_err());
+        let mut response = generate_response(c, &a);
+        response.signature = URL_SAFE_NO_PAD.encode([0u8; 64]);
+        assert!(verify_response(&response, USER, 1_800_000_002).is_err());
+    }
+    #[test]
+    fn wrong_owner_self_pairing_and_expired_challenge_rejected() {
+        let a = signing(7);
+        let b = signing(8);
+        let invite = invitation(&a, 1_800_000_000);
+        let c = generate_challenge(invite.clone(), &b, 1_800_000_001);
+        assert!(verify_challenge(&c, OTHER, 1_800_000_002).is_err());
+        assert!(verify_challenge(&c, USER, 1_800_000_301).is_err());
+        let self_challenge = generate_challenge(invite, &a, 1_800_000_001);
+        assert!(verify_challenge(&self_challenge, USER, 1_800_000_002).is_err());
+    }
+}

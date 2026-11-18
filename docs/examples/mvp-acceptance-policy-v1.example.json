@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "katosync.mvp-acceptance-policy/v1",
+  "projectId": "REPLACE_WITH_REGISTERED_PROJECT_ID",
+  "features": [
+    {
+      "featureId": "PHONE-BOOKING",
+      "acceptanceCriteria": "End-to-end booking flow passes and is manually reviewed",
+      "ciChecks": [
+        {
+          "workflow": "KatoSync PR Fast Gate",
+          "job": "Windows Node Regression"
+        }
+      ],
+      "testSource": "tests/phoneBooking.test.ts"
+    }
+  ]
+}

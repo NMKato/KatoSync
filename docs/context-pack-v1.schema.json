@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nmkato.solutions/schemas/katosync/context-pack-v1.schema.json",
+  "title": "KatoSync Context Pack v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "project",
+    "goal",
+    "currentState",
+    "decisions",
+    "activeJobs",
+    "blockers",
+    "evidence",
+    "nextSafeSteps",
+    "learnedRules",
+    "provenance",
+    "generatedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "katosync.context-pack/v1"
+    },
+    "project": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "goal": {
+      "type": "string",
+      "maxLength": 600
+    },
+    "currentState": {
+      "$ref": "#/$defs/boundedStatements"
+    },
+    "decisions": {
+      "$ref": "#/$defs/boundedStatements"
+    },
+    "activeJobs": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/activeJob"
+      }
+    },
+    "blockers": {
+      "$ref": "#/$defs/boundedStatements"
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "nextSafeSteps": {
+      "$ref": "#/$defs/boundedStatements"
+    },
+    "learnedRules": {
+      "$ref": "#/$defs/boundedStatements"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 64
+    }
+  },
+  "$defs": {
+    "boundedStatements": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "maxLength": 600
+      }
+    },
+    "activeJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "summary", "owner", "leaseExpiresAt"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "owner": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "leaseExpiresAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "source"],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generator", "sourcePolicy", "sources"],
+      "properties": {
+        "generator": {
+          "const": "KatoSync"
+        },
+        "sourcePolicy": {
+          "const": "approved-scanned-context-v1"
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/provenanceSource"
+          }
+        }
+      }
+    },
+    "provenanceSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relativePath", "category", "modifiedAt", "sizeBytes", "contentTruncated"],
+      "properties": {
+        "relativePath": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "category": {
+          "enum": ["status", "roadmap", "memory"]
+        },
+        "modifiedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contentTruncated": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

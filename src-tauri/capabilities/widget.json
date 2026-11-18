@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-widget-preview",
+  "description": "Read-only desktop widget view; never grant filesystem, shell, opener or dialog privileges.",
+  "windows": ["desktop-widget"],
+  "permissions": ["core:default"]
+}

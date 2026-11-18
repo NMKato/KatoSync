@@ -7,6 +7,10 @@ def main():
     parser.add_argument("--mode", choices=["read_only", "workspace_write"], default="read_only")
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--require-clean-git", action="store_true")
+    parser.add_argument("--lane", default="default")
+    parser.add_argument("--project")
+    parser.add_argument("--resource-lock", action="append", default=[])
+    parser.add_argument("--dedupe-key")
     parser.add_argument("--wait", action="store_true")
     parser.add_argument("--wait-timeout", type=int, default=960)
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -30,6 +34,10 @@ def main():
         "mode": args.mode,
         "timeoutSeconds": args.timeout,
         "requireCleanGit": args.require_clean_git,
+        "laneId": args.lane,
+        "projectId": args.project,
+        "resourceLocks": args.resource_lock,
+        "dedupeKey": args.dedupe_key,
     }
     tmp = inbox / (job_id + ".tmp")
     dst = inbox / (job_id + ".json")

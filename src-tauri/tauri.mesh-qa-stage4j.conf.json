@@ -1,0 +1,20 @@
+{
+  "productName": "KatoSync Mesh QA Stage4J Isolated",
+  "identifier": "com.nmkato.katosync.meshqa.stage4j-isolated",
+  "build": {
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "KatoSync 4J · Mesh Isolation QA (kein Live-Pairing)",
+        "width": 1240,
+        "height": 820,
+        "minWidth": 1040,
+        "minHeight": 720,
+        "resizable": true,
+        "center": true
+      }
+    ]
+  }
+}

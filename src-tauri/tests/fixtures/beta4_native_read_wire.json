@@ -1,0 +1,82 @@
+{
+  "source": "Connector production RC67/RC70 codecs",
+  "syntheticOnly": true,
+  "nowMs": 1795003200000,
+  "deviceSeedByte": 19,
+  "deviceRequestId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  "serverPin": {
+    "kid": "beta4_cross_language_server",
+    "x": "Md6-VdN8cidosTcTHKpghwgLLgtguUvXhdFFdc-kmLw"
+  },
+  "ticket": {
+    "version": 1,
+    "protocol": "rc67-beta-native-v1",
+    "ownerId": "11111111-1111-4111-8111-111111111111",
+    "tenantId": "22222222-2222-4222-8222-222222222222",
+    "grantId": "33333333-3333-4333-8333-333333333333",
+    "deviceId": "44444444-4444-4444-8444-444444444444",
+    "sessionId": "55555555-5555-4555-8555-555555555555",
+    "ticket": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "challengeId": "66666666-6666-4666-8666-666666666666",
+    "deviceKeyId": "mesh_ed25519_56fae12f7716462746a3a802817ca762f4e62170",
+    "revokeEpoch": 7,
+    "ticketExpiresAtMs": 1795003230000,
+    "expiresAtMs": 1795003245000,
+    "readmitAtMs": 1795003240000,
+    "route": "/api/device-relay/socket",
+    "remoteExecutionAllowed": false,
+    "nativeToolNames": [
+      "katosync_git_status"
+    ],
+    "admittedProjectIds": [
+      "katosync"
+    ],
+    "oauthClientId": "77777777-7777-4777-8777-777777777777",
+    "authorityRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "challenge": {
+    "type": "rc69.challenge",
+    "version": 1,
+    "protocol": "rc67-beta-native-v1",
+    "transport": "outbound-wss",
+    "sessionId": "55555555-5555-4555-8555-555555555555",
+    "challengeId": "66666666-6666-4666-8666-666666666666",
+    "nonceIssuedAtMs": 1795003200000,
+    "challengeExpiresAtMs": 1795003245000,
+    "expiresAtMs": 1795003245000,
+    "revokeEpoch": 7,
+    "expectedDirection": "device_to_cloud",
+    "frameTtlMs": 15000,
+    "serverProofJws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJldGE0X2Nyb3NzX2xhbmd1YWdlX3NlcnZlciIsInR5cCI6ImthdG9zeW5jLXJjNjctZHVwbGV4LXJlbGF5K2p3cyJ9.eyJ2ZXJzaW9uIjoxLCJkaXJlY3Rpb24iOiJjbG91ZF90b19kZXZpY2UiLCJraW5kIjoibWVzaC5ub3RpY2UiLCJvd25lcklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwidGVuYW50SWQiOiIyMjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiLCJncmFudElkIjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwiZGV2aWNlSWQiOiI0NDQ0NDQ0NC00NDQ0LTQ0NDQtODQ0NC00NDQ0NDQ0NDQ0NDQiLCJzZXNzaW9uSWQiOiI1NTU1NTU1NS01NTU1LTQ1NTUtODU1NS01NTU1NTU1NTU1NTUiLCJyZXF1ZXN0SWQiOiJhYWFhYWFhYS1hYWFhLTRhYWEtOGFhYS1hYWFhYWFhYWFhYWEiLCJzZXF1ZW5jZSI6MSwiaXNzdWVkQXRNcyI6MTc5NTAwMzIwMDEwMCwiZXhwaXJlc0F0TXMiOjE3OTUwMDMyMTUxMDAsImJvZHkiOnsidHlwZSI6InJjNzAuY2hhbGxlbmdlIiwiY2hhbGxlbmdlSWQiOiI2NjY2NjY2Ni02NjY2LTQ2NjYtODY2Ni02NjY2NjY2NjY2NjYiLCJwcm90b2NvbCI6InJjNjctYmV0YS1uYXRpdmUtdjEiLCJ0cmFuc3BvcnQiOiJvdXRib3VuZC13c3MiLCJyZXZva2VFcG9jaCI6N319.1PCahhhSsOpwvj8Kq7XZdsy3PJO8SOXVJGhqQIMjK2bpMZALuq80c9zXr6Ljz8aO5VXDnHKOmH5VfTK8AZENCg",
+    "serverKid": "beta4_cross_language_server"
+  },
+  "ack": {
+    "type": "rc69.presence.accepted",
+    "sessionId": "55555555-5555-4555-8555-555555555555",
+    "acceptedSequence": 1,
+    "expiresAtMs": 1795003215500,
+    "nativeToolNames": [
+      "katosync_git_status"
+    ],
+    "remoteExecutionAllowed": false,
+    "serverProofJws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJldGE0X2Nyb3NzX2xhbmd1YWdlX3NlcnZlciIsInR5cCI6ImthdG9zeW5jLXJjNjctZHVwbGV4LXJlbGF5K2p3cyJ9.eyJ2ZXJzaW9uIjoxLCJkaXJlY3Rpb24iOiJjbG91ZF90b19kZXZpY2UiLCJraW5kIjoibWVzaC5ub3RpY2UiLCJvd25lcklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwidGVuYW50SWQiOiIyMjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiLCJncmFudElkIjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwiZGV2aWNlSWQiOiI0NDQ0NDQ0NC00NDQ0LTQ0NDQtODQ0NC00NDQ0NDQ0NDQ0NDQiLCJzZXNzaW9uSWQiOiI1NTU1NTU1NS01NTU1LTQ1NTUtODU1NS01NTU1NTU1NTU1NTUiLCJyZXF1ZXN0SWQiOiJiYmJiYmJiYi1iYmJiLTRiYmItOGJiYi1iYmJiYmJiYmJiYmIiLCJzZXF1ZW5jZSI6MiwiaXNzdWVkQXRNcyI6MTc5NTAwMzIwMTAwMCwiZXhwaXJlc0F0TXMiOjE3OTUwMDMyMTYwMDAsImJvZHkiOnsidHlwZSI6InJjNzAucHJlc2VuY2UuYWNjZXB0ZWQiLCJjaGFsbGVuZ2VJZCI6IjY2NjY2NjY2LTY2NjYtNDY2Ni04NjY2LTY2NjY2NjY2NjY2NiIsImFjY2VwdGVkU2VxdWVuY2UiOjF9fQ.e4FjoZ98IupVuVxEXxNedNvaRS-3OawvDNciGhoo6rwnl5fay_OFhs9JpIyu8AX_nFnaTWu5_FIAX_pZJxPICg",
+    "serverKid": "beta4_cross_language_server"
+  },
+  "devicePresenceJws": "eyJhbGciOiJFZERTQSIsImtpZCI6Im1lc2hfZWQyNTUxOV81NmZhZTEyZjc3MTY0NjI3NDZhM2E4MDI4MTdjYTc2MmY0ZTYyMTcwIiwidHlwIjoia2F0b3N5bmMtcmM2Ny1kdXBsZXgtcmVsYXkrandzIn0.eyJ2ZXJzaW9uIjoxLCJkaXJlY3Rpb24iOiJkZXZpY2VfdG9fY2xvdWQiLCJraW5kIjoicHJlc2VuY2UuaGVhcnRiZWF0Iiwib3duZXJJZCI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsInRlbmFudElkIjoiMjIyMjIyMjItMjIyMi00MjIyLTgyMjItMjIyMjIyMjIyMjIyIiwiZ3JhbnRJZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsImRldmljZUlkIjoiNDQ0NDQ0NDQtNDQ0NC00NDQ0LTg0NDQtNDQ0NDQ0NDQ0NDQ0Iiwic2Vzc2lvbklkIjoiNTU1NTU1NTUtNTU1NS00NTU1LTg1NTUtNTU1NTU1NTU1NTU1IiwicmVxdWVzdElkIjoiY2NjY2NjY2MtY2NjYy00Y2NjLThjY2MtY2NjY2NjY2NjY2NjIiwic2VxdWVuY2UiOjEsImlzc3VlZEF0TXMiOjE3OTUwMDMyMDA1MDAsImV4cGlyZXNBdE1zIjoxNzk1MDAzMjE1NTAwLCJib2R5Ijp7ImNoYWxsZW5nZUlkIjoiNjY2NjY2NjYtNjY2Ni00NjY2LTg2NjYtNjY2NjY2NjY2NjY2IiwicHJvdG9jb2wiOiJyYzY3LWJldGEtbmF0aXZlLXYxIiwidHJhbnNwb3J0Ijoib3V0Ym91bmQtd3NzIiwic3RhdGUiOiJjb25uZWN0ZWRfYXV0aGVudGljYXRlZCIsInJldm9rZUVwb2NoIjo3LCJuYXRpdmVUb29sTmFtZXMiOlsia2F0b3N5bmNfZ2l0X3N0YXR1cyJdfX0.23SOfhlqAF7q7rgA7WX3F2ush7NZMeDSXfAq7-WIX47KmxTBpe0DVetzKUX_aISIySoWarTyg_qrFoaSwxMKAQ",
+  "gitRequestJws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJldGE0X2Nyb3NzX2xhbmd1YWdlX3NlcnZlciIsInR5cCI6ImthdG9zeW5jLXJjNjctZHVwbGV4LXJlbGF5K2p3cyJ9.eyJ2ZXJzaW9uIjoxLCJkaXJlY3Rpb24iOiJjbG91ZF90b19kZXZpY2UiLCJraW5kIjoidG9vbC5yZXF1ZXN0Iiwib3duZXJJZCI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsInRlbmFudElkIjoiMjIyMjIyMjItMjIyMi00MjIyLTgyMjItMjIyMjIyMjIyMjIyIiwiZ3JhbnRJZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsImRldmljZUlkIjoiNDQ0NDQ0NDQtNDQ0NC00NDQ0LTg0NDQtNDQ0NDQ0NDQ0NDQ0Iiwic2Vzc2lvbklkIjoiNTU1NTU1NTUtNTU1NS00NTU1LTg1NTUtNTU1NTU1NTU1NTU1IiwicmVxdWVzdElkIjoiZGRkZGRkZGQtZGRkZC00ZGRkLThkZGQtZGRkZGRkZGRkZGRkIiwic2VxdWVuY2UiOjMsImlzc3VlZEF0TXMiOjE3OTUwMDMyMDE1MDAsImV4cGlyZXNBdE1zIjoxNzk1MDAzMjE2NTAwLCJib2R5Ijp7InRvb2xOYW1lIjoia2F0b3N5bmNfZ2l0X3N0YXR1cyIsInByb2plY3RJZCI6ImthdG9zeW5jIiwib2F1dGhDbGllbnRJZCI6Ijc3Nzc3Nzc3LTc3NzctNDc3Ny04Nzc3LTc3Nzc3Nzc3Nzc3NyIsImF1dGhvcml0eVJldmlzaW9uIjoiZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZSJ9fQ.edFkcmZ7MiZqFLl-hNxnAw9V5LpZ3a-_vlMLDXdi0BQ5XZNNpCR3oF0qghzRRgCkK5dG29o_d3zvktvYPoTSDA",
+  "gitResult": {
+    "projectId": "katosync",
+    "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "branch": "beta/native-read",
+    "dirty": false,
+    "provenance": "local_git_verified_root"
+  },
+  "gitResultJws": "eyJhbGciOiJFZERTQSIsImtpZCI6Im1lc2hfZWQyNTUxOV81NmZhZTEyZjc3MTY0NjI3NDZhM2E4MDI4MTdjYTc2MmY0ZTYyMTcwIiwidHlwIjoia2F0b3N5bmMtcmM2Ny1kdXBsZXgtcmVsYXkrandzIn0.eyJ2ZXJzaW9uIjoxLCJkaXJlY3Rpb24iOiJkZXZpY2VfdG9fY2xvdWQiLCJraW5kIjoidG9vbC5yZXN1bHQiLCJvd25lcklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwidGVuYW50SWQiOiIyMjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiLCJncmFudElkIjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwiZGV2aWNlSWQiOiI0NDQ0NDQ0NC00NDQ0LTQ0NDQtODQ0NC00NDQ0NDQ0NDQ0NDQiLCJzZXNzaW9uSWQiOiI1NTU1NTU1NS01NTU1LTQ1NTUtODU1NS01NTU1NTU1NTU1NTUiLCJyZXF1ZXN0SWQiOiJkZGRkZGRkZC1kZGRkLTRkZGQtOGRkZC1kZGRkZGRkZGRkZGQiLCJzZXF1ZW5jZSI6MiwiaXNzdWVkQXRNcyI6MTc5NTAwMzIwMTgwMCwiZXhwaXJlc0F0TXMiOjE3OTUwMDMyMTY4MDAsImJvZHkiOnsidG9vbE5hbWUiOiJrYXRvc3luY19naXRfc3RhdHVzIiwic3RhdHVzIjoiY29tcGxldGVkIiwicmVzdWx0Ijp7InByb2plY3RJZCI6ImthdG9zeW5jIiwiaGVhZFNoYSI6ImFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJicmFuY2giOiJiZXRhL25hdGl2ZS1yZWFkIiwiZGlydHkiOmZhbHNlLCJwcm92ZW5hbmNlIjoibG9jYWxfZ2l0X3ZlcmlmaWVkX3Jvb3QifX19.hsQwlCT0u2vllpHy_pEYZ1Tvpx-MfmnL9oKy4PY8x-NbIYIHS8ieMXZjjBTxf_HQzYBWe2_ctaRxf6bUzjxVAA",
+  "resultAck": {
+    "type": "rc69.result.accepted",
+    "requestId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "acceptedSequence": 2,
+    "serverKid": "beta4_cross_language_server",
+    "serverProofJws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJldGE0X2Nyb3NzX2xhbmd1YWdlX3NlcnZlciIsInR5cCI6ImthdG9zeW5jLXJjNjctZHVwbGV4LXJlbGF5K2p3cyJ9.eyJ2ZXJzaW9uIjoxLCJkaXJlY3Rpb24iOiJjbG91ZF90b19kZXZpY2UiLCJraW5kIjoibWVzaC5ub3RpY2UiLCJvd25lcklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwidGVuYW50SWQiOiIyMjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiLCJncmFudElkIjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwiZGV2aWNlSWQiOiI0NDQ0NDQ0NC00NDQ0LTQ0NDQtODQ0NC00NDQ0NDQ0NDQ0NDQiLCJzZXNzaW9uSWQiOiI1NTU1NTU1NS01NTU1LTQ1NTUtODU1NS01NTU1NTU1NTU1NTUiLCJyZXF1ZXN0SWQiOiJkZGRkZGRkZC1kZGRkLTRkZGQtOGRkZC1kZGRkZGRkZGRkZGQiLCJzZXF1ZW5jZSI6NCwiaXNzdWVkQXRNcyI6MTc5NTAwMzIwMjAwMCwiZXhwaXJlc0F0TXMiOjE3OTUwMDMyMTcwMDAsImJvZHkiOnsidHlwZSI6InJjNzAucmVzdWx0LmFjY2VwdGVkIiwicmVxdWVzdElkIjoiZGRkZGRkZGQtZGRkZC00ZGRkLThkZGQtZGRkZGRkZGRkZGRkIiwiYWNjZXB0ZWRTZXF1ZW5jZSI6Mn19.D6KK0vEMMpHQNvE5plpYvQQUSf_XSNnc7O8KJo9jTyP6ewRfnQqSJ8IOCui53vKJETuMU7n-4OjjhjoNQa-2Bg"
+  }
+}
