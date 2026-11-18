@@ -65,9 +65,12 @@ eine exakt gebundene OAuth-Client-Freigabe, aktuelle Gerätefreigabe und echte
 native Präsenz nötig. Die neue Freigabeoberfläche führt den Owner durch die
 erforderliche frische MFA-Bestätigung.
 
-Produktive DB-/Worker-Freischaltung und echte MCP-/MFA-/Gerätefreigabe
-bleiben offen; der erforderliche
-Abhängigkeitsaudit ist weiterhin rot. Die nachfolgenden Korrekturen für
+Die produktive MCP-Providerfreigabe sowie DB-/Worker-Freischaltung und echte
+MCP-/MFA-/Gerätefreigabe bleiben offen; der erforderliche
+Abhängigkeitsaudit ist weiterhin rot. GitHub hat den Picomatch-Hinweis am
+18. November zurückgezogen; der anschließende lokale npm-Audit meldet
+weiterhin fünf hohe Befunde und Exit 1. Die genaue Chronologie steht im
+Beta-Protokoll. Die nachfolgenden Korrekturen für
 temporäre Authority-Fehler und einen leichter auffindbaren Verbindungseinstieg
 sind im zweiten Kandidaten `232822fb` enthalten. Sein
 [nativer CI-Paketbau](https://github.com/NMKato/KatoSync/actions/runs/44327673503)
@@ -80,9 +83,25 @@ Auf M3 wurden Navigation, Mesh-Karte, Rollenwahl und nativer Serverstart
 sichtbar geprüft. Zwei M2-Clientläufe bestanden mit sechs beziehungsweise
 drei beobachteten Heartbeats und bestätigtem Stop; der anschließende M3-UI-Stop
 gab den Listener frei. Remote-Jobs oder neue Pins wurden dabei nicht erzeugt.
-Ein separater lokaler Fix für die bekannte Race beim ersten Bootstrap besitzt
-sechs bestandene Regressionstests, ist aber **noch nicht in dieser installierten
-232822fb-App enthalten** und benötigt einen eigenen Paket-/Gerätenachweis.
+Der aktuelle dritte Kandidat `0c85c5d0` enthält auch den Fix für die Race beim
+ersten Bootstrap. Sein
+[nativer CI-Paketbau](https://github.com/NMKato/KatoSync/actions/runs/44336643584)
+bestand mit **482 bestandenen und 8 ignorierten Tests**; Linux und Windows
+bestanden jeweils **986 Node-Tests**, darunter die sechs Bootstrap-Regressionen.
+Candidate 3 ist mit Developer ID signiert und von Apple notarisiert; dasselbe
+Paket wurde auf M2 und M3 geprüft. Auf M3 funktionierten Kontoliste, vorhandene
+Peer-Auswahl und Serverstart über die GUI ohne die bisher mögliche
+120-Sekunden-Wartezeit. Der M2-Client bestand mit **sechs bestätigten
+Heartbeats, bestätigtem Stop und Exit 0**. Die M3-GUI zeigte währenddessen
+„Sicher verbunden“, nach dem Client-Ende den korrekten Wartezustand und nach
+dem UI-Stop „Bereit zum Verbinden“ ohne verbleibenden Mesh-Listener.
+Die physischen Durchläufe nutzten bereits gekoppelte Geräte; eine neue
+Anfrage samt Annahme wurde damit nicht zusätzlich abgenommen. Auf beiden
+Macs verweist die neue sichtbare Verknüpfung `~/Applications/KatoSync Beta4.app`
+auf den geprüften Candidate 3; keine bestehende App wurde überschrieben.
+Diese eigenen Candidate-3-Nachweise stehen im Beta-Protokoll;
+[Integrations-PR #283](https://github.com/NMKato/KatoSync/pull/283) führt den
+Quellstand zusammen. Eine vollständige 4.0- oder MCP-Freigabe folgt daraus nicht.
 
 Die bisherigen Sicherheitsnachweise der Stages 4AG–4AM bleiben in ihren
 datierten QA-Protokollen erhalten. Quelltests, lokale Test-Sockets und frühere

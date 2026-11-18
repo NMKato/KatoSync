@@ -8,7 +8,8 @@ Mesh-Dienst und der getrennten Remote-MCP-Freigabe. Die Produktbezeichnung 4.0
 ist das Integrationsziel. Die Paketversion 2.0.0 und bestehende signierte
 QA-Installationen sind damit nicht rückwirkend ein veröffentlichtes 4.0-Release.
 
-Desktop: `beta/4.0-integration-20261118`.
+Desktop: `beta/4.0-integration-20261118`,
+[Integrations-PR #283](https://github.com/NMKato/KatoSync/pull/283).
 Connector: `beta/4.0-runtime-integration-20261118` im Repository
 [NMKato/KatoSync-Remote-MCP](https://github.com/NMKato/KatoSync-Remote-MCP/tree/beta/4.0-runtime-integration-20261118).
 
@@ -38,6 +39,12 @@ Cloud-Heartbeat ersetzen den kryptografischen Peer-Nachweis nicht.
 
 ## Remote MCP ist eine getrennte Freigabe
 
+**Aktueller Stand:** Die produktive Providerfreigabe steht weiterhin aus.
+Die nachfolgenden nativen Mesh-Gerätetests ersetzen diese Freigabe nicht.
+Die lesende Supabase-Migrationsabfrage am 18. November um **17:05 Uhr MEZ**
+zeigte weiterhin `20261117172610` als letzten angewendeten Stand. Keine
+der drei Beta4-Migrationen war angewendet.
+
 Die registrierte ChatGPT-Verbindung stellt zunächst eine authentifizierte
 MCP-Verbindung her. Der bisherige synthetische Ping allein beweist weder
 Gerätezugriff noch ein verbundenes Mesh.
@@ -60,12 +67,12 @@ keine Remote-Shell-, Datei- oder Git-Ausführung.
 
 | Bereich | Implementierung | Aktueller Abnahmebeleg und verbleibende Grenze |
 |---|---|---|
-| Geräte-UI | Frische Kontoliste, Auswahl, historische Registrierungen, Rollenwahl, native Zustandsanzeige | Candidate 2 auf M3: Navigation, Mesh-Karte, Radiobuttons, vorhandene Peer-Auswahl, Serverstart, Live-Anzeige und UI-Stop geprüft. Der spätere Bootstrap-Race-Fix ist noch nicht in der installierten App enthalten. |
-| Mesh-Dienst | Tatsächlicher mTLS-Socket, Heartbeat-Lease, Reconnect, Stop, Owner-Wechsel | Candidate 2: M3-GUI-Server und zwei M2-Clientläufe mit 6/3 beobachteten Heartbeats, Exit 0 und Stop; Wiederverbindung im zweiten Lauf. Die frühere b754-Abnahme einschließlich Server-Exit 5 bleibt separat dokumentiert. |
+| Geräte-UI | Frische Kontoliste, Auswahl, historische Registrierungen, Rollenwahl, native Zustandsanzeige | Candidate 3 auf M3: manuelles Verbinden ohne 120-Sekunden-Wartezeit, sechs App-Registrierungen, vorhandene Peer-Auswahl, Serverstart, frische Live-Anzeige, Wartezustand nach Client-Ende und UI-Stop geprüft. |
+| Mesh-Dienst | Tatsächlicher mTLS-Socket, Heartbeat-Lease, Reconnect, Stop, Owner-Wechsel | Candidate 3: M3-GUI-Server und M2-Client mit sechs bestätigten Heartbeats, Client-Exit 0 und beidseitigem Stop-Nachweis. Candidate-2-Reconnect und die frühere b754-Abnahme einschließlich Server-Exit 5 bleiben separat dokumentiert. |
 | Sitzung | Serialisierte Tokenrotation, MFA, Logout-Sperre und Generation-Fencing | Native Tests und Logout während laufender Operation |
 | MCP-Freigabe | Owner-/Ziel-Client-Trennung, frische MFA, einmalige geprüfte Entscheidung | Echte Owner-Bestätigung; keine vorbereiteten Approved-Datensätze |
 | MCP-Präsenz | Gepinnte signierte Challenge/ACK, kurzlebige WSS-Sitzung, Widerrufsprüfung | Produktiver Worker, echte DB-Rollen und echtes freigegebenes Gerät |
-| Verpackung | Eigener signierter/notarisierter Kandidat mit geprüftem Ressourcenbestand | Candidate 2: Developer-ID-Signatur, Apple Accepted, Staple, codesign und spctl bestanden; dasselbe signierte Paket auf M2 und M3 geprüft und installiert. Bestehende Fallbacks bleiben erhalten. |
+| Verpackung | Eigener signierter/notarisierter Kandidat mit geprüftem Ressourcenbestand | Candidate 3: Developer-ID-Signatur, Apple Accepted, Staple, codesign und spctl bestanden; dasselbe Paket auf M2 und M3 verifiziert. Die früheren geprüften Pakete bleiben als Fallback erhalten. |
 
 ## Verifikation: Stand der Integration
 
@@ -110,8 +117,10 @@ bleiben historische Belege; sie ersetzen nicht den Test dieses neuen Builds.
   Mesh-Klickpfad-Abnahme** vor.
 - Produktive DB-Migration, Worker-Freischaltung und echte MFA-/Gerätefreigabe
   sind noch nicht als abgeschlossen protokolliert.
-- Der Abhängigkeitsaudit bleibt **rot** und ein eigener erforderlicher CI-Gate. Der
-  bekannte Picomatch-Befund wird nicht durch Deaktivieren des Audits übergangen.
+- Der Abhängigkeitsaudit bleibt ein eigener erforderlicher CI-Gate. Der
+  historische Candidate-3-CI-Audit ist **rot**. GitHub hat das Picomatch-Advisory
+  inzwischen zurückgezogen; der anschließende lokale Audit blieb mit fünf
+  hohen Befunden und Exit 1 rot. Die getrennten Zeitpunkte stehen unten.
 
 ### Signierte Paketidentität des physisch getesteten b754-Builds
 
@@ -236,7 +245,7 @@ exakten Candidate-2-Lauf belegt; die Rollen-Radiobuttons wurden anschließend
 am neuen M3-Paket sichtbar geprüft. Der frühere Node-Count wird nicht als neuer vollständiger Node-Lauf
 nach dieser CSS-Änderung ausgegeben.
 
-#### Bekannte Bootstrap-Race: späterer lokaler Fix
+#### Bootstrap-Race in Candidate 2 und nachfolgender Fix
 
 In der installierten `232822fb`-App kann eine manuelle erste Rosterabfrage
 den noch laufenden Hintergrund-Bootstrap überholen. Ein separater lokaler
@@ -246,15 +255,128 @@ bleiben erhalten. Dafür bestanden **sechs gezielte Regressionstests**.
 Nach Übernahme bestand auf dem M2 zusätzlich die gezielte Prüfung aller
 Testdateien, die diese Komponente referenzieren: **180/180 bestanden,
 0 Fehler, 0 übersprungen**, TAP-Laufzeit **20,40 Sekunden**.
-Dieser spätere Patch ist **noch nicht Bestandteil des hier signierten und
-physisch geprüften Pakets**. Er benötigt einen eigenen nativen Build und
-Gerätenachweis; die Candidate-2-Ergebnisse werden ihm nicht zugerechnet.
+Dieser spätere Patch ist **nicht Bestandteil des oben signierten und physisch
+geprüften Candidate-2-Pakets**. Candidate 3 enthält ihn und besitzt die unten
+aufgeführten eigenen Build-/Testbelege; die Candidate-2-Geräteergebnisse
+werden ihm nicht zugerechnet.
 
 Produktive DB-Migration, Cloudflare-Worker-Freischaltung, echte MFA- und
 Gerätefreigabe sowie der reale MCP-Gerätezugriff bleiben separate offene
 Gates; der erforderliche Dependency-Audit bleibt rot. Auch das signierte,
 notarisierte und getestete Candidate-2-Paket ist damit keine vollständige
 4.0- oder Remote-MCP-Freigabe.
+
+### Candidate 3: Bootstrap-Fix, native CI und signiertes Paket
+
+Der genaue Quellstand ist `0c85c5d010eef779b998be852e985dc7ffbac28e`.
+Alle lesbaren Uhrzeiten in diesem Abschnitt verwenden Europe/Berlin
+(MEZ, UTC+1); rohe API-Zeitstempel bleiben unverändert.
+
+| Nachweis am 18. November 2026 | Ergebnis |
+|---|---|
+| [Nativer CI-Lauf 44336643584](https://github.com/NMKato/KatoSync/actions/runs/44336643584), [Job 134915085698](https://github.com/NMKato/KatoSync/actions/runs/44336643584/job/134915085698) | PASS, 16:31:44–16:35:19 Uhr, **215 Sekunden** Gesamtjobzeit |
+| Native Tests | **482 bestanden, 0 fehlgeschlagen, 8 ignoriert**, Laufzeit **11,25 Sekunden** |
+| TypeScript / Vite | PASS; gemeldete Vite-Buildzeit **1,46 Sekunden** |
+| Tatsächlicher Tauri-/Cargo-App-Build | PASS, **75 Sekunden** |
+| [Fast Gate 44336630777](https://github.com/NMKato/KatoSync/actions/runs/44336630777): Linux Node | **986/986 bestanden**, **13,198 Sekunden** |
+| Windows Node | **986 bestanden**, **14,581 Sekunden** |
+| Bootstrap-Regressionen | Alle **sechs** bestanden |
+| Weitere CI-Prüfungen | Rustfmt und Deno bestanden |
+
+Das CI-Artefakt trägt die ID `14441423050` und die gemeldete Größe
+**26.116.062 Bytes**. Seine Werte vor der lokalen Developer-ID-Signierung:
+
+| CI-Artefakt | SHA-256 |
+|---|---|
+| GitHub-Artefakt-ZIP | `50686dd298a20a20e514b582ea8bf686e0f450a8639b45173e8fe949bcf79f9a` |
+| App-Binärdatei | `c73e7a15a00c1db7e746e3536b4b3cff8df894dbf5f97228c9051918937a3a97` |
+
+Der lokale Signier-/Notarisierungslauf endete nach **304,76 Sekunden mit
+Exit 0**. Apple meldete **Accepted**; `stapler`, die strenge rekursive
+`codesign`-Prüfung und `spctl` bestanden. Anschließend wurde dasselbe Paket
+auf M3 übertragen und dort anhand von Hash, Signatur, Staple und Gatekeeper
+geprüft. Die Übertragung endete nach **61,17 Sekunden mit Exit 0**; der
+temporäre Transfer-Listener wurde geschlossen.
+
+| Signiertes Candidate-3-Artefakt | SHA-256 |
+|---|---|
+| Zur Notarisierung eingereichtes ZIP | `f764c4c389b4c9b16ed25a543a656be39a5248af70e3e444901a2616fbc58a10` |
+| ZIP mit angeheftetem Notarisierungsticket, 53.974.449 Bytes | `12daef86020527a26bf9d448c7d8d2edbc48e23ac90cb31d7ea810263b6153dd` |
+| Signierte App-Binärdatei | `e03a8bc3cf5a342c82037f3c3cc654743665a7477c44db5906a4fc52e97bde11` |
+
+Auf M3 wurde die vorherige GUI kontrolliert beendet und **KatoSync Beta4
+Candidate 3.app** gestartet. Die Anmeldung blieb erhalten; Agent Sync und
+der Verbindungseintrag an zweiter Navigationsposition sind sichtbar.
+Auf beiden Macs wurde die zuvor nicht vorhandene sichtbare Verknüpfung
+`~/Applications/KatoSync Beta4.app` auf den geprüften Candidate 3 angelegt.
+Ziel-Commit und signierter Binärdatei-Hash wurden vorher geprüft; keine
+bestehende App wurde überschrieben.
+
+#### Candidate-3-GUI: Verbinden, frischer Kanal und bestätigtes Trennen
+
+Der manuelle Weg **Verbindungen → Verbinden** stellte die Kontoliste und
+den Bootstrap ohne die zuvor mögliche 120-Sekunden-Wartezeit bereit.
+Angezeigt wurden sechs App-Registrierungen, die eigene und fünf weitere;
+daraus wird keine Anzahl physischer Computer abgeleitet. Die Server-Rolle
+war über den korrekt dargestellten 18-Pixel-Radiobutton auswählbar. Der
+bereits gepinnte M2-Peer wurde ausgewählt und **„Als Server bereitstellen“**
+gestartet. Es erfolgte keine neue Kopplung oder Schlüsselerzeugung.
+Die physischen Durchläufe nutzten bereits gekoppelte Geräte. Der Ablauf
+einer **frischen Anfrage und Annahme** ist dadurch nicht zusätzlich belegt.
+
+Der M2-Client verwendete dieselbe signierte Binärdatei aus exakt
+`0c85c5d010eef779b998be852e985dc7ffbac28e`:
+
+| Physischer Lauf am 18. November 2026 | Ergebnis |
+|---|---|
+| M2-Client, Beginn | **16:59:50 Uhr MEZ**, vorgesehenes 60-Sekunden-Testfenster |
+| Gesamtlaufzeit | **64,85 Sekunden** |
+| Zustände | Erkennung → Verbindungsaufbau → verbunden |
+| Kanalbeleg | **Sechs bestätigte Heartbeats** |
+| Abschluss | `MESH_BETA_STOP_CONFIRMED`, `MESH_BETA_RUNTIME_PASS_NO_REMOTE_JOBS`, **Exit 0** |
+
+Während der Client tatsächlich verbunden war, zeigte die native M3-GUI
+**„Sicher verbunden“** in Kopfzeile, Netzwerkanzeige und Runtime-Bereich.
+Nach dem Client-Ende wechselte sie automatisch zu **„Gekoppelt (lokal)“**,
+**„Noch nicht aktiv“** und **„Server wartet auf das andere Gerät“**.
+Damit blieb kein falsches grünes Live-Signal stehen.
+
+Anschließend wurde in derselben M3-GUI **„Trennen / Versuch beenden“**
+gewählt. Die Aufnahme um **17:02 Uhr MEZ** zeigt **„Bereit zum Verbinden“**,
+wieder bedienbare Rollenwahl und den erhaltenen ausgewählten M2-Peer.
+Die unabhängige Listener-Abfrage für denselben GUI-Prozess fand danach
+keinen TCP-Listener auf Port 49284. Die App bleibt geöffnet und inaktiv.
+Es wurden keine Remote-Jobs ausgeführt, keine neuen Pins angelegt und
+keine alten funktionierenden Bundles entfernt.
+
+Die sechs automatisierten Bootstrap-Regressionen prüfen die Race gezielt.
+Die native GUI-Abnahme belegt den funktionierenden manuellen Bedienweg;
+sie wird **nicht als garantierte Provokation derselben exakten
+Race-Reihenfolge** ausgegeben. Die physischen Candidate-2-Ergebnisse
+bleiben separat erhalten.
+
+### Picomatch: zurückgezogenes Advisory, Audit-Gate noch nicht grün
+
+Der historische
+[Candidate-3-Auditjob 134914998751](https://github.com/NMKato/KatoSync/actions/runs/44336630777/job/134914998751)
+meldete fünf hohe Abhängigkeitsbefunde im Picomatch-Pfad und blieb rot.
+Ein späterer Check bestätigt für
+[GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+die GitHub-Rücknahme: `withdrawn_at=2026-11-18T15:38:56Z`, entsprechend
+**16:38:56 Uhr MEZ**; der API-Titel beginnt nun mit „Withdrawn Advisory“.
+
+Genau ein anschließender lokaler `npm audit --json` auf unverändertem
+Commit `0c85c5d0` lief von **16:56:01 bis 16:56:16 Uhr MEZ**. Er endete
+weiterhin mit **Exit 1, fünf hohen Befunden, null kritischen Befunden**.
+Betroffen waren laut dieser Audit-Antwort `picomatch` sowie die abhängigen
+Pakete `fdir`, `tinyglobby`, `vite` und `@vitejs/plugin-react`; der direkte
+Hinweis verwies weiterhin auf dasselbe GHSA. Commit, `package.json`,
+`package-lock.json` und sauberer Arbeitsbaum blieben unverändert.
+
+Die Rücknahme ist eine bestätigte Upstream-Änderung; sie ist hier **kein
+behaupteter Paket-Fix und kein Audit-/Freigabe-PASS**. Der historische rote
+CI-Lauf wird nicht rückwirkend als erfolgreich markiert. Es erfolgte keine
+weitere Audit-Abfrage und kein CI-Rerun für diesen Nachweis.
 
 ## CI-Ausführung und Kosten
 
@@ -301,8 +423,15 @@ und anschließend einen bestätigten Stop. Er erlaubt keine Remote-Jobs.
 
 ## Noch getrennt abzunehmende 4.0-Ziele
 
-Agent Birth, Modell-/Runtime-Lizenzierung, dauerhafte Persona, vollständiges
+Agent Birth, Modell-/Runtime-Lizenzierung, dauerhafte Persona/Memory,
+Desktop-Widget und vollständiges
 Orchestrieren von Aufgaben, schreibende Remote-Jobs, Single-Writer-Lease,
-Billing und Windows-Installer besitzen eigene Release-Gates. Der erste
-eigene Mesh-Test schließt diese Gates nicht. Maßgeblich ist die
+Billing, Windows-Installer und Barrierefreiheit besitzen eigene Release-Gates.
+Die signierten Mesh-Kandidaten erfüllen diese Gesamtziele nicht automatisch.
+Produktive DB-/Worker-Freischaltung, echte Owner-MFA, Gerätefreigabe und
+produktiver MCP-Gerätezugriff bleiben ebenfalls getrennt abzunehmen.
+Die Roadmap-Tabelle vom 4. November ist ausdrücklich historisch; ihr
+Abgleich vom 18. November verweist für aktuelle Paket-/Gerätenachweise auf
+dieses Protokoll. Es werden keine vollständigen 4.0-Gates allein aufgrund
+der neuen Mesh-CI- oder Signaturergebnisse abgehakt. Maßgeblich ist die
 [4.0-Roadmap](KATOSYNC_4_0_AGENT_BIRTH_RELEASE_ROADMAP_2026-11-04.md).
