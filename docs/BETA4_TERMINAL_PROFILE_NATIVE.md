@@ -41,3 +41,8 @@ Im Abschnitt „Einzelnes Terminalprofil freigeben“ Projekt und Authenticator 
 Die synthetische Fixture in `src-tauri/tests/fixtures/beta4_terminal_profile_wire.json` stammt aus den produktiven Connector-Codecs. Native Tests vergleichen Argumenthash, rohe Geräte-ACK-Bytes und Signatur, Approval-/Request-JWS, signiertes Ergebnis und Ergebnis-ACK. Sie prüfen geänderte Bindungen, Ablauf, Replay, fehlende lokale Einmalfreigabe, den Abbruch während der Bestätigung und einen echten festen Git-Prozess.
 
 Der schlanke Harness unter `qa/terminal-profile-harness` kompiliert die echten Consent-, Dispatch-, Git- und Signaturmodule. Authentifizierung, Live-Registry und WSS-Grenzen sind dort absichtlich nicht verfügbar. Die vollständige Tauri-/HTTP-/WSS-Komposition, das tatsächliche Frontend und das installierbare Paket werden über den vorhandenen Beta4-Native-Package-Workflow geprüft. Ein physischer MCP-Erfolg ist erst nach Nutzer-MFA, echten Client-/Gerätefreigaben und einem signierten Live-Ergebnis belegt.
+
+
+## Verifiziertes Candidate5-Paket
+
+Der einmalige native Package-Lauf [44411213526](https://github.com/NMKato/KatoSync/actions/runs/44411213526) auf Quellstand `a806ebc2825a5548928779dbf8c9d5648b4ce88e` bestand mit **505 bestandenen, 0 fehlgeschlagenen und 8 bewusst ignorierten Tests**. Das anschließend signierte, von Apple akzeptierte und gestapelte Candidate5-Paket wurde identisch auf M2/M3 installiert und tatsächlich gestartet. [Paket- und Laufzeitnachweis](KATOSYNC_BETA4_CANDIDATE5_20261118.md) enthält die genaue Artefaktbindung und Digests. Persönliche MFA/Freigaben, App→Worker-Lesestatus und ein signierter Live-Auftrag bleiben getrennte, noch offene Abnahmeschritte.

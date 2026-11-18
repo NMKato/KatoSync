@@ -79,12 +79,18 @@ Request-ID. `remoteExecutionAllowed` und `remoteJobsEnabled` bleiben `false`.
   Challenge, Heartbeat-ACK, Auftrag und Ergebnis-ACK bestand; das native
   Ergebnis-JWS stimmt Byte für Byte mit der Connector-Fixture überein.
 
-Diese Nachweise bestätigen Quellcode und Protokollkompatibilität. Sie ersetzen
-keinen vollständigen macOS-App-Build und keinen Live-Aufruf aus ChatGPT auf einem
-freigegebenen Gerät. Für die Beta-Freigabe bleiben der gebündelte finale CI-Lauf,
-die gekoppelte Connector-/Datenbank-Bereitstellung und der echte Verbindungs- und
-Git-Status-Test mit frischer Freigabe erforderlich. Allgemeine Terminal-, CLI-
-oder Computersteuerung ist nicht Bestandteil dieser Erweiterung.
+Die oben genannten ursprünglichen Nachweise bestätigten Quellcode und
+Protokollkompatibilität. Inzwischen bestand der vollständige macOS-Package-Lauf
+für Candidate5 auf Quellstand `a806ebc` mit 505 bestandenen, 0 fehlgeschlagenen und
+8 bewusst ignorierten Tests. Das signierte und notarisierte Paket wurde auf
+M2/M3 installiert und tatsächlich gestartet; siehe
+[Candidate5-Nachweis](KATOSYNC_BETA4_CANDIDATE5_20261118.md).
+
+Der echte Verbindungs- und Git-Status-Test aus ChatGPT mit frischer persönlicher
+MFA und Client-/Gerätefreigabe bleibt offen. Der neue, gesondert freigegebene
+[Terminalprofilpfad](BETA4_TERMINAL_PROFILE_NATIVE.md) umfasst ausschließlich
+`git_version`. Allgemeine Terminal- oder Computersteuerung ist nicht Bestandteil
+dieser Erweiterungen.
 
 Quellcode:
 [Relay](../src-tauri/src/remote_mcp_relay.rs),
