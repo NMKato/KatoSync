@@ -60,12 +60,12 @@ keine Remote-Shell-, Datei- oder Git-Ausführung.
 
 | Bereich | Implementierung | Aktueller Abnahmebeleg und verbleibende Grenze |
 |---|---|---|
-| Geräte-UI | Frische Kontoliste, Auswahl, historische Registrierungen, Rollenwahl, native Zustandsanzeige | b754-App auf beiden Macs gestartet; auf M3 Workspacewahl, Agent-Sync-Dashboard und Verbindungsseite sichtbar geprüft. Vollständiger nativer Mesh-Klickpfad offen; M2-Pixelaufnahme fehlgeschlagen. |
-| Mesh-Dienst | Tatsächlicher mTLS-Socket, Heartbeat-Lease, Reconnect, Stop, Owner-Wechsel | Derselbe signierte `b754d170`-Build auf M2 Pro und M3; zwei Clientläufe mit 8/9 Heartbeats und Stop bestanden. Server-Reconnect beobachtet, aber kein Server-Gesamt-PASS. |
+| Geräte-UI | Frische Kontoliste, Auswahl, historische Registrierungen, Rollenwahl, native Zustandsanzeige | Candidate 2 auf M3: Navigation, Mesh-Karte, Radiobuttons, vorhandene Peer-Auswahl, Serverstart, Live-Anzeige und UI-Stop geprüft. Der spätere Bootstrap-Race-Fix ist noch nicht in der installierten App enthalten. |
+| Mesh-Dienst | Tatsächlicher mTLS-Socket, Heartbeat-Lease, Reconnect, Stop, Owner-Wechsel | Candidate 2: M3-GUI-Server und zwei M2-Clientläufe mit 6/3 beobachteten Heartbeats, Exit 0 und Stop; Wiederverbindung im zweiten Lauf. Die frühere b754-Abnahme einschließlich Server-Exit 5 bleibt separat dokumentiert. |
 | Sitzung | Serialisierte Tokenrotation, MFA, Logout-Sperre und Generation-Fencing | Native Tests und Logout während laufender Operation |
 | MCP-Freigabe | Owner-/Ziel-Client-Trennung, frische MFA, einmalige geprüfte Entscheidung | Echte Owner-Bestätigung; keine vorbereiteten Approved-Datensätze |
 | MCP-Präsenz | Gepinnte signierte Challenge/ACK, kurzlebige WSS-Sitzung, Widerrufsprüfung | Produktiver Worker, echte DB-Rollen und echtes freigegebenes Gerät |
-| Verpackung | Eigener signierter/notarisierter Kandidat mit geprüftem Ressourcenbestand | Developer-ID-Signatur, Apple-Notarisierung, Staple und Gatekeeper bestanden; identisches Paket auf beiden Geräten verifiziert und gestartet. Bestehende Fallbacks bleiben erhalten. |
+| Verpackung | Eigener signierter/notarisierter Kandidat mit geprüftem Ressourcenbestand | Candidate 2: Developer-ID-Signatur, Apple Accepted, Staple, codesign und spctl bestanden; dasselbe signierte Paket auf M2 und M3 geprüft und installiert. Bestehende Fallbacks bleiben erhalten. |
 
 ## Verifikation: Stand der Integration
 
@@ -113,7 +113,7 @@ bleiben historische Belege; sie ersetzen nicht den Test dieses neuen Builds.
 - Der Abhängigkeitsaudit bleibt **rot** und ein eigener erforderlicher CI-Gate. Der
   bekannte Picomatch-Befund wird nicht durch Deaktivieren des Audits übergangen.
 
-### Paketidentität des tatsächlich getesteten Builds
+### Signierte Paketidentität des physisch getesteten b754-Builds
 
 Die folgenden SHA-256-Werte gehören zum signierten, notarisierten
 `b754d170`-Kandidaten. Sie kennzeichnen keine spätere Quellcodeänderung.
@@ -141,28 +141,81 @@ wurde nicht abgeschwächt. Die erfolgreichen Clientläufe und der beobachtete
 Server-Reconnect bleiben die konkret belegten Ergebnisse. Es wurden keine
 Remote-Jobs ausgeführt oder daraus neue Ausführungsrechte abgeleitet.
 
-### Nachfolgende Korrekturen benötigen eigene Nachweise
+### Candidate 2: nativer Build, signiertes Paket und echter GUI-/Mesh-Lauf
 
-Im Arbeitsbaum nach b754 sind der enge Rust-Fix sowie die UI-Änderungen in
-`App.tsx` und `ProviderManager` angewendet. **TypeScript-Prüfung und
-Vite-Produktionsbuild bestanden** an diesem geänderten Baum: Die Prüffolge
-dauerte insgesamt **223,89 Sekunden**, der Vite-Build **6,72 Sekunden**
-bei **1.925 Modulen**. Ein neuer nativer Build liegt noch nicht vor.
+Der genaue Quellstand des zweiten Kandidaten ist
+`232822fb3ac50f51e08ab3a884d1fa4184337602`. Er enthält den engen Rust-Fix,
+die UI-Änderungen in `App.tsx` und `ProviderManager` sowie die korrigierte
+Radio-CSS-Regel. Der öffentliche
+[CI-Lauf 44327673503](https://github.com/NMKato/KatoSync/actions/runs/44327673503),
+[Job 134883261989](https://github.com/NMKato/KatoSync/actions/runs/44327673503/job/134883261989),
+bestand mit **482 bestandenen nativen Tests, 0 Fehlern und 8 ignorierten Tests**.
+TypeScript und Vite bestanden einschließlich der Radio-CSS-Korrektur.
+Der tatsächliche Tauri-App-Build dauerte **85 Sekunden**, der gesamte Job
+**217 Sekunden**.
+
+Das CI-Artefakt trägt die ID `14438505940`. Die folgenden im CI gemeldeten
+SHA-256-Werte gehören zum Paket **vor einer lokalen Developer-ID-Signierung**:
+
+| CI-Artefakt | SHA-256 |
+|---|---|
+| GitHub-Artefakt-ZIP | `2929373d906d6402599980cba55e75e3d726bff4ed7c795fc06aa167538edf35` |
+| App-Binärdatei | `0de5db2468b9b034abec627292cf934dbcdfae2eeb088b5947f8d3abbd081ca7` |
+
+Der lokale Signier-/Notarisierungslauf endete nach **288,50 Sekunden mit
+Exit 0**. Apple meldete **Accepted**; das Notarisierungsticket wurde
+angeheftet. `codesign`, `stapler` und `spctl` bestanden auf M2 und M3.
+Dasselbe Paket wurde auf beiden Macs als **KatoSync Beta4 Candidate 2.app**
+installiert. Die signierten Paket- und Geräteergebnisse von b754 bleiben
+getrennte historische Nachweise.
+
+| Signiertes Candidate-2-Artefakt | SHA-256 |
+|---|---|
+| Zur Notarisierung eingereichtes ZIP | `9a6803a2a677ba0b1cdf7b8b6dd4d364dd15d756d1d05865aa58747dcae0df1e` |
+| ZIP mit angeheftetem Notarisierungsticket, 53.974.396 Bytes | `8b0c7e446a13c6749277ea76e461598e3afcaf29f63055bf5cfe7133a77fe8b7` |
+| Signierte App-Binärdatei | `3780bc4303694e9d63b4c0d148547a2ea5132a6fe32a3c79bdcf8c608daf0c46` |
+
+#### Native M3-GUI und zwei M2-Clientläufe
+
+Auf M3 wurde die native Candidate-2-App gestartet. Der Verbindungseintrag
+an zweiter Navigationsposition, die Mesh-Karte am Anfang und die korrigierten
+Rollen-Radiobuttons wurden sichtbar geprüft. Die Kontoansicht zeigte
+**sechs App-Registrierungen: die eigene und fünf weitere Registrierungen**.
+Das ist keine Zählung von sechs physischen Computern.
+
+In der GUI wurde der vorhandene, bereits gepinnte M2-Peer ausgewählt,
+M3 als **Server** eingestellt und der native Server gestartet. Der M2
+verband sich anschließend zweimal über denselben nativen CLI-Dienst.
+Die Startzeiten am 18. November 2026 verwenden Europe/Berlin (MEZ, UTC+1).
+
+| M2-Clientlauf | Start | Gesamtdauer | Beobachtete Heartbeats | Ergebnis |
+|---|---|---:|---:|---|
+| Erster Lauf | 16:15:38 Uhr | 63,99 Sekunden | 6 | `STOP_CONFIRMED`, `RUNTIME_PASS_NO_REMOTE_JOBS`, Exit 0 |
+| Zweiter Lauf | 16:18:32 Uhr | 65,67 Sekunden | 3 | Erkennung → Verbindungsaufbau → Wiederverbinden → erneute Erkennung → Verbindungsaufbau → verbunden; `STOP_CONFIRMED`, `RUNTIME_PASS`, Exit 0 |
+
+Während der ersten Live-Verbindung zeigte die M3-GUI **„Sicher verbunden“**.
+Nach dem Ende der Gegenstelle erschien **„Server wartet“**. Der abschließende
+UI-Stop führte zu **„Bereit zum Verbinden“**; `lsof` bestätigte, dass derselbe
+GUI-Prozess danach keinen Listener auf Port 49284 mehr hielt. Für die
+Wiederverbindung im zweiten Lauf stammt der Kanalnachweis aus dem nativen
+Runtime-PASS; ein zweiter grüner Screenshot dieser Wiederverbindung liegt
+nicht vor. Es wurden **keine Remote-Jobs ausgeführt und keine neuen Pins
+angelegt**.
 
 Der Rust-Fix erhält bei der erneuten Authority-Prüfung im
 Server-Heartbeat ausschließlich den bereits typisiert klassifizierten Fehler
 `MESH_ADMISSION_AUTHORITY_UNAVAILABLE` als wiederholbar. Andere
-Berechtigungsfehler bleiben terminal und erzeugen kein ACK. Für diese
-nachfolgende Korrektur liegt hier **noch kein ausgeführter nativer
-Test-/Buildnachweis** vor; sie gehört nicht zur getesteten b754-Binärdatei.
+Berechtigungsfehler bleiben terminal und erzeugen kein ACK. Die Korrektur
+ist im erfolgreich getesteten nativen Candidate-2-Build enthalten; sie
+gehört nicht zur zuvor physisch getesteten b754-Binärdatei.
 
 Die zusätzliche UI-Korrektur ordnet den Verbindungseintrag (`agentProviders`)
-direkt nach dem Dashboard und die Mesh-/MCP-Karten an den Anfang. Trotz des
-bestandenen Web-Builds besitzt diese Änderung **noch keinen nativen Build-
-oder vollständigen GUI-Nachweis**. Die sichtbare M3-Prüfung von Workspacewahl,
-Dashboard und Verbindungsseite gehört weiterhin zur b754-App.
+direkt nach dem Dashboard und die Mesh-/MCP-Karten an den Anfang. Diese
+Anordnung ist jetzt am nativen Candidate-2-Fenster auf M3 sichtbar geprüft.
+Die früheren M3-Prüfungen von Workspacewahl, Dashboard und Verbindungsseite
+unter b754 bleiben davon getrennt.
 
-Ein historischer AB1-Source-Contract wird fachlich an die seit `c93a0ab`
+Ein historischer AB1-Source-Contract wurde fachlich an die seit `c93a0ab`
 vorhandene crate-interne `LiveTlsLease`-Brücke angepasst. Das bisherige
 pauschale Verbot auch von `pub(crate) fn` erzeugte dort einen Falschalarm.
 Die Verbote von direktem Tauri-IPC, öffentlichen `pub fn` und Transportzugriffen
@@ -177,12 +230,30 @@ vor und nach dem Lauf identisch.
 Danach wurde anhand eines tatsächlichen M3-Screenshots die globale
 Textfeldbreite für die Rollen-Radiobuttons korrigiert: Der eng begrenzte
 Radio-Selektor verwendet nun 18-Pixel-Abmessungen statt `width: 100%`.
-Diese einzelne CSS-Regel ist nach dem genannten Web-/Node-Lauf geändert
-worden; ihr Build- und visueller Nachweis folgen im nächsten Kandidaten.
+Diese einzelne CSS-Regel wurde nach dem genannten Node-Lauf geändert.
+Ihr TypeScript-/Vite- und nativer Paketbau sind durch den oben genannten
+exakten Candidate-2-Lauf belegt; die Rollen-Radiobuttons wurden anschließend
+am neuen M3-Paket sichtbar geprüft. Der frühere Node-Count wird nicht als neuer vollständiger Node-Lauf
+nach dieser CSS-Änderung ausgegeben.
+
+#### Bekannte Bootstrap-Race: späterer lokaler Fix
+
+In der installierten `232822fb`-App kann eine manuelle erste Rosterabfrage
+den noch laufenden Hintergrund-Bootstrap überholen. Ein separater lokaler
+Patch startet nach erfolgreicher aktueller Vordergrundabfrage den bestehenden
+geprüften Bootstrap-Effekt erneut; Owner-, Epoch- und Identitätsprüfungen
+bleiben erhalten. Dafür bestanden **sechs gezielte Regressionstests**.
+Nach Übernahme bestand auf dem M2 zusätzlich die gezielte Prüfung aller
+Testdateien, die diese Komponente referenzieren: **180/180 bestanden,
+0 Fehler, 0 übersprungen**, TAP-Laufzeit **20,40 Sekunden**.
+Dieser spätere Patch ist **noch nicht Bestandteil des hier signierten und
+physisch geprüften Pakets**. Er benötigt einen eigenen nativen Build und
+Gerätenachweis; die Candidate-2-Ergebnisse werden ihm nicht zugerechnet.
 
 Produktive DB-Migration, Cloudflare-Worker-Freischaltung, echte MFA- und
 Gerätefreigabe sowie der reale MCP-Gerätezugriff bleiben separate offene
-Gates. Das signierte, notarisierte und getestete b754-Paket ist keine vollständige
+Gates; der erforderliche Dependency-Audit bleibt rot. Auch das signierte,
+notarisierte und getestete Candidate-2-Paket ist damit keine vollständige
 4.0- oder Remote-MCP-Freigabe.
 
 ## CI-Ausführung und Kosten

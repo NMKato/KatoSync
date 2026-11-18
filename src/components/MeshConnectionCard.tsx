@@ -372,6 +372,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   };
   const [directory,setDirectory]=useState<MeshAccountDirectory|null>(null);
   const [agentBootstrap,setAgentBootstrap]=useState<MeshAgentBootstrapSnapshot|null>(null);
+  const [bootstrapRefreshEpoch,setBootstrapRefreshEpoch]=useState(0);
   const lastPresenceAttempt=useRef(0);
   const presenceIdentity=useRef("");
   const [nativeInboxBusy,setNativeInboxBusy]=useState(false);
@@ -621,6 +622,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     const operation=++rosterOperation.current;
     const previousDevices=directory?.devices??[];
     const previousSelection=selectedDeviceId;
+    let rosterReadSucceeded=false;
     setDirectoryBusy(true);setDirectoryError(false);setDirectoryIssue(null);
     nativePreflightOperation.current++;nativePreflightInFlight.current=false;
     setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
@@ -651,6 +653,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           setChallengeBusy(false);setChallengeError(false);
           setNativeInboxSent(null);setNativeInboxPrepared(null);
         }
+        rosterReadSucceeded=true;
       }
     }catch(cause){
       if(operation===rosterOperation.current){
@@ -663,6 +666,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     }
     finally{if(operation===rosterOperation.current){
       rosterInFlight.current=false;setDirectoryBusy(false);
+      // A foreground read can invalidate the initial bootstrap. Refresh only
+      // after success, using the same owner/epoch checks as initial load.
+      if(rosterReadSucceeded)setBootstrapRefreshEpoch(value=>value+1);
     }}
   };
   const recoverPairing=()=>{
@@ -717,7 +723,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         const rosterOperationAtStart=rosterOperation.current;
         const roster=await invoke<MeshAccountDirectory>("mesh_account_devices_list");
         // A manual discovery or account refresh invalidates this background read.
-        if(rosterOperationAtStart!==rosterOperation.current)return;
+        if(!active||rosterOperationAtStart!==rosterOperation.current)return;
         // Revalidate the identity after I/O to guard against account switching.
         const stillMe=await invoke<MeshAgentBootstrapSnapshot>("mesh_agent_bootstrap_snapshot");
         if(!active || rosterOperationAtStart!==rosterOperation.current ||
@@ -765,7 +771,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     return ()=>{active=false;if(timer!==undefined)window.clearTimeout(timer);};
     // Session checks happen inside the native command, not using a JS token.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[refreshEpoch]);
+  },[refreshEpoch,bootstrapRefreshEpoch]);
 
   const startConnectionGuide=()=>{
     setGuideOpen(true);

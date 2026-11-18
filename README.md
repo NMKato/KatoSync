@@ -35,7 +35,7 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 **Stand: 18. November 2026.** Der aktuelle Entwicklungszweig verbindet die
 vorhandene Kontoanmeldung, Geräteregistrierung und sichere Kopplung mit einem
 dauerhaft gestarteten nativen Mesh-Dienst, Rollenwahl, Reconnect und einer
-getrennten Remote-MCP-Freigabe. Der Kandidat `b754d170` wurde im
+getrennten Remote-MCP-Freigabe. Der frühere Kandidat `b754d170` wurde im
 [öffentlichen CI-Lauf](https://github.com/NMKato/KatoSync/actions/runs/44319035816)
 gebaut und getestet, lokal mit Developer ID signiert, von Apple notarisiert
 und als identisches Paket auf M2 Pro und M3 verifiziert. Zwei echte
@@ -65,13 +65,24 @@ eine exakt gebundene OAuth-Client-Freigabe, aktuelle Gerätefreigabe und echte
 native Präsenz nötig. Die neue Freigabeoberfläche führt den Owner durch die
 erforderliche frische MFA-Bestätigung.
 
-Die vollständige Mesh-GUI-Abnahme, produktive DB-/Worker-Freischaltung und
-echte MCP-/MFA-/Gerätefreigabe bleiben offen; der erforderliche
+Produktive DB-/Worker-Freischaltung und echte MCP-/MFA-/Gerätefreigabe
+bleiben offen; der erforderliche
 Abhängigkeitsaudit ist weiterhin rot. Die nachfolgenden Korrekturen für
 temporäre Authority-Fehler und einen leichter auffindbaren Verbindungseinstieg
-sind im Arbeitsbaum angewendet; TypeScript und Vite-Produktionsbuild haben
-bestanden. Ein neuer nativer Build und Gerätelauf stehen noch aus. Die
-Nachweise für `b754d170` gelten nicht automatisch für diese Änderungen.
+sind im zweiten Kandidaten `232822fb` enthalten. Sein
+[nativer CI-Paketbau](https://github.com/NMKato/KatoSync/actions/runs/44327673503)
+bestand mit **482 bestandenen, 0 fehlgeschlagenen und 8 ignorierten Tests**; TypeScript und
+Vite bestanden einschließlich der korrigierten Rollen-Radiobuttons. Der
+vorangehende Node-Lauf bestand mit **984/984 Tests**; die genaue Zuordnung
+steht im Beta-Protokoll. Candidate 2 ist inzwischen mit Developer ID signiert,
+von Apple notarisiert und als identisches Paket auf beiden Macs geprüft.
+Auf M3 wurden Navigation, Mesh-Karte, Rollenwahl und nativer Serverstart
+sichtbar geprüft. Zwei M2-Clientläufe bestanden mit sechs beziehungsweise
+drei beobachteten Heartbeats und bestätigtem Stop; der anschließende M3-UI-Stop
+gab den Listener frei. Remote-Jobs oder neue Pins wurden dabei nicht erzeugt.
+Ein separater lokaler Fix für die bekannte Race beim ersten Bootstrap besitzt
+sechs bestandene Regressionstests, ist aber **noch nicht in dieser installierten
+232822fb-App enthalten** und benötigt einen eigenen Paket-/Gerätenachweis.
 
 Die bisherigen Sicherheitsnachweise der Stages 4AG–4AM bleiben in ihren
 datierten QA-Protokollen erhalten. Quelltests, lokale Test-Sockets und frühere
