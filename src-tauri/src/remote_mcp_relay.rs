@@ -210,7 +210,7 @@ fn server_key() -> Result<(String, VerifyingKey), String> {
         .ok()
         .and_then(|v| v.try_into().ok())
         .ok_or("REMOTE_MCP_RELAY_PIN_INVALID")?;
-    if pin.kid != "katosync_beta4_relay_20261118" || URL_SAFE_NO_PAD.encode(bytes) != pin.x {
+    if pin.kid != "katosync_beta4_relay_20261118b" || URL_SAFE_NO_PAD.encode(bytes) != pin.x {
         return Err("REMOTE_MCP_RELAY_PIN_INVALID".into());
     }
     let key =
@@ -1201,10 +1201,10 @@ mod tests {
     #[test]
     fn relay_pin_is_independent_and_valid() {
         let (kid, key) = server_key().unwrap();
-        assert_eq!(kid, "katosync_beta4_relay_20261118");
+        assert_eq!(kid, "katosync_beta4_relay_20261118b");
         assert_eq!(
             URL_SAFE_NO_PAD.encode(key.as_bytes()),
-            "Xw8c0cOH1mVJ1ZApzM2dMTF64xhATfxW5TW4wtgRVYE"
+            "8AI4jpN5AdpR-mPLw51orqj2ZEymp4vIBGdU9mOLzps"
         );
     }
     #[test]
