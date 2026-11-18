@@ -40,7 +40,9 @@ test("existing locally paired selection never calls the invite-sending routine",
 test("connection status never conflates local pairing with live network or remote access",()=>{
  const source=readFileSync(new URL("../src/components/MeshConnectionCard.tsx",import.meta.url),"utf8");
  assert.match(source,/data-ready=\{locallyPaired\?"yes":"no"\}/);
- assert.equal((source.match(/data-ready="no"/g)||[]).length,2);
+ assert.equal((source.match(/data-ready="no"/g)||[]).length,1);
+ assert.match(source,/data-ready=\{liveConnected\?"yes":"no"\}/);
+ assert.match(source,/isMeshConnectionLive\(connectionSnapshot,Date\.now\(\)\)/);
  assert.match(source,/mesh\.stage4x\.notOnline/);
  assert.match(source,/mesh\.stage4x\.locked/);
  assert.match(source,/channelStillActive!==false/);

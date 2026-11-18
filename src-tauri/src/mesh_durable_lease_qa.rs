@@ -244,6 +244,80 @@ impl MeshLeaseMachine {
     }
 }
 
+// Stage4AB.2 QA bridge. These constructors are deliberately confined to the
+// internal crate (never IPC, CLI, Serialize or production feature); only the
+// pinned TLS supervisor that owns the still-open stream may call them.
+pub(crate) struct LiveTlsLease {
+    machine: MeshLeaseMachine,
+    binding: ChannelBinding,
+}
+impl LiveTlsLease {
+    pub(crate) fn after_verified_open_channel(
+        owner_id: [u8; 16],
+        local_ed25519: [u8; 32],
+        peer_ed25519: [u8; 32],
+        tls_session_nonce: [u8; 32],
+        now: Instant,
+    ) -> Result<Self, String> {
+        let binding = ChannelBinding {
+            owner_id,
+            local_ed25519,
+            peer_ed25519,
+            tls_session_nonce,
+        };
+        let mut machine = MeshLeaseMachine::default();
+        if !(machine.locally_approved()
+            && machine.begin_verification()
+            && machine.on_still_open_tls_socket(ValidatedOpenTlsSocket { binding }, now))
+        {
+            return Err("MESH_STAGE4AB2_LEASE_DENIED".to_string());
+        }
+        Ok(Self { machine, binding })
+    }
+    pub(crate) fn verified_in_channel_heartbeat(
+        &mut self,
+        sequence: u64,
+        now: Instant,
+    ) -> Result<(), String> {
+        if !self.machine.on_verified_channel_heartbeat(
+            VerifiedInChannelHeartbeat {
+                binding: self.binding,
+                sequence,
+            },
+            now,
+        ) || !self.machine.snapshot(now).live_peer_authenticated
+        {
+            return Err("MESH_STAGE4AB2_HEARTBEAT_LEASE_DENIED".to_string());
+        }
+        Ok(())
+    }
+    pub(crate) fn close(&mut self) {
+        self.machine.socket_closed();
+    }
+    // Internal QA boundary. A remote device-presence receipt is never enough
+    // to reverse these invalidations. A fresh, pinned TLS handshake plus
+    // full owner/Keychain/enrollment preflight is mandatory.
+    pub(crate) fn on_network_loss(&mut self) {
+        self.machine.network_lost();
+    }
+    pub(crate) fn on_sleep_or_wake(&mut self) {
+        self.machine.sleep_or_wake();
+    }
+    pub(crate) fn on_owner_or_peer_revoked(&mut self) {
+        self.machine.revoked_or_owner_changed();
+    }
+    pub(crate) fn is_live(&self, now: Instant) -> bool {
+        self.machine.snapshot(now).channel_still_active
+    }
+}
+
+// Fail closed on early exit after TLS stream loss, timeout or revocation.
+impl Drop for LiveTlsLease {
+    fn drop(&mut self) {
+        self.machine.socket_closed();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

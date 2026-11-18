@@ -11493,3 +11493,54 @@ button.agent-tile:hover {
  .provider-mesh-card .vision-mesh-readiness-lanes {grid-template-columns:1fr;}
  .provider-mesh-card .vision-mesh-readiness-lane {min-height:0;}
 }
+
+/* Live Mesh controls use native observations; a saved role is not connectivity. */
+.provider-mesh-card .mesh-live-connection{margin-top:16px;padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface);}
+.provider-mesh-card .mesh-live-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.provider-mesh-card .mesh-live-heading strong{font-size:14px;}
+.provider-mesh-card .mesh-live-state{margin:5px 0 0;color:var(--text-muted);font-size:13px;}
+.provider-mesh-card .mesh-live-state[data-live="yes"]{color:#22a36b;font-weight:650;}
+.provider-mesh-card .mesh-live-connection>p{font-size:12px;line-height:1.55;overflow-wrap:anywhere;}
+.provider-mesh-card .mesh-live-roles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;border:0;margin:14px 0 8px;padding:0;min-width:0;}
+.provider-mesh-card .mesh-live-roles legend{font-size:12px;font-weight:650;padding:0 0 8px;}
+.provider-mesh-card .mesh-live-roles label{display:flex;align-items:flex-start;gap:9px;border:1px solid var(--line);border-radius:11px;padding:11px;cursor:pointer;}
+.provider-mesh-card .mesh-live-roles label[data-selected="true"]{border-color:#ec8742;background:rgba(236,135,66,.07);}
+.provider-mesh-card .mesh-live-roles input{flex:none;margin-top:3px;accent-color:#ec8742;}
+.provider-mesh-card .mesh-live-roles span{display:grid;gap:5px;min-width:0;}
+.provider-mesh-card .mesh-live-roles strong{font-size:12px;line-height:1.4;}
+.provider-mesh-card .mesh-live-roles small,.provider-mesh-card .mesh-live-hint,.provider-mesh-card .mesh-live-actions small{font-size:11px;line-height:1.5;color:var(--text-muted);}
+.provider-mesh-card .mesh-live-roles:disabled label{cursor:default;opacity:.72;}
+.provider-mesh-card .mesh-live-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:13px;}
+.provider-mesh-card .mesh-live-recovery{border-top:1px solid var(--line);padding-top:12px;margin-bottom:0;}
+.provider-mesh-card .mesh-pairing-recovery{margin-top:10px;border-top:1px solid var(--line);padding-top:10px;}
+.provider-mesh-card .mesh-pairing-recovery p{font-size:12px;line-height:1.5;}
+.provider-mesh-card .vision-mesh-connected-dot{width:7px;height:7px;display:inline-block;border-radius:50%;background:#22a36b;box-shadow:0 0 0 4px rgba(34,163,107,.12);}
+.provider-mesh-card .mesh-live-connection button:focus-visible,.provider-mesh-card .mesh-live-roles input:focus-visible{outline:2px solid #ec8742;outline-offset:3px;}
+@media(max-width:760px){.provider-mesh-card .mesh-live-roles{grid-template-columns:1fr;}.provider-mesh-card .mesh-live-heading{flex-wrap:wrap;}}
+
+
+/* Explicit native owner review for the separately registered ChatGPT client. */
+.remote-mcp-owner-card{grid-column:1/-1;min-width:0;padding:20px;display:grid;gap:12px;border:1px solid var(--line);border-radius:18px;}
+.remote-mcp-owner-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.remote-mcp-owner-heading>div{display:flex;align-items:center;gap:9px;}
+.remote-mcp-owner-heading strong{font-size:15px;}
+.remote-mcp-owner-card p{margin:0;font-size:13px;line-height:1.6;}
+.remote-mcp-owner-state{font-weight:650;}
+.remote-mcp-owner-target{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);}
+.remote-mcp-owner-target dt{font-size:11px;color:var(--text-muted);margin-bottom:6px;}
+.remote-mcp-owner-target dd{margin:0;font-size:13px;overflow-wrap:anywhere;}
+.remote-mcp-owner-target dd small{display:block;margin-top:5px;font-size:10px;color:var(--text-muted);}
+.remote-mcp-owner-card .remote-mcp-owner-boundary{font-size:12px;color:var(--text-muted);}
+.remote-mcp-owner-actions{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;}
+.remote-mcp-owner-actions>label{display:grid;gap:6px;max-width:100%;font-size:12px;}
+.remote-mcp-owner-actions select{max-width:100%;min-width:0;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:inherit;}
+.remote-mcp-owner-review{display:grid;gap:10px;padding:15px;border:1px solid #ec8742;border-radius:12px;}
+.remote-mcp-owner-review label,.remote-mcp-owner-review small{font-size:12px;line-height:1.5;}
+.remote-mcp-owner-review input{box-sizing:border-box;max-width:280px;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:inherit;font-size:18px;letter-spacing:.3em;}
+.remote-mcp-owner-error{border-top:1px solid var(--line);padding-top:12px;}
+.remote-mcp-relay{display:grid;gap:10px;padding-top:15px;border-top:1px solid var(--line);}
+.remote-mcp-relay>strong{font-size:13px;}
+.remote-mcp-relay p[data-live="yes"]{color:#22a36b;font-weight:650;}
+.remote-mcp-relay small{font-size:12px;line-height:1.5;color:var(--text-muted);}
+.remote-mcp-owner-card button:focus-visible,.remote-mcp-owner-card input:focus-visible,.remote-mcp-owner-card select:focus-visible{outline:2px solid #ec8742;outline-offset:3px;}
+@media(max-width:640px){.remote-mcp-owner-target{grid-template-columns:1fr;}.remote-mcp-owner-actions{align-items:stretch;flex-direction:column;}.remote-mcp-owner-actions button{width:100%;}}

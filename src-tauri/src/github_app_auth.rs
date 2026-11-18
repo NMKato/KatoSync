@@ -59,28 +59,105 @@ fn issuer_error_code(body: &serde_json::Value) -> Option<&str> {
         .and_then(serde_json::Value::as_str)
         .or_else(|| body.get("code").and_then(serde_json::Value::as_str))
 }
-async fn fetch_katosync_identity(token: &str) -> Result<reqwest::Response, String> {
-    network()?
+/// A failed authority check never grants admission. Only typed transport
+/// failures and temporary authority HTTP statuses permit a fresh retry.
+/// Public messages remain fixed strings; request URLs, bodies and tokens are
+/// deliberately not retained in this error.
+#[derive(Debug)]
+pub(crate) enum AuthorityCheckError {
+    Unavailable(String),
+    Denied(String),
+}
+
+impl AuthorityCheckError {
+    pub(crate) fn denied(message: impl Into<String>) -> Self {
+        Self::Denied(message.into())
+    }
+
+    pub(crate) fn from_status(status: reqwest::StatusCode, message: &str) -> Self {
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            Self::Unavailable(message.to_string())
+        } else {
+            Self::Denied(message.to_string())
+        }
+    }
+
+    pub(crate) fn from_request(error: &reqwest::Error, message: &str) -> Self {
+        if error.is_timeout() || error.is_connect() {
+            Self::Unavailable(message.to_string())
+        } else if let Some(status) = error.status() {
+            Self::from_status(status, message)
+        } else {
+            Self::Denied(message.to_string())
+        }
+    }
+
+    pub(crate) fn from_session(error: &anyhow::Error, message: &str) -> Self {
+        // Token refresh preserves reqwest's typed cause through anyhow context.
+        // A Keychain, malformed-response or account error is never retried just
+        // because its text contains a network-related word.
+        let unavailable = error.chain().any(|cause| {
+            cause
+                .downcast_ref::<reqwest::Error>()
+                .is_some_and(|request| Self::from_request(request, message).is_unavailable())
+        });
+        if unavailable {
+            Self::Unavailable(message.to_string())
+        } else {
+            Self::Denied(message.to_string())
+        }
+    }
+
+    pub(crate) fn is_unavailable(&self) -> bool {
+        matches!(self, Self::Unavailable(_))
+    }
+
+    pub(crate) fn with_message(self, message: &str) -> Self {
+        if self.is_unavailable() {
+            Self::Unavailable(message.to_string())
+        } else {
+            Self::Denied(message.to_string())
+        }
+    }
+
+    pub(crate) fn into_message(self) -> String {
+        match self {
+            Self::Unavailable(message) | Self::Denied(message) => message,
+        }
+    }
+}
+
+async fn fetch_katosync_identity(token: &str) -> Result<reqwest::Response, AuthorityCheckError> {
+    network()
+        .map_err(AuthorityCheckError::denied)?
         .get(format!("{}/auth/v1/user", crate::KATOSYNC_AUTH_URL))
         .header("apikey", crate::KATOSYNC_AUTH_ANON_KEY)
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|_| "KatoSync-Sitzung nicht überprüfbar.".to_string())
+        .map_err(|error| {
+            AuthorityCheckError::from_request(&error, "KatoSync-Sitzung nicht überprüfbar.")
+        })
 }
+
 pub(crate) async fn verified_katosync_user() -> Result<String, String> {
+    verified_katosync_user_classified()
+        .await
+        .map_err(AuthorityCheckError::into_message)
+}
+
+pub(crate) async fn verified_katosync_user_classified() -> Result<String, AuthorityCheckError> {
     // Zeroize on every return path, including network failure and a refused
     // issuer identity. No secret is exposed to frontend diagnostics.
-    let mut token = zeroize::Zeroizing::new(
-        crate::ensure_supabase_access_token()
-            .await
-            .map_err(|_| "Bitte zuerst bei KatoSync anmelden.".to_string())?,
-    );
+    let mut token = zeroize::Zeroizing::new(crate::ensure_supabase_access_token().await.map_err(
+        |error| AuthorityCheckError::from_session(&error, "Bitte zuerst bei KatoSync anmelden."),
+    )?);
     let mut response = Some(fetch_katosync_identity(token.as_str()).await?);
     let status = response.as_ref().expect("issuer result").status();
 
     // Reading a 403's small structured error consumes its HTTP response.
-    // All other responses remain intact for the verified /auth/v1/user parse.
+    // A verified 403 remains denied unless its complete body says bad_jwt;
+    // a stalled or malformed forbidden response cannot turn into permission.
     let needs_refresh = if status == reqwest::StatusCode::FORBIDDEN {
         let rejected = response.take().expect("issuer 403");
         let body: Option<serde_json::Value> = rejected.json().await.ok();
@@ -93,34 +170,158 @@ pub(crate) async fn verified_katosync_user() -> Result<String, String> {
         // A parallel caller may already have replaced this rejected token.
         let replacement = crate::replace_rejected_supabase_access_token(token.as_str())
             .await
-            .map_err(|_| "Bitte KatoSync-Sitzung erneuern.".to_string())?;
+            .map_err(|error| {
+                AuthorityCheckError::from_session(&error, "Bitte KatoSync-Sitzung erneuern.")
+            })?;
         token.zeroize();
         *token = replacement;
         response = Some(fetch_katosync_identity(token.as_str()).await?);
     }
-    let response = response.ok_or("Bitte KatoSync-Sitzung erneuern.")?;
+    let response =
+        response.ok_or_else(|| AuthorityCheckError::denied("Bitte KatoSync-Sitzung erneuern."))?;
     if !response.status().is_success() {
-        return Err("Bitte KatoSync-Sitzung erneuern.".into());
+        return Err(AuthorityCheckError::from_status(
+            response.status(),
+            "Bitte KatoSync-Sitzung erneuern.",
+        ));
     }
-    let identity: SupabaseUserIdentity = response
-        .json()
-        .await
-        .map_err(|_| "Ungültige KatoSync-Benutzeridentität.".to_string())?;
+    let identity: SupabaseUserIdentity = response.json().await.map_err(|error| {
+        AuthorityCheckError::from_request(&error, "Ungültige KatoSync-Benutzeridentität.")
+    })?;
     let uid = uuid::Uuid::parse_str(&identity.id)
-        .map_err(|_| "KatoSync-Benutzerkennung ungültig.".to_string())?
+        .map_err(|_| AuthorityCheckError::denied("KatoSync-Benutzerkennung ungültig."))?
         .to_string();
     // Fail closed when the issuer changes under an already verified desktop
     // session. A parallel reauth must not silently rebind GitHub/Mesh trust.
     if let Ok(mut x) = active_user().lock() {
         if x.as_deref().is_some_and(|previous| previous != uid) {
-            return Err("KatoSync-Konto während der Prüfung gewechselt.".into());
+            return Err(AuthorityCheckError::denied(
+                "KatoSync-Konto während der Prüfung gewechselt.",
+            ));
         }
         *x = Some(uid.clone());
     } else {
-        return Err("KatoSync-Sitzung nicht überprüfbar.".into());
+        return Err(AuthorityCheckError::denied(
+            "KatoSync-Sitzung nicht überprüfbar.",
+        ));
     }
     Ok(uid)
 }
+#[cfg(test)]
+mod authority_failure_classification_tests {
+    use super::AuthorityCheckError;
+    use std::time::Duration;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    async fn response(status: u16, body: &'static str) -> reqwest::Response {
+        // Loopback-only authority fixture; never uses credentials or an issuer.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 2048];
+            stream.read(&mut request).await.unwrap();
+            let reply = format!(
+                "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(reply.as_bytes()).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap();
+        server.await.unwrap();
+        response
+    }
+
+    #[test]
+    fn only_rate_limit_and_server_failure_statuses_allow_retry() {
+        for value in 100..600 {
+            let status = reqwest::StatusCode::from_u16(value).unwrap();
+            let classified = AuthorityCheckError::from_status(status, "safe authority error");
+            assert_eq!(
+                classified.is_unavailable(),
+                value == 429 || value >= 500,
+                "HTTP {value}"
+            );
+            assert_eq!(classified.into_message(), "safe authority error");
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_context_retains_http_cause_without_retrying_verified_denial() {
+        for (status, retryable) in [(401, false), (403, false), (429, true), (503, true)] {
+            let error = response(status, "{}").await.error_for_status().unwrap_err();
+            let contextual = anyhow::Error::new(error).context("safe session refresh rejection");
+            let classified = AuthorityCheckError::from_session(&contextual, "safe auth error");
+            assert_eq!(classified.is_unavailable(), retryable, "HTTP {status}");
+            assert_eq!(classified.into_message(), "safe auth error");
+        }
+    }
+
+    #[tokio::test]
+    async fn real_connection_failure_and_timeout_remain_retryable() {
+        let reserved = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = reserved.local_addr().unwrap();
+        drop(reserved);
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let error = client
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(error.is_connect());
+        assert!(AuthorityCheckError::from_request(&error, "safe connect error").is_unavailable());
+
+        // An open listener that never sends HTTP headers produces a genuine
+        // reqwest timeout, without external DNS or timing a remote service.
+        let stalled = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = stalled.local_addr().unwrap();
+        let error = client
+            .get(format!("http://{address}/"))
+            .timeout(Duration::from_millis(50))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(error.is_timeout());
+        assert!(AuthorityCheckError::from_session(
+            &anyhow::Error::new(error).context("refresh"),
+            "safe timeout error"
+        )
+        .is_unavailable());
+        drop(stalled);
+    }
+
+    #[tokio::test]
+    async fn malformed_success_and_error_text_cannot_become_transient_authority_failures() {
+        let error = response(200, "invalid JSON")
+            .await
+            .json::<serde_json::Value>()
+            .await
+            .unwrap_err();
+        assert!(error.is_decode());
+        assert!(
+            !AuthorityCheckError::from_request(&error, "safe invalid identity").is_unavailable()
+        );
+        let invented = anyhow::anyhow!("connect timeout HTTP 503");
+        assert!(!AuthorityCheckError::from_session(&invented, "safe denial").is_unavailable());
+    }
+}
+
 #[cfg(test)]
 mod katosync_issuer_bad_jwt_retry_tests {
     use super::*;
@@ -798,6 +999,10 @@ pub(crate) fn is_same_cached_katosync_user(new_uid: &str) -> bool {
 }
 
 pub(crate) fn on_katosync_account_switch() {
+    // An explicit owner transition invalidates the live native channel before
+    // the cached identity is cleared. Same-owner token refresh does not call
+    // this hook and must not interrupt an otherwise valid connection.
+    crate::invalidate_native_owner_session();
     clear_pending();
     clear_active_user();
 }

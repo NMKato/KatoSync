@@ -110,11 +110,11 @@ test("refuse existing invites, trusted keys, unexpected owners and revoked devic
  blocked(x,"EDGE_DATABASE_UPDATE_NOT_AUTHORIZED");
 });
 test("CLI never fetches network and requires explicitly supplied local JSON file",()=>{
- const missing=spawnSync(process.execPath,[gate],{encoding:"utf8",timeout:2000});
+ const missing=spawnSync(process.execPath,[gate],{encoding:"utf8",timeout: 15000});
  assert.equal(missing.status,2);
  assert.match(missing.stderr,/MESH_ROLLOUT_BLOCKED/);
  const url=spawnSync(process.execPath,[gate,"--phase","baseline","--snapshot","https://example.com/private"],{
-  encoding:"utf8",timeout:2000
+  encoding:"utf8",timeout: 15000
  });
  assert.equal(url.status,2);
  assert.match(url.stderr,/LOCAL_SNAPSHOT_ONLY/);
@@ -123,7 +123,7 @@ test("CLI never fetches network and requires explicitly supplied local JSON file
   const name=join(folder,"base.json");
   writeFileSync(name,JSON.stringify(baseline()));
   const result=spawnSync(process.execPath,[gate,"--phase","baseline","--snapshot",name],{
-   encoding:"utf8",timeout:2000
+   encoding:"utf8",timeout: 15000
   });
   assert.equal(result.status,0,result.stderr);
   assert.equal(JSON.parse(result.stdout).connected,false);

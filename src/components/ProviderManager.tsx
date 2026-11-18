@@ -27,6 +27,7 @@ import {
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { GithubAppConnectionPanel } from "./GithubAppConnectionPanel";
 import { MeshConnectionCard } from "./MeshConnectionCard";
+import { RemoteMcpOwnerConsentCard } from "./RemoteMcpOwnerConsentCard";
 import { ProviderBrandMark } from "./ProviderBrandMark";
 import type {GithubIssueHandoff} from "../lib/githubChatHandoff";
 import { copyText } from "../lib/clipboard";
@@ -188,6 +189,7 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
           </Fragment>
         ))}
         {vm.sessionStatus.loggedIn ? <MeshConnectionCard refreshEpoch={connectionRefreshEpoch} /> : null}
+        {vm.sessionStatus.loggedIn ? <RemoteMcpOwnerConsentCard key={vm.sessionStatus.email ?? "signed-in-owner"} refreshEpoch={connectionRefreshEpoch} /> : null}
       </div>
 
       <div className="provider-info-grid">

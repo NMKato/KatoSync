@@ -7,8 +7,9 @@
 //! or writer authorization is enabled.
 
 use crate::{
-    mesh_enrollment_gate::require_both_devices_enrolled,
-    mesh_identity::{existing_identity, same_account_still_verified},
+    github_app_auth::AuthorityCheckError,
+    mesh_enrollment_gate::require_both_devices_enrolled_classified,
+    mesh_identity::{existing_identity, same_account_still_verified_classified},
     mesh_tls::DeviceTlsIdentity,
     mesh_transport,
     mesh_trust::{approved_peer_for_account, ApprovedPeer},
@@ -17,10 +18,10 @@ use ed25519_dalek::SigningKey;
 use serde::Serialize;
 use tokio::net::TcpStream;
 
-struct NativeAdmission {
-    owner_uid: String,
-    local_signing: SigningKey,
-    approved_peer: ApprovedPeer,
+pub(crate) struct NativeAdmission {
+    pub(crate) owner_uid: String,
+    pub(crate) local_signing: SigningKey,
+    pub(crate) approved_peer: ApprovedPeer,
 }
 
 fn qa_build_enabled() -> Result<(), &'static str> {
@@ -38,14 +39,22 @@ fn approval_unchanged(before: &ApprovedPeer, after: &ApprovedPeer) -> bool {
         && before.status == after.status
 }
 
-async fn authorize(requested_fingerprint: &str) -> Result<NativeAdmission, String> {
+fn authority_failure(error: AuthorityCheckError, denied_code: &'static str) -> String {
+    if error.is_unavailable() {
+        "MESH_ADMISSION_AUTHORITY_UNAVAILABLE".to_string()
+    } else {
+        denied_code.to_string()
+    }
+}
+
+pub(crate) async fn authorize(requested_fingerprint: &str) -> Result<NativeAdmission, String> {
     // Stage 2D is isolated to the explicit KATOOS Auth QA build. A stable
     // binary must not treat an unrelated legacy issuer as a Mesh owner.
     qa_build_enabled().map_err(str::to_string)?;
     // Canonical issuer identity is checked online; failure denies admission.
-    let uid = crate::github_app_auth::verified_katosync_user()
+    let uid = crate::github_app_auth::verified_katosync_user_classified()
         .await
-        .map_err(|_| "MESH_ADMISSION_LOGIN_REQUIRED".to_string())?;
+        .map_err(|error| authority_failure(error, "MESH_ADMISSION_LOGIN_REQUIRED"))?;
 
     // This is a read-only load. A missing local key must NOT be generated
     // by a transport request or accidentally overwrite a device identity.
@@ -56,12 +65,12 @@ async fn authorize(requested_fingerprint: &str) -> Result<NativeAdmission, Strin
 
     // Server-side registry must independently show both exact Ed25519 keys
     // under the verified owner, neither revoked. Discovery never grants trust.
-    require_both_devices_enrolled(&uid, &signing.verifying_key(), &peer)
+    require_both_devices_enrolled_classified(&uid, &signing.verifying_key(), &peer)
         .await
-        .map_err(|_| "MESH_ADMISSION_ENROLLMENT_REQUIRED".to_string())?;
-    same_account_still_verified(&uid)
+        .map_err(|error| authority_failure(error, "MESH_ADMISSION_ENROLLMENT_REQUIRED"))?;
+    same_account_still_verified_classified(&uid)
         .await
-        .map_err(|_| "MESH_ADMISSION_ACCOUNT_CHANGED".to_string())?;
+        .map_err(|error| authority_failure(error, "MESH_ADMISSION_ACCOUNT_CHANGED"))?;
     // No cached UI inventory is trusted after the issuer check.
     let current = approved_peer_for_account(&uid, requested_fingerprint, &signing.verifying_key())
         .map_err(|_| "MESH_ADMISSION_PEER_REVOKED".to_string())?;
@@ -75,13 +84,13 @@ async fn authorize(requested_fingerprint: &str) -> Result<NativeAdmission, Strin
     })
 }
 
-async fn recheck_after_probe(
+pub(crate) async fn recheck_after_probe(
     admitted: &NativeAdmission,
     requested_fingerprint: &str,
 ) -> Result<(), String> {
-    same_account_still_verified(&admitted.owner_uid)
+    same_account_still_verified_classified(&admitted.owner_uid)
         .await
-        .map_err(|_| "MESH_ADMISSION_ACCOUNT_CHANGED".to_string())?;
+        .map_err(|error| authority_failure(error, "MESH_ADMISSION_ACCOUNT_CHANGED"))?;
     // A rotated/replaced local Keychain identity invalidates this probe.
     let live_signing = existing_identity(&admitted.owner_uid)
         .map_err(|_| "MESH_ADMISSION_LOCAL_IDENTITY_CHANGED".to_string())?;
@@ -99,9 +108,13 @@ async fn recheck_after_probe(
     }
     // Verify neither endpoint was de-registered while the one-shot TLS probe
     // was in flight. A persistent session still needs a revocation watcher.
-    require_both_devices_enrolled(&admitted.owner_uid, &live_signing.verifying_key(), &fresh)
-        .await
-        .map_err(|_| "MESH_ADMISSION_ENROLLMENT_REVOKED".to_string())
+    require_both_devices_enrolled_classified(
+        &admitted.owner_uid,
+        &live_signing.verifying_key(),
+        &fresh,
+    )
+    .await
+    .map_err(|error| authority_failure(error, "MESH_ADMISSION_ENROLLMENT_REVOKED"))
 }
 
 /// Stage4I: explicit UI-triggered, READ-ONLY admission preflight.
@@ -290,6 +303,51 @@ mod stage4y_diagnostics_tests {
 // No real-Keychain tests here: those would mutate a live user's OS account.
 // Pure key selection/revocation cases reside in mesh_trust::tests, while the
 // synthetic TLS hardware tests remain in mesh_transport::tests.
+
+#[cfg(test)]
+mod authority_retry_tests {
+    use super::{authority_failure, AuthorityCheckError};
+    use reqwest::StatusCode;
+
+    #[test]
+    fn temporary_authority_failure_has_one_stable_code_at_each_admission_boundary() {
+        for denied in [
+            "MESH_ADMISSION_LOGIN_REQUIRED",
+            "MESH_ADMISSION_ENROLLMENT_REQUIRED",
+            "MESH_ADMISSION_ACCOUNT_CHANGED",
+            "MESH_ADMISSION_ENROLLMENT_REVOKED",
+        ] {
+            for status in [
+                StatusCode::TOO_MANY_REQUESTS,
+                StatusCode::SERVICE_UNAVAILABLE,
+            ] {
+                assert_eq!(
+                    authority_failure(
+                        AuthorityCheckError::from_status(status, "safe error"),
+                        denied
+                    ),
+                    "MESH_ADMISSION_AUTHORITY_UNAVAILABLE"
+                );
+            }
+            for status in [StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN] {
+                assert_eq!(
+                    authority_failure(
+                        AuthorityCheckError::from_status(status, "safe error"),
+                        denied
+                    ),
+                    denied
+                );
+            }
+            assert_eq!(
+                authority_failure(
+                    AuthorityCheckError::denied("revoked or invalid owner"),
+                    denied
+                ),
+                denied
+            );
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

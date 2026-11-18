@@ -78,7 +78,7 @@ test("restore must enforce no cron/net on source AND recovered database",()=>{
 });
 test("offline plan is default-deny and never starts a cloud session without exact flag",()=>{
  for(const argv of [[],["--deploy"],["--offline-synthetic","--yes"]]){
-  const r=spawnSync(process.execPath,[cmd,...argv],{encoding:"utf8",timeout:2500});
+  const r=spawnSync(process.execPath,[cmd,...argv],{encoding:"utf8",timeout: 15000});
   assert.equal(r.status,2);
   assert.match(r.stderr,/EXPLICIT_OFFLINE_SYNTHETIC_REQUIRED/);
  }

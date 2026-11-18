@@ -14,7 +14,8 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
-    mesh_identity::{fingerprint, same_account_still_verified},
+    github_app_auth::AuthorityCheckError,
+    mesh_identity::{fingerprint, same_account_still_verified_classified},
     mesh_trust::ApprovedPeer,
 };
 
@@ -119,27 +120,43 @@ pub(crate) async fn require_both_devices_enrolled(
     own: &VerifyingKey,
     approved_peer: &ApprovedPeer,
 ) -> Result<(), String> {
+    require_both_devices_enrolled_classified(owner_uid, own, approved_peer)
+        .await
+        .map_err(AuthorityCheckError::into_message)
+}
+
+pub(crate) async fn require_both_devices_enrolled_classified(
+    owner_uid: &str,
+    own: &VerifyingKey,
+    approved_peer: &ApprovedPeer,
+) -> Result<(), AuthorityCheckError> {
     if !cfg!(feature = "katoos-auth-qa") {
-        return Err("MESH_ENROLLMENT_NOT_CONFIGURED".into());
+        return Err(AuthorityCheckError::denied(
+            "MESH_ENROLLMENT_NOT_CONFIGURED",
+        ));
     }
-    let owner =
-        Uuid::parse_str(owner_uid).map_err(|_| "MESH_ENROLLMENT_WRONG_OWNER".to_string())?;
-    let peer = parse_public_key(&approved_peer.public_key).map_err(str::to_string)?;
+    let owner = Uuid::parse_str(owner_uid)
+        .map_err(|_| AuthorityCheckError::denied("MESH_ENROLLMENT_WRONG_OWNER"))?;
+    let peer = parse_public_key(&approved_peer.public_key).map_err(AuthorityCheckError::denied)?;
     if peer == *own
         || fingerprint(&peer) != approved_peer.fingerprint
         || approved_peer.status != "locally_approved"
     {
-        return Err("MESH_ENROLLMENT_PEER_NOT_APPROVED".into());
+        return Err(AuthorityCheckError::denied(
+            "MESH_ENROLLMENT_PEER_NOT_APPROVED",
+        ));
     }
     let token = Zeroizing::new(
         crate::ensure_supabase_access_token()
             .await
-            .map_err(|_| "MESH_ENROLLMENT_LOGIN_REQUIRED".to_string())?,
+            .map_err(|error| {
+                AuthorityCheckError::from_session(&error, "MESH_ENROLLMENT_LOGIN_REQUIRED")
+            })?,
     );
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(8))
         .build()
-        .map_err(|_| "MESH_ENROLLMENT_UNAVAILABLE".to_string())?;
+        .map_err(|_| AuthorityCheckError::denied("MESH_ENROLLMENT_UNAVAILABLE"))?;
     let url = format!("{}/rest/v1/mesh_devices", crate::KATOSYNC_AUTH_URL);
     let response = client
         .get(url)
@@ -153,24 +170,30 @@ pub(crate) async fn require_both_devices_enrolled(
         .bearer_auth(token.as_str())
         .send()
         .await
-        .map_err(|_| "MESH_ENROLLMENT_UNAVAILABLE".to_string())?;
+        .map_err(|error| {
+            AuthorityCheckError::from_request(&error, "MESH_ENROLLMENT_UNAVAILABLE")
+        })?;
     if !response.status().is_success() {
-        return Err("MESH_ENROLLMENT_UNAVAILABLE".into());
+        return Err(AuthorityCheckError::from_status(
+            response.status(),
+            "MESH_ENROLLMENT_UNAVAILABLE",
+        ));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|_| "MESH_ENROLLMENT_UNAVAILABLE".to_string())?;
+    let bytes = response.bytes().await.map_err(|error| {
+        AuthorityCheckError::from_request(&error, "MESH_ENROLLMENT_UNAVAILABLE")
+    })?;
     if bytes.len() > MAX_RESPONSE_BYTES {
-        return Err("MESH_ENROLLMENT_INVALID_ROSTER".into());
+        return Err(AuthorityCheckError::denied(
+            "MESH_ENROLLMENT_INVALID_ROSTER",
+        ));
     }
-    let records: Vec<EnrollmentRecord> =
-        serde_json::from_slice(&bytes).map_err(|_| "MESH_ENROLLMENT_INVALID_ROSTER".to_string())?;
+    let records: Vec<EnrollmentRecord> = serde_json::from_slice(&bytes)
+        .map_err(|_| AuthorityCheckError::denied("MESH_ENROLLMENT_INVALID_ROSTER"))?;
     validate_two_enrollments(&records, owner, own, &peer, chrono::Utc::now())
-        .map_err(str::to_string)?;
-    same_account_still_verified(owner_uid)
+        .map_err(AuthorityCheckError::denied)?;
+    same_account_still_verified_classified(owner_uid)
         .await
-        .map_err(|_| "MESH_ENROLLMENT_ACCOUNT_CHANGED".to_string())
+        .map_err(|error| error.with_message("MESH_ENROLLMENT_ACCOUNT_CHANGED"))
 }
 
 #[cfg(test)]

@@ -11,7 +11,8 @@ test("Connect opens a read-only verified account roster, Find explicitly enrolls
  const guide=view.slice(view.indexOf("const loadAccountDirectory=async("),view.indexOf("const [clipboardStatus"));
  assert.match(guide,/mode:"list"\|"discover"="discover"/);
  assert.match(guide,/mode==="list"\?"mesh_account_devices_list":"mesh_account_device_discover"/);
- assert.match(guide,/if\(!directory&&!directoryBusy\)void loadAccountDirectory\("list"\)/);
+ assert.match(guide,/if\(!directoryBusy\)void loadAccountDirectory\("list"\)/);
+ assert.doesNotMatch(guide,/if\(!directory&&!directoryBusy\)void loadAccountDirectory\("list"\)/);
  assert.match(guide,/void loadAccountDirectory\("discover"\)/);
  const actions=view.slice(view.indexOf('<div className="vision-mesh-compact-actions">'),
    view.indexOf("</div>",view.indexOf('<div className="vision-mesh-compact-actions">')));

@@ -50,6 +50,31 @@ mod mesh_native_issuer;
 mod mesh_owner_review_readback;
 mod mesh_preview_auth;
 mod mesh_private_lan_qa;
+// RC67/RC68 signed Device Presence codec, isolated to owner-authenticated QA.
+// No WebSocket/IPC/remote job is enabled by including this source module.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc67_presence_qa;
+// QA-only native Git read adapter; no IPC or MCP registration before live DO grant.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc69_readonly_qa;
+// Signed native tool.result codec; remains QA-only, with no runtime dispatcher.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc69_result_qa;
+// RC70 QA transport supervisor: outbound only, quarantined until signed DO challenge.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc70_outbound_wss_qa;
+// RC71 private RC69 DO ticket/challenge contract probe: QA only, never auto-started.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc71_rc69_ticket_qa;
+// RC72 independently pinned Connector RC70 server JWS verifier; QA only.
+#[cfg(feature = "katoos-auth-qa")]
+#[allow(dead_code)]
+mod mesh_rc72_signed_server_qa;
 mod mesh_readiness;
 mod mesh_relay_client;
 #[cfg(feature = "stage4j-qa")]
@@ -57,8 +82,186 @@ mod mesh_tailnet_qa;
 // Stage4AB.1 – internal, passive lease-state logic only. Deliberately has no
 // Tauri IPC/CLI, no long-lived socket, no runtime supervisor and no job grant.
 #[cfg(feature = "stage4j-qa")]
+mod mesh_clock_gap_qa;
+#[cfg(feature = "stage4j-qa")]
 #[allow(dead_code)]
 mod mesh_durable_lease_qa;
+#[cfg(feature = "stage4j-qa")]
+mod mesh_live_supervisor_qa;
+
+// User-triggered private-beta session commands. Stable builds keep a deny
+// response and never compile or start the private networking service.
+#[tauri::command]
+async fn mesh_connection_start(
+    peer_fingerprint: String,
+    role: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        use mesh_live_supervisor_qa::runtime::{self, ConnectionRole};
+        let role = match role.as_str() {
+            "server" => ConnectionRole::Server,
+            "client" => ConnectionRole::Client,
+            _ => return Err("MESH_CONNECTION_INVALID_ROLE".into()),
+        };
+        serde_json::to_value(runtime::mesh_connection_start(peer_fingerprint, role).await?)
+            .map_err(|_| "MESH_CONNECTION_STATE_UNAVAILABLE".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (peer_fingerprint, role);
+        Err("MESH_CONNECTION_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn mesh_connection_stop() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(mesh_live_supervisor_qa::runtime::mesh_connection_stop().await?)
+            .map_err(|_| "MESH_CONNECTION_STATE_UNAVAILABLE".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("MESH_CONNECTION_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+fn mesh_connection_status() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(mesh_live_supervisor_qa::runtime::mesh_connection_status()?)
+            .map_err(|_| "MESH_CONNECTION_STATE_UNAVAILABLE".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("MESH_CONNECTION_NOT_CONFIGURED".into())
+    }
+}
+
+#[cfg(feature = "stage4j-qa")]
+mod remote_mcp_owner_review;
+#[cfg(feature = "stage4j-qa")]
+mod remote_mcp_relay;
+
+#[tauri::command]
+async fn remote_mcp_owner_snapshot() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(remote_mcp_owner_review::remote_mcp_owner_snapshot().await?)
+            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_owner_request_client() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(remote_mcp_owner_review::remote_mcp_owner_request_client().await?)
+            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_owner_prepare_decision(
+    action: String,
+    grant_id: String,
+    expected_revision: String,
+    factor_id: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        let action = serde_json::from_value(serde_json::Value::String(action))
+            .map_err(|_| "REMOTE_MCP_ACTION_INVALID".to_string())?;
+        serde_json::to_value(
+            remote_mcp_owner_review::remote_mcp_owner_prepare_decision(
+                action,
+                grant_id,
+                expected_revision,
+                factor_id,
+            )
+            .await?,
+        )
+        .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (action, grant_id, expected_revision, factor_id);
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_owner_confirm_decision(
+    review_id: String,
+    code: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(
+            remote_mcp_owner_review::remote_mcp_owner_confirm_decision(review_id, code).await?,
+        )
+        .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (review_id, code);
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+fn remote_mcp_owner_cancel_review(review_id: String) -> Result<(), String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        remote_mcp_owner_review::remote_mcp_owner_cancel_review(review_id)
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = review_id;
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_relay_start() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(remote_mcp_relay::remote_mcp_relay_start().await?)
+            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_relay_stop() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(remote_mcp_relay::remote_mcp_relay_stop().await)
+            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+fn remote_mcp_relay_status() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(remote_mcp_relay::remote_mcp_relay_status())
+            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.
 #[allow(dead_code)]
@@ -123,6 +326,25 @@ static SUPABASE_ACCESS_TOKEN_CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::
 // inside this process. GoTrue refresh grants are single-use, so two concurrent
 // requests must never exchange or overwrite different rotated refresh tokens.
 static SUPABASE_SESSION_TRANSITION_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+static SUPABASE_LOGOUT_PENDING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static SUPABASE_SESSION_REVISION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+pub(crate) fn native_owner_session_generation() -> u64 {
+    SUPABASE_SESSION_REVISION.load(std::sync::atomic::Ordering::Acquire)
+}
+pub(crate) fn invalidate_native_owner_session() {
+    SUPABASE_SESSION_REVISION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    #[cfg(feature = "stage4j-qa")]
+    mesh_live_supervisor_qa::runtime::invalidate_owner_session();
+    #[cfg(feature = "stage4j-qa")]
+    remote_mcp_relay::invalidate_owner_session();
+}
+#[cfg(feature = "stage4j-qa")]
+mod remote_mcp_mfa;
+#[cfg(feature = "stage4j-qa")]
+pub(crate) use remote_mcp_mfa::verify_remote_mcp_totp_native;
+
 fn supabase_session_transition_lock() -> &'static tokio::sync::Mutex<()> {
     SUPABASE_SESSION_TRANSITION_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
@@ -327,6 +549,30 @@ pub struct LaunchAgentStatus {
 }
 
 pub fn run() {
+    // The same user-started runtime as the UI, bounded to five minutes.
+    // Public fingerprint only; no private key, token, or remote command input.
+    if env::args().nth(1).as_deref() == Some("--mesh-beta-session") {
+        #[cfg(feature = "stage4j-qa")]
+        {
+            let args = env::args().skip(2).collect();
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| "MESH_CONNECTION_RUNTIME_UNAVAILABLE".to_string())
+                .and_then(|rt| rt.block_on(mesh_live_supervisor_qa::runtime::run_smoke(args)));
+            if let Err(error) = result {
+                eprintln!("{error}");
+                std::process::exit(5);
+            }
+            return;
+        }
+        #[cfg(not(feature = "stage4j-qa"))]
+        {
+            eprintln!("MESH_CONNECTION_NOT_CONFIGURED");
+            std::process::exit(5);
+        }
+    }
+
     // Stage4AA: distinct QA-only tailnet mTLS proof, *not* the Stage4W LAN
     // route. Requires BOTH dedicated owner opt-ins, existing mutual Keychain
     // pins, owner enrollment and an authenticated online Tailscale overlay.
@@ -556,6 +802,18 @@ pub fn run() {
             mesh_readiness::mesh_local_readiness,
             mesh_native_issuer::mesh_native_issuer_readiness,
             mesh_admission::mesh_native_peer_preflight,
+            mesh_connection_start,
+            mesh_connection_stop,
+            mesh_connection_status,
+            remote_mcp_owner_snapshot,
+            remote_mcp_owner_request_client,
+            remote_mcp_owner_prepare_decision,
+            remote_mcp_owner_confirm_decision,
+            remote_mcp_owner_cancel_review,
+            remote_mcp_relay_start,
+            remote_mcp_relay_stop,
+            remote_mcp_relay_status,
+
             mesh_private_lan_qa::mesh_private_lan_listen_once_qa,
             mesh_private_lan_qa::mesh_private_lan_connect_once_qa,
             mesh_katoos_shared_preflight::mesh_katoos_shared_preflight,
@@ -979,10 +1237,17 @@ async fn login_supabase(email: String, password: String) -> Result<SupabaseSessi
     {
         return Err("KATOOS_QA_REAUTH_ACCOUNT_MISMATCH".into());
     }
+    let generation = native_owner_session_generation();
     let _session_guard = supabase_session_transition_lock().lock().await;
+    if generation != native_owner_session_generation() {
+        return Err("KATOOS_SESSION_CHANGED".into());
+    }
     let session = supabase_password_login(email_trim, &password)
         .await
         .map_err(error_to_string)?;
+    if generation != native_owner_session_generation() {
+        return Err("KATOOS_SESSION_CHANGED".into());
+    }
     if !cfg!(feature = "katoos-auth-qa") || existing_email.is_none() {
         github_app_auth::on_katosync_account_switch();
     }
@@ -1051,7 +1316,11 @@ async fn renew_katoos_qa_session(
     let pass = zeroize::Zeroizing::new(password);
     // Reauthentication takes the same lock as refresh. Otherwise a refresh
     // started earlier may overwrite the newly signed-in device session.
+    let generation = native_owner_session_generation();
     let _session_guard = supabase_session_transition_lock().lock().await;
+    if generation != native_owner_session_generation() {
+        return Err("KATOOS_SESSION_CHANGED".into());
+    }
     let session = tokio::time::timeout(
         std::time::Duration::from_secs(15),
         supabase_password_login(entered, &pass),
@@ -1096,6 +1365,9 @@ async fn renew_katoos_qa_session(
     }
     // Store only AFTER live issuer verification. No GitHub logout/purge and no
     // token sent back to the frontend. Failed logins preserve the existing session.
+    if generation != native_owner_session_generation() {
+        return Err("KATOOS_SESSION_CHANGED".into());
+    }
     save_supabase_refresh_token(&new_refresh)
         .map_err(|_| "KATOOS_QA_REAUTH_KEYCHAIN_FAILED".to_string())?;
     cache_supabase_access_token(Some(new_access.to_string()));
@@ -1211,13 +1483,19 @@ async fn verified_katoos_identity_badge() -> Result<KatoosIdentityBadge, String>
 }
 
 #[tauri::command]
-fn logout_supabase() -> Result<SupabaseSessionStatus, String> {
+async fn logout_supabase() -> Result<SupabaseSessionStatus, String> {
+    SUPABASE_LOGOUT_PENDING.store(true, std::sync::atomic::Ordering::Release);
+    // Fence pending native operations immediately, then serialize credential
+    // deletion with any in-flight refresh/MFA/password exchange.
+    invalidate_native_owner_session();
+    let _session_guard = supabase_session_transition_lock().lock().await;
     github_app_auth::purge_local_credentials();
     if let Ok(entry) = supabase_session_keychain_entry() {
         let _ = entry.delete_credential();
     }
     cache_supabase_access_token(None);
     let _ = remove_supabase_session_email();
+    SUPABASE_LOGOUT_PENDING.store(false, std::sync::atomic::Ordering::Release);
     Ok(SupabaseSessionStatus {
         logged_in: false,
         email: None,
@@ -5574,6 +5852,9 @@ fn supabase_access_token_cache() -> &'static Mutex<Option<String>> {
 }
 
 fn cached_supabase_access_token() -> Option<String> {
+    if SUPABASE_LOGOUT_PENDING.load(std::sync::atomic::Ordering::Acquire) {
+        return None;
+    }
     supabase_access_token_cache()
         .lock()
         .ok()
@@ -5711,12 +5992,16 @@ async fn supabase_refresh_session(refresh_token: &str) -> Result<SupabaseTokenRe
         .await?;
 
     let status = response.status();
-    let text = response.text().await?;
     if !status.is_success() {
-        return Err(anyhow!(
-            "KatoOS-Sitzung abgelaufen ({status}). Bitte neu anmelden."
-        ));
+        let message = format!("KatoOS-Sitzung abgelaufen ({status}). Bitte neu anmelden.");
+        // Keep the typed HTTP cause so Mesh can distinguish temporary 429/5xx
+        // from a verified 401/403 without parsing translated error strings.
+        return Err(match response.error_for_status_ref().err() {
+            Some(error) => anyhow::Error::new(error).context(message),
+            None => anyhow!(message),
+        });
     }
+    let text = response.text().await?;
     serde_json::from_str(&text).map_err(Into::into)
 }
 
@@ -5724,10 +6009,17 @@ async fn supabase_refresh_session(refresh_token: &str) -> Result<SupabaseTokenRe
 // Caller MUST hold SUPABASE_SESSION_TRANSITION_LOCK. Persist the new refresh
 // grant before exposing the access token. A failed Keychain write is NOT success.
 async fn refresh_supabase_session_under_lock() -> Result<String> {
+    if SUPABASE_LOGOUT_PENDING.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(anyhow!("KATOOS_SESSION_CHANGED"));
+    }
+    let generation = native_owner_session_generation();
     let refresh = zeroize::Zeroizing::new(load_supabase_refresh_token()?);
     let session = supabase_refresh_session(refresh.as_str()).await?;
     let access = zeroize::Zeroizing::new(session.access_token);
     let rotated = zeroize::Zeroizing::new(session.refresh_token);
+    if generation != native_owner_session_generation() {
+        return Err(anyhow!("KATOOS_SESSION_CHANGED"));
+    }
     save_supabase_refresh_token(rotated.as_str())
         .context("Erneuerte KATOOS-Sitzung konnte nicht im Schlüsselbund gespeichert werden.")?;
     cache_supabase_access_token(Some(access.to_string()));
@@ -5737,6 +6029,9 @@ async fn refresh_supabase_session_under_lock() -> Result<String> {
 // Read-after-lock avoids repeated or concurrent refresh calls against a
 // single-use token, and ensures an explicit account login wins over old refreshes.
 async fn ensure_supabase_access_token() -> Result<String> {
+    if SUPABASE_LOGOUT_PENDING.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(anyhow!("KATOOS_SESSION_CHANGED"));
+    }
     if let Some(token) = cached_supabase_access_token() {
         return Ok(token);
     }

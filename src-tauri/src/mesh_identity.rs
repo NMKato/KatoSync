@@ -182,9 +182,19 @@ pub(crate) fn verify_offer(
 }
 
 pub(crate) async fn same_account_still_verified(uid: &str) -> Result<(), String> {
-    let current = crate::github_app_auth::verified_katosync_user().await?;
+    same_account_still_verified_classified(uid)
+        .await
+        .map_err(crate::github_app_auth::AuthorityCheckError::into_message)
+}
+
+pub(crate) async fn same_account_still_verified_classified(
+    uid: &str,
+) -> Result<(), crate::github_app_auth::AuthorityCheckError> {
+    let current = crate::github_app_auth::verified_katosync_user_classified().await?;
     if current != uid {
-        return Err("KatoSync-Konto während der Geräteprüfung gewechselt.".to_string());
+        return Err(crate::github_app_auth::AuthorityCheckError::denied(
+            "KatoSync-Konto während der Geräteprüfung gewechselt.",
+        ));
     }
     Ok(())
 }

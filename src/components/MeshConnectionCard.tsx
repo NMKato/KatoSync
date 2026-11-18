@@ -15,6 +15,8 @@ import {matchEasyRelayMessage,canQuickApproveSameCode,validEasyMeshSession,
 import {EASY_RELAY_POLL_MS,canPollEasyMeshRelay} from "../lib/meshRelayFlowPolicy4U";
 import {deriveLocalPairingStatus} from "../lib/meshPairingStatus4V";
 import {canSelectLocallyApprovedPeerForQa} from "../lib/meshPairedSelection4X";
+import {MeshLiveConnectionPanel} from "./MeshLiveConnectionPanel";
+import {isMeshConnectionLive,retainedMeshSelection,type MeshConnectionSnapshot} from "../lib/meshConnectionState";
 
 function relativeTime(value: string | null | undefined, lang: string): string | null {
   if (!value) return null;
@@ -224,6 +226,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
   const [guideOpen,setGuideOpen]=useState(import.meta.env.VITE_MESH_EASY_PAIR_QA==="1");
   const [easyAdvancedOpen,setEasyAdvancedOpen]=useState(false);
   const [selectedDeviceId,setSelectedDeviceId]=useState<string|null>(null);
+  const [connectionSnapshot,setConnectionSnapshot]=useState<MeshConnectionSnapshot|null>(null);
   // Stage4W: opt-in engineering QA, never automatic pairing/remote execution.
   const [lanQaLocalIp,setLanQaLocalIp]=useState("");
   const [lanQaPeerIp,setLanQaPeerIp]=useState("");
@@ -559,6 +562,8 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     const own=directory?.devices.find(d=>d.fingerprint===agentBootstrap?.fingerprint);
     const peer=directory?.devices.find(d=>d.deviceId===targetDeviceId&&
       d.fingerprint!==agentBootstrap?.fingerprint);
+    if(approvedPeers===null||approvedPeers.some(pin=>
+      pin.status==="locally_approved"&&pin.fingerprint===peer?.fingerprint))return;
     if(easyEnabled&&(!own||!peer||own.deviceId===peer.deviceId))return;
     inboxInFlight.current=true;
     const operation=++inboxOperation.current;
@@ -614,14 +619,11 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     if(rosterInFlight.current)return;
     rosterInFlight.current=true;
     const operation=++rosterOperation.current;
-    setDirectoryBusy(true);setDirectoryError(false);setDirectoryIssue(null);setDirectory(null);
-    setSelectedDeviceId(null);
+    const previousDevices=directory?.devices??[];
+    const previousSelection=selectedDeviceId;
+    setDirectoryBusy(true);setDirectoryError(false);setDirectoryIssue(null);
     nativePreflightOperation.current++;nativePreflightInFlight.current=false;
     setNativePreflight(null);setNativePreflightError(false);setNativePreflightBusy(false);
-    setNativeInboxPrepared(null);setNativeInboxError(false);setNativeInboxSent(null);setRecipientInbox(null);setRecipientDecision(null);
-    resetRelay();
-    challengeOperation.current++;challengeInFlight.current=false;
-    setAcceptedInboxOffer(null);setAcceptedChallenge(null);setChallengeBusy(false);setChallengeError(false);
     try{
       // Opening the guide only READS the signed-in account's existing roster.
       // The explicit "Find devices" button alone performs enrollment.
@@ -630,11 +632,26 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       if(roster.accountVerified!==true || roster.discoveryOnly!==true ||
          roster.transportReady!==false || roster.remoteJobsEnabled!==false ||
          !Array.isArray(roster.devices) || roster.devices.length>10 ||
-         roster.devices.some(d=>!d.deviceId||!d.displayName||!d.fingerprint||
+         roster.devices.some(d=>!d.deviceId||!d.ownerUserId||!d.displayName||!d.fingerprint||
            !["macos","windows","linux"].includes(d.platformOs)||
            !["discovered","pending","trusted","revoked"].includes(d.membershipState)))
         throw new Error("invalid_directory_contract");
-      if(operation===rosterOperation.current)setDirectory(roster);
+      if(operation===rosterOperation.current){
+        const retained=retainedMeshSelection({selectedId:previousSelection,
+          previous:previousDevices,next:roster.devices,
+          ownFingerprint:agentBootstrap?.fingerprint??null});
+        setDirectory(roster);
+        setSelectedDeviceId(retained);
+        // A read refresh never restarts a signed handshake. Only a changed
+        // account/key or removed/revoked participant invalidates that attempt.
+        if(easySession&&(!retained||retained!==easySession.peerDeviceId)){
+          resetRelay();
+          challengeOperation.current++;challengeInFlight.current=false;
+          setAcceptedInboxOffer(null);setAcceptedChallenge(null);
+          setChallengeBusy(false);setChallengeError(false);
+          setNativeInboxSent(null);setNativeInboxPrepared(null);
+        }
+      }
     }catch(cause){
       if(operation===rosterOperation.current){
         const code=String(cause);
@@ -647,6 +664,21 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     finally{if(operation===rosterOperation.current){
       rosterInFlight.current=false;setDirectoryBusy(false);
     }}
+  };
+  const recoverPairing=()=>{
+    if(nativeInboxBusy||recipientBusy||relayBusy||pairingBusy||directoryBusy)return;
+    inboxOperation.current++;inboxInFlight.current=false;
+    recipientOperation.current++;recipientInFlight.current=false;
+    challengeOperation.current++;challengeInFlight.current=false;
+    resetRelay();
+    setNativeInboxError(false);setNativeInboxSent(null);setNativeInboxPrepared(null);
+    setRecipientDecision(null);setRecipientError(false);
+    setAcceptedInboxOffer(null);setAcceptedChallenge(null);
+    setChallengeError(false);setChallengeBusy(false);
+    // Existing invitations expire server-side; no remote cancellation or new
+    // trust is claimed. Recheck the roster/inbox before another explicit send.
+    void loadAccountDirectory("list");
+    void loadRecipientInbox(true);
   };
   // Stage 3.5: authenticated first-start auto-introduction, read-only roster refresh.
   // Never enroll silently, accept an invitation, connect TLS or transmit job data.
@@ -737,7 +769,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
 
   const startConnectionGuide=()=>{
     setGuideOpen(true);
-    if(!directory&&!directoryBusy)void loadAccountDirectory("list");
+    if(!directoryBusy)void loadAccountDirectory("list");
   };
   const discoverDevices=()=>{
     setGuideOpen(true);
@@ -1346,6 +1378,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     crossDeviceWrites:snapshot?.crossDeviceWrites??null
   });
   const locallyPaired=pairingStatus==="locally_paired";
+  const liveConnected=isMeshConnectionLive(connectionSnapshot,Date.now());
   const renderRegistration=(device:MeshAccountDevice)=>{
     const lastSeen=Date.parse(device.lastSeenAt??"");
     const recent=Number.isFinite(lastSeen)&&lastSeen<=Date.now()+5*60_000&&
@@ -1368,7 +1401,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     return <button type="button"
     className="vision-mesh-guide-device" key={device.deviceId}
     data-selected={selectedDeviceId===device.deviceId}
-    disabled={directoryBusy||nativeInboxBusy||recipientBusy||lanQaBusy||
+    disabled={directoryBusy||directoryError||nativeInboxBusy||recipientBusy||lanQaBusy||
       (easyEnabled&&!canRequest&&!canSelectPinned)}
     onClick={()=>{
       nativePreflightOperation.current++;nativePreflightInFlight.current=false;
@@ -1403,13 +1436,14 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           <strong>{t("mesh.simple.title")}</strong>
           <span className="vision-mesh-compact-state"
             data-pairing-status={pairingStatus}>
-            <span className={locallyPaired?"vision-mesh-locally-paired-dot":"vision-mesh-offline-dot"}/>
-            {error?t("mesh.simple.unavailable"):
+            <span className={liveConnected?"vision-mesh-connected-dot":locallyPaired?"vision-mesh-locally-paired-dot":"vision-mesh-offline-dot"}/>
+            {liveConnected?t("mesh.connection.state.connected"):error?t("mesh.simple.unavailable"):
               locallyPaired?t("mesh.status.locallyPaired"):
               pairingStatus==="checking"?t("mesh.status.checking"):
               t("mesh.simple.disconnected")}
           </span>
-          <small>{locallyPaired?t("mesh.status.noTransport"):t("mesh.simple.noPeers")}</small>
+          <small>{liveConnected?t("mesh.connection.scope"):
+            locallyPaired?t("mesh.status.noTransport"):t("mesh.simple.noPeers")}</small>
         </div>
         <button type="button" className="ghost compact-button mesh-status-refresh"
           aria-label={t("connections.refreshMesh")} title={t("connections.refreshMesh")}
@@ -1423,9 +1457,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
           <RefreshCcw size={15} className={directoryBusy?"spin":""}/>
           {t("mesh.directory.refresh")}
         </button>
-        {!easyEnabled?<button type="button" className="primary compact-button"
-          disabled={pairingBusy||!snapshot}
-          onClick={startConnectionGuide}>{t("mesh.simple.connect")}</button>:null}
+        <button type="button" className="primary compact-button"
+          disabled={pairingBusy||directoryBusy||!snapshot}
+          onClick={startConnectionGuide}>{t("mesh.simple.connect")}</button>
         <button type="button" className="ghost compact-button" aria-expanded={detailsOpen}
           aria-controls="vision-mesh-technical-details"
           onClick={()=>setDetailsOpen(value=>!value)}>{t("mesh.simple.details")}</button>
@@ -1437,10 +1471,10 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <strong>{t(locallyPaired?"mesh.stage4x.paired":"mesh.stage4x.notPaired")}</strong>
         <small>{t("mesh.stage4x.localHint")}</small>
       </div>
-      <div className="vision-mesh-readiness-lane" data-ready="no">
+      <div className="vision-mesh-readiness-lane" data-ready={liveConnected?"yes":"no"}>
         <span className="vision-mesh-readiness-step">02 · {t("mesh.stage4x.tunnel")}</span>
-        <strong>{t("mesh.stage4x.notOnline")}</strong>
-        <small>{t("mesh.stage4x.tunnelHint")}</small>
+        <strong>{t(liveConnected?"mesh.connection.state.connected":"mesh.stage4x.notOnline")}</strong>
+        <small>{t(liveConnected?"mesh.connection.freshHeartbeat":"mesh.stage4x.tunnelHint")}</small>
       </div>
       <div className="vision-mesh-readiness-lane" data-ready="no">
         <span className="vision-mesh-readiness-step">03 · {t("mesh.stage4x.control")}</span>
@@ -1448,6 +1482,16 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         <small>{t("mesh.stage4x.controlHint")}</small>
       </div>
     </section>
+    <MeshLiveConnectionPanel enabled={lanQaEnabled}
+      peerFingerprint={selectedDevice?.fingerprint??null}
+      peerName={selectedDevice?displayRegistrationName(selectedDevice):null}
+      peerLabels={(directory?.devices??[]).map(device=>({fingerprint:device.fingerprint,name:displayRegistrationName(device)}))}
+      ownFingerprint={agentBootstrap?.fingerprint??null}
+      canStart={!directoryBusy&&!directoryError&&!pairingBusy&&!easySession&&
+        canSelectLocallyApprovedPeerForQa({enabled:lanQaEnabled,peer:selectedDevice,
+          approvedPeers,ownFingerprint:agentBootstrap?.fingerprint??null})}
+      preferredServer={hubPreference?.preferred??false} refreshEpoch={refreshEpoch}
+      onSnapshot={setConnectionSnapshot}/>
     {agentBootstrap?<div className="vision-mesh-compact-notice" role="status">
       <strong>{t("mesh.agent35.identity",{name:agentBootstrap.agentName})}</strong>
       <small>{t("mesh.agent35.hardware",{
@@ -1460,7 +1504,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
         presentation?.registeredPeers?
           t("mesh.agent35.accountRecords",{count:presentation.registeredPeers}):
           t("mesh.agent35.noColleagues")}</small>
-      <small>{t(locallyPaired?"mesh.status.helloBlocked":"mesh.agent35.pendingTrust")}</small>
+      <small>{liveConnected?t("mesh.connection.scope"):t(locallyPaired?"mesh.status.helloBlocked":"mesh.agent35.pendingTrust")}</small>
     </div>:null}
     {offer?<div className="vision-mesh-compact-notice" role="status">
       <span>{t("mesh.simple.offerReady")}</span>
@@ -1488,7 +1532,7 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       aria-label={t("mesh.guide.heading")}>
       <div className="vision-mesh-guide-heading">
         <strong>{t(easyEnabled?"mesh.easy.title":"mesh.guide.heading")}</strong>
-        <small>{t(locallyPaired?"mesh.status.locallyPaired":"mesh.guide.notConnected")}</small>
+        <small>{t(liveConnected?"mesh.connection.state.connected":locallyPaired?"mesh.status.locallyPaired":"mesh.guide.notConnected")}</small>
       </div>
       <p>{t(easyEnabled?"mesh.easy.description":"mesh.guide.description")}</p>
       {easyEnabled?<div className="vision-mesh-simple-steps"
@@ -1538,11 +1582,18 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
            {!selectedDevice||selectedDevice.fingerprint!==relayProof.fingerprint?
              <p role="alert" className="vision-mesh-warning">{t("mesh.easy.peerNotVerified")}</p>:null}
          </div>:
-         locallyPaired||easyStage==="approved"?<p>{t("mesh.easy.approvedLocalOnly")}</p>:
+         locallyPaired||easyStage==="approved"?<p>{t(liveConnected?"mesh.connection.state.connected":"mesh.easy.approvedLocalOnly")}</p>:
          easyStage==="expired"?<p>{t("mesh.easy.expired")}</p>:
          easyStage==="error"?<p role="alert">{t("mesh.easy.failed")}</p>:
          <p>{t("mesh.easy.ready")}</p>}
-        <small>{t("mesh.easy.noTransport")}</small>
+        <small>{t(liveConnected?"mesh.connection.scope":"mesh.easy.noTransport")}</small>
+        {easyStage==="error"||easyStage==="expired"||nativeInboxError||recipientError?
+          <div className="mesh-pairing-recovery">
+            <p>{t("mesh.connection.pairingRecoveryHint")}</p>
+            <button type="button" className="ghost compact-button"
+              disabled={nativeInboxBusy||recipientBusy||relayBusy||pairingBusy||directoryBusy}
+              onClick={recoverPairing}>{t("mesh.connection.checkRequests")}</button>
+          </div>:null}
         <button type="button" className="ghost compact-button vision-mesh-easy-advanced-toggle"
           aria-expanded={easyAdvancedOpen} onClick={()=>setEasyAdvancedOpen(v=>!v)}>
           {t("mesh.easy.advanced")}
@@ -1551,21 +1602,17 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
     <section className="vision-mesh-account-directory" aria-label={t("mesh.directory.heading")}>
       <div className="vision-mesh-directory-heading">
         <strong>{t(easyEnabled?"mesh.easy.devices":"mesh.directory.heading")}</strong>
-        <span className="vision-mesh-directory-note">{t("mesh.simple.discoveryStatus")}</span>
+        <span className="vision-mesh-directory-note">{t(liveConnected?"mesh.connection.state.connected":"mesh.simple.discoveryStatus")}</span>
       </div>
       {!easyEnabled?<p>{t("mesh.directory.notice")}</p>:null}
       {directory===null&&!directoryBusy&&!directoryError?
         <p>{t("mesh.guide.notLoaded")}</p>:null}
       {directoryBusy?<p role="status">{t("mesh.guide.loading")}</p>:null}
       {directory?.devices.length===0?<p role="status">{t("mesh.directory.empty")}</p>:null}
-      {directory?(easyEnabled?
-        <details className="vision-mesh-older-registrations vision-mesh-directory-meta">
-          <summary>{t("mesh.easy.accountInfo")}</summary>
-          <p>{t("mesh.directory.identityCount",{count:presentation?.totalIdentities??directory.devices.length})}</p>
-        </details>:
+      {directory?
         <p className="vision-mesh-registration-summary" role="status">
-          {t("mesh.directory.identityCount",{count:presentation?.totalIdentities??directory.devices.length})}
-        </p>):null}
+          {t("mesh.connection.accountSummary",{count:presentation?.totalIdentities??directory.devices.length})}
+        </p>:null}
       {presentation?<>
         {presentation.own?<div className="vision-mesh-own-registration">
           <strong>{t("mesh.directory.own")}</strong>
@@ -1588,7 +1635,9 @@ export function MeshConnectionCard({refreshEpoch=0}:{refreshEpoch?:number}) {
       {manualMeshControls&&selectedDevice?<div className="vision-mesh-guide-target" role="group"
         aria-label={t("mesh.guide.target")}>
         <strong>{selectedDevice.personaName||selectedDevice.displayName}</strong>
-        {selectedDevice.membershipState==="discovered"&&qaAuthEnabled?
+        {approvedPeers?.some(pin=>pin.fingerprint===selectedDevice.fingerprint&&pin.status==="locally_approved")?
+          <small>{t("mesh.stage4x.alreadyPaired")}</small>:
+          selectedDevice.membershipState==="discovered"&&qaAuthEnabled?
           inboxSendEnabled?
             <button type="button" className="primary compact-button"
               disabled={nativeInboxBusy||directoryBusy||recipientBusy||

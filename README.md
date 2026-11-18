@@ -1,4 +1,4 @@
-<!-- KatoSync public project overview | 2026-10-21 -->
+<!-- KatoSync project overview | 2026-11-18 -->
 
 <div align="center">
 
@@ -11,14 +11,12 @@
 **Local-first Project Work Hub & AI Orchestration für macOS und Windows.**  
 Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kontrolliert ausführen.
 
-[![Status: Beta + Preview](https://img.shields.io/badge/Status-Beta%20%2B%20Preview-F97316)](https://github.com/NMKato/KatoSync/pulls)
-[![macOS](https://img.shields.io/badge/macOS-Tested-111827?logo=apple)](https://github.com/NMKato/KatoSync/pull/75)
-[![Windows](https://img.shields.io/badge/Windows-Native%20tests%20pass-2563EB?logo=windows)](https://github.com/NMKato/KatoSync/pull/75)
+[![Status: Private Beta Integration](https://img.shields.io/badge/Status-Private%20Beta%20Integration-F97316)](docs/KATOSYNC_BETA4_INTEGRATION_20261118.md)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-Core-000000?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React%20%2B%20TypeScript-UI-149ECA?logo=react)](https://react.dev/)
 
-**[Desktop-Releases](https://github.com/NMKato/KatoSync/releases) · [Aktuelle Integration](https://github.com/NMKato/KatoSync/pull/75) · [Roadmap](#roadmap) · [Sicherheit](#sicherheit-und-freigaben)**
+**[Desktop-Releases](https://github.com/NMKato/KatoSync/releases) · [Private Beta-Integration](docs/KATOSYNC_BETA4_INTEGRATION_20261118.md) · [4.0-Roadmap](docs/KATOSYNC_4_0_AGENT_BIRTH_RELEASE_ROADMAP_2026-11-04.md) · [Sicherheit](#sicherheit-und-freigaben)**
 
 <sub>Aus einem Mistral-orientierten Schulprojekt wurde eine plattformübergreifende Arbeitsumgebung für Projekte, lokale KI und mehrere Agenten.</sub>
 
@@ -32,17 +30,39 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
-> **Entwicklungsstatus (21.10.2026):** Die öffentlich verfügbaren Desktop-Betas und der neuere Project Work Hub haben unterschiedliche Freigabestände. Die Integration der neuen Projekt- und GPU-Funktionen ist erfolgreich getestet, aber **noch nicht in `dev` oder `main` gemergt oder als vollständig geprüfter Installer veröffentlicht**. Details: [Draft-PR #75](https://github.com/NMKato/KatoSync/pull/75).
+## Aktueller Stand: private 4.0-Beta-Integration
 
-> **SmartMesh-Sicherheits-QA (16.11.2026, Stage4AG–Stage4AI):** Der isolierte Entwicklungszweig enthält lokale Widerrufs-Race-Fences, signierte synthetische Widerrufsereignisse, einen abbrechbaren **test-only** Child-Prozess, eine strikt geprüfte RC66K-Control-Plane-Quittung (Ed25519/EdDSA-JWS) und eine persistente Fail-Closed-Widerrufssperre. Letzte lokale Abnahme: **56/56 Rust und 37/37 Node**. **Kein Nachweis echter RC66K→Mesh-Gerätezustellung, keine produktive Remote-Git-Ausführung und keine Freigabe der MCP-Geräterechte.** Details: [Stage4AI-QA-Protokoll](docs/KATOSYNC_STAGE4AI_RC66K_WIRE_DURABLE_REVOKE_QA_20261116.md) und [Remote-MCP RC66K Draft #52](https://github.com/NMKato/KatoSync-Remote-MCP/pull/52). Stage4AJ ergänzt diese Basis um einen separaten physischen QA-Nachweis; die produktive Integration bleibt gesperrt.
+**Stand: 18. November 2026.** Der aktuelle Entwicklungszweig verbindet die
+vorhandene Kontoanmeldung, Geräteregistrierung und sichere Kopplung mit einem
+dauerhaft gestarteten nativen Mesh-Dienst, Rollenwahl, Reconnect und einer
+getrennten Remote-MCP-Freigabe. Der signierte Zwei-Mac-Test dieses neuen
+Kandidaten und die produktive MCP-Freigabe sind eigene Abnahmen; ihr aktueller
+Nachweis steht im [Beta-Integrationsprotokoll](docs/KATOSYNC_BETA4_INTEGRATION_20261118.md).
 
-> **SmartMesh Stage4AJ – physischer Zwei-Mac-Test (16.11.2026):** Ein synthetisches, exakt geräte- und aufgabengebundenes Widerrufsereignis wurde zwischen Apple M2 Pro und MacBook Air M3 tatsächlich über einen **temporären, gegenseitig authentifizierten TLS-1.3-Kanal im privaten Tailnet** ausgetauscht. Der M3 prüfte die zusätzliche Ed25519-Signatur, speicherte die Sperre in einer privaten Datei und quittierte sie mit eigener Gerätesignatur; Wiederholung wurde abgelehnt. **43/43 Node-Vertragstests bestanden.** Der Nachweis betrifft einen **isolierten QA-Transport**, weder die produktive RC66K-Outbox noch den normalen KatoSync-Mesh-Runtime-Pfad. **Remote-Ausführung weiterhin NO-GO.** [Stage4AJ-Protokoll](docs/KATOSYNC_STAGE4AJ_PHYSICAL_TWO_MAC_SIGNED_REVOKE_RECEIPT_QA_20261116.md). Stage4AK erweitert diesen Nachweis um eine isolierte Integrationsbrücke für die Sicherheitsprüfung.
+**Der vorgesehene Ablauf:** anmelden → **Verbinden** → eigene aktuelle
+Geräteregistrierungen laden → Gegenstelle auswählen → bei Bedarf Einladung
+und SAS bestätigen → **Server/Client** wählen → native Verbindung starten.
+„Verbunden“ verlangt eine frische, kryptografisch bestätigte Verbindung.
+Historische App-Registrierungen, gespeicherte Kopplungen und zuletzt gemeldete
+Cloud-Präsenz werden nicht als aktuell erreichbare Computer gezählt.
 
-> **SmartMesh Stage4AK – RC66K-/Mesh-Sicherheitsintegration (17.11.2026):** Die isolierte QA-Brücke prüft eine **gültige RC66K-EdDSA/JWS-Kontrollserverquittung**, bevor sie zusammen mit einer separat signierten, exakt an Owner, Grant, Consent, Gerät, Sitzung, Projekt und Aufgabe gebundenen Widerrufsmitteilung eine private Sperre samt signierter Gerätequittung zulässt. Ein eigenständiger Rust-Test prüft den **echten kanonischen `MeshLeaseMachine`-Zustandsautomaten** und dessen Übergang zu `Revoked`, einschließlich geschlossener Neustart-Recovery. **55/55 Node, 16/16 kanonische Rust-Tests sowie 56/56 Stage4AF-Rust-Regressionen bestanden.** Das ist ein **source-only QA-Integrationsnachweis**, keine live geschaltete RC66K→Mesh-Gerätezustellung und keine produktive Remote-Berechtigung. [Stage4AK-Protokoll](docs/KATOSYNC_STAGE4AK_RC66K_MESH_BOUND_REVOKE_QA_20261117.md). Stage4AL führt die interoperable RC66L-Gerätequittung als getrennte QA fort. **Remote-Ausführung: NO-GO.**
+Für die erste private macOS-Beta ist ein aktives gemeinsames **Tailscale-Konto**
+Voraussetzung. Der Mesh-Dienst bindet nur die verifizierte private Adresse,
+prüft beide Geräteschlüssel und erneuert seine Berechtigung fortlaufend.
+Temporäre Netzfehler werden mit begrenztem Backoff behandelt; Abmelden,
+Trennen, falscher Schlüssel und Widerruf schließen den Kanal.
 
-> **SmartMesh Stage4AL – Server-/Geräte-Signaturvertrag (17.11.2026):** Im separaten [Remote-MCP-Repository](https://github.com/NMKato/KatoSync-Remote-MCP/tree/qa/rc66l-device-receipt-barrier-20261117) prüft RC66L zunächst einen gültigen RC66K-Kontrollserverbeleg, eine frisch bestätigte Widerrufsautorität und erst danach die signierte Gerätequittung, bevor ein synthetischer Outbox-ACK zulässig ist. KatoSync enthält nun einen **isolierten, fest gepinnten RC66L-Geräteempfänger** mit geräte- und aufgabenbezogener Ed25519-Prüfung, synthetischem Mesh-Session-Fence, privatem fsync-Journal und signierter Empfangsquittung. Die realen Signaturformate wurden über beide Repositories hinweg geprüft: **484/484 Remote-MCP-Tests** und **64/64 KatoSync-Node-Tests (einschließlich Cross-Repo-Interoperabilität)**. **Kein nativer Produktiv-Transport, keine echte Supabase-/KatoOS-Zustellung, keine Remote-Berechtigung.** [Stage4AL-QA-Protokoll](docs/KATOSYNC_STAGE4AL_RC66L_PINNED_DEVICE_RECEIVER_QA_20261117.md). Stage4AM setzt den nativen In-Channel-Empfänger in einer isolierten Rust-QA fort; die autoritative Serverbindung ist noch nicht produktiv hergestellt. **Remote-Ausführung: NO-GO.**
+Die bereits registrierte ChatGPT-MCP-Anbindung ist ein separater Zugriffsweg.
+Ein erfolgreicher synthetischer Ping ist noch kein Gerätezugriff. Dafür sind
+eine exakt gebundene OAuth-Client-Freigabe, aktuelle Gerätefreigabe und echte
+native Präsenz nötig. Die neue Freigabeoberfläche führt den Owner durch die
+erforderliche frische MFA-Bestätigung.
 
-> **SmartMesh Stage4AM – nativer RC66L-Widerruf auf bestehendem Rust-TLS-Kanal (17.11.2026, QA):** Die unveränderte native `mesh_tls.rs`-Konfiguration (fest gepinnte Ed25519-Geräteidentitäten, mTLS 1.3) und der echte `MeshLeaseMachine`-Heartbeat werden innerhalb einer **`#[cfg(test)]`-Erweiterung** um einen begrenzten Ed25519-signierten `KAMREV01`-Widerrufsframe ergänzt. Empfänger und Sender prüfen exakt Owner, Gerät, Session-Bindung, Grant/Consent, Aufgabe, Widerrufsfolge und den Hash des synthetischen RC66K-Belegs. Der Empfänger schließt seine Mesh-Lease, schreibt die Sperre mit `fsync` und gibt erst danach eine gerätesignierte `KAMACK01`-Quittung zurück. **69/69 Node-Vertragstests und 30/30 native Rust-TLS-Tests bestanden.** Der QA-Rust-Empfänger wurde auf einem echten gegenseitig authentifizierten Loopback-TLS-1.3-Socket inklusive originaler Mesh-Lease, Heartbeat, signiertem Widerruf, dauerhafter Sperre und Geräte-ACK ausgeführt. Kein physischer Zwei-Mac-Test dieses neuen RC66L-Frames und keine echte serverseitige Ausstellungsautorität. [Stage4AM-QA-Protokoll](docs/KATOSYNC_STAGE4AM_NATIVE_RC66L_INCHANNEL_TLS_QA_20261117.md). Die Implementierung ist **nur QA**, weder produktive RC66K-Verbindung noch freigegebene Fernbefehle.
+Die bisherigen Sicherheitsnachweise der Stages 4AG–4AM bleiben in ihren
+datierten QA-Protokollen erhalten. Quelltests, lokale Test-Sockets und frühere
+signierte Pakete werden nicht als Abnahme des aktuellen Kandidaten ausgegeben.
+**4.0 bezeichnet das Produktziel; ein vollständiges 4.0-Release ist noch nicht
+veröffentlicht.**
 
 ## Was KatoSync zusammenbringt
 
@@ -55,7 +75,7 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 | **Kato AI / Local Brain** | Eigene lokale Modell-Runtime, Statusprüfung, Metal-/CUDA-Kandidatenerkennung und CPU-Fallback | macOS-Metal auf echtem Gerät geprüft; Windows-GPU-Inferenz offen |
 | **System Resources** | Live-CPU, verfügbarer RAM, GPU-Anzeige, Warnungen bei geringer Speicherreserve | macOS-GUI geprüft, Windows-Bibliothekstests grün; PR #75 |
 | **Local Control Bridge** | Strukturierte lokale Aufträge über Inbox/Outbox, Heartbeat und Ausführungsprotokolle | Bestehender lokaler Integrationspfad |
-| **SmartMesh / Fleet** | Persönliche Nodes, Hardware-Rollen, Git-first-Projektübergabe, direkte verschlüsselte Peer-Transfers und adaptive Arbeitsverteilung | **Geplant** – [#13](https://github.com/NMKato/KatoSync/issues/13) / [#15](https://github.com/NMKato/KatoSync/issues/15); kein freigegebener Multi-Node-Release |
+| **SmartMesh / Fleet** | Kontogeräte finden, sichere Kopplung, Server-/Client-Rolle, nativer TLS-Kanal, Heartbeat und Wiederverbinden | Private macOS-Integration; aktueller Paket-/Gerätenachweis im [Beta-Protokoll](docs/KATOSYNC_BETA4_INTEGRATION_20261118.md). Verteilte Jobs bleiben gesondert freizugeben. |
 | **Sichere autonome Zusammenarbeit** | Isolierte Task-Worktrees, exklusiver Writer-Lease, abgestufte Schreib-/Netzwerkfreigaben | **Release-Blocker**, [Issue #76](https://github.com/NMKato/KatoSync/issues/76) |
 
 **Wichtig:** „Integriert“ und „getestet“ bedeuten nicht automatisch „im Download enthalten“. Nicht freigegebene Workflows und unbeaufsichtigtes Codeschreiben bleiben ausdrücklich beschränkt.
@@ -102,7 +122,7 @@ Der macOS-Test auf einem **M2 Pro** hat eine funktionierende lokale Inferenz mit
 
 ## KatoSync SmartMesh – gemeinsam arbeiten, Hardware sinnvoll nutzen
 
-> **In Entwicklung / Architekturziel:** SmartMesh ist als [Fleet Mode #13](https://github.com/NMKato/KatoSync/issues/13) und [Core Mesh #15](https://github.com/NMKato/KatoSync/issues/15) spezifiziert. Eine vollständig autonome, sicher abgenommene Geräteverbindung, Git-Übergabe und verteilte Ausführung ist **noch kein veröffentlichter Funktionsumfang**. Sicherheitsvoraussetzung: [#76](https://github.com/NMKato/KatoSync/issues/76).
+> **Private Beta:** Geräteauswahl und nativer Mesh-Verbindungsdienst werden im aktuellen Kandidaten zusammengeführt. Git-Übergabe, automatische Aufgabenverteilung und Schreibausführung besitzen weitere Sicherheits- und Geräteabnahmen. [Ablauf und Prüfstatus](docs/KATOSYNC_BETA4_INTEGRATION_20261118.md), [Orchestrierungs-Gate #76](https://github.com/NMKato/KatoSync/issues/76).
 
 **Eine Installation, ein intelligenter Node. Mehrere autorisierte Installationen, ein koordinierter Projektarbeitsraum.** Jeder Node erhält eine dauerhafte, widerrufbare Geräteidentität und einen selbst vorgeschlagenen, vom Nutzer änderbaren Namen – zum Beispiel „M2 Koordinator“, „M3 Builder“ oder „Windows Operator“. Seine Rolle orientiert sich an **wirklich gemessenen** Fähigkeiten, nicht an einer bloßen KI-Behauptung.
 
@@ -131,11 +151,11 @@ Für **einzelne genehmigte Dateien, Artefakte oder private lokale Projekte** wir
 
 SmartMesh soll verfügbare CPU, **freien** Arbeitsspeicher, erkannte GPU, nachgewiesene Backend-Beschleunigung, dedizierten VRAM **oder** gemeinsam genutzten Speicher sowie Toolchains, Laufzeitlast und Akkuzustand berücksichtigen. Damit kann beispielsweise ein GPU-Node eine lokale Modellanfrage, ein Mac den Xcode-Build und Windows eine plattformspezifische Prüfung übernehmen. **Mehrere Computer bilden dadurch aber nicht automatisch einen gemeinsamen RAM-/VRAM-Speicher.** Die aktuelle Ressourcenüberwachung liefert dafür erste technische Grundlagen; die automatische geräteübergreifende Planung ist noch offen.
 
-Für die geplante Cloud-Beta sind **2 registrierte Mesh-Geräte im Free-Modell** und **bis zu 10 in Pro** vorgesehen. Direkte LAN-/P2P-Nutzdaten sollen nicht auf ein kostenpflichtiges Relay-Datenbudget angerechnet werden. Geplante Relay-Startkontingente: **2 GiB/Monat Free**, **50 GiB/Monat Pro** – vorläufige Werte, **nicht** als live verfügbare Leistung zugesichert. Siehe [Cloud-Plan #37](https://github.com/NMKato/KatoSync/issues/37) und [Invite-Beta #79](https://github.com/NMKato/KatoSync/issues/79).
+Für diesen internen Test werden keine kommerziellen Tarife oder Leistungszusagen veröffentlicht. Frühere Free-/Pro-Entwürfe enthalten unterschiedliche Mesh-Kontingente und müssen vor einem bezahlten Release mit Produkt, Billing und Server-Limits vereinheitlicht werden. Historische App-Identitäten dürfen nicht ohne geprüfte Zuordnung als zusätzliche physische Geräte berechnet werden.
 
 ## Plattformstatus & Qualitätsnachweise
 
-Stand: **21. Oktober 2026**, [Integrations-PR #75](https://github.com/NMKato/KatoSync/pull/75).
+**Historischer Baseline-Nachweis vom 21. Oktober 2026**, [Integrations-PR #75](https://github.com/NMKato/KatoSync/pull/75). Diese Zahlen gelten nicht für den neuen Beta-Kandidaten. Aktuelle Prüfungen und offene Geräte-/Paket-Gates: [Beta-Integrationsprotokoll](docs/KATOSYNC_BETA4_INTEGRATION_20261118.md).
 
 | Test | Ergebnis |
 | :-- | :-- |
@@ -171,7 +191,7 @@ Details und Akzeptanzkriterien: [Security Gate #76](https://github.com/NMKato/Ka
 ```bash
 git clone https://github.com/NMKato/KatoSync.git
 cd KatoSync
-npm install
+npm ci
 npm run dev
 # Native Desktop-Entwicklung:
 npm run tauri dev
@@ -194,6 +214,8 @@ Ein Konto allein soll keine unbegrenzte Nutzung kostenpflichtiger KI-Modelle, GP
 Eine neue, plattformübergreifende Bilderstrecke ist geplant: **Project Work Hub**, **Agent Sync**, **Kato AI**, **CPU/RAM/GPU**, **SmartMesh / Fleet-Topologie**, **Live-Monitor**, **Checkpoints** und **Windows/macOS**. Wir ergänzen verifizierte Screenshots und kurze Demos erst nach der GUI-/Release-Abnahme, damit keine veraltete Mistral-Oberfläche als aktueller Funktionsstand erscheint.
 
 ## Roadmap
+
+Die verbindlichen 4.0-Ziele und ihre getrennten Abnahmen stehen in der [Agent-Birth- und Release-Roadmap](docs/KATOSYNC_4_0_AGENT_BIRTH_RELEASE_ROADMAP_2026-11-04.md). Die folgende Übersicht enthält die bereits vorhandene Basis und weiterhin offene Gesamtziele; ein Mesh-Test erfüllt nicht automatisch Agenten-, Billing- oder Windows-Gates.
 
 - [x] Lokaler Runner / Agent Sync und Local Control als technische Basis
 - [x] Projektregister, Projektanlage, Resume-Kontext, KUAS und read-only MCP-Brücke im Integrations-Draft
@@ -223,5 +245,5 @@ The latest Project Work Hub + GPU integration has passed macOS and Windows nativ
 </details>
 
 <div align="center">
-<sub>Ein Projekt von <strong>KatoOS / NMKato Solutions</strong> · Entwicklung und Dokumentation: Oktober 2026</sub>
+<sub>Ein Projekt von <strong>KatoOS / NMKato Solutions</strong> · Entwicklung und Dokumentation: November 2026</sub>
 </div>

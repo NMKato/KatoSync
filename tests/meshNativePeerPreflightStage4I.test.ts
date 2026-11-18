@@ -26,11 +26,11 @@ test("fingerprint input is exact and cannot become a supplied key or URL",()=>{
  assert.doesNotMatch(section,/https:\/\/|\.listen\(|TcpListener::|TcpStream::|\.bind\(|ensure_identity\(|set_password\(|save_raw\(|send_remote_job|\.post\(/);
 });
 test("preflight requires canonical account, exact Keychain peer pin and enrollment",()=>{
- assert.match(src,/verified_katosync_user\(\)/);
+ assert.match(src,/verified_katosync_user_classified\(\)/);
  assert.match(src,/existing_identity\(&uid\)/);
  assert.match(src,/approved_peer_for_account\(&uid, requested_fingerprint/);
- assert.match(src,/require_both_devices_enrolled\(&uid, &signing\.verifying_key\(\), &peer\)/);
- assert.match(src,/same_account_still_verified\(&uid\)\s*\.await/);
+ assert.match(src,/require_both_devices_enrolled_classified\(&uid, &signing\.verifying_key\(\), &peer\)/);
+ assert.match(src,/same_account_still_verified_classified\(&uid\)\s*\.await/);
  assert.match(src,/recheck_after_probe\(&admitted, &requested_fingerprint\)/);
  assert.match(gate,/\.get\(url\)/);
  assert.doesNotMatch(gate,/\.post\(url\)|\.patch\(url\)|\.delete\(url\)/);

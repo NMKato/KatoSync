@@ -48,8 +48,8 @@ test("the new integration test uses actual native TLS on OS loopback and no keyc
 test("production admission still requires Keychain, approved peer, enrollment and recheck",()=>{
  assert.match(admission,/existing_identity\(&uid\)/);
  assert.match(admission,/approved_peer_for_account\(&uid/);
- assert.match(admission,/require_both_devices_enrolled\(&uid/);
- assert.match(admission,/same_account_still_verified\(&uid\)\s*\.await/);
+ assert.match(admission,/require_both_devices_enrolled_classified\(&uid/);
+ assert.match(admission,/same_account_still_verified_classified\(&uid\)\s*\.await/);
  assert.match(admission,/recheck_after_probe\(&admitted, requested_fingerprint\)\.await/);
  assert.match(admission,/MESH_ADMISSION_NOT_CONFIGURED/);
  assert.match(trust,/clear_raw\(&uid, PENDING_ACCOUNT\)/);

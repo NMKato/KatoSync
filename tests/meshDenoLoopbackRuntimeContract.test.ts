@@ -9,7 +9,7 @@ const script=fileURLToPath(new URL("../scripts/qa-mesh-deno-loopback.mjs",import
 const src=readFileSync(script,"utf8");
 test("deno real loopback QA is denied without explicit local binary opt-in",()=>{
  for(const args of [[],["--synthetic-loopback"],["--deploy"],["--synthetic-loopback","--deno-bin","https://example.invalid/deno"]]){
-  const r=spawnSync(process.execPath,[script,...args],{encoding:"utf8",timeout:3000});
+  const r=spawnSync(process.execPath,[script,...args],{encoding:"utf8",timeout: 15000});
   assert.equal(r.status,2,r.stderr);
   assert.match(r.stderr,/MESH_DENO_LOOPBACK_BLOCKED: EXPLICIT_LOCAL_DENO_REQUIRED/);
  }

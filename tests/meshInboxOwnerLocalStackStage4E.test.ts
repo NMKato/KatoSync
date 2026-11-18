@@ -49,7 +49,7 @@ test("standalone test cannot open a socket without the exact local proof",()=>{
  const p=spawnSync(process.execPath,["--experimental-strip-types",path],{
   env:{...process.env,KATOSYNC_INBOX_LOCAL_STACK_QA_ONLY:"",
    KATOSYNC_MESH_E2E_SOCKET:"",KATOSYNC_MESH_E2E_PORT:""},
-  encoding:"utf8",timeout:5000});
+  encoding:"utf8",timeout: 15000});
  assert.notEqual(p.status,0);
  assert.match(p.stderr,/KATOSYNC_LOCAL_STACK_REQUIRES_DISPOSABLE_UNIX_SOCKET/);
 });

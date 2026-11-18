@@ -9,7 +9,8 @@ const registry=read("../src-tauri/src/mesh_directory.rs");
 const root=read("../src-tauri/src/lib.rs");
 test("Scan uses native signed discovery; not an implicit login side effect",()=>{
  assert.ok(ui.includes('mode==="list"?"mesh_account_devices_list":"mesh_account_device_discover"'));
- assert.match(ui,/if\(!directory&&!directoryBusy\)void loadAccountDirectory\("list"\)/);
+ assert.match(ui,/if\(!directoryBusy\)void loadAccountDirectory\("list"\)/);
+ assert.doesNotMatch(ui,/if\(!directory&&!directoryBusy\)void loadAccountDirectory\("list"\)/);
  assert.match(ui,/void loadAccountDirectory\("discover"\)/);
  assert.match(ui,/onClick=\{discoverDevices\}/);
  assert.match(ui,/onClick=\{startConnectionGuide\}/);

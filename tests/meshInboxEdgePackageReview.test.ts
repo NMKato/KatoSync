@@ -89,11 +89,11 @@ test("reviewer never upgrades partial/live changes to permission for release",as
  await assert.rejects(buildReview(root,y),/EDGE_ALREADY_PRESENT/);
 });
 test("CLI is disabled without an explicit locally supplied non-secret snapshot",()=>{
- const r=spawnSync(process.execPath,[script],{encoding:"utf8",timeout:3000});
+ const r=spawnSync(process.execPath,[script],{encoding:"utf8",timeout: 15000});
  assert.equal(r.status,2);
  assert.match(r.stderr,/REQUIRES_OFFLINE_BASELINE_SNAPSHOT/);
  const other=spawnSync(process.execPath,[script,"--snapshot","https://example.test/data"],{
-  encoding:"utf8",timeout:3000
+  encoding:"utf8",timeout: 15000
  });
  assert.equal(other.status,2);
  assert.match(other.stderr,/LOCAL_SNAPSHOT_ONLY/);

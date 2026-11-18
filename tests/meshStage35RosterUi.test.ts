@@ -8,7 +8,8 @@ test("Stage35 roster distinguishes cryptographic app registrations from physical
  assert.ok(ui.includes("presentation.recentlyReported.map(renderRegistration)"));
  assert.ok(ui.includes("presentation.olderEntries.map(renderRegistration)"));
  assert.ok(ui.includes("displayRegistrationName(presentation.own)"));
- assert.ok(ui.includes('t("mesh.directory.identityCount"'));
+ assert.ok(ui.includes('t("mesh.connection.accountSummary"'));
+ assert.ok(ui.includes("count:presentation?.totalIdentities??directory.devices.length"));
  assert.ok(ui.includes('t("mesh.directory.older"'));
  assert.ok(!ui.includes("physicalDevices:directory.devices.length"));
 });
@@ -30,5 +31,6 @@ test("all four UI languages distinguish app identity from physical computer",()=
    assert.ok(locale.includes('"mesh.directory.'+key+'":'),lang+" "+key);
   }
   assert.ok(locale.includes('"mesh.agent35.accountRecords":'));
+  assert.ok(locale.includes('"mesh.connection.accountSummary":'));
  }
 });

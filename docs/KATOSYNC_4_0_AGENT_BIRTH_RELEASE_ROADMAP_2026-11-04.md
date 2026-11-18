@@ -4,6 +4,48 @@
 
 **Entscheidungsdatum:** 04.11.2026 · **Status:** verbindliche Zielarchitektur und QA-Fahrplan, **kein Release** · **Owner:** KatoSync/NMKato Solutions.
 
+## Abgleich vom 18. November 2026: erste eigene Mesh-Beta
+
+**Aktuelle Priorität:** Den vorhandenen Pairing-/Sicherheitsstand zu einer
+durchgängig bedienbaren privaten Beta verbinden: **Verbinden → Kontogeräte
+laden → Einladung/SAS bei unbekanntem Schlüssel → Server/Client wählen →
+frisch bestätigte native Verbindung → Trennen/Wiederverbinden**.
+
+Die Tabellen mit Datum 04.11.2026 weiter unten dokumentieren den historischen
+Ausgangspunkt. Seitdem liegen spätere echte Pairing-/TLS-Nachweise vor; die
+neue Integration wird dennoch auf ihrem eigenen signierten Paket geprüft.
+Aktuelle Quelle: [Beta-Integration und Prüfprotokoll](KATOSYNC_BETA4_INTEGRATION_20261118.md).
+Desktop-Zweig: `beta/4.0-integration-20261118`; ergänzender Connector-Zweig:
+`beta/4.0-runtime-integration-20261118`.
+
+| Arbeitspaket | Aktueller Integrationsstand | Abnahme |
+|---|---|---|
+| Geräte finden | Frische Kontoliste, genaue Schlüsselbindung, getrennte historische Registrierungen | UI-/Native-Gerätetest |
+| Pairing | Bestehende SAS-/Keychain-Vertrauensbeziehung wiederverwenden; unbekannte Gegenstelle benötigt Bestätigung | Neue und vorhandene Kopplung prüfen |
+| Verbindung | Nativer TLS-1.3-Server/Client, Heartbeat-Lease, begrenzter Reconnect, Stop-/Owner-Fencing | M2 Pro ↔ MacBook Air M3 auf neuem signiertem Build |
+| MCP-Owner-Freigabe | Konkrete Zielanwendung, aktuelle MFA, einmalige transaktionale Entscheidung | Echte Anmeldung und vom Owner eingegebener MFA-Code |
+| MCP-Gerätepräsenz | Ausgehender WSS-Dienst, einmalige Tickets, gepinnte signierte Servernachweise | Produktive Autorität und tatsächlicher Geräte-Heartbeat |
+| Lieferung | Reproduzierbarer isolierter Paketbau, Signatur/Notarisierung, vorhandenes Rollback erhalten | Paketprüfung, Start, Reconnect und Stop auf beiden Macs |
+
+**Zusätzliche Pflichtfälle:** Ein alter Heartbeat darf kein grünes Online-Signal
+erhalten; Abmelden während MFA/Refresh darf keine Sitzung wiederbeleben;
+eine späte Antwort darf Stop oder Owner-Wechsel nicht überschreiben.
+Vorhandene Gerätelisten sind Registrierungen, keine verlässliche physische
+Rechnerzählung. Netzwerkverlust und Schlaf benötigen neue Autorisierung statt
+Wiederverwendung einer abgelaufenen Lease.
+
+Die erste private Beta verwendet Tailscale als verifizierten Transportweg.
+Allgemeine LAN-/Internet-Discovery, verteilte Jobs und vollständiger Ersatz
+eines Remote-Desktop-Werkzeugs sind erst nach ihren eigenen Nachweisen
+zugesichert. Der MCP-Ping allein stellt keinen solchen Nachweis dar.
+
+**Unverändert offen bleiben die jeweils separat abzunehmenden Gesamtziele**
+für Agent Birth, Modell-/Runtime-Paket, Persona/Memory, sichere Jobausführung,
+Billing, Windows-Installer und Barrierefreiheit. Die früheren Free-/Pro-
+Kontingente sind Produktentwürfe; widersprüchliche Angaben werden vor
+kommerzieller Freigabe konsolidiert. Für den eigenen Beta-Test erfolgt
+keine stillschweigende Tarif-/Berechtigungsumschaltung.
+
 ## Produktentscheidung
 
 **KatoSync 4.0** bezeichnet die erste vollständig integrierte Version aus **lokaler KI-Agentenlaufzeit, dauerhafter eigener Agentenidentität, nachweisbar sicheren Mesh-Kollegen, Projektgedächtnis und benutzbarem Orchestrator**. Die bisherige Stage-3.5-Reihe bleibt technisch notwendige Vorstufe. Die finale UI/UX-Politur ist die letzte Produktphase **nach** den funktionalen Sicherheits- und E2E-Gates, nicht deren Ersatz.
@@ -12,7 +54,7 @@
 
 Die „Geburt“ bezeichnet einen **persistenten Software-Agenten mit Modellfähigkeit**, kein menschliches Bewusstsein und keine Garantie für permanentes autonomes Verhalten. Ohne aktives Modell gibt es **keinen erwachten lokalen KI-Agenten**; technische Geräteerkennung und sichere Hintergrundregistrierung können trotzdem funktionieren.
 
-## Verifizierter Ist-Stand (04.11.2026)
+## Historischer verifizierter Ausgangsstand (04.11.2026)
 
 | Bereich | Verifiziert | Grenze |
 |---|---|---|
@@ -90,7 +132,7 @@ Quellen im Repo: `src-tauri/src/mesh_agent_bootstrap.rs`, `src-tauri/src/local_b
 - Maximal 10 Pro-Agenten/Workstations erfordern **serverautorisierte Kontingentlogik**. Test-Installationen mit getrennten Keychain-Scopes bleiben eigene kryptografische Instanzen; Hardware-Zusammenführung nicht anhand spoofbarer Hostnamen.
 - OpenClaw und Gemma sind eigenständige Komponenten mit eigenen Lizenzen und Release-Anforderungen; Repackaging/Redistribution erst nach gesonderter Freigabe. Kein automatischer Download großer Modelle bei knappem Speicher.
 
-## Unmittelbare Reihenfolge und Übergabe
+## Ursprüngliche Reihenfolge und Übergabe (04.11.2026)
 
 1. Stage35e/f kontrolliert integrieren und echten SAS-Trust abnehmen; bestehendes **Issue #152** und Draft-PRs #222/#223 weiterführen.
 2. **Epic #224 Agent Birth & Activation angelegt.** Die erste technische Prüfung ist **bestanden**: M2-Bestandsmodell 4.590.807.392 B und Vision-Projektor 559.874.816 B stimmen in SHA-256 und Größe exakt mit dem Manifest überein. Nächste Aktion ist die sichere, nur lesende Runtime-/Lizenz-Prüfung und eine isolierte Wiederverwendung ohne Manipulation der vorhandenen Dateien.

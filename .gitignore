@@ -45,3 +45,7 @@ docs/KATOSYNC_3_0_ARCHITECTURE.md
 /src-tauri/resources/stt/katosync-stt
 
 /src-tauri/resources/stt/KatoSyncSpeechHelper.app/
+
+# Locally verified macOS bundle inputs; do not publish machine-specific resource locks.
+/src-tauri/release-resources.lock.json
+/src-tauri/resources/licenses/
