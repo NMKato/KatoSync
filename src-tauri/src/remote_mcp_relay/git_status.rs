@@ -23,7 +23,7 @@ const DENIED: &str = "REMOTE_MCP_GIT_REQUEST_REJECTED";
 #[derive(Clone)]
 pub(super) struct ApprovedProject {
     pub id: String,
-    root: PathBuf,
+    pub(super) root: PathBuf,
 }
 
 #[derive(Serialize)]
@@ -295,7 +295,7 @@ fn git_executable() -> Result<PathBuf, &'static str> {
         .ok_or("REMOTE_MCP_GIT_EXECUTABLE_UNAVAILABLE")
 }
 
-async fn run_git(
+pub(super) async fn run_git(
     project: &ApprovedProject,
     args: &[&str],
     deadline: Instant,
@@ -317,6 +317,7 @@ async fn run_git(
         }
     }
     command
+        .current_dir(&project.root)
         .args(["--no-optional-locks", "-c", "core.fsmonitor=false", "-C"])
         .arg(&project.root)
         .args(args)

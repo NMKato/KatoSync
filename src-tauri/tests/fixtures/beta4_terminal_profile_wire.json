@@ -1,0 +1,124 @@
+{
+  "source": "Connector production CLI and RC67/RC70 codecs",
+  "syntheticOnly": true,
+  "nowMs": 1795003200000,
+  "deviceSeedByte": 19,
+  "serverPin": {
+    "kid": "beta4_cross_language_server",
+    "x": "Md6-VdN8cidosTcTHKpghwgLLgtguUvXhdFFdc-kmLw"
+  },
+  "devicePublicKey": "Zs1gi5KLiOUODv6qM_rxxDzv4HKUsLh-n-CrpqPPdjM",
+  "ticket": {
+    "version": 1,
+    "protocol": "rc67-beta-native-v1",
+    "ownerId": "11111111-1111-4111-8111-111111111111",
+    "tenantId": "22222222-2222-4222-8222-222222222222",
+    "grantId": "33333333-3333-4333-8333-333333333333",
+    "deviceId": "44444444-4444-4444-8444-444444444444",
+    "sessionId": "55555555-5555-4555-8555-555555555555",
+    "ticket": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "challengeId": "66666666-6666-4666-8666-666666666666",
+    "deviceKeyId": "mesh_ed25519_56fae12f7716462746a3a802817ca762f4e62170",
+    "revokeEpoch": 7,
+    "ticketExpiresAtMs": 1795003230000,
+    "expiresAtMs": 1795003245000,
+    "readmitAtMs": 1795003240000,
+    "route": "/api/device-relay/socket",
+    "remoteExecutionAllowed": false,
+    "nativeToolNames": [
+      "katosync_git_status",
+      "katosync_run_terminal_profile"
+    ],
+    "admittedProjectIds": [
+      "katosync"
+    ],
+    "oauthClientId": "77777777-7777-4777-8777-777777777777",
+    "authorityRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "operation": {
+    "version": 1,
+    "operationId": "99999999-9999-4999-8999-999999999999",
+    "nonce": "HR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0",
+    "ownerId": "11111111-1111-4111-8111-111111111111",
+    "tenantId": "22222222-2222-4222-8222-222222222222",
+    "oauthClientId": "77777777-7777-4777-8777-777777777777",
+    "grantId": "33333333-3333-4333-8333-333333333333",
+    "deviceId": "44444444-4444-4444-8444-444444444444",
+    "projectId": "katosync",
+    "profileId": "git_version",
+    "argumentsSha256": "54880fcb9f71b0484c5ca5d188c146c776d92ba8bf935f9f603892f08c89baa3",
+    "authorityRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "expiresAtMs": 1795003290000,
+    "factors": [
+      {
+        "id": "88888888-8888-4888-8888-888888888888",
+        "friendlyName": "Test authenticator",
+        "type": "totp"
+      }
+    ]
+  },
+  "args": {
+    "deviceId": "44444444-4444-4444-8444-444444444444",
+    "projectId": "katosync",
+    "profileId": "git_version",
+    "operationId": "99999999-9999-4999-8999-999999999999"
+  },
+  "deviceProof": {
+    "payload": "{\"version\":1,\"kind\":\"BETA4_NATIVE_CLI_OPERATION_ACK\",\"ownerId\":\"11111111-1111-4111-8111-111111111111\",\"tenantId\":\"22222222-2222-4222-8222-222222222222\",\"oauthClientId\":\"77777777-7777-4777-8777-777777777777\",\"grantId\":\"33333333-3333-4333-8333-333333333333\",\"deviceId\":\"44444444-4444-4444-8444-444444444444\",\"operationId\":\"99999999-9999-4999-8999-999999999999\",\"projectId\":\"katosync\",\"profileId\":\"git_version\",\"argumentsSha256\":\"54880fcb9f71b0484c5ca5d188c146c776d92ba8bf935f9f603892f08c89baa3\",\"authorityRevision\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"nonce\":\"HR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0\"}",
+    "signature": "nYQLAbiqVv8LyPSJAIlmzE8Cu3Dcn2AhieHNiF8y0HPuXitOvZ0zZxy57Yys62XsFOGfoVseL-zOjUi_3VP7Dw"
+  },
+  "deviceProofSha256": "2af36345002747e8afb41d3ad9ec3b741faeb7e21de6987b83479e098530ff10",
+  "approvalPayload": {
+    "version": 1,
+    "kind": "BETA4_NATIVE_CLI_OPERATION_APPROVAL",
+    "ownerId": "11111111-1111-4111-8111-111111111111",
+    "tenantId": "22222222-2222-4222-8222-222222222222",
+    "oauthClientId": "77777777-7777-4777-8777-777777777777",
+    "grantId": "33333333-3333-4333-8333-333333333333",
+    "deviceId": "44444444-4444-4444-8444-444444444444",
+    "operationId": "99999999-9999-4999-8999-999999999999",
+    "projectId": "katosync",
+    "profileId": "git_version",
+    "argumentsSha256": "54880fcb9f71b0484c5ca5d188c146c776d92ba8bf935f9f603892f08c89baa3",
+    "authorityRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "deviceProofSha256": "2af36345002747e8afb41d3ad9ec3b741faeb7e21de6987b83479e098530ff10",
+    "issuedAtMs": 1795003201000,
+    "expiresAtMs": 1795003261000
+  },
+  "approvalProofJws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJldGE0X2Nyb3NzX2xhbmd1YWdlX3NlcnZlciIsInR5cCI6ImthdG9zeW5jLWNsaS1vcGVyYXRpb24tYXBwcm92YWwrandzIn0.eyJ2ZXJzaW9uIjoxLCJraW5kIjoiQkVUQTRfTkFUSVZFX0NMSV9PUEVSQVRJT05fQVBQUk9WQUwiLCJvd25lcklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwidGVuYW50SWQiOiIyMjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiLCJvYXV0aENsaWVudElkIjoiNzc3Nzc3NzctNzc3Ny00Nzc3LTg3NzctNzc3Nzc3Nzc3Nzc3IiwiZ3JhbnRJZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsImRldmljZUlkIjoiNDQ0NDQ0NDQtNDQ0NC00NDQ0LTg0NDQtNDQ0NDQ0NDQ0NDQ0Iiwib3BlcmF0aW9uSWQiOiI5OTk5OTk5OS05OTk5LTQ5OTktODk5OS05OTk5OTk5OTk5OTkiLCJwcm9qZWN0SWQiOiJrYXRvc3luYyIsInByb2ZpbGVJZCI6ImdpdF92ZXJzaW9uIiwiYXJndW1lbnRzU2hhMjU2IjoiNTQ4ODBmY2I5ZjcxYjA0ODRjNWNhNWQxODhjMTQ2Yzc3NmQ5MmJhOGJmOTM1ZjlmNjAzODkyZjA4Yzg5YmFhMyIsImF1dGhvcml0eVJldmlzaW9uIjoiZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZSIsImRldmljZVByb29mU2hhMjU2IjoiMmFmMzYzNDUwMDI3NDdlOGFmYjQxZDNhZDllYzNiNzQxZmFlYjdlMjFkZTY5ODdiODM0NzllMDk4NTMwZmYxMCIsImlzc3VlZEF0TXMiOjE3OTUwMDMyMDEwMDAsImV4cGlyZXNBdE1zIjoxNzk1MDAzMjYxMDAwfQ.7n_xZO30CJJVVXB5KYpeYLEiWLUNSSuLW6ijRVI6XzBg7CDHcocyeE2PRlWo2LRNDvgYr1TXXv3NWoFERCWPAw",
+  "approvalResponse": {
+    "version": 1,
+    "status": "approved",
+    "operationId": "99999999-9999-4999-8999-999999999999",
+    "argumentsSha256": "54880fcb9f71b0484c5ca5d188c146c776d92ba8bf935f9f603892f08c89baa3",
+    "expiresAtMs": 1795003261000
+  },
+  "requestBody": {
+    "toolName": "katosync_run_terminal_profile",
+    "projectId": "katosync",
+    "profileId": "git_version",
+    "operationId": "99999999-9999-4999-8999-999999999999",
+    "argumentsSha256": "54880fcb9f71b0484c5ca5d188c146c776d92ba8bf935f9f603892f08c89baa3",
+    "oauthClientId": "77777777-7777-4777-8777-777777777777",
+    "authorityRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "approvalProofJws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJldGE0X2Nyb3NzX2xhbmd1YWdlX3NlcnZlciIsInR5cCI6ImthdG9zeW5jLWNsaS1vcGVyYXRpb24tYXBwcm92YWwrandzIn0.eyJ2ZXJzaW9uIjoxLCJraW5kIjoiQkVUQTRfTkFUSVZFX0NMSV9PUEVSQVRJT05fQVBQUk9WQUwiLCJvd25lcklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwidGVuYW50SWQiOiIyMjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiLCJvYXV0aENsaWVudElkIjoiNzc3Nzc3NzctNzc3Ny00Nzc3LTg3NzctNzc3Nzc3Nzc3Nzc3IiwiZ3JhbnRJZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsImRldmljZUlkIjoiNDQ0NDQ0NDQtNDQ0NC00NDQ0LTg0NDQtNDQ0NDQ0NDQ0NDQ0Iiwib3BlcmF0aW9uSWQiOiI5OTk5OTk5OS05OTk5LTQ5OTktODk5OS05OTk5OTk5OTk5OTkiLCJwcm9qZWN0SWQiOiJrYXRvc3luYyIsInByb2ZpbGVJZCI6ImdpdF92ZXJzaW9uIiwiYXJndW1lbnRzU2hhMjU2IjoiNTQ4ODBmY2I5ZjcxYjA0ODRjNWNhNWQxODhjMTQ2Yzc3NmQ5MmJhOGJmOTM1ZjlmNjAzODkyZjA4Yzg5YmFhMyIsImF1dGhvcml0eVJldmlzaW9uIjoiZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZSIsImRldmljZVByb29mU2hhMjU2IjoiMmFmMzYzNDUwMDI3NDdlOGFmYjQxZDNhZDllYzNiNzQxZmFlYjdlMjFkZTY5ODdiODM0NzllMDk4NTMwZmYxMCIsImlzc3VlZEF0TXMiOjE3OTUwMDMyMDEwMDAsImV4cGlyZXNBdE1zIjoxNzk1MDAzMjYxMDAwfQ.7n_xZO30CJJVVXB5KYpeYLEiWLUNSSuLW6ijRVI6XzBg7CDHcocyeE2PRlWo2LRNDvgYr1TXXv3NWoFERCWPAw"
+  },
+  "requestJws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJldGE0X2Nyb3NzX2xhbmd1YWdlX3NlcnZlciIsInR5cCI6ImthdG9zeW5jLXJjNjctZHVwbGV4LXJlbGF5K2p3cyJ9.eyJ2ZXJzaW9uIjoxLCJkaXJlY3Rpb24iOiJjbG91ZF90b19kZXZpY2UiLCJraW5kIjoidG9vbC5yZXF1ZXN0Iiwib3duZXJJZCI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsInRlbmFudElkIjoiMjIyMjIyMjItMjIyMi00MjIyLTgyMjItMjIyMjIyMjIyMjIyIiwiZ3JhbnRJZCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsImRldmljZUlkIjoiNDQ0NDQ0NDQtNDQ0NC00NDQ0LTg0NDQtNDQ0NDQ0NDQ0NDQ0Iiwic2Vzc2lvbklkIjoiNTU1NTU1NTUtNTU1NS00NTU1LTg1NTUtNTU1NTU1NTU1NTU1IiwicmVxdWVzdElkIjoiZGRkZGRkZGQtZGRkZC00ZGRkLThkZGQtZGRkZGRkZGRkZGRkIiwic2VxdWVuY2UiOjMsImlzc3VlZEF0TXMiOjE3OTUwMDMyMDE1MDAsImV4cGlyZXNBdE1zIjoxNzk1MDAzMjE2NTAwLCJib2R5Ijp7InRvb2xOYW1lIjoia2F0b3N5bmNfcnVuX3Rlcm1pbmFsX3Byb2ZpbGUiLCJwcm9qZWN0SWQiOiJrYXRvc3luYyIsInByb2ZpbGVJZCI6ImdpdF92ZXJzaW9uIiwib3BlcmF0aW9uSWQiOiI5OTk5OTk5OS05OTk5LTQ5OTktODk5OS05OTk5OTk5OTk5OTkiLCJhcmd1bWVudHNTaGEyNTYiOiI1NDg4MGZjYjlmNzFiMDQ4NGM1Y2E1ZDE4OGMxNDZjNzc2ZDkyYmE4YmY5MzVmOWY2MDM4OTJmMDhjODliYWEzIiwib2F1dGhDbGllbnRJZCI6Ijc3Nzc3Nzc3LTc3NzctNDc3Ny04Nzc3LTc3Nzc3Nzc3Nzc3NyIsImF1dGhvcml0eVJldmlzaW9uIjoiZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZSIsImFwcHJvdmFsUHJvb2ZKd3MiOiJleUpoYkdjaU9pSkZaRVJUUVNJc0ltdHBaQ0k2SW1KbGRHRTBYMk55YjNOelgyeGhibWQxWVdkbFgzTmxjblpsY2lJc0luUjVjQ0k2SW10aGRHOXplVzVqTFdOc2FTMXZjR1Z5WVhScGIyNHRZWEJ3Y205MllXd3JhbmR6SW4wLmV5SjJaWEp6YVc5dUlqb3hMQ0pyYVc1a0lqb2lRa1ZVUVRSZlRrRlVTVlpGWDBOTVNWOVBVRVZTUVZSSlQwNWZRVkJRVWs5V1FVd2lMQ0p2ZDI1bGNrbGtJam9pTVRFeE1URXhNVEV0TVRFeE1TMDBNVEV4TFRneE1URXRNVEV4TVRFeE1URXhNVEV4SWl3aWRHVnVZVzUwU1dRaU9pSXlNakl5TWpJeU1pMHlNakl5TFRReU1qSXRPREl5TWkweU1qSXlNakl5TWpJeU1qSWlMQ0p2WVhWMGFFTnNhV1Z1ZEVsa0lqb2lOemMzTnpjM056Y3ROemMzTnkwME56YzNMVGczTnpjdE56YzNOemMzTnpjM056YzNJaXdpWjNKaGJuUkpaQ0k2SWpNek16TXpNek16TFRNek16TXRORE16TXkwNE16TXpMVE16TXpNek16TXpNek16TXlJc0ltUmxkbWxqWlVsa0lqb2lORFEwTkRRME5EUXRORFEwTkMwME5EUTBMVGcwTkRRdE5EUTBORFEwTkRRME5EUTBJaXdpYjNCbGNtRjBhVzl1U1dRaU9pSTVPVGs1T1RrNU9TMDVPVGs1TFRRNU9Ua3RPRGs1T1MwNU9UazVPVGs1T1RrNU9Ua2lMQ0p3Y205cVpXTjBTV1FpT2lKcllYUnZjM2x1WXlJc0luQnliMlpwYkdWSlpDSTZJbWRwZEY5MlpYSnphVzl1SWl3aVlYSm5kVzFsYm5SelUyaGhNalUySWpvaU5UUTRPREJtWTJJNVpqY3hZakEwT0RSak5XTmhOV1F4T0Roak1UUTJZemMzTm1RNU1tSmhPR0ptT1RNMVpqbG1OakF6T0RreVpqQTRZemc1WW1GaE15SXNJbUYxZEdodmNtbDBlVkpsZG1semFXOXVJam9pWldWbFpXVmxaV1ZsWldWbFpXVmxaV1ZsWldWbFpXVmxaV1ZsWldWbFpXVmxaV1ZsWldWbFpXVmxaV1ZsWldWbFpXVmxaV1ZsWldWbFpXVmxaV1ZsWlNJc0ltUmxkbWxqWlZCeWIyOW1VMmhoTWpVMklqb2lNbUZtTXpZek5EVXdNREkzTkRkbE9HRm1ZalF4WkROaFpEbGxZek5pTnpReFptRmxZamRsTWpGa1pUWTVPRGRpT0RNME56bGxNRGs0TlRNd1ptWXhNQ0lzSW1semMzVmxaRUYwVFhNaU9qRTNPVFV3TURNeU1ERXdNREFzSW1WNGNHbHlaWE5CZEUxeklqb3hOemsxTURBek1qWXhNREF3ZlEuN25feFpPMzBDSkpWVlhCNUtZcGVZTEVpV0xVTlNTdUxXNmlqUlZJNlh6Qmc3Q0RIY29jeWVFMlBSbFdvMkxSTkR2Z1lyMVRYWHYzTldvRkVSQ1dQQXcifX0.HBFQQ_pWOi2M-Ow9eyxCV-de6bSSP0L3F4m__ZhroVsbAWm6Vz6p93XKHdaIwFmzv6fvs4n-Vs8RjyIBN_-bCA",
+  "result": {
+    "operationId": "99999999-9999-4999-8999-999999999999",
+    "projectId": "katosync",
+    "profileId": "git_version",
+    "exitCode": 0,
+    "stdout": "git version 2.50.1 (Apple Git-155)\n",
+    "stderr": "",
+    "provenance": "local_cli_profile_verified_root"
+  },
+  "resultJws": "eyJhbGciOiJFZERTQSIsImtpZCI6Im1lc2hfZWQyNTUxOV81NmZhZTEyZjc3MTY0NjI3NDZhM2E4MDI4MTdjYTc2MmY0ZTYyMTcwIiwidHlwIjoia2F0b3N5bmMtcmM2Ny1kdXBsZXgtcmVsYXkrandzIn0.eyJ2ZXJzaW9uIjoxLCJkaXJlY3Rpb24iOiJkZXZpY2VfdG9fY2xvdWQiLCJraW5kIjoidG9vbC5yZXN1bHQiLCJvd25lcklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwidGVuYW50SWQiOiIyMjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiLCJncmFudElkIjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwiZGV2aWNlSWQiOiI0NDQ0NDQ0NC00NDQ0LTQ0NDQtODQ0NC00NDQ0NDQ0NDQ0NDQiLCJzZXNzaW9uSWQiOiI1NTU1NTU1NS01NTU1LTQ1NTUtODU1NS01NTU1NTU1NTU1NTUiLCJyZXF1ZXN0SWQiOiJkZGRkZGRkZC1kZGRkLTRkZGQtOGRkZC1kZGRkZGRkZGRkZGQiLCJzZXF1ZW5jZSI6MiwiaXNzdWVkQXRNcyI6MTc5NTAwMzIwMTgwMCwiZXhwaXJlc0F0TXMiOjE3OTUwMDMyMTY4MDAsImJvZHkiOnsidG9vbE5hbWUiOiJrYXRvc3luY19ydW5fdGVybWluYWxfcHJvZmlsZSIsInN0YXR1cyI6ImNvbXBsZXRlZCIsInJlc3VsdCI6eyJvcGVyYXRpb25JZCI6Ijk5OTk5OTk5LTk5OTktNDk5OS04OTk5LTk5OTk5OTk5OTk5OSIsInByb2plY3RJZCI6ImthdG9zeW5jIiwicHJvZmlsZUlkIjoiZ2l0X3ZlcnNpb24iLCJleGl0Q29kZSI6MCwic3Rkb3V0IjoiZ2l0IHZlcnNpb24gMi41MC4xIChBcHBsZSBHaXQtMTU1KVxuIiwic3RkZXJyIjoiIiwicHJvdmVuYW5jZSI6ImxvY2FsX2NsaV9wcm9maWxlX3ZlcmlmaWVkX3Jvb3QifX19.yr_-kRGg7XSIxVRoJDbE4glWFVhiiNv8LXXxGq_bGueN0H-c31VzaYhpqFHCZMRZgwvQeORtb87aCkoaiCpGAQ",
+  "resultAck": {
+    "type": "rc69.result.accepted",
+    "requestId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "acceptedSequence": 2,
+    "serverKid": "beta4_cross_language_server",
+    "serverProofJws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJldGE0X2Nyb3NzX2xhbmd1YWdlX3NlcnZlciIsInR5cCI6ImthdG9zeW5jLXJjNjctZHVwbGV4LXJlbGF5K2p3cyJ9.eyJ2ZXJzaW9uIjoxLCJkaXJlY3Rpb24iOiJjbG91ZF90b19kZXZpY2UiLCJraW5kIjoibWVzaC5ub3RpY2UiLCJvd25lcklkIjoiMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExIiwidGVuYW50SWQiOiIyMjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiLCJncmFudElkIjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwiZGV2aWNlSWQiOiI0NDQ0NDQ0NC00NDQ0LTQ0NDQtODQ0NC00NDQ0NDQ0NDQ0NDQiLCJzZXNzaW9uSWQiOiI1NTU1NTU1NS01NTU1LTQ1NTUtODU1NS01NTU1NTU1NTU1NTUiLCJyZXF1ZXN0SWQiOiJkZGRkZGRkZC1kZGRkLTRkZGQtOGRkZC1kZGRkZGRkZGRkZGQiLCJzZXF1ZW5jZSI6NCwiaXNzdWVkQXRNcyI6MTc5NTAwMzIwMjAwMCwiZXhwaXJlc0F0TXMiOjE3OTUwMDMyMTcwMDAsImJvZHkiOnsidHlwZSI6InJjNzAucmVzdWx0LmFjY2VwdGVkIiwicmVxdWVzdElkIjoiZGRkZGRkZGQtZGRkZC00ZGRkLThkZGQtZGRkZGRkZGRkZGRkIiwiYWNjZXB0ZWRTZXF1ZW5jZSI6Mn19.D6KK0vEMMpHQNvE5plpYvQQUSf_XSNnc7O8KJo9jTyP6ewRfnQqSJ8IOCui53vKJETuMU7n-4OjjhjoNQa-2Bg"
+  }
+}

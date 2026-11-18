@@ -20,6 +20,8 @@ const READ_ONLY_NAMES: &[&str] = &[
     "katosync_list_directory",
     "katosync_read_file",
     "katosync_project_checkpoint",
+    // Eigenes festes CLI-Profil; allgemeine Shell-Tools bleiben ausgeschlossen.
+    "katosync_run_terminal_profile",
 ];
 
 /// Values must come from a server-verified, current owner/tenant/client-grant

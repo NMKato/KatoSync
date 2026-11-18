@@ -1,6 +1,21 @@
 // Deutsche Quell-Texte (Single Source of Truth). Andere Sprachen fallen bei fehlendem Key auf Deutsch zurueck.
 // Platzhalter im Format {name} werden von t() interpoliert.
 const de = {
+  "remoteMcp.owner.profileScope": "Gerätestatus, Git-Status und einzeln bestätigte Git-Versionsabfragen",
+  "remoteMcp.terminal.title": "Einzelnes Terminalprofil freigeben",
+  "remoteMcp.terminal.scope": "Dieses Profil führt git --version im ausgewählten Projekt aus. Die Ausführung endet nach spätestens acht Sekunden.",
+  "remoteMcp.terminal.project": "Projekt",
+  "remoteMcp.terminal.prepare": "Git-Version prüfen und freigeben",
+  "remoteMcp.terminal.reviewTitle": "Genau diese Versionsabfrage einmal erlauben?",
+  "remoteMcp.terminal.once": "Die Bestätigung gilt für einen Aufruf innerhalb von 60 Sekunden.",
+  "remoteMcp.terminal.confirm": "Einmalig mit Code freigeben",
+  "remoteMcp.terminal.approved": "Einmalfreigabe vorbereitet · noch {seconds} Sekunden. Ein Ausführungsergebnis liegt erst nach dem Aufruf vor.",
+  "remoteMcp.terminal.shareOperation": "Übergeben Sie diese Auftrags-ID an ChatGPT:",
+  "remoteMcp.terminal.needsConnection": "Verbinden Sie zuerst mit ausgewählten Projekten und aktivierten Terminalprofilen.",
+  "remoteMcp.terminal.failed": "Die Freigabe konnte nicht bestätigt werden. Prüfen Sie die Verbindung und bereiten Sie den Auftrag erneut vor.",
+  "remoteMcp.terminal.requestScope": "Einzelne Git-Versionsabfragen mit eigener Bestätigung zusätzlich anfordern",
+  "remoteMcp.terminal.connectOptIn": "Einzeln bestätigte Terminalprofile für diese Verbindung aktivieren",
+  "remoteMcp.terminal.start": "Mit Git-Status und Profilfreigaben verbinden",
   "remoteMcp.device.title": "Diese App für MCP freigeben",
   "remoteMcp.device.needsClient": "Bestätigen Sie zuerst die Freigabe des ChatGPT-Clients.",
   "remoteMcp.device.loading": "Die Registrierung dieser App wird geprüft.",

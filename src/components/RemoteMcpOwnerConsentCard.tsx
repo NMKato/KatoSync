@@ -23,6 +23,8 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
   const [failure, setFailure] = useState<ReturnType<typeof remoteMcpOwnerRecovery> | null>(null);
   const [notice, setNotice] = useState<"requested" | "approved" | "revoked" | null>(null);
   const [includeGitStatus, setIncludeGitStatus] = useState(false);
+  const [includeTerminalProfiles, setIncludeTerminalProfiles] = useState(false);
+  const [terminalReviewBusy, setTerminalReviewBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
   const generation = useRef(0);
   const pending = useRef(false);
@@ -90,7 +92,7 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
     const operation = ++generation.current;
     pending.current = true; setBusy(true); setNotice(null); setFailure(null);
     try {
-      acceptSnapshot(await invoke("remote_mcp_owner_request_client", { includeGitStatus }), operation);
+      acceptSnapshot(await invoke("remote_mcp_owner_request_client", { includeGitStatus, includeTerminalProfiles }), operation);
       if (mounted.current && operation === generation.current) setNotice("requested");
     } catch (cause) { fail(cause, operation); }
     finally {
@@ -142,7 +144,7 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
 
   if (!enabled) return null;
   const grantExpired = !!snapshot?.clientGrant && Date.parse(snapshot.clientGrant.expiresAt) <= now;
-  const childBusy = deviceReviewBusy || enrollmentBusy;
+  const childBusy = deviceReviewBusy || enrollmentBusy || terminalReviewBusy;
   const clientReady = snapshot?.clientGrant?.status === "approved" && !grantExpired;
   const status = !snapshot ? busy ? "loading" : "unavailable" : grantExpired ? "expired" :
     snapshot.clientGrant?.status === "approved" ? "approved" : snapshot.clientGrant ? "pending" : "notRequested";
@@ -161,13 +163,15 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
     {snapshot ? <>
       <dl className="remote-mcp-owner-target">
         <div><dt>{t("remoteMcp.owner.target")}</dt><dd>{snapshot.targetClient.name}<small>{snapshot.targetClient.id}</small></dd></div>
-        <div><dt>{t("remoteMcp.owner.permissions")}</dt><dd>{t(snapshot.allowedTools.includes("git.status") ? "remoteMcp.owner.gitReadOnlyScope" : "remoteMcp.owner.readOnlyScope")}</dd></div>
+        <div><dt>{t("remoteMcp.owner.permissions")}</dt><dd>{t(snapshot.allowedTools.includes("terminal.run_profile") ? "remoteMcp.owner.profileScope" : snapshot.allowedTools.includes("git.status") ? "remoteMcp.owner.gitReadOnlyScope" : "remoteMcp.owner.readOnlyScope")}</dd></div>
       </dl>
       <p className="remote-mcp-owner-boundary">{t("remoteMcp.owner.deviceBoundary")}</p>
       {!review ? <div className="remote-mcp-owner-actions">
         {snapshot.canRequestClient ? <>
-          <label className="remote-mcp-git-opt-in"><input type="checkbox" checked={includeGitStatus} disabled={busy || childBusy}
+          <label className="remote-mcp-git-opt-in"><input type="checkbox" checked={includeGitStatus} disabled={busy || childBusy || includeTerminalProfiles}
             onChange={event => setIncludeGitStatus(event.target.checked)} />{t("remoteMcp.owner.includeGitStatus")}</label>
+          <label className="remote-mcp-git-opt-in"><input type="checkbox" checked={includeTerminalProfiles} disabled={busy || childBusy}
+            onChange={event => { setIncludeTerminalProfiles(event.target.checked); if (event.target.checked) setIncludeGitStatus(true); }} />{t("remoteMcp.terminal.requestScope")}</label>
           <button className="secondary compact-button" type="button" disabled={busy || childBusy}
             onClick={() => void requestClient()}>{t("remoteMcp.owner.request")}</button>
         </> : null}
@@ -187,7 +191,7 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
           ? "remoteMcp.owner.enrollTotp" : "remoteMcp.owner.reviewUnavailable")}</p> : null}
       </div> : <form className="remote-mcp-owner-review" onSubmit={event => { event.preventDefault(); void confirm(); }}>
         <strong>{t(review.action === "approve_client" ? "remoteMcp.owner.confirmApproveTitle" : "remoteMcp.owner.confirmRevokeTitle")}</strong>
-        <p>{review.targetClient.name} · {t(review.allowedTools.includes("git.status") ? "remoteMcp.owner.gitReadOnlyScope" : "remoteMcp.owner.readOnlyScope")}</p>
+        <p>{review.targetClient.name} · {t(review.allowedTools.includes("terminal.run_profile") ? "remoteMcp.owner.profileScope" : review.allowedTools.includes("git.status") ? "remoteMcp.owner.gitReadOnlyScope" : "remoteMcp.owner.readOnlyScope")}</p>
         <p>{t("remoteMcp.owner.reviewExpires", { seconds: Math.max(0, Math.ceil((review.expiresAt - now) / 1000)) })}</p>
         <label htmlFor="remote-mcp-owner-totp">{t("remoteMcp.owner.code")}</label>
         <input id="remote-mcp-owner-totp" type="password" inputMode="numeric" autoComplete="one-time-code"
@@ -212,6 +216,9 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
       canInteract={!busy && !review && !enrollmentBusy} refreshEpoch={refreshEpoch}
       onReady={setDeviceReady} onReviewBusy={setDeviceReviewBusy} onChanged={() => void refresh()} />
     <RemoteMcpRelayPanel canStart={clientReady && deviceReady && !busy && !review && !childBusy}
-      refreshEpoch={refreshEpoch} allowGitStatus={clientReady && !!snapshot?.allowedTools.includes("git.status")} />
+      refreshEpoch={refreshEpoch} allowGitStatus={clientReady && !!snapshot?.allowedTools.includes("git.status")}
+      allowTerminalProfiles={clientReady && !!snapshot?.allowedTools.includes("terminal.run_profile")}
+      factors={snapshot?.factors ?? []} onTerminalBusy={setTerminalReviewBusy}
+      canReviewTerminal={!busy && !review && !deviceReviewBusy && !enrollmentBusy} />
   </section>;
 }

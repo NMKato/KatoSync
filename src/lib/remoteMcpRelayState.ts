@@ -8,6 +8,7 @@ export interface RemoteMcpRelaySnapshot {
   deviceAccessEnabled: false;
   remoteJobsEnabled: false;
   readOnlyGitStatusEnabled: boolean;
+  terminalProfilesEnabled: boolean;
   approvedProjectIds: string[];
 }
 export function parseRemoteMcpRelaySnapshot(value: unknown): RemoteMcpRelaySnapshot | null {
@@ -26,10 +27,12 @@ export function parseRemoteMcpRelaySnapshot(value: unknown): RemoteMcpRelaySnaps
   if (typeof gitEnabled !== "boolean" || !Array.isArray(projectIds) || projectIds.length > 8 ||
       new Set(projectIds).size !== projectIds.length || projectIds.some(id => !isRemoteMcpProjectId(id)) ||
       gitEnabled !== (projectIds.length > 0) || (gitEnabled && data.state !== "connected")) return null;
+  const terminalEnabled = data.terminalProfilesEnabled ?? false;
+  if (typeof terminalEnabled !== "boolean" || (terminalEnabled && (!gitEnabled || data.state !== "connected"))) return null;
   return { state: data.state as RemoteMcpRelaySnapshot["state"],
     lastHeartbeatAt: data.lastHeartbeatAt as number | null, expiresAt: data.expiresAt as number | null,
     errorCode: data.errorCode as string | null, deviceAccessEnabled: false, remoteJobsEnabled: false,
-    readOnlyGitStatusEnabled: gitEnabled, approvedProjectIds: [...projectIds] };
+    readOnlyGitStatusEnabled: gitEnabled, terminalProfilesEnabled: terminalEnabled, approvedProjectIds: [...projectIds] };
 }
 export function isRemoteMcpProjectId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9._-]{1,140}$/.test(value) && value !== "." && value !== "..";

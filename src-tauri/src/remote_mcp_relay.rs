@@ -25,6 +25,7 @@ use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
 mod git_status;
+mod terminal_profile;
 
 const HOST: &str = "https://remote-mcp.katoos.de";
 const SOCKET: &str = "wss://remote-mcp.katoos.de/api/device-relay/socket";
@@ -42,6 +43,7 @@ pub(crate) struct RelayStatus {
     remote_jobs_enabled: bool,
     read_only_git_status_enabled: bool,
     approved_project_ids: Vec<String>,
+    terminal_profiles_enabled: bool,
 }
 impl RelayStatus {
     fn state(state: &str, error: Option<&str>) -> Self {
@@ -54,6 +56,7 @@ impl RelayStatus {
             remote_jobs_enabled: false,
             read_only_git_status_enabled: false,
             approved_project_ids: Vec::new(),
+            terminal_profiles_enabled: false,
         }
     }
 }
@@ -62,6 +65,7 @@ struct Runtime {
     status: RelayStatus,
     deadline: Option<Instant>,
     task: Option<JoinHandle<()>>,
+    terminal_scopes: Vec<crate::remote_mcp_terminal::Scope>,
 }
 static RUNTIME: OnceLock<Mutex<Runtime>> = OnceLock::new();
 fn runtime() -> &'static Mutex<Runtime> {
@@ -71,6 +75,7 @@ fn runtime() -> &'static Mutex<Runtime> {
             status: RelayStatus::state("idle", None),
             deadline: None,
             task: None,
+            terminal_scopes: Vec::new(),
         })
     })
 }
@@ -85,6 +90,7 @@ fn publish(generation: u64, state: &str, error: Option<&str>) {
     if r.generation == generation {
         r.status = RelayStatus::state(state, error);
         r.deadline = None;
+        r.terminal_scopes.clear();
     }
 }
 fn publish_ack(
@@ -92,7 +98,8 @@ fn publish_ack(
     owner_generation: u64,
     acknowledged_at: u64,
     expires: u64,
-    project_ids: &[String],
+    ticket: &Ticket,
+    projects: &[git_status::ApprovedProject],
 ) -> Result<(), String> {
     let mut r = runtime().lock().unwrap_or_else(|e| e.into_inner());
     if r.generation != generation || crate::native_owner_session_generation() != owner_generation {
@@ -102,6 +109,33 @@ fn publish_ack(
     if expires <= now || now < acknowledged_at || now.saturating_sub(acknowledged_at) >= FRESH_MS {
         return Err("REMOTE_MCP_RELAY_HEARTBEAT_EXPIRED".into());
     }
+    let project_ids = &ticket.admitted_project_ids;
+    let terminal = ticket
+        .native_tool_names
+        .iter()
+        .any(|name| name == crate::remote_mcp_terminal::TOOL);
+    r.terminal_scopes = if terminal {
+        projects
+            .iter()
+            .map(|project| crate::remote_mcp_terminal::Scope {
+                relay_generation: generation,
+                owner_generation,
+                owner_id: ticket.owner_id,
+                tenant_id: ticket.tenant_id,
+                oauth_client_id: ticket.oauth_client_id.expect("validated terminal ticket"),
+                grant_id: ticket.grant_id,
+                device_id: ticket.device_id,
+                project_id: project.id.clone(),
+                authority_revision: ticket
+                    .authority_revision
+                    .clone()
+                    .expect("validated terminal ticket"),
+                root: project.root.clone(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     r.status = RelayStatus {
         state: "connected".into(),
         last_heartbeat_at: Some(acknowledged_at),
@@ -111,6 +145,7 @@ fn publish_ack(
         remote_jobs_enabled: false,
         read_only_git_status_enabled: !project_ids.is_empty(),
         approved_project_ids: project_ids.to_vec(),
+        terminal_profiles_enabled: terminal,
     };
     r.deadline = Some(Instant::now() + Duration::from_millis(expires - now));
     Ok(())
@@ -139,6 +174,9 @@ pub(crate) fn invalidate_owner_session() {
     }
     r.status = RelayStatus::state("idle", None);
     r.deadline = None;
+    r.terminal_scopes.clear();
+    drop(r);
+    crate::remote_mcp_terminal::invalidate();
 }
 async fn reserve() -> u64 {
     let (generation, old) = {
@@ -146,8 +184,10 @@ async fn reserve() -> u64 {
         r.generation = r.generation.wrapping_add(1);
         r.status = RelayStatus::state("idle", None);
         r.deadline = None;
+        r.terminal_scopes.clear();
         (r.generation, r.task.take())
     };
+    crate::remote_mcp_terminal::invalidate();
     if let Some(old) = old {
         old.abort();
         let _ = old.await;
@@ -167,9 +207,49 @@ pub(crate) async fn remote_mcp_relay_projects() -> Result<serde_json::Value, Str
     crate::remote_mcp_owner_review::check_generation(&owner)?;
     serde_json::to_value(options).map_err(|_| "REMOTE_MCP_GIT_REGISTRY_INVALID".into())
 }
+/// Liefert ausschließlich den frischen, lokal ausgewählten CLI-Projektkontext.
+pub(crate) fn terminal_review_scope(
+    project_id: &str,
+) -> Result<crate::remote_mcp_terminal::Scope, String> {
+    let observed = remote_mcp_relay_status();
+    if observed.state != "connected" || !observed.terminal_profiles_enabled {
+        return Err("REMOTE_MCP_TERMINAL_CONNECTION_REQUIRED".into());
+    }
+    let scope = {
+        let r = runtime()
+            .lock()
+            .map_err(|_| "REMOTE_MCP_TERMINAL_CONNECTION_REQUIRED")?;
+        let scope = r
+            .terminal_scopes
+            .iter()
+            .find(|s| s.project_id == project_id)
+            .cloned()
+            .ok_or("REMOTE_MCP_TERMINAL_PROJECT_REQUIRED")?;
+        if scope.relay_generation != r.generation
+            || scope.owner_generation != crate::native_owner_session_generation()
+            || !r.deadline.is_some_and(|d| Instant::now() < d)
+        {
+            return Err("REMOTE_MCP_TERMINAL_CONNECTION_REQUIRED".into());
+        }
+        scope
+    };
+    let registry = crate::project_registry::project_registry_load()
+        .map_err(|_| "REMOTE_MCP_GIT_REGISTRY_INVALID".to_string())?
+        .ok_or("REMOTE_MCP_GIT_REGISTRY_INVALID")?;
+    let project = git_status::approve_projects(&registry, &[project_id.to_string()])
+        .map_err(str::to_owned)?;
+    if project[0].root != scope.root {
+        return Err("REMOTE_MCP_GIT_PROJECT_CHANGED".into());
+    }
+    Ok(scope)
+}
 pub(crate) async fn remote_mcp_relay_start(
     project_ids: Vec<String>,
+    allow_terminal_profiles: bool,
 ) -> Result<RelayStatus, String> {
+    if allow_terminal_profiles && project_ids.is_empty() {
+        return Err("REMOTE_MCP_TERMINAL_PROJECT_REQUIRED".into());
+    }
     server_key()?;
     // Bind selection before any asynchronous work. The reserved supervisor
     // verifies this same owner's live session before requesting a ticket.
@@ -192,6 +272,7 @@ pub(crate) async fn remote_mcp_relay_start(
         generation,
         owner_generation,
         projects,
+        allow_terminal_profiles,
     )));
     Ok(r.status.clone())
 }
@@ -210,7 +291,7 @@ fn server_key() -> Result<(String, VerifyingKey), String> {
         .ok()
         .and_then(|v| v.try_into().ok())
         .ok_or("REMOTE_MCP_RELAY_PIN_INVALID")?;
-    if pin.kid != "katosync_beta4_relay_20261118b" || URL_SAFE_NO_PAD.encode(bytes) != pin.x {
+    if pin.kid != "katosync_beta4_relay_20261118c" || URL_SAFE_NO_PAD.encode(bytes) != pin.x {
         return Err("REMOTE_MCP_RELAY_PIN_INVALID".into());
     }
     let key =
@@ -244,6 +325,7 @@ async fn supervise(
     generation: u64,
     owner_generation: u64,
     projects: Vec<git_status::ApprovedProject>,
+    allow_terminal_profiles: bool,
 ) {
     let mut backoff = 1;
     loop {
@@ -251,7 +333,14 @@ async fn supervise(
             return;
         }
         publish(generation, "connecting", None);
-        match session(generation, owner_generation, &projects).await {
+        match session(
+            generation,
+            owner_generation,
+            &projects,
+            allow_terminal_profiles,
+        )
+        .await
+        {
             Ok(()) => {
                 backoff = 1;
                 publish(generation, "reconnecting", None);
@@ -371,6 +460,7 @@ impl Drop for Ticket {
         self.ticket.zeroize();
     }
 }
+#[cfg(test)]
 fn valid_ticket(
     t: &Ticket,
     owner: Uuid,
@@ -379,6 +469,25 @@ fn valid_ticket(
     now: u64,
     projects: &[git_status::ApprovedProject],
 ) -> Result<(), String> {
+    valid_ticket_with_profiles(t, owner, device, key, now, projects, false)
+}
+fn valid_ticket_with_profiles(
+    t: &Ticket,
+    owner: Uuid,
+    device: Uuid,
+    key: &SigningKey,
+    now: u64,
+    projects: &[git_status::ApprovedProject],
+    allow_terminal_profiles: bool,
+) -> Result<(), String> {
+    if allow_terminal_profiles && projects.is_empty() {
+        return Err("REMOTE_MCP_RELAY_TICKET_SCOPE_INVALID".into());
+    }
+    let expected_names = if allow_terminal_profiles {
+        vec![git_status::TOOL, crate::remote_mcp_terminal::TOOL]
+    } else {
+        vec![git_status::TOOL]
+    };
     let digest = Sha256::digest(key.verifying_key().as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -425,7 +534,7 @@ fn valid_ticket(
         || if projects.is_empty() {
             !t.native_tool_names.is_empty()
         } else {
-            t.native_tool_names != [git_status::TOOL]
+            t.native_tool_names != expected_names
                 || t.oauth_client_id.is_none_or(|id| id.is_nil())
                 || t.authority_revision.as_ref().is_none_or(|revision| {
                     revision.len() != 64
@@ -457,6 +566,47 @@ fn remaining_execution_ms(deadline: u64, now: u64) -> Result<u64, String> {
         .checked_sub(now)
         .filter(|remaining| *remaining > 0)
         .ok_or_else(|| "REMOTE_MCP_GIT_DEADLINE".into())
+}
+
+/// The bearer comes only from the native owner store and is attached to the
+/// fixed WSS origin. The Worker authenticates it before choosing a device DO;
+/// the inner opaque ticket and device-signature checks remain mandatory.
+fn websocket_request(
+    ticket: &Ticket,
+    owner: Uuid,
+    device: Uuid,
+    token: &str,
+) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, String> {
+    if ticket.owner_id != owner
+        || ticket.device_id != device
+        || ticket.route != "/api/device-relay/socket"
+    {
+        return Err("REMOTE_MCP_RELAY_TICKET_SCOPE_INVALID".into());
+    }
+    crate::remote_mcp_mfa::validate_native_session(token, &owner.to_string())?;
+    let mut request = SOCKET
+        .into_client_request()
+        .map_err(|_| "REMOTE_MCP_RELAY_ENDPOINT_INVALID".to_string())?;
+    let bearer = Zeroizing::new(format!("Bearer {token}"));
+    let mut authorization = HeaderValue::from_str(bearer.as_str())
+        .map_err(|_| "REMOTE_MCP_RELAY_LOGIN_REQUIRED".to_string())?;
+    authorization.set_sensitive(true);
+    request.headers_mut().insert(
+        tokio_tungstenite::tungstenite::http::header::AUTHORIZATION,
+        authorization,
+    );
+    let mut opaque_ticket = HeaderValue::from_str(&ticket.ticket)
+        .map_err(|_| "REMOTE_MCP_RELAY_TICKET_INVALID".to_string())?;
+    opaque_ticket.set_sensitive(true);
+    request
+        .headers_mut()
+        .insert("X-KatoSync-Relay-Ticket", opaque_ticket);
+    request.headers_mut().insert(
+        "X-KatoSync-Relay-Device",
+        HeaderValue::from_str(&device.to_string())
+            .map_err(|_| "REMOTE_MCP_RELAY_TICKET_INVALID".to_string())?,
+    );
+    Ok(request)
 }
 
 type Socket =
@@ -533,6 +683,7 @@ async fn session(
     generation: u64,
     owner_generation: u64,
     projects: &[git_status::ApprovedProject],
+    allow_terminal_profiles: bool,
 ) -> Result<(), String> {
     current(generation, owner_generation)?;
     let owner_string = tokio::time::timeout(
@@ -580,7 +731,11 @@ async fn session(
         .post(format!("{HOST}/api/device-relay/ticket"))
         .bearer_auth(token.as_str())
         .json(&if projects.is_empty() { serde_json::json!({"deviceId":device}) }
-            else { serde_json::json!({"deviceId":device,"projectIds":projects.iter().map(|project| &project.id).collect::<Vec<_>>()}) })
+            else {
+                let mut body = serde_json::json!({"deviceId":device,"projectIds":projects.iter().map(|project| &project.id).collect::<Vec<_>>()});
+                if allow_terminal_profiles { body["allowTerminalProfiles"] = serde_json::Value::Bool(true); }
+                body
+            })
         .send()
         .await
         .map_err(|_| "REMOTE_MCP_RELAY_UNAVAILABLE".to_string())?;
@@ -589,7 +744,15 @@ async fn session(
     }
     let ticket: Ticket = serde_json::from_slice(&bounded_body(response).await?)
         .map_err(|_| "REMOTE_MCP_RELAY_RESPONSE_INVALID".to_string())?;
-    valid_ticket(&ticket, owner, device, &key, now_ms()?, projects)?;
+    valid_ticket_with_profiles(
+        &ticket,
+        owner,
+        device,
+        &key,
+        now_ms()?,
+        projects,
+        allow_terminal_profiles,
+    )?;
     let renew_at = renewal_deadline(&ticket);
     if now_ms()? >= renew_at {
         // A nearly expired actor JWT may legitimately yield a short ticket.
@@ -611,19 +774,8 @@ async fn session(
         device_id: device,
         session_id: ticket.session_id,
     };
-    let mut request = SOCKET
-        .into_client_request()
-        .map_err(|_| "REMOTE_MCP_RELAY_ENDPOINT_INVALID".to_string())?;
-    request.headers_mut().insert(
-        "X-KatoSync-Relay-Ticket",
-        HeaderValue::from_str(&ticket.ticket)
-            .map_err(|_| "REMOTE_MCP_RELAY_TICKET_INVALID".to_string())?,
-    );
-    request.headers_mut().insert(
-        "X-KatoSync-Relay-Device",
-        HeaderValue::from_str(&device.to_string())
-            .map_err(|_| "REMOTE_MCP_RELAY_TICKET_INVALID".to_string())?,
-    );
+    let request = websocket_request(&ticket, owner, device, token.as_str())?;
+    current(generation, owner_generation)?;
     let (mut socket, _) = tokio::time::timeout(
         Duration::from_secs(7),
         connect_async_with_config(
@@ -757,7 +909,8 @@ async fn session(
                         owner_generation,
                         received,
                         lease_expires,
-                        &ticket.admitted_project_ids,
+                        &ticket,
+                        projects,
                     )?;
                 }
                 Some("rc69.result.accepted") => {
@@ -804,40 +957,122 @@ async fn session(
                 .as_deref()
                 .ok_or("REMOTE_MCP_RELAY_TICKET_SCOPE_INVALID")?,
         };
-        let request = git_status::verify_request(
-            &packet,
-            &pin,
-            &authority,
-            last_server_sequence,
-            received,
-            ticket.expires_at_ms,
-            projects,
-            &seen_requests,
-        )
-        .map_err(str::to_owned)?;
-        // Consume before execution, including failures; a request is never retried.
-        last_server_sequence = request.sequence;
-        seen_requests.insert(request.request_id);
+        let terminal = if terminal_profile::is_terminal_request(&packet) {
+            if !allow_terminal_profiles
+                || !ticket
+                    .native_tool_names
+                    .iter()
+                    .any(|t| t == crate::remote_mcp_terminal::TOOL)
+            {
+                return Err("REMOTE_MCP_TERMINAL_REQUEST_REJECTED".into());
+            }
+            Some(
+                terminal_profile::verify_request(
+                    &packet,
+                    &pin,
+                    &authority,
+                    last_server_sequence,
+                    received,
+                    ticket.expires_at_ms,
+                    projects,
+                    &seen_requests,
+                )
+                .map_err(str::to_owned)?,
+            )
+        } else {
+            None
+        };
+        let (request_id, request_sequence, request_deadline, project_id) =
+            if let Some(request) = &terminal {
+                (
+                    request.request_id,
+                    request.sequence,
+                    request.execution_deadline_ms,
+                    request.project_id.clone(),
+                )
+            } else {
+                let request = git_status::verify_request(
+                    &packet,
+                    &pin,
+                    &authority,
+                    last_server_sequence,
+                    received,
+                    ticket.expires_at_ms,
+                    projects,
+                    &seen_requests,
+                )
+                .map_err(str::to_owned)?;
+                (
+                    request.request_id,
+                    request.sequence,
+                    request.execution_deadline_ms,
+                    request.project_id,
+                )
+            };
+        // Request und lokale Einmalfreigabe werden vor dem Prozessstart verbraucht.
+        last_server_sequence = request_sequence;
+        seen_requests.insert(request_id);
         let project = projects
             .iter()
-            .find(|project| project.id == request.project_id)
+            .find(|project| project.id == project_id)
             .ok_or("REMOTE_MCP_GIT_PROJECT_NOT_SELECTED")?;
         let registry = crate::project_registry::project_registry_load()
             .map_err(|_| "REMOTE_MCP_GIT_REGISTRY_INVALID".to_string())?
             .ok_or("REMOTE_MCP_GIT_REGISTRY_INVALID")?;
         git_status::verify_registered_root(&registry, project).map_err(str::to_owned)?;
-        let execution_expires = request
-            .execution_deadline_ms
+        let execution_expires = request_deadline
             .min(ticket.expires_at_ms)
             .min(lease_expires)
             .min(renew_at);
         current(generation, owner_generation)?;
-        let result = git_status::read_status(
-            project,
-            remaining_execution_ms(execution_expires, now_ms()?)?,
-        )
-        .await
-        .map_err(str::to_owned)?;
+        enum NativeResult {
+            Git(crate::mesh_rc69_readonly_qa::NativeGitStatus),
+            Terminal(terminal_profile::ProfileResult),
+        }
+        let result = if let Some(request) = &terminal {
+            let scope = terminal_review_scope(&project.id)?;
+            if scope.relay_generation != generation
+                || scope.owner_generation != owner_generation
+                || scope.owner_id != owner
+                || scope.tenant_id != ticket.tenant_id
+                || scope.grant_id != ticket.grant_id
+                || scope.device_id != device
+                || scope.oauth_client_id != authority.client_id
+                || scope.authority_revision != authority.revision
+                || scope.root != project.root
+            {
+                return Err("REMOTE_MCP_TERMINAL_REQUEST_REJECTED".into());
+            }
+            crate::remote_mcp_terminal::consume(
+                &scope,
+                &crate::remote_mcp_terminal::DispatchConsent {
+                    operation_id: request.operation_id,
+                    arguments_sha256: &request.arguments_sha256,
+                    device_proof_sha256: &request.device_proof_sha256,
+                    approval_expires_at: request.approval_expires_at,
+                },
+                now_ms()?,
+            )?;
+            current(generation, owner_generation)?;
+            NativeResult::Terminal(
+                terminal_profile::run(
+                    project,
+                    request.operation_id,
+                    remaining_execution_ms(execution_expires, now_ms()?)?,
+                )
+                .await
+                .map_err(str::to_owned)?,
+            )
+        } else {
+            NativeResult::Git(
+                git_status::read_status(
+                    project,
+                    remaining_execution_ms(execution_expires, now_ms()?)?,
+                )
+                .await
+                .map_err(str::to_owned)?,
+            )
+        };
         current(generation, owner_generation)?;
         let completed = now_ms()?;
         if completed >= execution_expires
@@ -853,25 +1088,31 @@ async fn session(
             .ok_or("REMOTE_MCP_GIT_REGISTRY_INVALID")?;
         git_status::verify_registered_root(&registry, project).map_err(str::to_owned)?;
         let result_sequence = sequence;
-        let receipt = crate::mesh_rc69_result_qa::sign_git_status_result_jws(
-            &PresenceContext {
-                owner_id: owner,
-                tenant_id: ticket.tenant_id,
-                grant_id: ticket.grant_id,
-                device_id: device,
-                session_id: ticket.session_id,
-                request_id: request.request_id,
-                challenge_id: ticket.challenge_id,
-                key_id: &ticket.device_key_id,
-                sequence: result_sequence,
-                issued_at_ms: completed as i64,
-                challenge_expires_at_ms: ticket.expires_at_ms as i64,
-                revoke_epoch: ticket.revoke_epoch,
-                native_tool_names: &tool_names,
-            },
-            &result,
-            &key,
-        )
+        let result_context = PresenceContext {
+            owner_id: owner,
+            tenant_id: ticket.tenant_id,
+            grant_id: ticket.grant_id,
+            device_id: device,
+            session_id: ticket.session_id,
+            request_id,
+            challenge_id: ticket.challenge_id,
+            key_id: &ticket.device_key_id,
+            sequence: result_sequence,
+            issued_at_ms: completed as i64,
+            challenge_expires_at_ms: ticket.expires_at_ms as i64,
+            revoke_epoch: ticket.revoke_epoch,
+            native_tool_names: &tool_names,
+        };
+        let receipt = match result {
+            NativeResult::Git(result) => crate::mesh_rc69_result_qa::sign_git_status_result_jws(
+                &result_context,
+                &result,
+                &key,
+            ),
+            NativeResult::Terminal(result) => {
+                terminal_profile::sign_result(&result_context, &result, &key)
+            }
+        }
         .map_err(str::to_owned)?;
         current(generation, owner_generation)?;
         let sending = now_ms()?;
@@ -893,7 +1134,7 @@ async fn session(
         .await
         .map_err(|_| "REMOTE_MCP_GIT_DEADLINE".to_string())?
         .map_err(|_| "REMOTE_MCP_RELAY_DISCONNECTED".to_string())?;
-        pending_result = Some((request.request_id, result_sequence, completed));
+        pending_result = Some((request_id, result_sequence, completed));
         sequence = sequence
             .checked_add(1)
             .ok_or("REMOTE_MCP_RELAY_SEQUENCE_INVALID")?;
@@ -1201,10 +1442,10 @@ mod tests {
     #[test]
     fn relay_pin_is_independent_and_valid() {
         let (kid, key) = server_key().unwrap();
-        assert_eq!(kid, "katosync_beta4_relay_20261118b");
+        assert_eq!(kid, "katosync_beta4_relay_20261118c");
         assert_eq!(
             URL_SAFE_NO_PAD.encode(key.as_bytes()),
-            "8AI4jpN5AdpR-mPLw51orqj2ZEymp4vIBGdU9mOLzps"
+            "acB-nHkhkUfObDvJkOCBKIOkw-Zn3D-d3hnCusxeMKk"
         );
     }
     #[test]
@@ -1218,5 +1459,102 @@ mod tests {
         ] {
             assert!(!transient(code));
         }
+    }
+
+    #[test]
+    fn terminal_ticket_requires_explicit_local_opt_in_and_selected_project() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/beta4_terminal_profile_wire.json"
+        ))
+        .unwrap();
+        let ticket: Ticket = serde_json::from_value(fixture["ticket"].clone()).unwrap();
+        let key = SigningKey::from_bytes(&[fixture["deviceSeedByte"].as_u64().unwrap() as u8; 32]);
+        let now = fixture["nowMs"].as_u64().unwrap();
+        let registry = serde_json::json!({"schemaVersion":1,"projects":[{"id":"katosync","rootPath":std::env::temp_dir(),"focus":{"status":"active"}}]});
+        let projects = git_status::approve_projects(&registry, &["katosync".into()]).unwrap();
+        assert!(valid_ticket_with_profiles(
+            &ticket,
+            ticket.owner_id,
+            ticket.device_id,
+            &key,
+            now,
+            &projects,
+            true
+        )
+        .is_ok());
+        assert!(valid_ticket_with_profiles(
+            &ticket,
+            ticket.owner_id,
+            ticket.device_id,
+            &key,
+            now,
+            &projects,
+            false
+        )
+        .is_err());
+        assert!(valid_ticket_with_profiles(
+            &ticket,
+            ticket.owner_id,
+            ticket.device_id,
+            &key,
+            now,
+            &[],
+            true
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn websocket_owner_bearer_is_bound_to_fixed_origin_and_sensitive_headers() {
+        let fixture = connector_fixture();
+        let mut ticket: Ticket = serde_json::from_value(fixture["ticket"].clone()).unwrap();
+        let owner = ticket.owner_id;
+        let device = ticket.device_id;
+        let claims = serde_json::json!({
+            "iss":format!("{}/auth/v1",crate::KATOSYNC_AUTH_URL),
+            "sub":owner,"session_id":Uuid::new_v4(),
+            "aud":"authenticated","role":"authenticated","exp":now_ms().unwrap()/1000+90,
+        });
+        // Synthetic token: only native consistency is tested here; the Worker
+        // independently verifies the real provider signature before DO lookup.
+        let encode = |claims: &serde_json::Value| {
+            format!(
+                "e30.{}.synthetic-signature",
+                URL_SAFE_NO_PAD.encode(claims.to_string())
+            )
+        };
+        let token = encode(&claims);
+        let request = websocket_request(&ticket, owner, device, &token).unwrap();
+        assert_eq!(request.uri().scheme_str(), Some("wss"));
+        assert_eq!(request.uri().host(), Some("remote-mcp.katoos.de"));
+        assert_eq!(request.uri().path(), "/api/device-relay/socket");
+        assert!(request.uri().query().is_none());
+        let bearer =
+            &request.headers()[tokio_tungstenite::tungstenite::http::header::AUTHORIZATION];
+        assert_eq!(bearer.to_str().unwrap(), format!("Bearer {token}"));
+        assert!(bearer.is_sensitive());
+        assert!(request.headers()["X-KatoSync-Relay-Ticket"].is_sensitive());
+        assert_eq!(
+            request.headers()["X-KatoSync-Relay-Device"]
+                .to_str()
+                .unwrap(),
+            device.to_string()
+        );
+        let diagnostic = format!("{request:?}");
+        assert!(!diagnostic.contains(&token));
+        assert!(!diagnostic.contains(&ticket.ticket));
+        for (key, value) in [
+            ("sub", serde_json::json!(Uuid::new_v4())),
+            ("exp", serde_json::json!(1)),
+            ("oauth_client_id", serde_json::json!(Uuid::new_v4())),
+        ] {
+            let mut changed = claims.clone();
+            changed[key] = value;
+            assert!(websocket_request(&ticket, owner, device, &encode(&changed)).is_err());
+        }
+        assert!(websocket_request(&ticket, Uuid::new_v4(), device, &token).is_err());
+        assert!(websocket_request(&ticket, owner, Uuid::new_v4(), &token).is_err());
+        ticket.route = "wss://untrusted.invalid/collect".into();
+        assert!(websocket_request(&ticket, owner, device, &token).is_err());
     }
 }

@@ -142,6 +142,8 @@ fn mesh_connection_status() -> Result<serde_json::Value, String> {
 mod remote_mcp_owner_review;
 #[cfg(feature = "stage4j-qa")]
 mod remote_mcp_relay;
+#[cfg(feature = "stage4j-qa")]
+mod remote_mcp_terminal;
 
 #[tauri::command]
 async fn remote_mcp_owner_snapshot() -> Result<serde_json::Value, String> {
@@ -158,12 +160,14 @@ async fn remote_mcp_owner_snapshot() -> Result<serde_json::Value, String> {
 #[tauri::command]
 async fn remote_mcp_owner_request_client(
     include_git_status: Option<bool>,
+    include_terminal_profiles: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     #[cfg(feature = "stage4j-qa")]
     {
         serde_json::to_value(
             remote_mcp_owner_review::remote_mcp_owner_request_client(
                 include_git_status.unwrap_or(false),
+                include_terminal_profiles.unwrap_or(false),
             )
             .await?,
         )
@@ -171,7 +175,7 @@ async fn remote_mcp_owner_request_client(
     }
     #[cfg(not(feature = "stage4j-qa"))]
     {
-        let _ = include_git_status;
+        let _ = (include_git_status, include_terminal_profiles);
         Err("REMOTE_MCP_NOT_CONFIGURED".into())
     }
 }
@@ -234,6 +238,38 @@ fn remote_mcp_owner_cancel_review(review_id: String) -> Result<(), String> {
     }
 }
 #[tauri::command]
+async fn remote_mcp_terminal_prepare(
+    project_id: String,
+    factor_id: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(remote_mcp_terminal::prepare(project_id, factor_id).await?)
+            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (project_id, factor_id);
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_terminal_confirm(
+    review_id: String,
+    code: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(remote_mcp_terminal::confirm(review_id, code).await?)
+            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (review_id, code);
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
 async fn remote_mcp_relay_projects() -> Result<serde_json::Value, String> {
     #[cfg(feature = "stage4j-qa")]
     {
@@ -247,17 +283,22 @@ async fn remote_mcp_relay_projects() -> Result<serde_json::Value, String> {
 #[tauri::command]
 async fn remote_mcp_relay_start(
     project_ids: Option<Vec<String>>,
+    allow_terminal_profiles: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     #[cfg(feature = "stage4j-qa")]
     {
         serde_json::to_value(
-            remote_mcp_relay::remote_mcp_relay_start(project_ids.unwrap_or_default()).await?,
+            remote_mcp_relay::remote_mcp_relay_start(
+                project_ids.unwrap_or_default(),
+                allow_terminal_profiles.unwrap_or(false),
+            )
+            .await?,
         )
         .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
     }
     #[cfg(not(feature = "stage4j-qa"))]
     {
-        let _ = project_ids;
+        let _ = (project_ids, allow_terminal_profiles);
         Err("REMOTE_MCP_NOT_CONFIGURED".into())
     }
 }
@@ -931,6 +972,8 @@ pub fn run() {
             remote_mcp_owner_prepare_decision,
             remote_mcp_owner_confirm_decision,
             remote_mcp_owner_cancel_review,
+            remote_mcp_terminal_prepare,
+            remote_mcp_terminal_confirm,
             remote_mcp_owner_device_snapshot,
             remote_mcp_owner_prepare_device_decision,
             remote_mcp_owner_confirm_device_decision,

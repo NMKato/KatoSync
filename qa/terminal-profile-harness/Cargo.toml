@@ -1,0 +1,16 @@
+[package]
+name = "katosync-terminal-profile-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Exact production consent/dispatch/Git modules; no Tauri or network stack.
+[dependencies]
+base64 = "0.22"
+ed25519-dalek = "2.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.12", features = ["serde", "v4"] }
+tokio = { version = "1.41", features = ["macros", "rt-multi-thread", "time", "sync", "process", "io-util"] }
+sha2 = "0.10"
+zeroize = "1"

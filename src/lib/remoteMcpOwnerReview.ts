@@ -31,9 +31,10 @@ const target = (value: unknown): value is { id: string; name: string } => object
   typeof value.id === "string" && UUID.test(value.id) && typeof value.name === "string" &&
   value.name.trim().length > 0 && value.name.length <= 80;
 export const isRemoteMcpReadOnlyScope = (value: unknown): value is string[] => Array.isArray(value) &&
-  (value.length === 2 || value.length === 3) && new Set(value).size === value.length &&
+  value.length >= 2 && value.length <= 4 && new Set(value).size === value.length &&
   REMOTE_MCP_READ_TOOLS.every(tool => value.includes(tool)) &&
-  value.every(tool => ["devices.list", "device.status", "git.status"].includes(tool));
+  value.every(tool => ["devices.list", "device.status", "git.status", "terminal.run_profile"].includes(tool)) &&
+  (!value.includes("terminal.run_profile") || value.includes("git.status"));
 
 export function parseRemoteMcpOwnerSnapshot(value: unknown): RemoteMcpOwnerSnapshot | null {
   if (!object(value) || value.protocol !== "katosync-remote-mcp-owner-v1" || !target(value.targetClient) ||

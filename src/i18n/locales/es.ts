@@ -1,6 +1,21 @@
 import type { TKey } from "./de";
 
 const es: Record<TKey, string> = {
+  "remoteMcp.owner.profileScope": "Estado del dispositivo, Git y consultas de versión de Git confirmadas individualmente",
+  "remoteMcp.terminal.title": "Autorizar un perfil de terminal",
+  "remoteMcp.terminal.scope": "Este perfil ejecuta git --version en el proyecto seleccionado. La ejecución termina en ocho segundos como máximo.",
+  "remoteMcp.terminal.project": "Proyecto",
+  "remoteMcp.terminal.prepare": "Revisar consulta de versión de Git",
+  "remoteMcp.terminal.reviewTitle": "¿Permitir esta consulta de versión una sola vez?",
+  "remoteMcp.terminal.once": "La autorización permite una llamada durante 60 segundos.",
+  "remoteMcp.terminal.confirm": "Autorizar una vez con código",
+  "remoteMcp.terminal.approved": "Autorización de un solo uso preparada · quedan {seconds} segundos. El resultado estará disponible tras la llamada.",
+  "remoteMcp.terminal.shareOperation": "Envíe este identificador de operación a ChatGPT:",
+  "remoteMcp.terminal.needsConnection": "Conecte primero con proyectos seleccionados y perfiles de terminal habilitados.",
+  "remoteMcp.terminal.failed": "No se pudo confirmar la autorización. Revise la conexión y vuelva a preparar la operación.",
+  "remoteMcp.terminal.requestScope": "Solicitar también consultas de versión de Git confirmadas individualmente",
+  "remoteMcp.terminal.connectOptIn": "Habilitar perfiles de terminal confirmados individualmente para esta conexión",
+  "remoteMcp.terminal.start": "Conectar con Git y autorizaciones de perfiles",
   "remoteMcp.device.title": "Autorizar esta aplicación para MCP",
   "remoteMcp.device.needsClient": "Confirme primero la autorización del cliente de ChatGPT.",
   "remoteMcp.device.loading": "Comprobando el registro de esta aplicación.",

@@ -1,6 +1,21 @@
 import type { TKey } from "./de";
 
 const en: Record<TKey, string> = {
+  "remoteMcp.owner.profileScope": "Device status, Git status and individually confirmed Git version checks",
+  "remoteMcp.terminal.title": "Approve one terminal profile",
+  "remoteMcp.terminal.scope": "This profile runs git --version in the selected project. Execution ends within eight seconds.",
+  "remoteMcp.terminal.project": "Project",
+  "remoteMcp.terminal.prepare": "Review Git version check",
+  "remoteMcp.terminal.reviewTitle": "Allow exactly this version check once?",
+  "remoteMcp.terminal.once": "The approval covers one call within 60 seconds.",
+  "remoteMcp.terminal.confirm": "Approve once with code",
+  "remoteMcp.terminal.approved": "Single-use approval prepared · {seconds} seconds remaining. An execution result is available only after the call.",
+  "remoteMcp.terminal.shareOperation": "Give this operation ID to ChatGPT:",
+  "remoteMcp.terminal.needsConnection": "Connect with selected projects and terminal profiles enabled first.",
+  "remoteMcp.terminal.failed": "Approval could not be confirmed. Check the connection and prepare the operation again.",
+  "remoteMcp.terminal.requestScope": "Also request individually confirmed Git version checks",
+  "remoteMcp.terminal.connectOptIn": "Enable individually confirmed terminal profiles for this connection",
+  "remoteMcp.terminal.start": "Connect with Git status and profile approvals",
   "remoteMcp.device.title": "Approve this app for MCP",
   "remoteMcp.device.needsClient": "Confirm consent for the ChatGPT client first.",
   "remoteMcp.device.loading": "Checking this app's registration.",

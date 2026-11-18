@@ -113,7 +113,7 @@ export function RemoteMcpCurrentDevicePanel({ clientReady, clientGrantId, target
       <strong>{t("remoteMcp.device.confirmTitle")}</strong>
       <p>{review.currentDevice.name} · {review.targetClient.name}</p>
       <code>{review.currentDevice.fingerprint}</code>
-      <p>{t(review.allowedTools.includes("git.status") ? "remoteMcp.owner.gitReadOnlyScope" : "remoteMcp.owner.readOnlyScope")}</p>
+      <p>{t(review.allowedTools.includes("terminal.run_profile") ? "remoteMcp.owner.profileScope" : review.allowedTools.includes("git.status") ? "remoteMcp.owner.gitReadOnlyScope" : "remoteMcp.owner.readOnlyScope")}</p>
       <p>{t("remoteMcp.owner.reviewExpires", { seconds: Math.max(0, Math.ceil((review.expiresAt - now) / 1000)) })}</p>
       <label htmlFor="remote-mcp-device-totp">{t("remoteMcp.owner.code")}</label>
       <input id="remote-mcp-device-totp" type="password" inputMode="numeric" autoComplete="one-time-code"

@@ -153,18 +153,18 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 pub(crate) fn read_only_tools(tools: &[String]) -> bool {
-    (tools.len() == READ_TOOLS.len() || tools.len() == READ_TOOLS.len() + 1)
+    (2..=4).contains(&tools.len())
+        && tools.iter().collect::<std::collections::HashSet<_>>().len() == tools.len()
         && READ_TOOLS
             .iter()
-            .all(|tool| tools.iter().filter(|x| x.as_str() == *tool).count() == 1)
-        && tools
-            .iter()
-            .all(|tool| READ_TOOLS.contains(&tool.as_str()) || tool == "git.status")
-        && tools
-            .iter()
-            .filter(|tool| tool.as_str() == "git.status")
-            .count()
-            <= 1
+            .all(|tool| tools.iter().any(|x| x.as_str() == *tool))
+        && tools.iter().all(|tool| {
+            READ_TOOLS.contains(&tool.as_str())
+                || tool == "git.status"
+                || tool == "terminal.run_profile"
+        })
+        && (!tools.iter().any(|tool| tool == "terminal.run_profile")
+            || tools.iter().any(|tool| tool == "git.status"))
 }
 
 pub(crate) fn same_tools(left: &[String], right: &[String]) -> bool {
@@ -383,7 +383,11 @@ pub async fn remote_mcp_owner_snapshot() -> Result<OwnerSnapshot, String> {
 
 pub async fn remote_mcp_owner_request_client(
     include_git_status: bool,
+    include_terminal_profiles: bool,
 ) -> Result<OwnerSnapshot, String> {
+    if include_terminal_profiles && !include_git_status {
+        return Err("REMOTE_MCP_TERMINAL_GIT_SCOPE_REQUIRED".into());
+    }
     let context = context().await?;
     let before = snapshot_for(&context).await?;
     if !before.can_request_client || before.client_grant.is_some() {
@@ -394,6 +398,10 @@ pub async fn remote_mcp_owner_request_client(
     } else {
         json!({})
     };
+    let mut body = body;
+    if include_terminal_profiles {
+        body["includeTerminalProfiles"] = Value::Bool(true);
+    }
     let result = request(&context, "/api/owner/remote-mcp/requests", Some(body)).await?;
     if !result.get("requestCreated").is_some_and(Value::is_boolean)
         || !matches!(
@@ -569,7 +577,8 @@ pub fn remote_mcp_owner_cancel_review(review_id: String) -> Result<(), String> {
         state.operation = state.operation.checked_add(1).ok_or_else(invalid)?;
     }
     drop(state);
-    crate::remote_mcp_device_review::cancel_review(id)
+    crate::remote_mcp_device_review::cancel_review(id)?;
+    crate::remote_mcp_terminal::cancel_review(id)
 }
 
 pub async fn remote_mcp_owner_confirm_decision(

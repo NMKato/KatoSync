@@ -1,6 +1,21 @@
 import type { TKey } from "./de";
 
 const ru: Record<TKey, string> = {
+  "remoteMcp.owner.profileScope": "Статус устройства, Git и отдельно подтверждённые проверки версии Git",
+  "remoteMcp.terminal.title": "Разрешить один профиль терминала",
+  "remoteMcp.terminal.scope": "Профиль запускает git --version в выбранном проекте. Выполнение ограничено восемью секундами.",
+  "remoteMcp.terminal.project": "Проект",
+  "remoteMcp.terminal.prepare": "Проверить запрос версии Git",
+  "remoteMcp.terminal.reviewTitle": "Разрешить эту проверку версии один раз?",
+  "remoteMcp.terminal.once": "Разрешение действует для одного вызова в течение 60 секунд.",
+  "remoteMcp.terminal.confirm": "Разрешить один раз с кодом",
+  "remoteMcp.terminal.approved": "Одноразовое разрешение подготовлено · осталось {seconds} секунд. Результат появится только после вызова.",
+  "remoteMcp.terminal.shareOperation": "Передайте этот идентификатор операции в ChatGPT:",
+  "remoteMcp.terminal.needsConnection": "Сначала подключитесь с выбранными проектами и включёнными профилями терминала.",
+  "remoteMcp.terminal.failed": "Не удалось подтвердить разрешение. Проверьте соединение и подготовьте запрос снова.",
+  "remoteMcp.terminal.requestScope": "Также запросить отдельно подтверждаемые проверки версии Git",
+  "remoteMcp.terminal.connectOptIn": "Включить отдельно подтверждаемые профили терминала для этого соединения",
+  "remoteMcp.terminal.start": "Подключиться с Git и разрешениями профилей",
   "remoteMcp.device.title": "Разрешить этому приложению доступ к MCP",
   "remoteMcp.device.needsClient": "Сначала подтвердите разрешение для клиента ChatGPT.",
   "remoteMcp.device.loading": "Проверка регистрации этого приложения.",

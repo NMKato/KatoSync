@@ -83,18 +83,18 @@ struct WireSnapshot {
     device_access_enabled: bool,
 }
 
-struct LocalDevice {
-    id: Uuid,
+pub(crate) struct LocalDevice {
+    pub(crate) id: Uuid,
     fingerprint: String,
-    hash: String,
-    signer: SigningKey,
+    pub(crate) hash: String,
+    pub(crate) signer: SigningKey,
 }
 
 fn key_hash(key: &SigningKey) -> String {
     format!("{:x}", Sha256::digest(key.verifying_key().as_bytes()))
 }
 
-async fn local_device(context: &owner::OwnerContext) -> Result<LocalDevice, String> {
+pub(crate) async fn local_device(context: &owner::OwnerContext) -> Result<LocalDevice, String> {
     owner::recheck(context).await?;
     let signer = crate::mesh_identity::existing_identity(&context.uid)
         .map_err(|_| "REMOTE_MCP_DEVICE_IDENTITY_REQUIRED".to_string())?;
@@ -212,7 +212,7 @@ pub async fn remote_mcp_owner_device_snapshot() -> Result<DeviceSnapshot, String
 
 // Decoding is only a consistency check against the fixed, online-verified
 // native SSO session. The service independently verifies the JWT signature.
-async fn actor_session(context: &owner::OwnerContext) -> Result<Uuid, String> {
+pub(crate) async fn actor_session(context: &owner::OwnerContext) -> Result<Uuid, String> {
     owner::recheck(context).await?;
     let token = Zeroizing::new(
         crate::ensure_supabase_access_token()
