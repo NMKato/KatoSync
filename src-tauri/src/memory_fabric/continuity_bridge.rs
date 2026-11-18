@@ -12,6 +12,7 @@ use base64::Engine;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -171,17 +172,39 @@ fn registered_local_root(project_id: &str) -> Result<(PathBuf, String), String> 
 /// Caller must not silently attach older material indexed from another repository.
 /// Even when the root moved, the NORMALIZED remote repository identity must match.
 fn project_repair_state(project_id: &str, root: &Path) -> Result<LocalChatReadiness, String> {
-    let repo = project_registry::probe_repo(root, false)
-        .ok_or_else(|| "Git-Projekt nicht erreichbar.".to_string())?;
-    let current_remote = repo
-        .remote
-        .as_deref()
-        .and_then(super::ingest::normalize_remote);
     let database = crate::app_support_dir()
         .map_err(crate::error_to_string)?
         .join(STORE_DIR)
         .join(STORE_FILE);
-    let Some(store) = MemoryStore::open_read_only(&database)? else {
+    let store = MemoryStore::open_read_only(&database)?;
+    project_repair_state_with_store(project_id, root, store.as_ref())
+}
+
+/// Uses exactly the bounded ingestion allowlist and raw-content hashes stored by
+/// MemoryStore. Include newly admitted/removed sources, not just indexed paths.
+fn admitted_source_fingerprints(
+    collected: &super::ingest::CollectedProject,
+) -> BTreeMap<String, (String, bool)> {
+    let mut sources = BTreeMap::new();
+    for source in &collected.sources {
+        if super::ingest::admit_reason(source).is_none() {
+            sources
+                .entry(source.relative_path.clone())
+                .or_insert_with(|| (sha256_hex(&source.content), source.git_clean));
+        }
+    }
+    sources
+}
+
+fn project_repair_state_with_store(
+    project_id: &str,
+    root: &Path,
+    store: Option<&MemoryStore>,
+) -> Result<LocalChatReadiness, String> {
+    validate_project_id(project_id)?;
+    let collected = super::ingest::collect_project_sources(root)?;
+    let current_remote = &collected.repo_identity;
+    let Some(store) = store else {
         return Ok(LocalChatReadiness {
             code: "missing_index",
             can_repair: true,
@@ -191,26 +214,56 @@ fn project_repair_state(project_id: &str, root: &Path) -> Result<LocalChatReadin
         .conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(|_| "Schema nicht lesbar.".to_string())?;
-    let indexed: Option<(String, Option<String>)> = store
+    let indexed: Option<(String, Option<String>, Option<String>)> = store
         .conn
         .query_row(
-            "SELECT root_fingerprint, repo_identity FROM projects WHERE project_id=?1",
+            "SELECT root_fingerprint, repo_identity, git_head FROM projects WHERE project_id=?1",
             params![project_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()
         .map_err(|_| "Indexidentität nicht lesbar.".to_string())?;
     match indexed {
-        Some((old_fingerprint, old_remote)) => {
-            if old_fingerprint != super::ingest::root_fingerprint(&repo.path)
-                && (old_remote.is_none() || old_remote != current_remote)
+        Some((old_fingerprint, old_remote, old_head)) => {
+            if old_fingerprint != collected.root_fingerprint
+                && (old_remote.is_none() || &old_remote != current_remote)
             {
                 return Ok(LocalChatReadiness {
                     code: "foreign_repository",
                     can_repair: false,
                 });
             }
-            if old_fingerprint != super::ingest::root_fingerprint(&repo.path) || version < 3 {
+            let needs_refresh = old_fingerprint != collected.root_fingerprint
+                || version < super::store::SCHEMA_USER_VERSION
+                || old_head != collected.head;
+            let changed_sources = if needs_refresh {
+                true
+            } else {
+                let current = admitted_source_fingerprints(&collected);
+                let mut statement = store
+                    .conn
+                    .prepare(
+                        "SELECT relative_path, content_hash, truth_rank FROM sources WHERE project_id=?1",
+                    )
+                    .map_err(|_| "Indexquellen nicht lesbar.".to_string())?;
+                let indexed = statement
+                    .query_map(params![project_id], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            (row.get::<_, String>(1)?, row.get::<_, i64>(2)?),
+                        ))
+                    })
+                    .map_err(|_| "Indexquellen nicht lesbar.".to_string())?
+                    .collect::<Result<BTreeMap<_, _>, _>>()
+                    .map_err(|_| "Indexquellen nicht lesbar.".to_string())?;
+                current.len() != indexed.len()
+                    || current.iter().any(|(path, (hash, git_clean))| {
+                        indexed.get(path).is_none_or(|(old_hash, truth)| {
+                            old_hash != hash || (*truth < 2 && (*truth == 1) != *git_clean)
+                        })
+                    })
+            };
+            if changed_sources {
                 Ok(LocalChatReadiness {
                     code: "needs_refresh",
                     can_repair: true,
@@ -258,7 +311,9 @@ pub(crate) async fn continuity_chat_repair_project(
             .lock()
             .map_err(|_| "Memory Fabric gesperrt.".to_string())?;
         let state = project_repair_state(&project_id, &root)?;
-        if !state.can_repair {
+        // A deliberate refresh is also valid when the current index is ready.
+        // Foreign/unavailable identities remain denied by the native boundary.
+        if !state.can_repair && state.code != "ready" {
             return Err("Projektindex darf nicht automatisch neu zugeordnet werden.".into());
         }
         let collected = super::ingest::collect_project_sources(&root)?;
@@ -314,7 +369,19 @@ pub(crate) async fn continuity_chat_repair_project(
             }
             backup_created = true;
         }
-        let mut store = open_store()?; // performs atomic v1->v4 migration after valid backup
+        // Reject a project switch or source mutation during backup rather than
+        // acknowledging a stale snapshot as freshly indexed.
+        let (current_root, _) = registered_local_root(&project_id)?;
+        let current = super::ingest::collect_project_sources(&current_root)?;
+        if current_root != root
+            || current.root_fingerprint != collected.root_fingerprint
+            || current.repo_identity != collected.repo_identity
+            || current.head != collected.head
+            || admitted_source_fingerprints(&current) != admitted_source_fingerprints(&collected)
+        {
+            return Err("Projektquellen haben sich geändert; Aktualisierung erneut starten.".into());
+        }
+        let mut store = open_store()?; // performs atomic schema migration after valid backup
         let report = store.ingest(collected.into_batch(&project_id, &name, &super::now_iso()))?;
         registered_head(&store, &project_id)?;
         Ok(ChatRepairReceipt {
@@ -1091,6 +1158,182 @@ pub(crate) async fn continuity_save_blueprint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct KnowledgeRepo(PathBuf);
+
+    impl KnowledgeRepo {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!("katosync-knowledge-{}", Uuid::new_v4()));
+            fs::create_dir_all(&root).unwrap();
+            let repo = Self(root);
+            repo.git(&["init", "-q"]);
+            repo.git(&["config", "user.name", "NMKato"]);
+            repo.git(&["config", "user.email", "nmkato@web.de"]);
+            repo.commit_status("# Release\nThe release codeword is Amber.\n");
+            repo
+        }
+
+        fn git(&self, args: &[&str]) -> String {
+            let output = std::process::Command::new("git")
+                .args(["-c", "commit.gpgsign=false"])
+                .args(args)
+                .current_dir(&self.0)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "Git fixture command failed");
+            String::from_utf8(output.stdout).unwrap().trim().to_string()
+        }
+
+        fn commit_status(&self, text: &str) {
+            fs::write(self.0.join("PROJECT_STATUS_FLOW.md"), text).unwrap();
+            self.git(&["add", "PROJECT_STATUS_FLOW.md"]);
+            self.git(&["commit", "-qm", "Update project knowledge fixture"]);
+        }
+
+        fn index(&self, store: &mut MemoryStore) {
+            let collected = super::super::collect_project_sources(&self.0).unwrap();
+            store
+                .ingest(collected.into_batch("alpha", "Project Alpha", "2026-11-18T18:00:00Z"))
+                .unwrap();
+        }
+
+        fn readiness(&self, store: &MemoryStore) -> LocalChatReadiness {
+            project_repair_state_with_store("alpha", &self.0, Some(store)).unwrap()
+        }
+
+        fn rag(&self, store: &MemoryStore) -> super::super::RagBlock {
+            let collected = super::super::collect_project_sources(&self.0).unwrap();
+            let live = super::super::probe_live_state(
+                &collected,
+                &store.source_paths("alpha").unwrap(),
+            );
+            let result = store
+                .query(
+                    &super::super::MemoryQuery::new("alpha", "release", Some(8)),
+                    Some(&live),
+                    &super::super::LexicalOnly,
+                )
+                .unwrap();
+            super::super::assemble_rag_block(&result, &super::super::RagOptions::default())
+        }
+    }
+
+    impl Drop for KnowledgeRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn project_knowledge_refresh_tracks_real_git_revisions_and_preserves_chat() {
+        let repo = KnowledgeRepo::new();
+        let mut store = MemoryStore::open_in_memory().unwrap();
+        repo.index(&mut store);
+        assert_eq!(repo.readiness(&store).code, "ready");
+        assert!(repo.rag(&store).text.contains("Amber"));
+        store
+            .append_local_chat_turn(super::super::ChatTurnDraft {
+                project_id: "alpha".into(),
+                expected_sequence: 0,
+                question: "What is the release codeword?".into(),
+                answer: "Amber [1]".into(),
+                git_head: repo.git(&["rev-parse", "HEAD"]),
+                citations_json: "[]".into(),
+                created_at: "2026-11-18T18:00:00Z".into(),
+            })
+            .unwrap();
+
+        repo.commit_status("# Release\nThe release codeword is Cobalt.\n");
+        let changed = repo.readiness(&store);
+        assert_eq!(changed.code, "needs_refresh");
+        assert!(changed.can_repair);
+        assert!(repo.rag(&store).citations.is_empty());
+        repo.index(&mut store);
+        assert_eq!(repo.readiness(&store).code, "ready");
+        let fresh = repo.rag(&store);
+        assert!(fresh.text.contains("Cobalt"));
+        assert!(!fresh.text.contains("Amber"));
+        assert_eq!(fresh.citations.len(), 1);
+        let history = store.local_chat_history("alpha", 20).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].answer, "Amber [1]");
+        assert_eq!(history[0].sequence, 1);
+    }
+
+    #[test]
+    fn project_knowledge_refresh_detects_edits_additions_and_removals_at_same_head() {
+        let repo = KnowledgeRepo::new();
+        let mut store = MemoryStore::open_in_memory().unwrap();
+        repo.index(&mut store);
+        let head = repo.git(&["rev-parse", "HEAD"]);
+        fs::write(
+            repo.0.join("PROJECT_STATUS_FLOW.md"),
+            "# Release\nThe uncommitted release codeword is Copper.\n",
+        )
+        .unwrap();
+        assert_eq!(repo.readiness(&store).code, "needs_refresh");
+        repo.index(&mut store);
+        assert_eq!(repo.readiness(&store).code, "ready");
+        assert!(repo.rag(&store).citations.is_empty()); // observed stays non-authoritative
+
+        fs::write(repo.0.join("MEMORY.md"), "# Memory\nA new local note.\n").unwrap();
+        assert_eq!(repo.readiness(&store).code, "needs_refresh");
+        repo.index(&mut store);
+        assert_eq!(repo.readiness(&store).code, "ready");
+        fs::remove_file(repo.0.join("PROJECT_STATUS_FLOW.md")).unwrap();
+        assert_eq!(repo.readiness(&store).code, "needs_refresh");
+        repo.index(&mut store);
+        assert_eq!(repo.readiness(&store).code, "ready");
+        assert_eq!(store.source_paths("alpha").unwrap(), vec!["MEMORY.md"]);
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    }
+
+    #[test]
+    fn project_knowledge_refresh_refuses_foreign_repository_and_keeps_original_index() {
+        let original = KnowledgeRepo::new();
+        let foreign = KnowledgeRepo::new();
+        original.git(&["remote", "add", "origin", "https://example.invalid/owner/alpha.git"]);
+        foreign.git(&["remote", "add", "origin", "https://example.invalid/owner/other.git"]);
+        let mut store = MemoryStore::open_in_memory().unwrap();
+        original.index(&mut store);
+        let prior = store.snapshot("alpha").unwrap();
+        let denied = foreign.readiness(&store);
+        assert_eq!(denied.code, "foreign_repository");
+        assert!(!denied.can_repair);
+        let unchanged = store.snapshot("alpha").unwrap();
+        assert_eq!(unchanged.git_head, prior.git_head);
+        assert_eq!(unchanged.indexed_at, prior.indexed_at);
+        assert!(original.rag(&store).text.contains("Amber"));
+
+        foreign.git(&["remote", "set-url", "origin", "https://example.invalid/owner/alpha.git"]);
+        let relocated = foreign.readiness(&store);
+        assert_eq!(relocated.code, "needs_refresh");
+        assert!(relocated.can_repair); // moving the same registered repository remains possible
+    }
+
+    #[test]
+    fn project_knowledge_diagnostics_are_read_only_and_request_current_schema() {
+        let repo = KnowledgeRepo::new();
+        let mut store = MemoryStore::open_in_memory().unwrap();
+        repo.index(&mut store);
+        let prior = store.snapshot("alpha").unwrap();
+        for _ in 0..2 {
+            let ready = repo.readiness(&store);
+            assert_eq!(ready.code, "ready");
+            assert!(!ready.can_repair);
+        }
+        assert_eq!(store.snapshot("alpha").unwrap().indexed_at, prior.indexed_at);
+        store.conn.pragma_update(None, "user_version", 5).unwrap();
+        let outdated = repo.readiness(&store);
+        assert_eq!(outdated.code, "needs_refresh");
+        assert!(outdated.can_repair);
+        let version: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 5); // diagnosis never performs a migration
+    }
+
     const DOC: &str = r#"{"schemaVersion":"katosync.continuity-blueprint/v1","projectId":"alpha","blueprintId":"v1","revision":1,"title":"Why local","intent":"Work without cloud","source":{"kind":"chat_handoff","label":"Chat","capturedAt":"2026-10-22T10:00:00Z","reference":null},"baseGitHead":null,"decisions":[{"id":"ADR-1","title":"Local store","choice":"SQLite","rationale":"Offline first","alternatives":[],"consequences":[],"evidence":[]}],"nextSteps":[]}"#;
     #[test]
     fn local_question_must_be_short_nonempty_and_never_executable() {

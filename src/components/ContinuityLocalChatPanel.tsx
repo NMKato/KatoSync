@@ -258,6 +258,7 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   const [acceptBackup, setAcceptBackup] = useState(false);
   const [repairing, setRepairing] = useState(false);
   const [repairReceipt, setRepairReceipt] = useState<ChatRepairReceipt|null>(null);
+  const [knowledgeRefreshRequested, setKnowledgeRefreshRequested] = useState(false);
   const requestRef = useRef(0);
   const projectRef = useRef(projectId);
   projectRef.current = projectId;
@@ -301,6 +302,10 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   }
 
   useEffect(() => {
+    setKnowledgeRefreshRequested(false);
+    setAcceptBackup(false);
+    setRepairReceipt(null);
+    setRepairing(false);
     void refresh();
     return () => { requestRef.current += 1; };
     // Refresh only on selected project change.
@@ -308,10 +313,11 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   }, [projectId]);
 
   async function repairIndex() {
-    if (!diagnostics?.canRepair || !acceptBackup || repairing || busy) return;
+    if ((!knowledgeRefreshRequested && !diagnostics?.canRepair) ||
+        !acceptBackup || repairing || busy || !window.__TAURI_INTERNALS__) return;
     const current=projectId;
     const request=++requestRef.current;
-    setRepairing(true);setError("");
+    setRepairing(true);setBusy(true);setError("");
     try {
       const receipt=await invoke<ChatRepairReceipt>("continuity_chat_repair_project", {
         projectId:current,acceptedBackup:true
@@ -320,11 +326,18 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
       if (receipt.projectId!==current) throw new Error("invalid_repair_result");
       setRepairReceipt(receipt);
       setAcceptBackup(false);
+      setKnowledgeRefreshRequested(false);
+      setRepairing(false);
       await refresh();
     } catch {
       if (projectRef.current===current && requestRef.current===request)
         setError(t("continuity.chat.repairFailed"));
-    } finally {if (projectRef.current===current) setRepairing(false);}
+    } finally {
+      if (projectRef.current===current && requestRef.current===request) {
+        setRepairing(false);
+        setBusy(false);
+      }
+    }
   }
 
   async function dictateLocally(){
@@ -434,20 +447,30 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
           <h4>{t("continuity.chat.title")}</h4>
         </div>
         <button type="button" className="ghost compact-button" onClick={() => void refresh()}
-          disabled={busy || !window.__TAURI_INTERNALS__}>
+          disabled={busy || repairing || !window.__TAURI_INTERNALS__}>
           <RefreshCcw size={13}/> {t("continuity.chat.reload")}
         </button>
       </div>
       <p className="agent-empty continuity-chat-description">{t("continuity.chat.persistentSubtitle")}</p>
       <div className="continuity-project-tag"><span>{t("continuity.chat.projectTag")}:</span> <strong>{projectName} · {projectId}</strong></div>
       {!window.__TAURI_INTERNALS__ ? <p className="tone-warn">{t("continuity.chat.desktopOnly")}</p> : null}
-      {!loaded && diagnostics ? <div className="continuity-chat-recovery" role="region"
+      {window.__TAURI_INTERNALS__ && loaded ? <button type="button" className="ghost compact-button"
+        disabled={busy || repairing || dictating}
+        onClick={() => {
+          // Opening the explicit action never starts an indexing/diagnostic scan.
+          setKnowledgeRefreshRequested(true);
+          setAcceptBackup(false);
+          setRepairReceipt(null);
+        }}>
+        <RefreshCcw size={13}/>{t("continuity.chat.repairButton")}
+      </button>:null}
+      {knowledgeRefreshRequested || (!loaded && diagnostics) ? <div className="continuity-chat-recovery" role="region"
         aria-label={t("continuity.chat.recoveryTitle")}>
-        <strong>{t("continuity.chat.recoveryTitle")}</strong>
-        <p>{diagnostics.code==="needs_refresh"?t("continuity.chat.needsRefresh"):
+        <strong>{t(knowledgeRefreshRequested?"continuity.chat.repairButton":"continuity.chat.recoveryTitle")}</strong>
+        {diagnostics ? <p>{diagnostics.code==="needs_refresh"?t("continuity.chat.needsRefresh"):
           diagnostics.code==="missing_index"?t("continuity.chat.needsIndex"):
-          t("continuity.chat.recoveryBlocked")}</p>
-        {diagnostics.canRepair ? <>
+          t("continuity.chat.recoveryBlocked")}</p>:null}
+        {knowledgeRefreshRequested || diagnostics?.canRepair ? <>
           <label className="continuity-repair-consent">
             <input type="checkbox" checked={acceptBackup}
               disabled={repairing} onChange={e=>setAcceptBackup(e.target.checked)}/>
