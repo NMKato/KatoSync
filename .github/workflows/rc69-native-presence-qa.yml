@@ -11,6 +11,7 @@ on:
       - "src-tauri/src/mesh_rc72_signed_server_qa.rs"
       - "tests/meshRc71TicketedRelayContract.test.ts"
       - "tests/meshRc72SignedServerNotice.test.ts"
+      - "tests/meshRc73PinnedWssInterop.test.ts"
       - "src-tauri/Cargo.toml"
       - "src-tauri/Cargo.lock"
       - "src-tauri/src/lib.rs"
@@ -50,4 +51,4 @@ jobs:
         with:
           node-version: "22"
       - name: Verify RC69/RC70 source-level isolation contracts
-        run: node --experimental-strip-types --test tests/meshRc69PresenceWireContract.test.ts tests/meshRc69ReadOnlyGitContract.test.ts tests/meshRc69SignedResultContract.test.ts tests/meshRc70OutboundWssSupervisor.test.ts tests/meshRc71TicketedRelayContract.test.ts tests/meshRc72SignedServerNotice.test.ts
+        run: node --experimental-strip-types --test tests/meshRc69PresenceWireContract.test.ts tests/meshRc69ReadOnlyGitContract.test.ts tests/meshRc69SignedResultContract.test.ts tests/meshRc70OutboundWssSupervisor.test.ts tests/meshRc71TicketedRelayContract.test.ts tests/meshRc72SignedServerNotice.test.ts tests/meshRc73PinnedWssInterop.test.ts

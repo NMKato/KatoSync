@@ -171,6 +171,73 @@ pub(crate) async fn probe_private_rc69_qa_upgrade(
     }
 }
 
+/// RC73 source-QA-only: joins RC71's real ticketed WebSocket upgrade to the
+/// *independently pinned* RC72 Ed25519 server challenge verifier. The trusted
+/// pin and provisioned challenge MUST be obtained outside this websocket.
+/// The socket is always closed after the one challenge: even a valid JWS
+/// NEVER starts device presence, Keychain signing or native job dispatch.
+/// No caller in the application runtime or MCP. Ticket is consumed once.
+pub(crate) async fn probe_private_rc70_pinned_upgrade(
+    endpoint: &str,
+    ticket: Rc69QaOneTimeTicket,
+    pinned_server: &crate::mesh_rc72_signed_server_qa::PinnedServerContext<'_>,
+    provisioned_challenge_id: uuid::Uuid,
+    provisioned_revoke_epoch: u64,
+    last_server_sequence: u64,
+    mut stop: watch::Receiver<bool>,
+) -> Result<crate::mesh_rc72_signed_server_qa::VerifiedServerNotice, &'static str> {
+    validate_endpoint(endpoint)?;
+    let uri: Uri = endpoint.parse().map_err(|_| "RC73_QA_ENDPOINT_REJECTED")?;
+    if uri.path() != RC69_PRIVATE_ROUTE {
+        return Err("RC73_QA_ENDPOINT_REJECTED");
+    }
+    if ticket.expires_at_ms <= now_ms()? {
+        return Err("RC73_QA_TICKET_EXPIRED");
+    }
+    if *stop.borrow() {
+        return Err("RC73_QA_STOPPED");
+    }
+    let mut request = endpoint
+        .into_client_request()
+        .map_err(|_| "RC73_QA_ENDPOINT_REJECTED")?;
+    request.headers_mut().insert(
+        "X-KatoSync-Relay-Ticket",
+        HeaderValue::from_str(&ticket.secret).map_err(|_| "RC73_QA_TICKET_REJECTED")?,
+    );
+    let connect = connect_async_with_config(request, Some(bounded_ws_config()), false);
+    let dial = tokio::select! {
+        result = timeout(Duration::from_secs(7), connect) => result,
+        _ = stop.changed() => return Err("RC73_QA_STOPPED"),
+    };
+    let (mut socket, _response) = dial
+        .map_err(|_| "RC73_QA_UPGRADE_TIMEOUT")?
+        .map_err(|_| "RC73_QA_UPGRADE_REJECTED")?;
+    let received = tokio::select! {
+        result = timeout(READ_CHALLENGE_TIMEOUT, socket.next()) => result,
+        _ = stop.changed() => {
+            close_quarantined_socket(&mut socket).await;
+            return Err("RC73_QA_STOPPED");
+        }
+    };
+    let result = match received {
+        Ok(Some(Ok(Message::Text(text)))) => {
+            crate::mesh_rc72_signed_server_qa::verify_rc70_challenge_packet(
+                &text,
+                pinned_server,
+                provisioned_challenge_id,
+                provisioned_revoke_epoch,
+                last_server_sequence,
+                now_ms()?,
+            )
+        }
+        _ => Err("RC73_SIGNED_CHALLENGE_REJECTED"),
+    };
+    // Deliberate source-QA boundary: DO NOT advertise online status or
+    // send any signed device bytes even after authenticating the server JWS.
+    close_quarantined_socket(&mut socket).await;
+    result.map_err(|_| "RC73_SIGNED_CHALLENGE_REJECTED")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +341,144 @@ mod tests {
         assert_eq!(result, Err("RC71_UNSIGNED_QA_CHALLENGE_REJECTED"));
         backend.await.unwrap();
         assert!(saw_ticket.load(Ordering::SeqCst));
+    }
+
+    // Each case uses a genuine TCP+WebSocket upgrade and a genuine Ed25519
+    // signature. The verifier pin is preselected independently of the frame.
+    async fn signed_rc70_roundtrip(mode: u8) {
+        use crate::mesh_rc72_signed_server_qa::PinnedServerContext;
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+        use ed25519_dalek::{Signer, SigningKey};
+        use serde_json::json;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let owner = uuid::Uuid::new_v4();
+        let tenant = uuid::Uuid::new_v4();
+        let grant = uuid::Uuid::new_v4();
+        let device = uuid::Uuid::new_v4();
+        let session = uuid::Uuid::new_v4();
+        let challenge = uuid::Uuid::new_v4();
+        let request_id = uuid::Uuid::new_v4();
+        let signer = SigningKey::from_bytes(&[81; 32]);
+        let pin_key = if mode == 1 {
+            SigningKey::from_bytes(&[82; 32]).verifying_key()
+        } else {
+            signer.verifying_key()
+        };
+        let pin = PinnedServerContext {
+            kid: "rc70_qa_pinned_server_key_01",
+            verifying_key: pin_key,
+            owner_id: owner,
+            tenant_id: tenant,
+            grant_id: grant,
+            device_id: device,
+            session_id: if mode == 3 {
+                uuid::Uuid::new_v4()
+            } else {
+                session
+            },
+        };
+        let issued = now_ms().unwrap();
+        let protected = json!({
+            "alg":"EdDSA", "kid":"rc70_qa_pinned_server_key_01",
+            "typ":"katosync-rc67-duplex-relay+jws"
+        });
+        let payload = json!({
+            "version":1, "direction":"cloud_to_device", "kind":"mesh.notice",
+            "ownerId":owner, "tenantId":tenant, "grantId":grant,
+            "deviceId":device, "sessionId":session,
+            "requestId":request_id, "sequence":1,
+            "issuedAtMs":issued,"expiresAtMs":issued+15_000,
+            "body":{"type":"rc70.challenge","challengeId":challenge,
+                "protocol":"rc67-beta-native-v1","transport":"outbound-wss",
+                "revokeEpoch":5}
+        });
+        let signed = format!(
+            "{}.{}",
+            URL_SAFE_NO_PAD.encode(protected.to_string()),
+            URL_SAFE_NO_PAD.encode(payload.to_string())
+        );
+        let signed_jws = format!(
+            "{}.{}",
+            signed,
+            URL_SAFE_NO_PAD.encode(signer.sign(signed.as_bytes()).to_bytes())
+        );
+        let mut packet = json!({
+            "type":"rc69.challenge","version":1,
+            "protocol":"rc67-beta-native-v1","transport":"outbound-wss",
+            "sessionId":session,"challengeId":challenge,
+            "nonceIssuedAtMs":issued,"challengeExpiresAtMs":issued+60_000,
+            "expiresAtMs":issued+120_000,"revokeEpoch":5,
+            "expectedDirection":"device_to_cloud","frameTtlMs":15_000,
+            "serverProofJws":signed_jws,"serverKid":"rc70_qa_pinned_server_key_01"
+        });
+        if mode == 4 {
+            packet.as_object_mut().unwrap().remove("serverProofJws");
+        }
+        let backend = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut peer = accept_hdr_async(stream, move |req: &Request, res: Response| {
+                assert_eq!(req.uri().path(), RC69_PRIVATE_ROUTE);
+                assert_eq!(
+                    req.headers()
+                        .get("X-KatoSync-Relay-Ticket")
+                        .unwrap()
+                        .to_str()
+                        .unwrap(),
+                    "c".repeat(64)
+                );
+                Ok(res)
+            })
+            .await
+            .unwrap();
+            peer.send(Message::Text(packet.to_string().into()))
+                .await
+                .unwrap();
+            let closed = timeout(Duration::from_secs(3), peer.next()).await.unwrap();
+            match closed {
+                Some(Ok(Message::Close(Some(frame)))) => {
+                    assert_eq!(frame.code, CloseCode::Policy);
+                }
+                other => panic!("RC73 must send only a policy close, got {other:?}"),
+            }
+        });
+        let ticket = Rc69QaOneTimeTicket::new(&"c".repeat(64), now_ms().unwrap() + 20_000).unwrap();
+        let (_stop_tx, stop_rx) = watch::channel(false);
+        let endpoint = format!("ws://127.0.0.1:{}{}", addr.port(), RC69_PRIVATE_ROUTE);
+        let result = timeout(
+            Duration::from_secs(5),
+            probe_private_rc70_pinned_upgrade(
+                &endpoint,
+                ticket,
+                &pin,
+                challenge,
+                5,
+                if mode == 2 { 1 } else { 0 },
+                stop_rx,
+            ),
+        )
+        .await
+        .unwrap();
+        if mode == 0 {
+            let proof = result.unwrap();
+            assert_eq!(proof.server_sequence, 1);
+            assert_eq!(proof.request_id, request_id);
+        } else {
+            assert_eq!(result, Err("RC73_SIGNED_CHALLENGE_REJECTED"));
+        }
+        backend.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn real_ticketed_wss_verifies_signed_rc70_challenge_but_closes_qa_socket() {
+        signed_rc70_roundtrip(0).await;
+    }
+    #[tokio::test]
+    async fn real_ticketed_wss_denies_wrong_pin_replay_wrong_session_and_unsigned_proof() {
+        for mode in 1..=4 {
+            signed_rc70_roundtrip(mode).await;
+        }
     }
 
     #[tokio::test]
