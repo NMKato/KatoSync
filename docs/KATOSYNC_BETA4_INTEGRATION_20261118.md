@@ -13,6 +13,33 @@ Desktop: `beta/4.0-integration-20261118`,
 Connector: `beta/4.0-runtime-integration-20261118` im Repository
 [NMKato/KatoSync-Remote-MCP](https://github.com/NMKato/KatoSync-Remote-MCP/tree/beta/4.0-runtime-integration-20261118).
 
+## Aktueller Quellstand nach Candidate 3
+
+Diese Ergänzung vom **18. November 2026** unterscheidet den neuen Quellstand
+vom unten dokumentierten signierten Candidate-3-Paket. Neue Funktionen
+erhalten erst nach ihrem eigenen App-/Gerätetest eine entsprechende Abnahme.
+
+| Bereich | Jetzt belegt | Weiter offen |
+|---|---|---|
+| Projektwissen | Projektgebundenes RAG; sichtbarer manueller Refresh mit geprüfter Sicherung und erneuter Quellen-/Git-Bindung | Ausführung der vier neuen echten Git-/SQLite-Nativtests im finalen Mac-Build und aktueller Offline-Inferenzlauf |
+| Obsidian / Markdown | Export der gespeicherten Projektion über bestehenden nativen Befehl und Ordnerdialog; sieben neue Verhaltenstests bestanden | Nativer Klickpfad und Dateiexport im finalen Paket; keine automatische oder bidirektionale Synchronisation |
+| Nativer Git-Status | Explizite Clientfreigabe und lokale Projektauswahl, signierter lesender Vertrag, gezielte native Harness-Nachweise | Voller Mac-App-Build und tatsächlicher ChatGPT-Aufruf mit frischer Freigabe |
+| Desktop-QA | **990 Node-Tests** am Stand `aeb171d` vor Export; danach **44 gezielte Chat-/Export-Tests**, TypeScript und Vite-Build bestanden | Vollständiger finaler Node-/Mac-/Paketlauf für den zusammengeführten Quellstand |
+| Connector-QA | Beide isolierten **PostgreSQL-17-Modi** bestanden: Gerätefreigabe sowie zusätzliche explizite Git-Status-Freigabe | Produktionsmigrationen weiterhin **nicht angewendet** (`productionMigrationsApplied=false`); produktive Worker-/MFA-/Geräte-/WSS-Abnahme |
+| Abhängigkeiten | Frischer Registry-Audit um **17:52 UTC: Exit 0, null Befunde** auf Linux und M3 | Abschließender CI-Gate für den finalen Release-Quellstand; ältere rote CI-Ergebnisse bleiben historisch |
+
+Details: [Projektwissen und Export](KATOSYNC_BETA4_PROJECT_KNOWLEDGE_20261118.md),
+[nativer Git-Status](KATOSYNC_BETA4_NATIVE_GIT_STATUS_20261118.md),
+[frischer Audit](KATOSYNC_BETA4_DEPENDENCY_AUDIT_20261118.md) und
+[Connector-Vertrag mit beiden PostgreSQL-Modi](https://github.com/NMKato/KatoSync-Remote-MCP/blob/beta/4.0-runtime-integration-20261118/docs/BETA4_EXPLICIT_NATIVE_GIT_STATUS_20261118.md).
+
+Automatische Cross-Repo-Abfragen, ein produktiver Writer für
+`PROJECT_STATUS_FLOW.md`, Mesh-Wissensreplikation, automatischer
+Providerwechsel auf Local Brain und allgemeine Terminal-/CLI-/Computersteuerung sind
+weiterhin offene Integrationsziele. Ein Mesh-Heartbeat, ein Git-Leseauftrag
+oder ein Snapshot-Export nimmt diese Ziele nicht ab. **Das vollständige 4.0-Go
+bleibt offen.**
+
 ## Ablauf für den eigenen Mesh-Test
 
 1. Beide Anwendungen mit demselben KATOOS-Konto anmelden. Für diesen privaten
@@ -41,9 +68,11 @@ Cloud-Heartbeat ersetzen den kryptografischen Peer-Nachweis nicht.
 
 **Aktueller Stand:** Die produktive Providerfreigabe steht weiterhin aus.
 Die nachfolgenden nativen Mesh-Gerätetests ersetzen diese Freigabe nicht.
-Die lesende Supabase-Migrationsabfrage am 18. November um **17:05 Uhr MEZ**
+Die historische lesende Supabase-Migrationsabfrage am 18. November um **17:05 Uhr MEZ**
 zeigte weiterhin `20261117172610` als letzten angewendeten Stand. Keine
-der drei Beta4-Migrationen war angewendet.
+der damals drei Beta4-Migrationen war angewendet. Auch für die inzwischen
+ergänzte vierte Git-Status-Migration liegt noch kein Produktionsnachweis vor;
+der aktuelle Freigabestand bleibt `productionMigrationsApplied=false`.
 
 Die registrierte ChatGPT-Verbindung stellt zunächst eine authentifizierte
 MCP-Verbindung her. Der bisherige synthetische Ping allein beweist weder
@@ -60,8 +89,9 @@ Die ausgehende WSS-Verbindung verwendet ein einmaliges kurzlebiges Ticket,
 einen unabhängig eingebauten Ed25519-Server-Pin und den bestehenden
 Keychain-Geräteschlüssel. Jede Präsenzbestätigung wird signiert und neu gegen
 die aktuelle Serverautorität geprüft. Tickets, Schlüsselstand und Freigaben
-werden regelmäßig neu zugelassen. Die Präsenzverbindung registriert noch
-keine Remote-Shell-, Datei- oder Git-Ausführung.
+werden regelmäßig neu zugelassen. Im reinen Präsenzmodus werden keine
+Remote-Shell-, Datei- oder Git-Aufträge registriert. Der neue Git-Lesevertrag
+benötigt die separat dokumentierte Clientfreigabe und lokale Projektauswahl.
 
 ## Was der Integrationsstand ergänzt
 
@@ -70,8 +100,8 @@ keine Remote-Shell-, Datei- oder Git-Ausführung.
 | Geräte-UI | Frische Kontoliste, Auswahl, historische Registrierungen, Rollenwahl, native Zustandsanzeige | Candidate 3 auf M3: manuelles Verbinden ohne 120-Sekunden-Wartezeit, sechs App-Registrierungen, vorhandene Peer-Auswahl, Serverstart, frische Live-Anzeige, Wartezustand nach Client-Ende und UI-Stop geprüft. |
 | Mesh-Dienst | Tatsächlicher mTLS-Socket, Heartbeat-Lease, Reconnect, Stop, Owner-Wechsel | Candidate 3: M3-GUI-Server und M2-Client mit sechs bestätigten Heartbeats, Client-Exit 0 und beidseitigem Stop-Nachweis. Candidate-2-Reconnect und die frühere b754-Abnahme einschließlich Server-Exit 5 bleiben separat dokumentiert. |
 | Sitzung | Serialisierte Tokenrotation, MFA, Logout-Sperre und Generation-Fencing | Native Tests und Logout während laufender Operation |
-| MCP-Freigabe | Owner-/Ziel-Client-Trennung, frische MFA, einmalige geprüfte Entscheidung | Echte Owner-Bestätigung; keine vorbereiteten Approved-Datensätze |
-| MCP-Präsenz | Gepinnte signierte Challenge/ACK, kurzlebige WSS-Sitzung, Widerrufsprüfung | Produktiver Worker, echte DB-Rollen und echtes freigegebenes Gerät |
+| MCP-Freigabe | Owner-/Ziel-Client-Trennung, frische MFA, einmalige geprüfte Entscheidung | Offen: echte Owner-Bestätigung; keine vorbereiteten Approved-Datensätze |
+| MCP-Präsenz | Gepinnte signierte Challenge/ACK, kurzlebige WSS-Sitzung, Widerrufsprüfung | Offen: produktiver Worker, echte DB-Rollen und echtes freigegebenes Gerät |
 | Verpackung | Eigener signierter/notarisierter Kandidat mit geprüftem Ressourcenbestand | Candidate 3: Developer-ID-Signatur, Apple Accepted, Staple, codesign und spctl bestanden; dasselbe Paket auf M2 und M3 verifiziert. Die früheren geprüften Pakete bleiben als Fallback erhalten. |
 
 ## Verifikation: Stand der Integration
@@ -118,9 +148,11 @@ bleiben historische Belege; sie ersetzen nicht den Test dieses neuen Builds.
 - Produktive DB-Migration, Worker-Freischaltung und echte MFA-/Gerätefreigabe
   sind noch nicht als abgeschlossen protokolliert.
 - Der Abhängigkeitsaudit bleibt ein eigener erforderlicher CI-Gate. Der
-  historische Candidate-3-CI-Audit ist **rot**. GitHub hat das Picomatch-Advisory
-  inzwischen zurückgezogen; der anschließende lokale Audit blieb mit fünf
-  hohen Befunden und Exit 1 rot. Die getrennten Zeitpunkte stehen unten.
+  Candidate-3-CI-Audit und die lokale Antwort mit fünf hohen Befunden sind
+  **historische rote Ergebnisse**. Der spätere frische Registry-Audit um
+  **17:52 UTC** bestand mit **Exit 0 und null Befunden**. Der
+  [separate Nachweis](KATOSYNC_BETA4_DEPENDENCY_AUDIT_20261118.md) ersetzt
+  keinen abschließenden CI-Lauf des neuen Release-Quellstands.
 
 ### Signierte Paketidentität des physisch getesteten b754-Builds
 
@@ -262,7 +294,8 @@ werden ihm nicht zugerechnet.
 
 Produktive DB-Migration, Cloudflare-Worker-Freischaltung, echte MFA- und
 Gerätefreigabe sowie der reale MCP-Gerätezugriff bleiben separate offene
-Gates; der erforderliche Dependency-Audit bleibt rot. Auch das signierte,
+Gates; der Dependency-Audit war zum damaligen Candidate-2-Zeitpunkt rot
+(historisch; späterer [Audit-PASS](KATOSYNC_BETA4_DEPENDENCY_AUDIT_20261118.md)). Auch das signierte,
 notarisierte und getestete Candidate-2-Paket ist damit keine vollständige
 4.0- oder Remote-MCP-Freigabe.
 
@@ -355,7 +388,12 @@ sie wird **nicht als garantierte Provokation derselben exakten
 Race-Reihenfolge** ausgegeben. Die physischen Candidate-2-Ergebnisse
 bleiben separat erhalten.
 
-### Picomatch: zurückgezogenes Advisory, Audit-Gate noch nicht grün
+### Historisch: Picomatch-Rücknahme und zunächst weiterhin roter Audit
+
+**Aktualisierung:** Der unten erhaltene frühe Prüfstand wurde durch den
+[frischen Registry-Audit um 17:52 UTC](KATOSYNC_BETA4_DEPENDENCY_AUDIT_20261118.md)
+ergänzt: **Exit 0, null Befunde** auf Linux und M3 bei unverändertem Lockfile.
+Die alten CI-Ergebnisse werden dadurch nicht rückwirkend grün.
 
 Der historische
 [Candidate-3-Auditjob 134914998751](https://github.com/NMKato/KatoSync/actions/runs/44336630777/job/134914998751)
@@ -375,8 +413,9 @@ Hinweis verwies weiterhin auf dasselbe GHSA. Commit, `package.json`,
 
 Die Rücknahme ist eine bestätigte Upstream-Änderung; sie ist hier **kein
 behaupteter Paket-Fix und kein Audit-/Freigabe-PASS**. Der historische rote
-CI-Lauf wird nicht rückwirkend als erfolgreich markiert. Es erfolgte keine
-weitere Audit-Abfrage und kein CI-Rerun für diesen Nachweis.
+CI-Lauf wird nicht rückwirkend als erfolgreich markiert. Für diesen frühen
+Nachweis erfolgte kein CI-Rerun. Die spätere frische Audit-Abfrage ist im
+oben verlinkten separaten Protokoll dokumentiert.
 
 ## CI-Ausführung und Kosten
 

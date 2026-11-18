@@ -66,11 +66,13 @@ native Präsenz nötig. Die neue Freigabeoberfläche führt den Owner durch die
 erforderliche frische MFA-Bestätigung.
 
 Die produktive MCP-Providerfreigabe sowie DB-/Worker-Freischaltung und echte
-MCP-/MFA-/Gerätefreigabe bleiben offen; der erforderliche
-Abhängigkeitsaudit ist weiterhin rot. GitHub hat den Picomatch-Hinweis am
-18. November zurückgezogen; der anschließende lokale npm-Audit meldet
-weiterhin fünf hohe Befunde und Exit 1. Die genaue Chronologie steht im
-Beta-Protokoll. Die nachfolgenden Korrekturen für
+MCP-/MFA-/Gerätefreigabe bleiben offen. Die roten Picomatch-Audits sind
+**historische Ergebnisse**: Der frische Registry-Audit vom 18. November um
+**17:52 UTC** bestand auf Linux und dem M3 mit **Exit 0 und null Befunden**.
+Lockfile und Audit-Schwelle blieben unverändert; der abschließende CI-Lauf
+für den neuen Release-Quellstand ist weiter offen.
+[Audit-Nachweis und Chronologie](docs/KATOSYNC_BETA4_DEPENDENCY_AUDIT_20261118.md).
+Die nachfolgenden Korrekturen für
 temporäre Authority-Fehler und einen leichter auffindbaren Verbindungseinstieg
 sind im zweiten Kandidaten `232822fb` enthalten. Sein
 [nativer CI-Paketbau](https://github.com/NMKato/KatoSync/actions/runs/44327673503)
@@ -83,7 +85,7 @@ Auf M3 wurden Navigation, Mesh-Karte, Rollenwahl und nativer Serverstart
 sichtbar geprüft. Zwei M2-Clientläufe bestanden mit sechs beziehungsweise
 drei beobachteten Heartbeats und bestätigtem Stop; der anschließende M3-UI-Stop
 gab den Listener frei. Remote-Jobs oder neue Pins wurden dabei nicht erzeugt.
-Der aktuelle dritte Kandidat `0c85c5d0` enthält auch den Fix für die Race beim
+Der zuletzt physisch geprüfte dritte Kandidat `0c85c5d0` enthält auch den Fix für die Race beim
 ersten Bootstrap. Sein
 [nativer CI-Paketbau](https://github.com/NMKato/KatoSync/actions/runs/44336643584)
 bestand mit **482 bestandenen und 8 ignorierten Tests**; Linux und Windows
@@ -109,6 +111,28 @@ signierte Pakete werden nicht als Abnahme des aktuellen Kandidaten ausgegeben.
 **4.0 bezeichnet das Produktziel; ein vollständiges 4.0-Release ist noch nicht
 veröffentlicht.**
 
+### Neuer Quellstand nach Candidate 3
+
+Projektgebundenes RAG ist an registrierte Quellen und SQLite/FTS5 angebunden.
+Die lokale Chatansicht bietet jetzt eine ausdrückliche Aktualisierung mit
+geprüfter Sicherung und einen **Markdown-/Obsidian-Snapshot-Export** über die
+native Ordnerauswahl. Automatische Cross-Repo-Abfragen, das Fortschreiben
+von `PROJECT_STATUS_FLOW.md` und Wissensreplikation über Mesh bleiben offen.
+[Projektwissen: Umfang und Grenzen](docs/KATOSYNC_BETA4_PROJECT_KNOWLEDGE_20261118.md).
+
+Der neue [native Git-Status](docs/KATOSYNC_BETA4_NATIVE_GIT_STATUS_20261118.md)
+bindet den lesenden Aufruf an eine frische Clientfreigabe und die lokal
+ausgewählten Projekte. Terminal-/CLI-Fernsteuerung, Computersteuerung und
+automatischer Providerwechsel auf das lokale Modell sind damit nicht freigegeben.
+
+**Prüfstand:** 990 vollständige Node-Tests vor der Export-Erweiterung;
+44 gezielte Chat-/Export-Tests sowie TypeScript und Webbuild nach der
+Erweiterung bestanden. Die Connector-Integration bestand beide isolierten
+PostgreSQL-17-Modi. Produktionsmigrationen sind weiterhin nicht angewendet.
+Der finale Mac-App-Build, die tatsächlichen neuen UI-/MCP-/Offline-Läufe
+und das vollständige 4.0-Go bleiben offen. Die neuen Quelländerungen sind
+kein nachträglicher Funktionsnachweis für das Candidate-3-Paket.
+
 ## Was KatoSync zusammenbringt
 
 | Bereich | Funktionen | Status |
@@ -116,6 +140,7 @@ veröffentlicht.**
 | **Agent Sync & Live-Monitor** | Codex/Claude-Anbindung, Provider-Status, lokale Runner, Aufgaben- und Ausführungsansichten | Desktop-Beta; einzelne Geräteszenarien noch in Prüfung |
 | **Project Work Hub** | Projektregister, sichere lokale Projektanlage, Git-/Worktree-Kontext, Resume-Paket und Herkunftsnachweise | Integrierter, getesteter **Draft-PR #75** |
 | **Context Bridge** | Projektbezogene MCP-/CLI-Leseschnittstelle mit expliziter Allowlist; Übergabe zwischen Tools vorbereiten | **Read-only Preview** in PR #75 |
+| **Projektwissen / Memory Fabric** | Projektgebundenes RAG, manuelle Aktualisierung mit Sicherung, Markdown-/Obsidian-Snapshot | Aktueller Beta4-Quellstand; neue native End-to-End-Abnahme offen. Cross-Repo-/Mesh-Wissensreplikation bleibt ausstehend. |
 | **KUAS** | Versionierte, providerübergreifende Agentenregeln und nachvollziehbare Laufmetadaten | In PR #75 integriert; **keine** Berechtigungssandbox |
 | **Kato AI / Local Brain** | Eigene lokale Modell-Runtime, Statusprüfung, Metal-/CUDA-Kandidatenerkennung und CPU-Fallback | macOS-Metal auf echtem Gerät geprüft; Windows-GPU-Inferenz offen |
 | **System Resources** | Live-CPU, verfügbarer RAM, GPU-Anzeige, Warnungen bei geringer Speicherreserve | macOS-GUI geprüft, Windows-Bibliothekstests grün; PR #75 |
@@ -270,7 +295,9 @@ Die verbindlichen 4.0-Ziele und ihre getrennten Abnahmen stehen in der [Agent-Bi
 - [ ] Durchgehender Test: Projekt → freigegebener Agentenwechsel → Edit → Checkpoint → unabhängige Tests
 - [ ] Vollständige Windows- und macOS-Installer mit realen Ressourcen, GUI-/Gerätetests, Signierung
 - [ ] SmartMesh: vertrauenswürdige Gerätenamen/Identitäten, Fähigkeitsrouting, Git-first-Handoff, LAN/P2P/Relay-Fallback, unabhängige Git-Logins und Remote-Writer-Lease
-- [ ] Gerätesynchronisation und belastbare Projekt-Historie / Memory Fabric
+- [ ] Durchgehende Geräteabnahme für projektgebundenes RAG, manuellen Refresh und Obsidian-Snapshot-Export
+- [ ] Automatische Cross-Repo-Abfragen, Project-Status-Flow-Writer und Mesh-Wissensreplikation
+- [ ] Verifizierter automatischer Provider-/Local-Brain-Fallback und freigegebene Terminal-/Computersteuerung
 - [ ] Optionale Cloud-Tarife, Limits und Datenschutz-/Sicherheitsabnahme
 - [ ] Neue Screenshots, Demo-Video, Download-Seite und eindeutig definierte Open-Source-Lizenz
 
