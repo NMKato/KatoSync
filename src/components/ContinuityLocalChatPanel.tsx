@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { BrainCircuit, RefreshCcw, Send, ShieldCheck, ImagePlus, XCircle, Eye, EyeOff, Mic, Square, Settings2, CheckCircle2, Loader2, Sparkles, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { presentChatAnswer } from "../lib/chatAnswerPresentation";
 import { parseHumanView } from "../lib/chatAdaptiveViews";
 import {classifyLocalChatFailure} from "../lib/localChatError";
+import { exportProjectMemoryProjection, type MemoryProjectionExportReceipt } from "../lib/projectMemoryExport";
 import { useT } from "../i18n";
 
 type ChatDiagnostics = {code:string;canRepair:boolean};
@@ -259,6 +261,8 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
   const [repairing, setRepairing] = useState(false);
   const [repairReceipt, setRepairReceipt] = useState<ChatRepairReceipt|null>(null);
   const [knowledgeRefreshRequested, setKnowledgeRefreshRequested] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportReceipt, setExportReceipt] = useState<MemoryProjectionExportReceipt|null>(null);
   const requestRef = useRef(0);
   const projectRef = useRef(projectId);
   projectRef.current = projectId;
@@ -306,6 +310,8 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
     setAcceptBackup(false);
     setRepairReceipt(null);
     setRepairing(false);
+    setExporting(false);
+    setExportReceipt(null);
     void refresh();
     return () => { requestRef.current += 1; };
     // Refresh only on selected project change.
@@ -335,6 +341,37 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
     } finally {
       if (projectRef.current===current && requestRef.current===request) {
         setRepairing(false);
+        setBusy(false);
+      }
+    }
+  }
+
+  async function exportProjectKnowledge() {
+    if (!loaded || busy || repairing || exporting || !window.__TAURI_INTERNALS__) return;
+    const current = projectId;
+    const request = ++requestRef.current;
+    const isCurrent = () => projectRef.current === current && requestRef.current === request;
+    setBusy(true);
+    setExporting(true);
+    setExportReceipt(null);
+    setError("");
+    try {
+      const receipt = await exportProjectMemoryProjection(current, {
+        isCurrent,
+        chooseDirectory: async () => {
+          const selected = await open({
+            directory: true, multiple: false, title: t("continuity.chat.exportDirectory")
+          });
+          return typeof selected === "string" ? selected : null;
+        },
+        writeProjection: input => invoke<MemoryProjectionExportReceipt>("memory_fabric_export", input)
+      });
+      if (isCurrent() && receipt) setExportReceipt(receipt);
+    } catch {
+      if (isCurrent()) setError(t("continuity.chat.exportFailed"));
+    } finally {
+      if (isCurrent()) {
+        setExporting(false);
         setBusy(false);
       }
     }
@@ -454,7 +491,7 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
       <p className="agent-empty continuity-chat-description">{t("continuity.chat.persistentSubtitle")}</p>
       <div className="continuity-project-tag"><span>{t("continuity.chat.projectTag")}:</span> <strong>{projectName} · {projectId}</strong></div>
       {!window.__TAURI_INTERNALS__ ? <p className="tone-warn">{t("continuity.chat.desktopOnly")}</p> : null}
-      {window.__TAURI_INTERNALS__ && loaded ? <button type="button" className="ghost compact-button"
+      {window.__TAURI_INTERNALS__ && loaded ? <><div className="continuity-actions"><button type="button" className="ghost compact-button"
         disabled={busy || repairing || dictating}
         onClick={() => {
           // Opening the explicit action never starts an indexing/diagnostic scan.
@@ -463,7 +500,20 @@ export function ContinuityLocalChatPanel({ projectId, projectName, initialDraft 
           setRepairReceipt(null);
         }}>
         <RefreshCcw size={13}/>{t("continuity.chat.repairButton")}
-      </button>:null}
+      </button>
+        <button type="button" className="ghost compact-button"
+          disabled={busy || repairing || dictating}
+          onClick={() => void exportProjectKnowledge()}>
+          {exporting ? <Loader2 size={13} className="continuity-spin"/>:<ShieldCheck size={13}/>}
+          {t("continuity.chat.exportButton")}
+        </button>
+      </div><p className="agent-empty">{t("continuity.chat.exportHint")}</p></>:null}
+      {exportReceipt ? <p className="continuity-notice" role="status">
+        {t("continuity.chat.exportComplete", {
+          written:exportReceipt.written.length, unchanged:exportReceipt.unchanged.length,
+          preserved:exportReceipt.preservedEdits.length
+        })}
+      </p>:null}
       {knowledgeRefreshRequested || (!loaded && diagnostics) ? <div className="continuity-chat-recovery" role="region"
         aria-label={t("continuity.chat.recoveryTitle")}>
         <strong>{t(knowledgeRefreshRequested?"continuity.chat.repairButton":"continuity.chat.recoveryTitle")}</strong>

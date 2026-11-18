@@ -379,7 +379,9 @@ pub(crate) async fn continuity_chat_repair_project(
             || current.head != collected.head
             || admitted_source_fingerprints(&current) != admitted_source_fingerprints(&collected)
         {
-            return Err("Projektquellen haben sich geändert; Aktualisierung erneut starten.".into());
+            return Err(
+                "Projektquellen haben sich geändert; Aktualisierung erneut starten.".into(),
+            );
         }
         let mut store = open_store()?; // performs atomic schema migration after valid backup
         let report = store.ingest(collected.into_batch(&project_id, &name, &super::now_iso()))?;
@@ -1203,10 +1205,8 @@ mod tests {
 
         fn rag(&self, store: &MemoryStore) -> super::super::RagBlock {
             let collected = super::super::collect_project_sources(&self.0).unwrap();
-            let live = super::super::probe_live_state(
-                &collected,
-                &store.source_paths("alpha").unwrap(),
-            );
+            let live =
+                super::super::probe_live_state(&collected, &store.source_paths("alpha").unwrap());
             let result = store
                 .query(
                     &super::super::MemoryQuery::new("alpha", "release", Some(8)),
@@ -1292,8 +1292,18 @@ mod tests {
     fn project_knowledge_refresh_refuses_foreign_repository_and_keeps_original_index() {
         let original = KnowledgeRepo::new();
         let foreign = KnowledgeRepo::new();
-        original.git(&["remote", "add", "origin", "https://example.invalid/owner/alpha.git"]);
-        foreign.git(&["remote", "add", "origin", "https://example.invalid/owner/other.git"]);
+        original.git(&[
+            "remote",
+            "add",
+            "origin",
+            "https://example.invalid/owner/alpha.git",
+        ]);
+        foreign.git(&[
+            "remote",
+            "add",
+            "origin",
+            "https://example.invalid/owner/other.git",
+        ]);
         let mut store = MemoryStore::open_in_memory().unwrap();
         original.index(&mut store);
         let prior = store.snapshot("alpha").unwrap();
@@ -1305,7 +1315,12 @@ mod tests {
         assert_eq!(unchanged.indexed_at, prior.indexed_at);
         assert!(original.rag(&store).text.contains("Amber"));
 
-        foreign.git(&["remote", "set-url", "origin", "https://example.invalid/owner/alpha.git"]);
+        foreign.git(&[
+            "remote",
+            "set-url",
+            "origin",
+            "https://example.invalid/owner/alpha.git",
+        ]);
         let relocated = foreign.readiness(&store);
         assert_eq!(relocated.code, "needs_refresh");
         assert!(relocated.can_repair); // moving the same registered repository remains possible
@@ -1322,7 +1337,10 @@ mod tests {
             assert_eq!(ready.code, "ready");
             assert!(!ready.can_repair);
         }
-        assert_eq!(store.snapshot("alpha").unwrap().indexed_at, prior.indexed_at);
+        assert_eq!(
+            store.snapshot("alpha").unwrap().indexed_at,
+            prior.indexed_at
+        );
         store.conn.pragma_update(None, "user_version", 5).unwrap();
         let outdated = repo.readiness(&store);
         assert_eq!(outdated.code, "needs_refresh");
