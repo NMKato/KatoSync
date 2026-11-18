@@ -237,6 +237,7 @@ fn transient(code: &str) -> bool {
             | "REMOTE_MCP_RELAY_HEARTBEAT_EXPIRED"
             | "REMOTE_MCP_RELAY_TIMEOUT"
             | "REMOTE_MCP_RELAY_CLOCK_CHANGED"
+            | "REMOTE_MCP_GIT_DEADLINE"
     )
 }
 async fn supervise(
@@ -444,6 +445,20 @@ fn renewal_deadline(ticket: &Ticket) -> u64 {
         .min(ticket.expires_at_ms.saturating_sub(FRESH_MS))
 }
 
+fn renewal_due(now: u64, start_wall: u64, elapsed: u64, renew_at: u64) -> Result<bool, String> {
+    if now < start_wall || now.saturating_sub(start_wall).abs_diff(elapsed) > 5_000 {
+        return Err("REMOTE_MCP_RELAY_CLOCK_CHANGED".into());
+    }
+    Ok(now >= renew_at || elapsed >= renew_at.saturating_sub(start_wall))
+}
+
+fn remaining_execution_ms(deadline: u64, now: u64) -> Result<u64, String> {
+    deadline
+        .checked_sub(now)
+        .filter(|remaining| *remaining > 0)
+        .ok_or_else(|| "REMOTE_MCP_GIT_DEADLINE".into())
+}
+
 type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 async fn read_text(socket: &mut Socket) -> Result<String, String> {
@@ -648,10 +663,7 @@ async fn session(
         current(generation, owner_generation)?;
         let now = now_ms()?;
         let elapsed = start_mono.elapsed().as_millis() as u64;
-        if now < start_wall || now.saturating_sub(start_wall).abs_diff(elapsed) > 5_000 {
-            return Err("REMOTE_MCP_RELAY_CLOCK_CHANGED".into());
-        }
-        if now >= renew_at || elapsed >= renew_at.saturating_sub(start_wall) {
+        if renewal_due(now, start_wall, elapsed, renew_at)? {
             let _ = tokio::time::timeout(Duration::from_secs(1), socket.close(None)).await;
             return Ok(());
         }
@@ -709,6 +721,17 @@ async fn session(
         };
         let received = now_ms()?;
         current(generation, owner_generation)?;
+        // A packet can arrive after the pre-read boundary check. Rotate the
+        // expired session before interpreting it as an authority violation.
+        if renewal_due(
+            received,
+            start_wall,
+            start_mono.elapsed().as_millis() as u64,
+            renew_at,
+        )? {
+            let _ = tokio::time::timeout(Duration::from_secs(1), socket.close(None)).await;
+            return Ok(());
+        }
         if let Ok(doc) = serde_json::from_str::<serde_json::Value>(&packet) {
             match doc["type"].as_str() {
                 Some("rc69.presence.accepted") => {
@@ -766,8 +789,11 @@ async fn session(
             }
             continue;
         }
-        if pending_result.is_some() || lease_expires <= received || projects.is_empty() {
+        if pending_result.is_some() || projects.is_empty() {
             return Err("REMOTE_MCP_GIT_REQUEST_REJECTED".into());
+        }
+        if lease_expires <= received {
+            return Err("REMOTE_MCP_RELAY_HEARTBEAT_EXPIRED".into());
         }
         let authority = git_status::DispatchAuthority {
             client_id: ticket
@@ -801,13 +827,17 @@ async fn session(
             .ok_or("REMOTE_MCP_GIT_REGISTRY_INVALID")?;
         git_status::verify_registered_root(&registry, project).map_err(str::to_owned)?;
         let execution_expires = request
-            .expires_at_ms
+            .execution_deadline_ms
             .min(ticket.expires_at_ms)
             .min(lease_expires)
             .min(renew_at);
-        let result = git_status::read_status(project, execution_expires.saturating_sub(now_ms()?))
-            .await
-            .map_err(str::to_owned)?;
+        current(generation, owner_generation)?;
+        let result = git_status::read_status(
+            project,
+            remaining_execution_ms(execution_expires, now_ms()?)?,
+        )
+        .await
+        .map_err(str::to_owned)?;
         current(generation, owner_generation)?;
         let completed = now_ms()?;
         if completed >= execution_expires
@@ -844,8 +874,20 @@ async fn session(
         )
         .map_err(str::to_owned)?;
         current(generation, owner_generation)?;
+        let sending = now_ms()?;
+        if renewal_due(
+            sending,
+            start_wall,
+            start_mono.elapsed().as_millis() as u64,
+            renew_at,
+        )? {
+            return Err("REMOTE_MCP_GIT_DEADLINE".into());
+        }
+        // Do not pass a zero timeout to a ready send future: it can still be
+        // polled successfully after the deadline has already elapsed.
+        let send_ms = remaining_execution_ms(execution_expires, sending)?.min(5_000);
         tokio::time::timeout(
-            Duration::from_millis(execution_expires.saturating_sub(now_ms()?).min(5_000)),
+            Duration::from_millis(send_ms),
             socket.send(Message::Text(receipt)),
         )
         .await
@@ -863,6 +905,24 @@ mod tests {
     use super::*;
     fn connector_fixture() -> serde_json::Value {
         serde_json::from_str(include_str!("../tests/fixtures/beta4_relay_wire.json")).unwrap()
+    }
+
+    #[test]
+    fn late_packet_rotates_before_dispatch_using_wall_and_monotonic_time() {
+        assert!(!renewal_due(129_999, 100_000, 29_999, 130_000).unwrap());
+        assert!(renewal_due(130_000, 100_000, 30_000, 130_000).unwrap());
+        assert!(renewal_due(129_999, 100_000, 30_001, 130_000).unwrap());
+        assert!(renewal_due(99_999, 100_000, 1, 130_000).is_err());
+        assert!(renewal_due(135_001, 100_000, 30_000, 140_000).is_err());
+    }
+
+    #[test]
+    fn expired_send_never_gets_a_zero_budget_or_a_permanent_consent_error() {
+        assert_eq!(remaining_execution_ms(100, 99).unwrap(), 1);
+        assert!(remaining_execution_ms(100, 100).is_err());
+        assert!(remaining_execution_ms(100, 101).is_err());
+        assert!(transient("REMOTE_MCP_GIT_DEADLINE"));
+        assert!(!transient("REMOTE_MCP_GIT_REQUEST_REJECTED"));
     }
 
     #[test]

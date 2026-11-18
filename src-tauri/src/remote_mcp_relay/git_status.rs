@@ -16,6 +16,7 @@ pub(super) const MAX_PROJECTS: usize = 8;
 const MAX_FRAME_BYTES: usize = 24_576;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const FRAME_TTL_MS: u64 = 15_000;
+const EXECUTION_BUDGET_MS: u64 = 8_000;
 const MAX_GIT_BYTES: usize = 65_536;
 const DENIED: &str = "REMOTE_MCP_GIT_REQUEST_REJECTED";
 
@@ -167,7 +168,7 @@ struct Frame {
 pub(super) struct VerifiedRequest {
     pub request_id: Uuid,
     pub sequence: u64,
-    pub expires_at_ms: u64,
+    pub execution_deadline_ms: u64,
     pub project_id: String,
 }
 
@@ -238,7 +239,6 @@ pub(super) fn verify_request(
         || frame.issued_at_ms == 0
         || frame.issued_at_ms > MAX_SAFE_INTEGER - FRAME_TTL_MS
         || frame.expires_at_ms != frame.issued_at_ms + FRAME_TTL_MS
-        || now >= frame.expires_at_ms
         || frame.expires_at_ms > session_expires
         || frame.issued_at_ms > now.saturating_add(5_000)
         || !scope_id(&frame.owner_id, pin.owner_id)
@@ -262,10 +262,16 @@ pub(super) fn verify_request(
     {
         return Err(DENIED);
     }
+    // The server starts this same budget when signing, after its queued fresh
+    // authority check. Transport delay never creates a new eight-second lease.
+    let execution_deadline_ms = frame.issued_at_ms + EXECUTION_BUDGET_MS;
+    if now >= execution_deadline_ms {
+        return Err("REMOTE_MCP_GIT_DEADLINE");
+    }
     Ok(VerifiedRequest {
         request_id,
         sequence: frame.sequence,
-        expires_at_ms: frame.expires_at_ms,
+        execution_deadline_ms,
         project_id: frame.body.project_id,
     })
 }
@@ -527,6 +533,75 @@ mod tests {
             1_800_000_030_000,
             &approved,
             &seen
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn request_deadline_binds_signed_issue_time_not_packet_receipt() {
+        let key = SigningKey::from_bytes(&[84; 32]);
+        let pin = pin(&key);
+        let value = payload(&pin);
+        let raw = signed(&value, &key);
+        let revision = "a".repeat(64);
+        let authority = DispatchAuthority {
+            client_id: pin.owner_id,
+            revision: &revision,
+        };
+        let approved = approved();
+        let delayed = verify_request(
+            &raw,
+            &pin,
+            &authority,
+            2,
+            1_800_000_007_000,
+            1_800_000_030_000,
+            &approved,
+            &HashSet::new(),
+        )
+        .unwrap();
+        assert_eq!(delayed.execution_deadline_ms, 1_800_000_008_000);
+        // The signed frame still has seven seconds of cryptographic TTL,
+        // but its separately bounded execution budget is already exhausted.
+        assert_eq!(
+            verify_request(
+                &raw,
+                &pin,
+                &authority,
+                2,
+                1_800_000_008_000,
+                1_800_000_030_000,
+                &approved,
+                &HashSet::new()
+            )
+            .unwrap_err(),
+            "REMOTE_MCP_GIT_DEADLINE"
+        );
+        let mut foreign = value;
+        foreign["ownerId"] = json!(Uuid::new_v4());
+        assert_eq!(
+            verify_request(
+                &signed(&foreign, &key),
+                &pin,
+                &authority,
+                2,
+                1_800_000_008_000,
+                1_800_000_030_000,
+                &approved,
+                &HashSet::new()
+            )
+            .unwrap_err(),
+            DENIED
+        );
+        assert!(verify_request(
+            &"a".repeat(MAX_FRAME_BYTES + 1),
+            &pin,
+            &authority,
+            2,
+            1_800_000_001_000,
+            1_800_000_030_000,
+            &approved,
+            &HashSet::new()
         )
         .is_err());
     }

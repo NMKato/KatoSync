@@ -41,9 +41,16 @@ Der Runner verwendet eine feste Git-Binärdatei und feste Argumente ohne Shell.
 Geerbte `GIT_*`-Steuerungen werden entfernt; globale/systemweite Git-Konfiguration,
 fsmonitor und optionale Schreib-Locks sind deaktiviert. Die registrierte kanonische
 Projektwurzel wird vor und nach der Ausführung erneut gebunden. Alle Git-Prozesse
-teilen sich ein Zeitbudget von höchstens acht Sekunden, zusätzlich begrenzt durch
+teilen sich ein Zeitbudget von höchstens acht Sekunden ab dem signierten
+Ausstellungszeitpunkt des Auftrags, zusätzlich begrenzt durch
 Request, Ticket, Heartbeat-Lease und Sitzungswechsel. Ein Abbruch beendet den
 laufenden Kindprozess.
+
+Das gemeinsame Budget beginnt erst nach dem frischen Autoritätscheck in der
+Connector-Signierqueue. Warte- oder Übertragungszeit erzeugt auf dem Gerät keine
+neue Ausführungsfrist. Native prüft Rotation und Uhrabweichung erneut nach jedem
+Socket-Empfang und direkt vor Ergebnisversand. Regulärer Ablauf löst eine neue
+Verbindung aus; ein bereits abgelaufenes Ergebnis wird nicht mehr gesendet.
 
 Das Ergebnis enthält ausschließlich Projekt-ID, Branch, HEAD-Hash,
 `dirty` und die feste Provenienz `local_git_verified_root`. `dirty` bezieht sich
@@ -59,7 +66,7 @@ Request-ID. `remoteExecutionAllowed` und `remoteJobsEnabled` bleiben `false`.
   exakte Zwei-/Drei-Scope-Prüfung, Änderung einer vorbereiteten Freigabe,
   gültige lokale Projektmenge und Ablauf einer Präsenzanzeige.
 - TypeScript-Prüfung und Produktions-Webbuild bestanden.
-- 29 native Tests bestanden in einer isolierten Linux-Quellcode-Harness mit
+- 32 native Tests bestanden in einer isolierten Linux-Quellcode-Harness mit
   Rust 1.95.0, der im Repository festgelegten Version. Die echten Relay-,
   Owner-/Device-Review- und Codec-Module wurden kompiliert. Plattform-Auth,
   Keychain und Registry-Zugriff waren dort absichtlich nicht verfügbar.
