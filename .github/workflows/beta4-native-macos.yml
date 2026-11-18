@@ -1,20 +1,8 @@
 name: Beta4 Native macOS Library Tests
 
 on:
-  push:
-    branches:
-      - beta/4.0-integration-20261118
-    paths:
-      - "src-tauri/**"
-      - "src/**"
-      - "public/**"
-      - "package.json"
-      - "package-lock.json"
-      - "rust-toolchain.toml"
-      - "vite.config.*"
-      - "tsconfig*.json"
-      - ".github/workflows/beta4-native-macos.yml"
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - "src-tauri/**"
       - "src/**"
@@ -26,6 +14,12 @@ on:
       - "tsconfig*.json"
       - ".github/workflows/beta4-native-macos.yml"
   workflow_dispatch:
+    inputs:
+      build_package:
+        description: Build the unsigned ARM64 executable for local signing
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -36,10 +30,14 @@ concurrency:
 
 jobs:
   native-library:
+    # Other PR labels do not start another native run.
+    if: ${{ github.event_name != 'pull_request' || github.event.action != 'labeled' || github.event.label.name == 'beta-package' }}
     name: Actual Stage4J native library tests
     runs-on: macos-15
     timeout-minutes: 60
     env:
+      BETA4_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      BETA4_BUILD_PACKAGE: ${{ (github.event_name == 'workflow_dispatch' && inputs.build_package) || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'beta-package')) }}
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       CARGO_TERM_COLOR: always
@@ -103,3 +101,133 @@ jobs:
         env:
           TAURI_CONFIG: '{"build":{"beforeBuildCommand":""},"bundle":{"active":false,"resources":[]}}'
         run: cargo test --lib --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa -- --test-threads=2
+
+
+      - name: Verify ARM64 host and reviewed package inputs
+        if: ${{ success() && env.BETA4_BUILD_PACKAGE == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          test "$(rustc -vV | sed -n 's/^host: //p')" = aarch64-apple-darwin
+          test -z "${TAURI_CONFIG:-}"
+          test -z "${CARGO_BUILD_TARGET:-}"
+          test -x node_modules/.bin/tauri
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os, re, subprocess
+          expected = os.environ["BETA4_SOURCE_COMMIT"]
+          assert re.fullmatch(r"[0-9a-f]{40}", expected), "Invalid source commit"
+          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == expected, "Source mismatch"
+          assert not subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], text=True), "Source tree changed"
+          base = json.loads(Path("src-tauri/tauri.conf.json").read_text())
+          beta = json.loads(Path("src-tauri/tauri.beta4.conf.json").read_text())
+          assert beta["identifier"] == "com.nmkato.katosync.meshqa.stage4j-isolated", "Identity changed"
+          assert beta["build"]["beforeBuildCommand"] == "", "Unexpected build hook"
+          assert base["build"]["frontendDist"] == "../dist", "Unexpected frontend path"
+          assert base["bundle"]["macOS"]["minimumSystemVersion"] == "12.0", "Deployment target changed"
+          assert not list(Path("src-tauri").glob("tauri.macos.conf.*")), "Unexpected platform merge"
+          assert not Path("src-tauri/Tauri.macos.toml").exists(), "Unexpected platform merge"
+          assert Path("dist/index.html").is_file(), "Actual frontend assets missing"
+          print("BETA4_ARM64_SOURCE_AND_CONFIG_PASS")
+          PY
+
+      - name: Build the real unsigned Beta4 executable
+        if: ${{ success() && env.BETA4_BUILD_PACKAGE == 'true' }}
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
+          CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+        run: |
+          set -euo pipefail
+          # Use the CLI installed from package-lock.json. Preserve the Beta4
+          # identifier and all app settings; only runtime resource copying is
+          # deferred to the existing audited local signing helper.
+          ./node_modules/.bin/tauri build --debug --no-bundle --no-sign --ci \
+            --config src-tauri/tauri.beta4.conf.json \
+            --config '{"bundle":{"resources":[]}}' \
+            --features stage4j-qa -- --locked
+          test -x src-tauri/target/debug/katosync
+          test "$(lipo -archs src-tauri/target/debug/katosync)" = arm64
+          python3 scripts/qa-stage4j-native-namespace-audit.py src-tauri/target/debug/katosync
+
+      - name: Record exact inputs and archive only the verified executable
+        if: ${{ success() && env.BETA4_BUILD_PACKAGE == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, re, shutil, stat, subprocess, tarfile
+          root = Path.cwd()
+          expected = os.environ["BETA4_SOURCE_COMMIT"]
+          assert re.fullmatch(r"[0-9a-f]{40}", expected), "Invalid source commit"
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          assert actual == expected, "Source changed during build"
+          assert not subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], text=True), "Source tree changed during build"
+          binary = root / "src-tauri/target/debug/katosync"
+          assert not binary.is_symlink() and stat.S_ISREG(binary.stat().st_mode), "Binary is not a regular file"
+          assert 1_000_000 <= binary.stat().st_size <= 300_000_000, "Binary size outside namespace-audit bounds"
+          def sha256(path):
+              digest = hashlib.sha256()
+              with path.open("rb") as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+          stage = Path(os.environ["RUNNER_TEMP"]) / ("katosync-beta4-stage-" + actual)
+          stage.mkdir(mode=0o700)
+          copied = stage / "katosync"
+          shutil.copyfile(binary, copied)
+          copied.chmod(0o755)
+          binary_hash = sha256(binary)
+          assert sha256(copied) == binary_hash, "Binary changed during copy"
+          provenance = {
+              "schemaVersion": 1,
+              "sourceCommit": actual,
+              "buildProfile": "debug",
+              "target": "aarch64-apple-darwin",
+              "features": ["stage4j-qa"],
+              "bundleIdentifier": "com.nmkato.katosync.meshqa.stage4j-isolated",
+              "binaryFile": "katosync",
+              "binarySha256": binary_hash,
+              "cargoLockSha256": sha256(root / "src-tauri/Cargo.lock"),
+              "npmLockSha256": sha256(root / "package-lock.json"),
+              "tauriConfigSha256": sha256(root / "src-tauri/tauri.conf.json"),
+              "betaConfigSha256": sha256(root / "src-tauri/tauri.beta4.conf.json"),
+              "sourceTreeClean": True,
+              "resourceOverride": {"bundle": {"resources": []}},
+          }
+          receipt = stage / "build-provenance.json"
+          receipt.write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n")
+          receipt.chmod(0o644)
+          assert 0 < receipt.stat().st_size <= 16_384, "Manifest exceeds contract limit"
+          archive = Path(os.environ["RUNNER_TEMP"]) / ("katosync-beta4-" + actual + ".tar")
+          assert not archive.exists(), "Archive already exists"
+          with tarfile.open(archive, "w", format=tarfile.USTAR_FORMAT) as output:
+              for path, mode in [(copied, 0o755), (receipt, 0o644)]:
+                  info = path.lstat()
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1, "Unexpected linked artifact"
+                  member = tarfile.TarInfo(path.name)
+                  member.size = info.st_size
+                  member.mode = mode
+                  member.uid = member.gid = member.mtime = 0
+                  member.uname = member.gname = ""
+                  with path.open("rb") as content:
+                      output.addfile(member, content)
+          assert archive.stat().st_size <= 300_000_000 + 65_536, "Archive exceeds contract limit"
+          with tarfile.open(archive, "r:") as check:
+              members = check.getmembers()
+              assert [member.name for member in members] == ["katosync", "build-provenance.json"]
+              assert all(member.isreg() and not member.pax_headers for member in members)
+          print("BETA4_UNSIGNED_BINARY_ARCHIVE_PASS source=" + actual + " sha256=" + binary_hash)
+          PY
+
+      - name: Upload unsigned executable for local resource verification and signing
+        if: ${{ success() && env.BETA4_BUILD_PACKAGE == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta4-prebuilt-${{ env.BETA4_SOURCE_COMMIT }}-aarch64-apple-darwin-debug
+          path: ${{ runner.temp }}/katosync-beta4-${{ env.BETA4_SOURCE_COMMIT }}.tar
+          if-no-files-found: error
+          retention-days: 1

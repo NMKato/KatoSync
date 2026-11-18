@@ -82,12 +82,34 @@ historische Belege; sie ersetzen nicht den Test dieses neuen Builds.
   Supabase-Rollen bestanden, einschließlich nativer Client-MFA, signiertem
   Audit, Replay-Abweisung, Widerruf und weiterhin erlaubter Geräteerkennung.
   Der WSS-Server bestand 23 Node- und 6 echte Workerd-/SQLite-/Sockettests.
-- Native Rust-Kompilierung und Paketbau sind noch in Arbeit. Ein vorhandenes
-  Quellmodul oder ein gebauter Test-Harness ist kein Installationsnachweis.
+- Commit `c93a0ab697b07571ec3c5ac1862848ea7e516b08`: Der Workflow
+  [Beta4 Native macOS Library Tests](https://github.com/NMKato/KatoSync/actions/runs/44294689069)
+  hat die tatsächliche Stage4J-Bibliothek auf `macos-15` kompiliert und getestet:
+  **479 bestanden, 0 fehlgeschlagen, 8 bewusst ignorierte manuelle Live-Tests**.
+  TypeScript und der Vite-Produktionsbuild bestanden im selben Lauf.
+- Signierter/notarisierter Paketbau, Start und native GUI-Prüfung auf beiden
+  tatsächlichen Macs sowie echte Benutzer-MFA und individuelle Gerätefreigabe
+  bleiben getrennt abzunehmen. Der erfolgreiche Bibliothekslauf ist kein
+  Installations- oder physischer Mesh-Nachweis.
 - Produktive DB-Migration, Worker-Freischaltung und echte MFA-/Gerätefreigabe
   sind noch nicht als abgeschlossen protokolliert.
 - Der Abhängigkeitsaudit bleibt ein eigener erforderlicher CI-Gate. Der
   bekannte Picomatch-Befund wird nicht durch Deaktivieren des Audits übergangen.
+
+## CI-Ausführung und Kosten
+
+KatoSync ist zum Prüfzeitpunkt ein öffentliches Repository. Die verwendeten
+Standardrunner `ubuntu-latest`, `windows-latest` und `macos-15` sind deshalb
+[compute-kostenfrei und verbrauchen kein inkludiertes Compute-Kontingent](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+Runner-Laufzeit ist hier nicht mit einer tatsächlichen Kontingentabbuchung
+gleichzusetzen; Speicher wird getrennt betrachtet.
+
+Derselbe Commit `c93a0ab` wurde durch `push` und `pull_request` doppelt im
+Beta4-Mac-Workflow geprüft: [Push-Lauf](https://github.com/NMKato/KatoSync/actions/runs/44294689069)
+mit 4:55 Minuten und [PR-Lauf](https://github.com/NMKato/KatoSync/actions/runs/44294697659)
+mit 5:08 Minuten Joblaufzeit. Der zusätzliche Branch-Push-Trigger wird entfernt.
+`pull_request` mit bestehenden Pfadfiltern und `workflow_dispatch`, Jobname,
+Pflichtprüfungen und Testumfang bleiben erhalten.
 
 ## Reproduzierbare Entwicklung und Paketbau
 

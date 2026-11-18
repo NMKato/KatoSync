@@ -19,6 +19,8 @@ OUTPUT_APP="${KATOSYNC_BETA_OUTPUT_APP:-}"
 SIGN_ID="${KATOSYNC_BETA_SIGNING_IDENTITY:-}"
 NOTARY_PROFILE="${KATOSYNC_BETA_NOTARY_PROFILE:-}"
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/src-tauri/target}"
+PREBUILT_DIRECTORY="${KATOSYNC_BETA_PREBUILT_DIRECTORY:-}"
+PREBUILT_SHA256=""
 BUNDLE_ID="com.nmkato.katosync.meshqa.stage4j-isolated"
 [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "Set KATOSYNC_BETA_SOURCE_SHA to the reviewed commit"
 [[ "$BASE_APP" == /*.app && -d "$BASE_APP" && ! -L "$BASE_APP" ]] ||
@@ -71,6 +73,14 @@ BASE_TEAM="$(printf '%s\n' "$BASE_SIGNATURE" | sed -n 's/^TeamIdentifier=//p')"
 [[ "$BASE_TEAM" =~ ^[A-Z0-9]{10}$ && "$SIGN_ID" == *"($BASE_TEAM)" ]] ||
   fail "Signing team must match the accepted fallback"
 node "$ROOT/scripts/qa-stage4j-macos-resource-audit.mjs"
+if [[ -n "$PREBUILT_DIRECTORY" ]]; then
+  # Import only from the separately verified exact GitHub run. This receipt
+  # binds source and bytes; it is not a cryptographic build attestation.
+  PREBUILT_SHA256="$(python3 "$ROOT/scripts/verify-beta4-prebuilt.py" \
+    "$ROOT" "$SOURCE_SHA" "$PREBUILT_DIRECTORY" "$BASE_APP" "$OUTPUT_APP")" ||
+    fail "Prebuilt binary verification failed"
+  [[ "$PREBUILT_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail "Invalid prebuilt verification result"
+fi
 if [[ "$MODE" == --preflight ]]; then
   printf 'BETA4_PREFLIGHT_PASS source=%s\n' "$SOURCE_SHA"
   exit 0
@@ -90,14 +100,20 @@ export KATOSYNC_MESH_INBOX_SEND_QA=1
 export KATOSYNC_MESH_INBOX_RECEIVE_QA=1
 export KATOSYNC_MESH_PAIRING_RELAY_QA=1
 cd "$ROOT"
-npm run build
-npm exec -- tauri build --debug --no-bundle --config src-tauri/tauri.beta4.conf.json --features stage4j-qa
-BIN="$TARGET_DIR/debug/katosync"
+if [[ -n "$PREBUILT_DIRECTORY" ]]; then
+  BIN="$PREBUILT_DIRECTORY/katosync"
+else
+  npm run build
+  npm exec -- tauri build --debug --no-bundle --config src-tauri/tauri.beta4.conf.json --features stage4j-qa
+  BIN="$TARGET_DIR/debug/katosync"
+fi
 [[ -x "$BIN" ]] || fail "The native build did not produce katosync"
 [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" &&
    -z "$(git status --porcelain --untracked-files=normal)" ]] || fail "Source changed during the build"
 python3 scripts/qa-stage4j-native-namespace-audit.py "$BIN"
 BUILT_SHA256="$(shasum -a 256 "$BIN" | awk '{print $1}')"
+[[ -z "$PREBUILT_DIRECTORY" || "$BUILT_SHA256" == "$PREBUILT_SHA256" ]] ||
+  fail "Verified prebuilt binary changed before staging"
 
 STAGING="$(mktemp -d "$(dirname "$OUTPUT_APP")/.katosync-beta4-build.XXXXXX")"
 cleanup() {
