@@ -18,22 +18,22 @@ const READ_TOOLS: [&str; 2] = ["devices.list", "device.status"];
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TargetClient {
-    id: Uuid,
-    name: String,
+    pub(crate) id: Uuid,
+    pub(crate) name: String,
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientGrant {
-    id: Uuid,
-    status: String,
-    expires_at: String,
+    pub(crate) id: Uuid,
+    pub(crate) status: String,
+    pub(crate) expires_at: String,
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TotpFactor {
-    id: Uuid,
+    pub(crate) id: Uuid,
     friendly_name: String,
 }
 
@@ -41,8 +41,8 @@ pub struct TotpFactor {
 #[serde(rename_all = "camelCase")]
 pub struct OwnerSnapshot {
     protocol: &'static str,
-    target_client: TargetClient,
-    client_grant: Option<ClientGrant>,
+    pub(crate) target_client: TargetClient,
+    pub(crate) client_grant: Option<ClientGrant>,
     allowed_tools: Vec<String>,
     can_request_client: bool,
     can_approve: bool,
@@ -50,7 +50,7 @@ pub struct OwnerSnapshot {
     requires_mfa: bool,
     approval_state: String,
     revision: Option<String>,
-    factors: Vec<TotpFactor>,
+    pub(crate) factors: Vec<TotpFactor>,
     device_access_enabled: bool,
     remote_execution_allowed: bool,
 }
@@ -114,9 +114,9 @@ struct WireSnapshot {
     remote_execution_allowed: bool,
 }
 
-struct OwnerContext {
-    generation: u64,
-    uid: String,
+pub(crate) struct OwnerContext {
+    pub(crate) generation: u64,
+    pub(crate) uid: String,
 }
 
 struct PendingReview {
@@ -147,29 +147,29 @@ fn invalid() -> String {
     "REMOTE_MCP_OWNER_INVALID_RESPONSE".into()
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-fn read_only_tools(tools: &[String]) -> bool {
+pub(crate) fn read_only_tools(tools: &[String]) -> bool {
     tools.len() == READ_TOOLS.len()
         && READ_TOOLS
             .iter()
             .all(|tool| tools.iter().filter(|x| x.as_str() == *tool).count() == 1)
 }
 
-fn valid_target(target: &TargetClient) -> bool {
+pub(crate) fn valid_target(target: &TargetClient) -> bool {
     !target.id.is_nil() && !target.name.trim().is_empty() && target.name.chars().count() <= 80
 }
 
-fn valid_revision(revision: &str) -> bool {
+pub(crate) fn valid_revision(revision: &str) -> bool {
     revision.len() == 64
         && revision
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-fn parse_time(value: &str) -> Result<i64, String> {
+pub(crate) fn parse_time(value: &str) -> Result<i64, String> {
     chrono::DateTime::parse_from_rfc3339(value)
         .map(|time| time.timestamp_millis())
         .map_err(|_| invalid())
@@ -264,14 +264,14 @@ fn sanitize_snapshot(value: Value) -> Result<OwnerSnapshot, String> {
     })
 }
 
-fn check_generation(context: &OwnerContext) -> Result<(), String> {
+pub(crate) fn check_generation(context: &OwnerContext) -> Result<(), String> {
     if context.generation != crate::native_owner_session_generation() {
         return Err("REMOTE_MCP_OWNER_SESSION_CHANGED".into());
     }
     Ok(())
 }
 
-async fn context() -> Result<OwnerContext, String> {
+pub(crate) async fn context() -> Result<OwnerContext, String> {
     if !cfg!(feature = "katoos-auth-qa") {
         return Err("REMOTE_MCP_OWNER_NOT_CONFIGURED".into());
     }
@@ -284,7 +284,7 @@ async fn context() -> Result<OwnerContext, String> {
     Ok(context)
 }
 
-async fn recheck(context: &OwnerContext) -> Result<(), String> {
+pub(crate) async fn recheck(context: &OwnerContext) -> Result<(), String> {
     check_generation(context)?;
     crate::mesh_identity::same_account_still_verified(&context.uid)
         .await
@@ -292,7 +292,7 @@ async fn recheck(context: &OwnerContext) -> Result<(), String> {
     check_generation(context)
 }
 
-async fn request(
+pub(crate) async fn request(
     context: &OwnerContext,
     path: &'static str,
     body: Option<Value>,
@@ -353,7 +353,7 @@ async fn request(
     serde_json::from_slice(&bytes).map_err(|_| invalid())
 }
 
-async fn snapshot_for(context: &OwnerContext) -> Result<OwnerSnapshot, String> {
+pub(crate) async fn snapshot_for(context: &OwnerContext) -> Result<OwnerSnapshot, String> {
     let snapshot = sanitize_snapshot(request(context, OWNER_PATH, None).await?)?;
     check_generation(context)?;
     Ok(snapshot)
@@ -540,7 +540,8 @@ pub fn remote_mcp_owner_cancel_review(review_id: String) -> Result<(), String> {
         state.pending = None;
         state.operation = state.operation.checked_add(1).ok_or_else(invalid)?;
     }
-    Ok(())
+    drop(state);
+    crate::remote_mcp_device_review::cancel_review(id)
 }
 
 pub async fn remote_mcp_owner_confirm_decision(

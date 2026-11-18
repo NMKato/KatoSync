@@ -11544,3 +11544,10 @@ button.agent-tile:hover {
 .remote-mcp-relay small{font-size:12px;line-height:1.5;color:var(--text-muted);}
 .remote-mcp-owner-card button:focus-visible,.remote-mcp-owner-card input:focus-visible,.remote-mcp-owner-card select:focus-visible{outline:2px solid #ec8742;outline-offset:3px;}
 @media(max-width:640px){.remote-mcp-owner-target{grid-template-columns:1fr;}.remote-mcp-owner-actions{align-items:stretch;flex-direction:column;}.remote-mcp-owner-actions button{width:100%;}}
+
+/* Explicit consent for the current app and transient authenticator enrollment. */
+.remote-mcp-owner-card .remote-mcp-device,.remote-mcp-owner-card .remote-mcp-enrollment{border-top:1px solid var(--line);margin-top:18px;padding-top:16px;min-width:0;}
+.remote-mcp-owner-card .remote-mcp-device p,.remote-mcp-owner-card .remote-mcp-enrollment p{font-size:12px;line-height:1.55;overflow-wrap:anywhere;}
+.remote-mcp-owner-card .remote-mcp-device code{display:block;overflow-wrap:anywhere;word-break:break-word;font-size:11px;line-height:1.6;max-width:100%;}
+.remote-mcp-owner-card .remote-mcp-device [data-approved="yes"]{color:#22a36b;font-weight:600;}
+.remote-mcp-owner-card .remote-mcp-enrollment-qr{display:block;width:240px;height:auto;max-width:100%;box-sizing:border-box;padding:12px;background:#fff;border:1px solid var(--line);border-radius:12px;}

@@ -330,7 +330,10 @@ fn valid_ticket(
     key: &SigningKey,
     now: u64,
 ) -> Result<(), String> {
-    let digest = hex::encode(Sha256::digest(key.verifying_key().as_bytes()));
+    let digest = Sha256::digest(key.verifying_key().as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
     let ids = [
         t.owner_id,
         t.tenant_id,

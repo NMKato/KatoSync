@@ -1,0 +1,367 @@
+//! Explicit user-triggered native Authenticator enrollment.
+//! The QR is returned only to the local webview for display; it is never
+//! logged, persisted, sent to the Connector, or created during background work.
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use serde::{Deserialize, Serialize};
+use std::{
+    sync::OnceLock,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+use tokio::sync::Mutex;
+use uuid::Uuid;
+use zeroize::Zeroizing;
+
+struct Pending {
+    enrollment_id: Uuid,
+    owner: String,
+    generation: u64,
+    factor_id: Uuid,
+    qr: Zeroizing<String>,
+    expires_at: u64,
+    deadline: Instant,
+}
+#[derive(Default)]
+struct State {
+    pending: Option<Pending>,
+}
+static STATE: OnceLock<Mutex<State>> = OnceLock::new();
+fn state() -> &'static Mutex<State> {
+    STATE.get_or_init(|| Mutex::new(State::default()))
+}
+fn now() -> Result<u64, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .map_err(|_| "REMOTE_MCP_MFA_CLOCK_INVALID".into())
+}
+fn current(generation: u64) -> Result<(), String> {
+    if generation != crate::native_owner_session_generation() {
+        return Err("REMOTE_MCP_OWNER_CHANGED".into());
+    }
+    Ok(())
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EnrollmentView {
+    enrollment_id: Uuid,
+    qr_code_data_url: String,
+    expires_at: u64,
+}
+impl Pending {
+    fn view(&self) -> EnrollmentView {
+        EnrollmentView {
+            enrollment_id: self.enrollment_id,
+            qr_code_data_url: self.qr.to_string(),
+            expires_at: self.expires_at,
+        }
+    }
+}
+enum AuthOperation {
+    User,
+    Enroll,
+    Challenge(Uuid),
+}
+async fn auth_request(
+    generation: u64,
+    owner: &str,
+    operation: AuthOperation,
+) -> Result<Zeroizing<Vec<u8>>, String> {
+    current(generation)?;
+    let access = Zeroizing::new(
+        crate::ensure_supabase_access_token()
+            .await
+            .map_err(|_| "REMOTE_MCP_MFA_SESSION_INVALID".to_string())?,
+    );
+    crate::remote_mcp_mfa::validate_native_session(&access, owner)?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(12))
+        .build()
+        .map_err(|_| "REMOTE_MCP_MFA_UNAVAILABLE".to_string())?;
+    let root = format!("{}/auth/v1", crate::KATOSYNC_AUTH_URL);
+    let request=match operation {
+        AuthOperation::User=>client.get(format!("{root}/user")),
+        AuthOperation::Enroll=>client.post(format!("{root}/factors")).json(&serde_json::json!({
+            "factor_type":"totp","friendly_name":format!("KatoSync Desktop {}",Uuid::new_v4().simple()),
+            "issuer":"KATOOS"
+        })),
+        AuthOperation::Challenge(id)=>client.post(format!("{root}/factors/{id}/challenge")).json(&serde_json::json!({})),
+    };
+    current(generation)?;
+    let mut response = request
+        .header("apikey", crate::KATOSYNC_AUTH_ANON_KEY)
+        .bearer_auth(access.as_str())
+        .send()
+        .await
+        .map_err(|_| "REMOTE_MCP_MFA_UNAVAILABLE".to_string())?;
+    if !response.status().is_success() {
+        return Err(match response.status().as_u16() {
+            401 | 403 => "REMOTE_MCP_MFA_SESSION_INVALID",
+            429 => "REMOTE_MCP_MFA_RATE_LIMITED",
+            _ => "REMOTE_MCP_MFA_ENROLLMENT_REJECTED",
+        }
+        .into());
+    }
+    if response.content_length().is_some_and(|n| n > 131_072) {
+        return Err("REMOTE_MCP_MFA_RESPONSE_INVALID".into());
+    }
+    let mut bytes = Zeroizing::new(Vec::new());
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| "REMOTE_MCP_MFA_UNAVAILABLE".to_string())?
+    {
+        if bytes.len().saturating_add(chunk.len()) > 131_072 {
+            return Err("REMOTE_MCP_MFA_RESPONSE_INVALID".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    current(generation)?;
+    Ok(bytes)
+}
+#[derive(Deserialize)]
+struct Factor {
+    factor_type: String,
+    status: String,
+}
+#[derive(Deserialize)]
+struct User {
+    id: String,
+    #[serde(default)]
+    factors: Vec<Factor>,
+}
+#[derive(Deserialize)]
+struct Totp {
+    qr_code: String,
+}
+#[derive(Deserialize)]
+struct Enrolled {
+    id: Uuid,
+    #[serde(rename = "type")]
+    factor_type: String,
+    totp: Totp,
+}
+fn qr_data_url(raw: &str) -> Result<String, String> {
+    // GoTrue returns an SVG string, not an arbitrary display URL. Render only
+    // as an image data URI; never insert SVG markup into the DOM.
+    // GoTrue's pinned SVGo renderer emits this fixed XML preamble. Strip
+    // only the known declaration/comment; other XML and DTDs stay rejected.
+    let trimmed = raw.trim();
+    let trimmed = trimmed
+        .strip_prefix("<?xml version=\"1.0\"?>")
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    let trimmed = trimmed
+        .strip_prefix("<!-- Generated by SVGo -->")
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    let lower = trimmed.to_ascii_lowercase();
+    if trimmed.len() > 100_000
+        || !trimmed.starts_with("<svg")
+        || !trimmed.ends_with("</svg>")
+        || !lower.contains("http://www.w3.org/2000/svg")
+        || [
+            "<script",
+            "<foreignobject",
+            "<image",
+            "<use",
+            "<iframe",
+            "href=",
+            "onload",
+            "onerror",
+            "<!doctype",
+            "<!entity",
+            "url(",
+        ]
+        .iter()
+        .any(|bad| lower.contains(bad))
+    {
+        return Err("REMOTE_MCP_MFA_QR_INVALID".into());
+    }
+    Ok(format!(
+        "data:image/svg+xml;base64,{}",
+        STANDARD.encode(trimmed.as_bytes())
+    ))
+}
+pub(crate) async fn remote_mcp_mfa_enroll_begin() -> Result<EnrollmentView, String> {
+    let generation = crate::native_owner_session_generation();
+    let owner = crate::github_app_auth::verified_katosync_user()
+        .await
+        .map_err(|_| "REMOTE_MCP_MFA_SESSION_INVALID".to_string())?;
+    let mut state = state().lock().await;
+    current(generation)?;
+    if let Some(pending) = state.pending.as_ref() {
+        if pending.generation == generation
+            && pending.owner == owner
+            && now()? < pending.expires_at
+            && Instant::now() < pending.deadline
+        {
+            return Ok(pending.view());
+        }
+    }
+    state.pending = None;
+    let user: User =
+        serde_json::from_slice(&auth_request(generation, &owner, AuthOperation::User).await?)
+            .map_err(|_| "REMOTE_MCP_MFA_RESPONSE_INVALID".to_string())?;
+    if user.id != owner {
+        return Err("REMOTE_MCP_OWNER_CHANGED".into());
+    }
+    if user
+        .factors
+        .iter()
+        .any(|f| f.factor_type == "totp" && f.status == "verified")
+    {
+        return Err("REMOTE_MCP_MFA_ALREADY_CONFIGURED".into());
+    }
+    let enrolled: Enrolled =
+        serde_json::from_slice(&auth_request(generation, &owner, AuthOperation::Enroll).await?)
+            .map_err(|_| "REMOTE_MCP_MFA_RESPONSE_INVALID".to_string())?;
+    if enrolled.id.is_nil() || enrolled.factor_type != "totp" {
+        return Err("REMOTE_MCP_MFA_RESPONSE_INVALID".into());
+    }
+    let raw = Zeroizing::new(enrolled.totp.qr_code);
+    let qr = Zeroizing::new(qr_data_url(&raw)?);
+    current(generation)?;
+    let pending = Pending {
+        enrollment_id: Uuid::new_v4(),
+        owner,
+        generation,
+        factor_id: enrolled.id,
+        qr,
+        expires_at: now()?
+            .checked_add(300_000)
+            .ok_or("REMOTE_MCP_MFA_CLOCK_INVALID")?,
+        deadline: Instant::now() + Duration::from_secs(300),
+    };
+    let view = pending.view();
+    state.pending = Some(pending);
+    let enrollment_id = view.enrollment_id;
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(300)).await;
+        let mut state = crate::remote_mcp_mfa_enrollment::state().lock().await;
+        if state
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.enrollment_id == enrollment_id)
+        {
+            state.pending = None;
+        }
+    });
+    Ok(view)
+}
+#[derive(Deserialize)]
+struct Challenge {
+    id: Uuid,
+    #[serde(rename = "type")]
+    factor_type: String,
+    expires_at: u64,
+}
+pub(crate) async fn remote_mcp_mfa_enroll_confirm(
+    enrollment_id: String,
+    code: String,
+) -> Result<(), String> {
+    let code = Zeroizing::new(code);
+    if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("REMOTE_MCP_MFA_INPUT_INVALID".into());
+    }
+    let id = Uuid::parse_str(&enrollment_id)
+        .map_err(|_| "REMOTE_MCP_MFA_ENROLLMENT_EXPIRED".to_string())?;
+    let mut state = state().lock().await;
+    let pending = state
+        .pending
+        .as_ref()
+        .ok_or("REMOTE_MCP_MFA_ENROLLMENT_EXPIRED")?;
+    current(pending.generation)?;
+    if pending.enrollment_id != id
+        || now()? >= pending.expires_at
+        || Instant::now() >= pending.deadline
+    {
+        return Err("REMOTE_MCP_MFA_ENROLLMENT_EXPIRED".into());
+    }
+    let owner = crate::github_app_auth::verified_katosync_user()
+        .await
+        .map_err(|_| "REMOTE_MCP_MFA_SESSION_INVALID".to_string())?;
+    if owner != pending.owner {
+        return Err("REMOTE_MCP_OWNER_CHANGED".into());
+    }
+    let body = auth_request(
+        pending.generation,
+        &owner,
+        AuthOperation::Challenge(pending.factor_id),
+    )
+    .await?;
+    let challenge: Challenge =
+        serde_json::from_slice(&body).map_err(|_| "REMOTE_MCP_MFA_RESPONSE_INVALID".to_string())?;
+    let expires = challenge
+        .expires_at
+        .checked_mul(1000)
+        .ok_or("REMOTE_MCP_MFA_RESPONSE_INVALID")?;
+    let current_time = now()?;
+    if challenge.id.is_nil()
+        || challenge.factor_type != "totp"
+        || expires <= current_time
+        || expires > current_time.saturating_add(600_000)
+    {
+        return Err("REMOTE_MCP_MFA_RESPONSE_INVALID".into());
+    }
+    current(pending.generation)?;
+    // The online owner and challenge checks can consume the remaining local
+    // enrollment lifetime. Never start verification after that deadline.
+    if now()? >= pending.expires_at || Instant::now() >= pending.deadline {
+        state.pending = None;
+        return Err("REMOTE_MCP_MFA_ENROLLMENT_EXPIRED".into());
+    }
+    crate::verify_remote_mcp_totp_native(
+        &pending.factor_id.to_string(),
+        &challenge.id.to_string(),
+        &code,
+    )
+    .await?;
+    current(pending.generation)?;
+    state.pending = None;
+    Ok(())
+}
+pub(crate) async fn remote_mcp_mfa_enroll_cancel(enrollment_id: String) -> Result<(), String> {
+    let id = Uuid::parse_str(&enrollment_id)
+        .map_err(|_| "REMOTE_MCP_MFA_ENROLLMENT_EXPIRED".to_string())?;
+    let mut state = state().lock().await;
+    if state
+        .pending
+        .as_ref()
+        .is_some_and(|p| p.enrollment_id == id)
+    {
+        state.pending = None;
+    }
+    // Clearing local display data never deletes a pre-existing or newly
+    // verified Auth factor. Only the provider can confirm enrollment.
+    Ok(())
+}
+pub(crate) fn invalidate_owner_session() {
+    // Logout cannot await this mutex (verification may hold it). Generation
+    // checks already deny stale use; opportunistically erase display material.
+    if let Some(state) = STATE.get() {
+        if let Ok(mut state) = state.try_lock() {
+            state.pending = None;
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn enrollment_only_returns_inert_local_svg_images() {
+        let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M0 0h1v1z\"/></svg>";
+        assert!(qr_data_url(svg)
+            .unwrap()
+            .starts_with("data:image/svg+xml;base64,"));
+        let provider_svg = format!("<?xml version=\"1.0\"?>\n<!-- Generated by SVGo -->\n{svg}");
+        assert_eq!(
+            qr_data_url(&provider_svg).unwrap(),
+            qr_data_url(svg).unwrap()
+        );
+        for bad in ["https://foreign.invalid/qr.svg","<svg><script>bad</script></svg>",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><image href=\"https://foreign.invalid\"/></svg>"] {
+            assert!(qr_data_url(bad).is_err());
+        }
+    }
+}

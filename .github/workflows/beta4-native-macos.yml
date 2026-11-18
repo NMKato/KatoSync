@@ -1,0 +1,105 @@
+name: Beta4 Native macOS Library Tests
+
+on:
+  push:
+    branches:
+      - beta/4.0-integration-20261118
+    paths:
+      - "src-tauri/**"
+      - "src/**"
+      - "public/**"
+      - "package.json"
+      - "package-lock.json"
+      - "rust-toolchain.toml"
+      - "vite.config.*"
+      - "tsconfig*.json"
+      - ".github/workflows/beta4-native-macos.yml"
+  pull_request:
+    paths:
+      - "src-tauri/**"
+      - "src/**"
+      - "public/**"
+      - "package.json"
+      - "package-lock.json"
+      - "rust-toolchain.toml"
+      - "vite.config.*"
+      - "tsconfig*.json"
+      - ".github/workflows/beta4-native-macos.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta4-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-library:
+    name: Actual Stage4J native library tests
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+      VITE_KATOOS_AUTH_QA: "1"
+      VITE_MESH_INBOX_SEND_QA: "1"
+      VITE_MESH_INBOX_RECEIVE_QA: "1"
+      VITE_MESH_RELAY_QA: "1"
+      VITE_MESH_EASY_PAIR_QA: "1"
+      VITE_STAGE4W_LAN_QA: "1"
+      VITE_STAGE35_HEARTBEAT_QA: "1"
+      VITE_STAGE35_AUTO_RESUME_QA: "0"
+      KATOSYNC_MESH_INBOX_SEND_QA: "1"
+      KATOSYNC_MESH_INBOX_RECEIVE_QA: "1"
+      KATOSYNC_MESH_PAIRING_RELAY_QA: "1"
+    steps:
+      - name: Checkout the exact source under review
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node for actual frontend assets
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install locked frontend dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build actual TypeScript and Vite frontend
+        run: npm run build
+
+      - name: Install the compiler pinned in rust-toolchain.toml
+        shell: bash
+        run: |
+          beta_rust_toolchain="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const match = /^channel = "([0-9]+\.[0-9]+\.[0-9]+)"$/m.exec(readFileSync("rust-toolchain.toml","utf8")); if (!match) throw new Error("Expected a pinned repository Rust version"); process.stdout.write(match[1]);')"
+          rustup toolchain install "$beta_rust_toolchain" --profile minimal --component rustfmt --component clippy
+          rustup show active-toolchain
+          cargo --version
+
+      - name: Restore only Cargo build and registry caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            src-tauri/target
+          key: ${{ runner.os }}-${{ runner.arch }}-beta4-native-${{ hashFiles('rust-toolchain.toml', 'src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-beta4-native-
+
+      - name: Compile and run the actual native library
+        # tauri-build merges this supported test-only configuration before it
+        # copies package resources. Library tests need the real frontend, but
+        # do not package Poppler/Typst/STT. No replacement resource files are
+        # created. Production packaging retains its audited resource manifest.
+        # Default cargo test semantics leave physical/provider #[ignore] tests
+        # ignored; this job receives no credentials and launches no Tauri app.
+        env:
+          TAURI_CONFIG: '{"build":{"beforeBuildCommand":""},"bundle":{"active":false,"resources":[]}}'
+        run: cargo test --lib --locked --manifest-path src-tauri/Cargo.toml --features stage4j-qa -- --test-threads=2

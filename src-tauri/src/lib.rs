@@ -262,6 +262,101 @@ fn remote_mcp_relay_status() -> Result<serde_json::Value, String> {
     }
 }
 
+#[cfg(feature = "stage4j-qa")]
+mod remote_mcp_device_review;
+#[tauri::command]
+async fn remote_mcp_owner_device_snapshot() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(remote_mcp_device_review::remote_mcp_owner_device_snapshot().await?)
+            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_owner_prepare_device_decision(
+    expected_revision: String,
+    factor_id: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(
+            remote_mcp_device_review::remote_mcp_owner_prepare_device_decision(
+                expected_revision,
+                factor_id,
+            )
+            .await?,
+        )
+        .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (expected_revision, factor_id);
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_owner_confirm_device_decision(
+    review_id: String,
+    code: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(
+            remote_mcp_device_review::remote_mcp_owner_confirm_device_decision(review_id, code)
+                .await?,
+        )
+        .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (review_id, code);
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+
+#[cfg(feature = "stage4j-qa")]
+mod remote_mcp_mfa_enrollment;
+#[tauri::command]
+async fn remote_mcp_mfa_enroll_begin() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(remote_mcp_mfa_enrollment::remote_mcp_mfa_enroll_begin().await?)
+            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_mfa_enroll_confirm(enrollment_id: String, code: String) -> Result<(), String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        remote_mcp_mfa_enrollment::remote_mcp_mfa_enroll_confirm(enrollment_id, code).await
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (enrollment_id, code);
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_mfa_enroll_cancel(enrollment_id: String) -> Result<(), String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        remote_mcp_mfa_enrollment::remote_mcp_mfa_enroll_cancel(enrollment_id).await
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = enrollment_id;
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+
 // Stage 2D: native-only owner + pin admission. Deliberately no runtime
 // caller/IPC until real enrollment, session revocation and user consent.
 #[allow(dead_code)]
@@ -339,6 +434,8 @@ pub(crate) fn invalidate_native_owner_session() {
     mesh_live_supervisor_qa::runtime::invalidate_owner_session();
     #[cfg(feature = "stage4j-qa")]
     remote_mcp_relay::invalidate_owner_session();
+    #[cfg(feature = "stage4j-qa")]
+    remote_mcp_mfa_enrollment::invalidate_owner_session();
 }
 #[cfg(feature = "stage4j-qa")]
 mod remote_mcp_mfa;
@@ -810,6 +907,12 @@ pub fn run() {
             remote_mcp_owner_prepare_decision,
             remote_mcp_owner_confirm_decision,
             remote_mcp_owner_cancel_review,
+            remote_mcp_owner_device_snapshot,
+            remote_mcp_owner_prepare_device_decision,
+            remote_mcp_owner_confirm_device_decision,
+            remote_mcp_mfa_enroll_begin,
+            remote_mcp_mfa_enroll_confirm,
+            remote_mcp_mfa_enroll_cancel,
             remote_mcp_relay_start,
             remote_mcp_relay_stop,
             remote_mcp_relay_status,
@@ -5926,7 +6029,10 @@ fn remove_supabase_session_email() -> Result<()> {
 
 async fn supabase_password_login(email: &str, password: &str) -> Result<SupabaseTokenResponse> {
     let url = format!("{KATOSYNC_AUTH_URL}/auth/v1/token?grant_type=password");
-    let response = reqwest::Client::new()
+    let response = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(12))
+        .build()?
         .post(url)
         .header("apikey", KATOSYNC_AUTH_ANON_KEY)
         .header("User-Agent", USER_AGENT)
@@ -5983,7 +6089,10 @@ async fn supabase_recover(email: &str) -> Result<()> {
 
 async fn supabase_refresh_session(refresh_token: &str) -> Result<SupabaseTokenResponse> {
     let url = format!("{KATOSYNC_AUTH_URL}/auth/v1/token?grant_type=refresh_token");
-    let response = reqwest::Client::new()
+    let response = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(12))
+        .build()?
         .post(url)
         .header("apikey", KATOSYNC_AUTH_ANON_KEY)
         .header("User-Agent", USER_AGENT)

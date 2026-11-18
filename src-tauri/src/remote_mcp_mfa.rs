@@ -11,13 +11,15 @@ struct SessionClaims {
     iss: String,
     sub: String,
     session_id: String,
-    aud: serde_json::Value,
+    aud: String,
     role: String,
     exp: u64,
     #[serde(default)]
     aal: String,
     #[serde(default)]
     oauth_client_id: Option<String>,
+    #[serde(default)]
+    client_id: Option<String>,
 }
 
 fn canonical_uuid(value: &str) -> bool {
@@ -39,21 +41,30 @@ fn claims(token: &str, now: u64) -> Result<SessionClaims, String> {
     );
     let c: SessionClaims =
         serde_json::from_slice(&bytes).map_err(|_| "REMOTE_MCP_MFA_SESSION_INVALID".to_string())?;
-    let audience_ok = c.aud.as_str() == Some("authenticated")
-        || c.aud
-            .as_array()
-            .is_some_and(|a| a.iter().any(|v| v.as_str() == Some("authenticated")));
     if c.iss != format!("{}/auth/v1", crate::KATOSYNC_AUTH_URL)
         || !canonical_uuid(&c.sub)
         || !canonical_uuid(&c.session_id)
         || c.role != "authenticated"
-        || !audience_ok
+        || c.aud != "authenticated"
         || c.exp <= now
         || c.oauth_client_id.is_some()
+        || c.client_id.is_some()
     {
         return Err("REMOTE_MCP_MFA_SESSION_INVALID".into());
     }
     Ok(c)
+}
+
+pub(super) fn validate_native_session(token: &str, owner: &str) -> Result<(), String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "REMOTE_MCP_MFA_CLOCK_INVALID".to_string())?
+        .as_secs();
+    let session = claims(token, now)?;
+    if session.sub != owner {
+        return Err("REMOTE_MCP_OWNER_CHANGED".into());
+    }
+    Ok(())
 }
 
 fn check_rotation(

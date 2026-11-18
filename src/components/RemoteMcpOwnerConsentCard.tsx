@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { RefreshCcw, ShieldCheck } from "lucide-react";
 import { useT, type TKey } from "../i18n";
 import { RemoteMcpRelayPanel } from "./RemoteMcpRelayPanel";
+import { RemoteMcpCurrentDevicePanel } from "./RemoteMcpCurrentDevicePanel";
+import { RemoteMcpMfaEnrollmentPanel } from "./RemoteMcpMfaEnrollmentPanel";
 import { parseRemoteMcpOwnerSnapshot, parseRemoteMcpPreparedReview, remoteMcpOwnerRecovery,
   type RemoteMcpDecision, type RemoteMcpOwnerSnapshot, type RemoteMcpPreparedReview } from "../lib/remoteMcpOwnerReview";
 
@@ -15,6 +17,9 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
   const [factorId, setFactorId] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deviceReady, setDeviceReady] = useState(false);
+  const [deviceReviewBusy, setDeviceReviewBusy] = useState(false);
+  const [enrollmentBusy, setEnrollmentBusy] = useState(false);
   const [failure, setFailure] = useState<ReturnType<typeof remoteMcpOwnerRecovery> | null>(null);
   const [notice, setNotice] = useState<"requested" | "approved" | "revoked" | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -80,7 +85,7 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
   }, [review, now, clearReview]);
 
   const requestClient = async () => {
-    if (pending.current || !snapshot?.canRequestClient || review) return;
+    if (pending.current || deviceReviewBusy || enrollmentBusy || !snapshot?.canRequestClient || review) return;
     const operation = ++generation.current;
     pending.current = true; setBusy(true); setNotice(null); setFailure(null);
     try {
@@ -92,7 +97,7 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
     }
   };
   const prepare = async (action: RemoteMcpDecision) => {
-    if (pending.current || !snapshot?.clientGrant || !snapshot.revision || review ||
+    if (pending.current || deviceReviewBusy || enrollmentBusy || !snapshot?.clientGrant || !snapshot.revision || review ||
         !snapshot.factors.some(factor => factor.id === factorId) ||
         !(action === "approve_client" ? snapshot.canApprove : snapshot.canRevoke)) return;
     const operation = ++generation.current;
@@ -136,12 +141,14 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
 
   if (!enabled) return null;
   const grantExpired = !!snapshot?.clientGrant && Date.parse(snapshot.clientGrant.expiresAt) <= now;
+  const childBusy = deviceReviewBusy || enrollmentBusy;
+  const clientReady = snapshot?.clientGrant?.status === "approved" && !grantExpired;
   const status = !snapshot ? busy ? "loading" : "unavailable" : grantExpired ? "expired" :
     snapshot.clientGrant?.status === "approved" ? "approved" : snapshot.clientGrant ? "pending" : "notRequested";
   return <section className="remote-mcp-owner-card glass" aria-label={t("remoteMcp.owner.title")}>
     <div className="remote-mcp-owner-heading">
       <div><ShieldCheck size={19} aria-hidden="true" /><strong>{t("remoteMcp.owner.title")}</strong></div>
-      <button className="ghost compact-button" type="button" disabled={busy}
+      <button className="ghost compact-button" type="button" disabled={busy || !!review || childBusy}
         onClick={() => void refresh()} aria-label={t("remoteMcp.owner.refresh")}>
         <RefreshCcw size={16} className={busy ? "spin" : ""} />{t("remoteMcp.owner.refresh")}
       </button>
@@ -157,17 +164,17 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
       </dl>
       <p className="remote-mcp-owner-boundary">{t("remoteMcp.owner.deviceBoundary")}</p>
       {!review ? <div className="remote-mcp-owner-actions">
-        {snapshot.canRequestClient ? <button className="secondary compact-button" type="button" disabled={busy}
+        {snapshot.canRequestClient ? <button className="secondary compact-button" type="button" disabled={busy || childBusy}
           onClick={() => void requestClient()}>{t("remoteMcp.owner.request")}</button> : null}
         {(snapshot.canApprove || snapshot.canRevoke) && snapshot.factors.length > 0 ? <>
           <label>{t("remoteMcp.owner.factor")}
-            <select value={factorId} disabled={busy} onChange={event => setFactorId(event.target.value)}>
+            <select value={factorId} disabled={busy || childBusy} onChange={event => setFactorId(event.target.value)}>
               {snapshot.factors.map((factor, index) => <option key={factor.id} value={factor.id}>
                 {factor.friendlyName || t("remoteMcp.owner.factorFallback", { number: index + 1 })}
               </option>)}
             </select>
           </label>
-          <button className="primary compact-button" type="button" disabled={busy || !factorId || (grantExpired && snapshot.canApprove)}
+          <button className="primary compact-button" type="button" disabled={busy || childBusy || !factorId || (grantExpired && snapshot.canApprove)}
             onClick={() => void prepare(snapshot.canApprove ? "approve_client" : "revoke_client")}>
             {t(snapshot.canApprove ? "remoteMcp.owner.reviewApprove" : "remoteMcp.owner.reviewRevoke")}
           </button>
@@ -192,7 +199,14 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
     </> : null}
     {notice ? <p role="status">{t(("remoteMcp.owner.notice." + notice) as TKey)}</p> : null}
     {failure ? <p className="remote-mcp-owner-error" role="alert">{t(("remoteMcp.owner.error." + failure) as TKey)}</p> : null}
-    <RemoteMcpRelayPanel canStart={snapshot?.clientGrant?.status === "approved" && !grantExpired}
+    <RemoteMcpMfaEnrollmentPanel needed={!snapshot || snapshot.factors.length === 0}
+      canInteract={!busy && !review && !deviceReviewBusy} refreshEpoch={refreshEpoch}
+      onBusy={setEnrollmentBusy} onComplete={() => void refresh()} />
+    <RemoteMcpCurrentDevicePanel clientReady={clientReady} clientGrantId={snapshot?.clientGrant?.id ?? null}
+      targetClientId={snapshot?.targetClient.id ?? null} factors={snapshot?.factors ?? []}
+      canInteract={!busy && !review && !enrollmentBusy} refreshEpoch={refreshEpoch}
+      onReady={setDeviceReady} onReviewBusy={setDeviceReviewBusy} onChanged={() => void refresh()} />
+    <RemoteMcpRelayPanel canStart={clientReady && deviceReady && !busy && !review && !childBusy}
       refreshEpoch={refreshEpoch} />
   </section>;
 }
