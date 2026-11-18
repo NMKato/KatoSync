@@ -50,3 +50,13 @@ test("device confirmation is bound to the displayed app, fingerprint, target, sc
   const parsed = parseRemoteMcpPreparedDeviceReview({ ...prepared, nonce: "private", deviceProof: { payload: "private", signature: "private" }, authChallengeId: raw.grantId }, expected)!;
   assert.ok(parsed); assert.equal("nonce" in parsed, false); assert.equal("deviceProof" in parsed, false); assert.equal("authChallengeId" in parsed, false);
 });
+test("device consent preserves the exact separately approved Git scope", () => {
+  const allowedTools = ["devices.list", "device.status", "git.status"];
+  const expires = new Date(now + 86_400_000).toISOString();
+  const prepared = { protocol: "katosync-remote-mcp-device-review-v1", action: "approve_device", reviewId: raw.grantId,
+    targetClient: client, currentDevice: { ...device, consentStatus: "pending", revokeEpoch: 0, consentExpiresAt: expires },
+    allowedTools, expiresAt: now + 90_000, deviceConsentExpiresAt: expires };
+  const expected = { targetClientId: client.id, deviceId: device.deviceId, fingerprint: device.fingerprint, nowMs: now };
+  assert.equal(parseRemoteMcpPreparedDeviceReview(prepared, expected), null);
+  assert.deepEqual(parseRemoteMcpPreparedDeviceReview(prepared, { ...expected, allowedTools })?.allowedTools, allowedTools);
+});

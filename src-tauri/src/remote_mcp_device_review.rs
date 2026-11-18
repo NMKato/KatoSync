@@ -450,7 +450,8 @@ pub async fn remote_mcp_owner_prepare_device_decision(
         epoch,
         owner::now_ms(),
     )?;
-    if intent.current_device.membership_state != wire.current_device.membership_state
+    if !owner::same_tools(&intent.allowed_tools, &client.allowed_tools)
+        || intent.current_device.membership_state != wire.current_device.membership_state
         || (wire.current_device.consent_status.is_none()
             && intent.current_device.consent_status.as_deref() != Some("pending"))
         || (wire.current_device.consent_status.is_some()

@@ -30,12 +30,14 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 const target = (value: unknown): value is { id: string; name: string } => object(value) &&
   typeof value.id === "string" && UUID.test(value.id) && typeof value.name === "string" &&
   value.name.trim().length > 0 && value.name.length <= 80;
-const readOnlyTools = (value: unknown): value is string[] => Array.isArray(value) &&
-  value.length === 2 && new Set(value).size === 2 && REMOTE_MCP_READ_TOOLS.every(tool => value.includes(tool));
+export const isRemoteMcpReadOnlyScope = (value: unknown): value is string[] => Array.isArray(value) &&
+  (value.length === 2 || value.length === 3) && new Set(value).size === value.length &&
+  REMOTE_MCP_READ_TOOLS.every(tool => value.includes(tool)) &&
+  value.every(tool => ["devices.list", "device.status", "git.status"].includes(tool));
 
 export function parseRemoteMcpOwnerSnapshot(value: unknown): RemoteMcpOwnerSnapshot | null {
   if (!object(value) || value.protocol !== "katosync-remote-mcp-owner-v1" || !target(value.targetClient) ||
-      !readOnlyTools(value.allowedTools) || value.requiresMfa !== true ||
+      !isRemoteMcpReadOnlyScope(value.allowedTools) || value.requiresMfa !== true ||
       value.deviceAccessEnabled !== false || value.remoteExecutionAllowed !== false ||
       ![value.canRequestClient, value.canApprove, value.canRevoke].every(flag => typeof flag === "boolean") ||
       typeof value.approvalState !== "string" || !/^[a-z_]{1,80}$/.test(value.approvalState) ||
@@ -69,12 +71,14 @@ export function parseRemoteMcpOwnerSnapshot(value: unknown): RemoteMcpOwnerSnaps
 }
 
 export function parseRemoteMcpPreparedReview(value: unknown, expected: {
-  action: RemoteMcpDecision; targetClientId: string; nowMs: number;
+  action: RemoteMcpDecision; targetClientId: string; nowMs: number; allowedTools?: readonly string[];
 }): RemoteMcpPreparedReview | null {
   if (!object(value) || value.protocol !== "katosync-remote-mcp-review-v1" ||
       typeof value.reviewId !== "string" || !UUID.test(value.reviewId) ||
       value.action !== expected.action || !target(value.targetClient) ||
-      value.targetClient.id !== expected.targetClientId || !readOnlyTools(value.allowedTools) ||
+      value.targetClient.id !== expected.targetClientId || !isRemoteMcpReadOnlyScope(value.allowedTools) ||
+      value.allowedTools.length !== (expected.allowedTools ?? REMOTE_MCP_READ_TOOLS).length ||
+      !(expected.allowedTools ?? REMOTE_MCP_READ_TOOLS).every(tool => (value.allowedTools as string[]).includes(tool)) ||
       !Number.isSafeInteger(value.expiresAt) || (value.expiresAt as number) <= expected.nowMs ||
       (value.expiresAt as number) > expected.nowMs + 5 * 60_000) return null;
   return { protocol: "katosync-remote-mcp-review-v1", reviewId: value.reviewId,

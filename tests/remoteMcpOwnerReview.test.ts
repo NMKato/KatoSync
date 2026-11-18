@@ -53,3 +53,17 @@ test("safe recovery categories never echo raw server diagnostics or OTP", () => 
   assert.equal(remoteMcpOwnerRecovery("REMOTE_MCP_OWNER_MFA_REJECTED"), "mfa");
   assert.equal(remoteMcpOwnerRecovery("failure code=123456 token=private"), "unavailable");
 });
+test("Git status is an explicit reviewed scope and cannot appear during a two-scope approval", () => {
+  const allowedTools = ["devices.list", "device.status", "git.status"];
+  const parsed = parseRemoteMcpOwnerSnapshot({ ...snapshot, allowedTools });
+  assert.deepEqual(parsed?.allowedTools, allowedTools);
+  for (const bad of [[...allowedTools, "git.status"], [...allowedTools, "terminal.exec"], ["git.status"]])
+    assert.equal(parseRemoteMcpOwnerSnapshot({ ...snapshot, allowedTools: bad }), null);
+  const now = 1_800_000_000_000;
+  const receipt = { protocol: "katosync-remote-mcp-review-v1", reviewId: grant.id,
+    action: "approve_client", targetClient: client, allowedTools, expiresAt: now + 90_000 };
+  const expected = { action: "approve_client" as const, targetClientId: client.id, nowMs: now };
+  assert.equal(parseRemoteMcpPreparedReview(receipt, expected), null);
+  assert.deepEqual(parseRemoteMcpPreparedReview(receipt, { ...expected, allowedTools })?.allowedTools, allowedTools);
+  assert.equal(parseRemoteMcpPreparedReview({ ...receipt, allowedTools: ["devices.list", "device.status"] }, { ...expected, allowedTools }), null);
+});

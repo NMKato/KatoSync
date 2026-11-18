@@ -2,8 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useT, type TKey } from "../i18n";
-import { isRemoteMcpRelayLive, parseRemoteMcpRelaySnapshot, remoteMcpRelayActive,
-  type RemoteMcpRelaySnapshot } from "../lib/remoteMcpRelayState";
+import { isRemoteMcpRelayLive, parseRemoteMcpRelaySnapshot, remoteMcpRelayActive, parseRemoteMcpProjectOptions,
+  type RemoteMcpRelaySnapshot, type RemoteMcpProjectOption } from "../lib/remoteMcpRelayState";
 
 async function bounded<T>(operation: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -12,13 +12,16 @@ async function bounded<T>(operation: Promise<T>): Promise<T> {
   })]); } finally { if (timer !== undefined) clearTimeout(timer); }
 }
 
-export function RemoteMcpRelayPanel({ canStart, refreshEpoch }: { canStart: boolean; refreshEpoch: number }) {
+export function RemoteMcpRelayPanel({ canStart, refreshEpoch, allowGitStatus }: { canStart: boolean; refreshEpoch: number; allowGitStatus: boolean }) {
   const { t } = useT();
   const [snapshot, setSnapshot] = useState<RemoteMcpRelaySnapshot | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [busy, setBusy] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [projects, setProjects] = useState<RemoteMcpProjectOption[]>([]);
+  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
+  const [projectsUnavailable, setProjectsUnavailable] = useState(false);
   const generation = useRef(0);
   const mounted = useRef(false);
   const pending = useRef(false);
@@ -27,7 +30,7 @@ export function RemoteMcpRelayPanel({ canStart, refreshEpoch }: { canStart: bool
     const observed = parseRemoteMcpRelaySnapshot(raw);
     if (!observed) throw new Error("invalid_presence_receipt");
     setSnapshot(observed.state === "connected" && !isRemoteMcpRelayLive(observed, Date.now())
-      ? { ...observed, state: "reconnecting", lastHeartbeatAt: null, expiresAt: null } : observed);
+      ? { ...observed, state: "reconnecting", lastHeartbeatAt: null, expiresAt: null, readOnlyGitStatusEnabled: false, approvedProjectIds: [] } : observed);
     setUnavailable(false);
   };
   const fail = (operation: number) => {
@@ -57,8 +60,21 @@ export function RemoteMcpRelayPanel({ canStart, refreshEpoch }: { canStart: bool
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshEpoch]);
   useEffect(() => {
+    let active = true;
+    setProjects([]); setSelectedProjects([]); setProjectsUnavailable(false);
+    if (allowGitStatus && window.__TAURI_INTERNALS__) {
+      void bounded(invoke("remote_mcp_relay_projects")).then(raw => {
+        if (!active) return;
+        const options = parseRemoteMcpProjectOptions(raw);
+        if (!options) throw new Error("invalid_project_options");
+        setProjects(options);
+      }).catch(() => { if (active) setProjectsUnavailable(true); });
+    }
+    return () => { active = false; };
+  }, [allowGitStatus, refreshEpoch]);
+  useEffect(() => {
     if (snapshot?.state === "connected" && !isRemoteMcpRelayLive(snapshot, now)) {
-      setSnapshot({ ...snapshot, state: "reconnecting", lastHeartbeatAt: null, expiresAt: null });
+      setSnapshot({ ...snapshot, state: "reconnecting", lastHeartbeatAt: null, expiresAt: null, readOnlyGitStatusEnabled: false, approvedProjectIds: [] });
     }
   }, [snapshot, now]);
   const command = async (stop: boolean) => {
@@ -67,7 +83,8 @@ export function RemoteMcpRelayPanel({ canStart, refreshEpoch }: { canStart: bool
     pending.current = true; setBusy(true); setStopping(stop);
     if (stop) setSnapshot(null);
     try {
-      await bounded(invoke(stop ? "remote_mcp_relay_stop" : "remote_mcp_relay_start"));
+      await bounded(invoke(stop ? "remote_mcp_relay_stop" : "remote_mcp_relay_start",
+        stop ? undefined : { projectIds: allowGitStatus ? selectedProjects : [] }));
       accept(await bounded(invoke("remote_mcp_relay_status")), operation);
     } catch { fail(operation); }
     finally {
@@ -84,9 +101,19 @@ export function RemoteMcpRelayPanel({ canStart, refreshEpoch }: { canStart: bool
       {t(("remoteMcp.relay.state." + (unavailable ? "unavailable" : snapshot?.state ?? "idle")) as TKey)}
     </p>
     <p>{t("remoteMcp.relay.scope")}</p>
+    {allowGitStatus ? <fieldset className="remote-mcp-git-projects" disabled={busy || active || !canStart}>
+      <legend>{t("remoteMcp.relay.gitProjects")}</legend>
+      <small>{t("remoteMcp.relay.gitScope")}</small>
+      {projects.map(project => <label key={project.id}><input type="checkbox"
+        checked={selectedProjects.includes(project.id)} disabled={!selectedProjects.includes(project.id) && selectedProjects.length >= 8}
+        onChange={event => setSelectedProjects(current => event.target.checked ? [...current, project.id] : current.filter(id => id !== project.id))} />
+        <span>{project.name}<small>{project.id}</small></span></label>)}
+      {!projects.length ? <p>{t(projectsUnavailable ? "remoteMcp.relay.projectsUnavailable" : "remoteMcp.relay.noProjects")}</p> : null}
+    </fieldset> : <small>{t("remoteMcp.relay.gitNeedsScope")}</small>}
+    {live && snapshot?.readOnlyGitStatusEnabled ? <p role="status">{t("remoteMcp.relay.gitActive", { projects: snapshot.approvedProjectIds.join(", ") })}</p> : null}
     <div className="remote-mcp-owner-actions">
       <button type="button" className="secondary compact-button" disabled={busy || active || !canStart}
-        onClick={() => void command(false)}>{t("remoteMcp.relay.start")}</button>
+        onClick={() => void command(false)}>{t(allowGitStatus && selectedProjects.length ? "remoteMcp.relay.startGit" : "remoteMcp.relay.start")}</button>
       {active || busy || unavailable ? <button type="button" className="ghost compact-button" disabled={stopping}
         onClick={() => void command(true)}>{t("remoteMcp.relay.stop")}</button> : null}
     </div>

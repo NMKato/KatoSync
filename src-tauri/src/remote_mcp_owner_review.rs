@@ -43,7 +43,7 @@ pub struct OwnerSnapshot {
     protocol: &'static str,
     pub(crate) target_client: TargetClient,
     pub(crate) client_grant: Option<ClientGrant>,
-    allowed_tools: Vec<String>,
+    pub(crate) allowed_tools: Vec<String>,
     can_request_client: bool,
     can_approve: bool,
     can_revoke: bool,
@@ -130,6 +130,7 @@ struct PendingReview {
     factor_id: Uuid,
     auth_challenge_id: Uuid,
     expires_at: i64,
+    allowed_tools: Vec<String>,
 }
 
 #[derive(Default)]
@@ -152,10 +153,25 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 pub(crate) fn read_only_tools(tools: &[String]) -> bool {
-    tools.len() == READ_TOOLS.len()
+    (tools.len() == READ_TOOLS.len() || tools.len() == READ_TOOLS.len() + 1)
         && READ_TOOLS
             .iter()
             .all(|tool| tools.iter().filter(|x| x.as_str() == *tool).count() == 1)
+        && tools
+            .iter()
+            .all(|tool| READ_TOOLS.contains(&tool.as_str()) || tool == "git.status")
+        && tools
+            .iter()
+            .filter(|tool| tool.as_str() == "git.status")
+            .count()
+            <= 1
+}
+
+pub(crate) fn same_tools(left: &[String], right: &[String]) -> bool {
+    read_only_tools(left)
+        && read_only_tools(right)
+        && left.len() == right.len()
+        && left.iter().all(|tool| right.contains(tool))
 }
 
 pub(crate) fn valid_target(target: &TargetClient) -> bool {
@@ -221,6 +237,7 @@ fn sanitize_snapshot(value: Value) -> Result<OwnerSnapshot, String> {
                 || !matches!(grant.status.as_str(), "pending" | "approved")
                 || grant.revoked_at.is_some()
                 || !read_only_tools(&grant.allowed_tools)
+                || !same_tools(&grant.allowed_tools, &wire.allowed_tools)
             {
                 return Err(invalid());
             }
@@ -251,7 +268,7 @@ fn sanitize_snapshot(value: Value) -> Result<OwnerSnapshot, String> {
         protocol: "katosync-remote-mcp-owner-v1",
         target_client: wire.target_client,
         client_grant,
-        allowed_tools: READ_TOOLS.iter().map(|x| x.to_string()).collect(),
+        allowed_tools: wire.allowed_tools,
         can_request_client: wire.can_request_client,
         can_approve: wire.can_approve,
         can_revoke: wire.can_revoke,
@@ -364,13 +381,20 @@ pub async fn remote_mcp_owner_snapshot() -> Result<OwnerSnapshot, String> {
     snapshot_for(&context).await
 }
 
-pub async fn remote_mcp_owner_request_client() -> Result<OwnerSnapshot, String> {
+pub async fn remote_mcp_owner_request_client(
+    include_git_status: bool,
+) -> Result<OwnerSnapshot, String> {
     let context = context().await?;
     let before = snapshot_for(&context).await?;
     if !before.can_request_client || before.client_grant.is_some() {
         return Err("REMOTE_MCP_OWNER_REVIEW_CHANGED".into());
     }
-    let result = request(&context, "/api/owner/remote-mcp/requests", Some(json!({}))).await?;
+    let body = if include_git_status {
+        json!({"includeGitStatus":true})
+    } else {
+        json!({})
+    };
+    let result = request(&context, "/api/owner/remote-mcp/requests", Some(body)).await?;
     if !result.get("requestCreated").is_some_and(Value::is_boolean)
         || !matches!(
             result.get("status").and_then(Value::as_str),
@@ -481,6 +505,9 @@ pub async fn remote_mcp_owner_prepare_decision(
         before.target_client.id,
         now_ms(),
     )?;
+    if !same_tools(&intent.allowed_tools, &before.allowed_tools) {
+        return Err("REMOTE_MCP_OWNER_REVIEW_CHANGED".into());
+    }
     let nonce = Zeroizing::new(intent.nonce);
     let challenge: WireChallenge = serde_json::from_value(
         request(
@@ -510,7 +537,7 @@ pub async fn remote_mcp_owner_prepare_decision(
         review_id: id,
         action,
         target_client: intent.target_client.clone(),
-        allowed_tools: READ_TOOLS.iter().map(|x| x.to_string()).collect(),
+        allowed_tools: intent.allowed_tools.clone(),
         expires_at: challenge_expiry,
     };
     let mut state = review_state().lock().map_err(|_| invalid())?;
@@ -529,6 +556,7 @@ pub async fn remote_mcp_owner_prepare_decision(
         factor_id,
         auth_challenge_id: challenge.auth_challenge_id,
         expires_at: challenge_expiry,
+        allowed_tools: intent.allowed_tools,
     });
     Ok(receipt)
 }
@@ -606,6 +634,8 @@ pub async fn remote_mcp_owner_confirm_decision(
     let snapshot = snapshot_for(&pending.context).await?;
     if snapshot.target_client.id != pending.target_client_id
         || (pending.action == DecisionAction::ApproveClient
+            && !same_tools(&snapshot.allowed_tools, &pending.allowed_tools))
+        || (pending.action == DecisionAction::ApproveClient
             && !snapshot
                 .client_grant
                 .as_ref()
@@ -660,6 +690,36 @@ mod tests {
             invalid[key] = value;
             assert!(sanitize_snapshot(invalid).is_err(), "{key}");
         }
+    }
+
+    #[test]
+    fn optional_git_scope_must_match_exact_current_grant() {
+        let mut input = wire();
+        input["allowedTools"] = json!(["devices.list", "device.status", "git.status"]);
+        assert_eq!(
+            sanitize_snapshot(input.clone())
+                .unwrap()
+                .allowed_tools
+                .len(),
+            3
+        );
+        input["canRequestClient"] = json!(false);
+        input["clientGrant"] = json!({"grant_id":Uuid::new_v4(),"status":"pending","allowed_tools":["devices.list","device.status"],"expires_at":"2027-01-01T00:00:00Z","revoked_at":null});
+        assert!(sanitize_snapshot(input.clone()).is_err());
+        input["clientGrant"]["allowed_tools"] =
+            json!(["devices.list", "device.status", "git.status"]);
+        assert!(sanitize_snapshot(input).is_ok());
+        assert!(!read_only_tools(&[
+            "devices.list".into(),
+            "device.status".into(),
+            "terminal.exec".into()
+        ]));
+        assert!(!read_only_tools(&[
+            "devices.list".into(),
+            "device.status".into(),
+            "git.status".into(),
+            "git.status".into()
+        ]));
     }
 
     #[test]

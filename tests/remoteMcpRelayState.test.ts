@@ -1,7 +1,7 @@
 // Created by NMKato Solutions
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isRemoteMcpRelayLive, parseRemoteMcpRelaySnapshot, remoteMcpRelayActive } from "../src/lib/remoteMcpRelayState.ts";
+import { isRemoteMcpRelayLive, parseRemoteMcpRelaySnapshot, remoteMcpRelayActive, parseRemoteMcpProjectOptions } from "../src/lib/remoteMcpRelayState.ts";
 const now = 1_800_000_000_000;
 const receipt = { state: "connected", lastHeartbeatAt: now - 1000, expiresAt: now + 14_000,
   errorCode: null, deviceAccessEnabled: false, remoteJobsEnabled: false };
@@ -12,6 +12,21 @@ test("only a fresh native ACK presents MCP presence as connected", () => {
   assert.equal(isRemoteMcpRelayLive({ ...status, expiresAt: now + 90_000 }, now + 14_000), false);
   assert.equal(isRemoteMcpRelayLive(status, now - 1001), false);
   assert.equal(isRemoteMcpRelayLive(status, Number.NaN), false);
+});
+test("Git capability requires a bounded explicit project selection on a live receipt", () => {
+  const enabled = { ...receipt, readOnlyGitStatusEnabled: true, approvedProjectIds: ["katosync"] };
+  assert.deepEqual(parseRemoteMcpRelaySnapshot(enabled)?.approvedProjectIds, ["katosync"]);
+  for (const changed of [{ approvedProjectIds: [] }, { readOnlyGitStatusEnabled: false }, { state: "blocked" },
+    { approvedProjectIds: ["katosync", "katosync"] }, { approvedProjectIds: ["../foreign"] },
+    { approvedProjectIds: ["."] }, { approvedProjectIds: Array.from({ length: 9 }, (_, i) => `repo-${i}`) }])
+    assert.equal(parseRemoteMcpRelaySnapshot({ ...enabled, ...changed }), null);
+  assert.equal(parseRemoteMcpRelaySnapshot(receipt)?.readOnlyGitStatusEnabled, false);
+});
+test("native project choices expose stable IDs and names without registry paths", () => {
+  assert.deepEqual(parseRemoteMcpProjectOptions([{ id: "katosync", name: "KatoSync", rootPath: "/private/local/repo" }]), [{ id: "katosync", name: "KatoSync" }]);
+  for (const input of [[{ id: "../x", name: "X" }], [{ id: "..", name: "X" }],
+    [{ id: "katosync", name: "X" }, { id: "katosync", name: "Y" }], [{ id: "x", name: "secret\nline" }]])
+    assert.equal(parseRemoteMcpProjectOptions(input), null);
 });
 test("presence cannot imply device consent or job permission", () => {
   for (const changed of [{ deviceAccessEnabled: true }, { remoteJobsEnabled: true },

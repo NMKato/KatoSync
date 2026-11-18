@@ -6,10 +6,10 @@ import { remoteMcpOwnerRecovery, type RemoteMcpOwnerSnapshot } from "../lib/remo
 import { isRemoteMcpCurrentDeviceApproved, parseRemoteMcpDeviceSnapshot, parseRemoteMcpPreparedDeviceReview,
   type RemoteMcpDeviceSnapshot, type RemoteMcpPreparedDeviceReview } from "../lib/remoteMcpDeviceReview";
 
-export function RemoteMcpCurrentDevicePanel({ clientReady, clientGrantId, targetClientId, factors, canInteract,
+export function RemoteMcpCurrentDevicePanel({ clientReady, clientGrantId, targetClientId, factors, allowedTools, canInteract,
   refreshEpoch, onReady, onReviewBusy, onChanged }: {
   clientReady: boolean; clientGrantId: string | null; targetClientId: string | null;
-  factors: RemoteMcpOwnerSnapshot["factors"]; canInteract: boolean; refreshEpoch: number;
+  factors: RemoteMcpOwnerSnapshot["factors"]; allowedTools: string[]; canInteract: boolean; refreshEpoch: number;
   onReady: (ready: boolean) => void; onReviewBusy: (busy: boolean) => void; onChanged: () => void;
 }) {
   const { t } = useT();
@@ -72,7 +72,7 @@ export function RemoteMcpCurrentDevicePanel({ clientReady, clientGrantId, target
       const raw = await invoke("remote_mcp_owner_prepare_device_decision", { expectedRevision: snapshot.revision, factorId });
       if (!alive.current || operation.current !== epoch) return;
       const checked = parseRemoteMcpPreparedDeviceReview(raw, { targetClientId: snapshot.targetClient.id,
-        deviceId: snapshot.currentDevice.deviceId, fingerprint: snapshot.currentDevice.fingerprint, nowMs: Date.now() });
+        deviceId: snapshot.currentDevice.deviceId, fingerprint: snapshot.currentDevice.fingerprint, nowMs: Date.now(), allowedTools });
       if (!checked) throw new Error("invalid_device_review");
       reviewId.current = checked.reviewId; setReview(checked);
     } catch (cause) { fail(cause, epoch); }
@@ -113,7 +113,7 @@ export function RemoteMcpCurrentDevicePanel({ clientReady, clientGrantId, target
       <strong>{t("remoteMcp.device.confirmTitle")}</strong>
       <p>{review.currentDevice.name} · {review.targetClient.name}</p>
       <code>{review.currentDevice.fingerprint}</code>
-      <p>{t("remoteMcp.owner.readOnlyScope")}</p>
+      <p>{t(review.allowedTools.includes("git.status") ? "remoteMcp.owner.gitReadOnlyScope" : "remoteMcp.owner.readOnlyScope")}</p>
       <p>{t("remoteMcp.owner.reviewExpires", { seconds: Math.max(0, Math.ceil((review.expiresAt - now) / 1000)) })}</p>
       <label htmlFor="remote-mcp-device-totp">{t("remoteMcp.owner.code")}</label>
       <input id="remote-mcp-device-totp" type="password" inputMode="numeric" autoComplete="one-time-code"

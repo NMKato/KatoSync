@@ -1,5 +1,6 @@
 // Created by NMKato Solutions
 // Native-verified current registration only; no caller-selected device or implicit epoch.
+import { isRemoteMcpReadOnlyScope, REMOTE_MCP_READ_TOOLS } from "./remoteMcpOwnerReview.ts";
 export interface RemoteMcpCurrentDevice {
   deviceId: string; name: string; fingerprint: string;
   membershipState: "discovered" | "pending" | "trusted" | "revoked";
@@ -52,14 +53,14 @@ export function isRemoteMcpCurrentDeviceApproved(snapshot: RemoteMcpDeviceSnapsh
     current.revokeEpoch !== null && current.consentExpiresAt !== null && Date.parse(current.consentExpiresAt) > nowMs;
 }
 export function parseRemoteMcpPreparedDeviceReview(value: unknown, expected: {
-  targetClientId: string; deviceId: string; fingerprint: string; nowMs: number;
+  targetClientId: string; deviceId: string; fingerprint: string; nowMs: number; allowedTools?: readonly string[];
 }): RemoteMcpPreparedDeviceReview | null {
   if (!object(value) || !Number.isFinite(expected.nowMs)) return null;
   const tools = value.allowedTools;
   if (value.protocol !== "katosync-remote-mcp-device-review-v1" || value.action !== "approve_device" ||
       !id(value.reviewId) || !target(value.targetClient) || value.targetClient.id !== expected.targetClientId ||
-      !Array.isArray(tools) || tools.length !== 2 ||
-      !["devices.list", "device.status"].every(tool => tools.includes(tool)) ||
+      !isRemoteMcpReadOnlyScope(tools) || tools.length !== (expected.allowedTools ?? REMOTE_MCP_READ_TOOLS).length ||
+      !(expected.allowedTools ?? REMOTE_MCP_READ_TOOLS).every(tool => tools.includes(tool)) ||
       !Number.isSafeInteger(value.expiresAt) || (value.expiresAt as number) <= expected.nowMs || (value.expiresAt as number) > expected.nowMs + 300_000 ||
       typeof value.deviceConsentExpiresAt !== "string" || !(Date.parse(value.deviceConsentExpiresAt) > expected.nowMs)) return null;
   const currentDevice = device(value.currentDevice);
@@ -68,6 +69,6 @@ export function parseRemoteMcpPreparedDeviceReview(value: unknown, expected: {
       currentDevice.consentExpiresAt !== value.deviceConsentExpiresAt) return null;
   return { protocol: "katosync-remote-mcp-device-review-v1", reviewId: value.reviewId, action: "approve_device",
     targetClient: { id: value.targetClient.id, name: value.targetClient.name }, currentDevice,
-    allowedTools: ["devices.list", "device.status"], expiresAt: value.expiresAt as number,
+    allowedTools: [...tools], expiresAt: value.expiresAt as number,
     deviceConsentExpiresAt: value.deviceConsentExpiresAt };
 }

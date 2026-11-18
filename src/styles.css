@@ -11551,3 +11551,12 @@ button.agent-tile:hover {
 .remote-mcp-owner-card .remote-mcp-device code{display:block;overflow-wrap:anywhere;word-break:break-word;font-size:11px;line-height:1.6;max-width:100%;}
 .remote-mcp-owner-card .remote-mcp-device [data-approved="yes"]{color:#22a36b;font-weight:600;}
 .remote-mcp-owner-card .remote-mcp-enrollment-qr{display:block;width:240px;height:auto;max-width:100%;box-sizing:border-box;padding:12px;background:#fff;border:1px solid var(--line);border-radius:12px;}
+
+/* Explicit session-scoped MCP Git selection. */
+.remote-mcp-git-opt-in,
+.remote-mcp-git-projects label { display: flex; align-items: flex-start; gap: .65rem; }
+.remote-mcp-git-opt-in input[type="checkbox"],
+.remote-mcp-git-projects input[type="checkbox"] { width: 1rem; height: 1rem; flex: 0 0 auto; margin-top: .2rem; }
+.remote-mcp-git-projects { display: grid; gap: .7rem; margin: 1rem 0; padding: 1rem; border: 1px solid var(--border, #334155); border-radius: .6rem; }
+.remote-mcp-git-projects label span { min-width: 0; overflow-wrap: anywhere; }
+.remote-mcp-git-projects label small { display: block; opacity: .7; }

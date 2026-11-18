@@ -156,14 +156,22 @@ async fn remote_mcp_owner_snapshot() -> Result<serde_json::Value, String> {
     }
 }
 #[tauri::command]
-async fn remote_mcp_owner_request_client() -> Result<serde_json::Value, String> {
+async fn remote_mcp_owner_request_client(
+    include_git_status: Option<bool>,
+) -> Result<serde_json::Value, String> {
     #[cfg(feature = "stage4j-qa")]
     {
-        serde_json::to_value(remote_mcp_owner_review::remote_mcp_owner_request_client().await?)
-            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+        serde_json::to_value(
+            remote_mcp_owner_review::remote_mcp_owner_request_client(
+                include_git_status.unwrap_or(false),
+            )
+            .await?,
+        )
+        .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
     }
     #[cfg(not(feature = "stage4j-qa"))]
     {
+        let _ = include_git_status;
         Err("REMOTE_MCP_NOT_CONFIGURED".into())
     }
 }
@@ -226,14 +234,30 @@ fn remote_mcp_owner_cancel_review(review_id: String) -> Result<(), String> {
     }
 }
 #[tauri::command]
-async fn remote_mcp_relay_start() -> Result<serde_json::Value, String> {
+async fn remote_mcp_relay_projects() -> Result<serde_json::Value, String> {
     #[cfg(feature = "stage4j-qa")]
     {
-        serde_json::to_value(remote_mcp_relay::remote_mcp_relay_start().await?)
-            .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+        remote_mcp_relay::remote_mcp_relay_projects().await
     }
     #[cfg(not(feature = "stage4j-qa"))]
     {
+        Err("REMOTE_MCP_NOT_CONFIGURED".into())
+    }
+}
+#[tauri::command]
+async fn remote_mcp_relay_start(
+    project_ids: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        serde_json::to_value(
+            remote_mcp_relay::remote_mcp_relay_start(project_ids.unwrap_or_default()).await?,
+        )
+        .map_err(|_| "REMOTE_MCP_RESPONSE_INVALID".into())
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = project_ids;
         Err("REMOTE_MCP_NOT_CONFIGURED".into())
     }
 }
@@ -914,6 +938,7 @@ pub fn run() {
             remote_mcp_mfa_enroll_confirm,
             remote_mcp_mfa_enroll_cancel,
             remote_mcp_relay_start,
+            remote_mcp_relay_projects,
             remote_mcp_relay_stop,
             remote_mcp_relay_status,
 
