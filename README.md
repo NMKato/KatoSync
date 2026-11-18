@@ -35,9 +35,16 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 **Stand: 18. November 2026.** Der aktuelle Entwicklungszweig verbindet die
 vorhandene Kontoanmeldung, Geräteregistrierung und sichere Kopplung mit einem
 dauerhaft gestarteten nativen Mesh-Dienst, Rollenwahl, Reconnect und einer
-getrennten Remote-MCP-Freigabe. Der signierte Zwei-Mac-Test dieses neuen
-Kandidaten und die produktive MCP-Freigabe sind eigene Abnahmen; ihr aktueller
-Nachweis steht im [Beta-Integrationsprotokoll](docs/KATOSYNC_BETA4_INTEGRATION_20261118.md).
+getrennten Remote-MCP-Freigabe. Der Kandidat `b754d170` wurde im
+[öffentlichen CI-Lauf](https://github.com/NMKato/KatoSync/actions/runs/44319035816)
+gebaut und getestet, lokal mit Developer ID signiert, von Apple notarisiert
+und als identisches Paket auf M2 Pro und M3 verifiziert. Zwei echte
+60-Sekunden-Clientläufe bestanden mit acht beziehungsweise neun Heartbeats
+und bestätigtem Stop. Derselbe Serverprozess verband sich zwischen den
+Clientläufen erneut; sein 300-Sekunden-Fenster endete jedoch ohne anwesenden
+Client mit Exit 5 und besitzt deshalb **keinen Server-Gesamt-PASS**.
+Paket-Hashes, Nachweise und Grenzen stehen im
+[Beta-Integrationsprotokoll](docs/KATOSYNC_BETA4_INTEGRATION_20261118.md).
 
 **Der vorgesehene Ablauf:** anmelden → **Verbinden** → eigene aktuelle
 Geräteregistrierungen laden → Gegenstelle auswählen → bei Bedarf Einladung
@@ -57,6 +64,14 @@ Ein erfolgreicher synthetischer Ping ist noch kein Gerätezugriff. Dafür sind
 eine exakt gebundene OAuth-Client-Freigabe, aktuelle Gerätefreigabe und echte
 native Präsenz nötig. Die neue Freigabeoberfläche führt den Owner durch die
 erforderliche frische MFA-Bestätigung.
+
+Die vollständige Mesh-GUI-Abnahme, produktive DB-/Worker-Freischaltung und
+echte MCP-/MFA-/Gerätefreigabe bleiben offen; der erforderliche
+Abhängigkeitsaudit ist weiterhin rot. Die nachfolgenden Korrekturen für
+temporäre Authority-Fehler und einen leichter auffindbaren Verbindungseinstieg
+sind im Arbeitsbaum angewendet; TypeScript und Vite-Produktionsbuild haben
+bestanden. Ein neuer nativer Build und Gerätelauf stehen noch aus. Die
+Nachweise für `b754d170` gelten nicht automatisch für diese Änderungen.
 
 Die bisherigen Sicherheitsnachweise der Stages 4AG–4AM bleiben in ihren
 datierten QA-Protokollen erhalten. Quelltests, lokale Test-Sockets und frühere

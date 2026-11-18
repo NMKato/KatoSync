@@ -11505,7 +11505,7 @@ button.agent-tile:hover {
 .provider-mesh-card .mesh-live-roles legend{font-size:12px;font-weight:650;padding:0 0 8px;}
 .provider-mesh-card .mesh-live-roles label{display:flex;align-items:flex-start;gap:9px;border:1px solid var(--line);border-radius:11px;padding:11px;cursor:pointer;}
 .provider-mesh-card .mesh-live-roles label[data-selected="true"]{border-color:#ec8742;background:rgba(236,135,66,.07);}
-.provider-mesh-card .mesh-live-roles input{flex:none;margin-top:3px;accent-color:#ec8742;}
+.provider-mesh-card .mesh-live-roles input[type="radio"]{width:18px;height:18px;min-width:18px;min-height:18px;flex:0 0 18px;padding:0;margin:2px 0 0;accent-color:#ec8742;}
 .provider-mesh-card .mesh-live-roles span{display:grid;gap:5px;min-width:0;}
 .provider-mesh-card .mesh-live-roles strong{font-size:12px;line-height:1.4;}
 .provider-mesh-card .mesh-live-roles small,.provider-mesh-card .mesh-live-hint,.provider-mesh-card .mesh-live-actions small{font-size:11px;line-height:1.5;color:var(--text-muted);}

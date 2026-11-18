@@ -232,17 +232,31 @@ async fn heartbeat_server<T: AsyncRead + AsyncWrite + Unpin>(
             .map_err(|_| "MESH_STAGE4AB2_HEARTBEAT_DENIED")?;
         // Revalidate server pin, owner session and BOTH enrollments *before*
         // the responder ACK is issued. Revocation must never yield success.
-        mesh_admission::recheck_after_probe(admitted, peer_fingerprint)
-            .await
-            .map_err(|_| "MESH_STAGE4AB2_OWNER_OR_PIN_REVOKED")?;
-        tls.write_all(&heartbeat_frame(HB_ACK_TAG, sequence, session))
-            .await
-            .map_err(|_| "MESH_STAGE4AB2_HEARTBEAT_IO")?;
-        tls.flush().await.map_err(|_| "MESH_STAGE4AB2_HEARTBEAT_IO")
+        let authority = mesh_admission::recheck_after_probe(admitted, peer_fingerprint).await;
+        acknowledge_server_heartbeat_after_recheck(tls, sequence, session, authority).await
     })
     .await
     .map_err(|_| "MESH_STAGE4AB2_HEARTBEAT_TIMEOUT".to_string())?
     .map_err(str::to_string)
+}
+
+async fn acknowledge_server_heartbeat_after_recheck<T: AsyncWrite + Unpin>(
+    tls: &mut T,
+    sequence: u64,
+    session: &[u8; 32],
+    authority: Result<(), String>,
+) -> Result<(), &'static str> {
+    // This exact code is emitted only by the typed native authority classifier.
+    // A temporary outage still denies this heartbeat; a new connection must
+    // repeat full admission. Every other failure remains a terminal denial.
+    authority.map_err(|error| match error.as_str() {
+        "MESH_ADMISSION_AUTHORITY_UNAVAILABLE" => "MESH_ADMISSION_AUTHORITY_UNAVAILABLE",
+        _ => "MESH_STAGE4AB2_OWNER_OR_PIN_REVOKED",
+    })?;
+    tls.write_all(&heartbeat_frame(HB_ACK_TAG, sequence, session))
+        .await
+        .map_err(|_| "MESH_STAGE4AB2_HEARTBEAT_IO")?;
+    tls.flush().await.map_err(|_| "MESH_STAGE4AB2_HEARTBEAT_IO")
 }
 
 async fn server_once(
@@ -489,6 +503,65 @@ async fn run_once_with_optional_qa_fault(
 mod tests {
     use super::*;
     use tokio::io::duplex;
+
+    async fn server_ack_after_recheck(
+        authority: Result<(), String>,
+    ) -> (Result<(), &'static str>, Vec<u8>) {
+        let (mut client, mut server) = duplex(256);
+        let result =
+            acknowledge_server_heartbeat_after_recheck(&mut server, 1, &[7; 32], authority).await;
+        drop(server);
+        let mut reply = Vec::new();
+        client.read_to_end(&mut reply).await.unwrap();
+        (result, reply)
+    }
+
+    #[tokio::test]
+    async fn server_heartbeat_preserves_temporary_authority_failure_without_ack() {
+        let (result, reply) =
+            server_ack_after_recheck(Err("MESH_ADMISSION_AUTHORITY_UNAVAILABLE".into())).await;
+        assert_eq!(result, Err("MESH_ADMISSION_AUTHORITY_UNAVAILABLE"));
+        assert!(
+            reply.is_empty(),
+            "an unavailable authority must never issue an ACK"
+        );
+    }
+
+    #[tokio::test]
+    async fn server_heartbeat_denials_and_unclassified_errors_never_ack_or_become_retryable() {
+        for error in [
+            "MESH_ADMISSION_LOGIN_REQUIRED",
+            "MESH_ADMISSION_ACCOUNT_CHANGED",
+            "MESH_ADMISSION_LOCAL_IDENTITY_MISSING",
+            "MESH_ADMISSION_LOCAL_IDENTITY_CHANGED",
+            "MESH_ADMISSION_PEER_NOT_APPROVED",
+            "MESH_ADMISSION_PEER_REVOKED",
+            "MESH_ADMISSION_PEER_CHANGED",
+            "MESH_ADMISSION_ENROLLMENT_REQUIRED",
+            "MESH_ADMISSION_ENROLLMENT_REVOKED",
+            "SESSION_EXPIRED",
+            "timeout after peer revocation",
+            "HTTP 503: enrollment denied",
+            "MESH_ADMISSION_AUTHORITY_UNAVAILABLE: revoked",
+            "mesh_admission_authority_unavailable",
+            "unknown",
+        ] {
+            let (result, reply) = server_ack_after_recheck(Err(error.into())).await;
+            assert_eq!(
+                result,
+                Err("MESH_STAGE4AB2_OWNER_OR_PIN_REVOKED"),
+                "{error}"
+            );
+            assert!(reply.is_empty(), "denied authority issued an ACK: {error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn server_heartbeat_ack_requires_successful_authority_recheck() {
+        let (result, reply) = server_ack_after_recheck(Ok(())).await;
+        assert_eq!(result, Ok(()));
+        assert_eq!(reply, heartbeat_frame(HB_ACK_TAG, 1, &[7; 32]));
+    }
 
     #[test]
     fn supervisor_requires_separate_explicit_opt_in() {

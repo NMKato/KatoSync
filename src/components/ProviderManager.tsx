@@ -174,6 +174,8 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
       </div>
 
       <div className="provider-cards">
+        {vm.sessionStatus.loggedIn ? <MeshConnectionCard refreshEpoch={connectionRefreshEpoch} /> : null}
+        {vm.sessionStatus.loggedIn ? <RemoteMcpOwnerConsentCard key={vm.sessionStatus.email ?? "signed-in-owner"} refreshEpoch={connectionRefreshEpoch} /> : null}
         {cardProviders.map((provider) => (
           <Fragment key={provider}>
             {provider === "local" && vm.sessionStatus.loggedIn ? (
@@ -188,8 +190,6 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
             />
           </Fragment>
         ))}
-        {vm.sessionStatus.loggedIn ? <MeshConnectionCard refreshEpoch={connectionRefreshEpoch} /> : null}
-        {vm.sessionStatus.loggedIn ? <RemoteMcpOwnerConsentCard key={vm.sessionStatus.email ?? "signed-in-owner"} refreshEpoch={connectionRefreshEpoch} /> : null}
       </div>
 
       <div className="provider-info-grid">

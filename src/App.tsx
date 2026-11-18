@@ -133,10 +133,10 @@ const mistralSteps: Array<{ id: StepId; icon: typeof Activity }> = [
 
 const agentSyncSteps: Array<{ id: StepId; icon: typeof Activity }> = [
   { id: "agentDashboard", icon: Gauge },
+  { id: "agentProviders", icon: Bot },
   { id: "agentVision", icon: Orbit },
   { id: "agentJobs", icon: Workflow },
   { id: "agentMasterChat", icon: MessageSquareText },
-  { id: "agentProviders", icon: Bot },
   { id: "agentMonitor", icon: Activity },
   { id: "agentProjects", icon: FolderOpen },
   { id: "agentHistory", icon: History },

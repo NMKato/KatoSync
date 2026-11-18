@@ -8,10 +8,10 @@ const rust=readFileSync(new URL("src-tauri/src/mesh_durable_lease_qa.rs",root),"
 const entry=readFileSync(new URL("src-tauri/src/lib.rs",root),"utf8");
 const cloud=readFileSync(new URL("src-tauri/src/mesh_device_presence.rs",root),"utf8");
 
-test("lease machine is internal, QA compiled and not callable by web UI or CLI",()=>{
+test("lease type is feature-gated and crate-internal without direct Tauri or CLI binding",()=>{
  assert.match(entry, /\#\[cfg\(feature = "stage4j-qa"\)\]\s*\#\[allow\(dead_code\)\]\s*mod mesh_durable_lease_qa;/);
  assert.doesNotMatch(entry,/mesh_durable_lease_qa::/);
- assert.doesNotMatch(rust,/\#\[tauri::command\]|pub\s+(?:async\s+)?fn|pub\(crate\)\s+(?:async\s+)?fn/);
+ assert.doesNotMatch(rust,/\#\[tauri::command\]|pub\s+(?:async\s+)?fn/);
  assert.doesNotMatch(rust,/Tcp(?:Listener|Stream|Socket)|Command::new|reqwest::|\bstd::fs\b/);
 });
 

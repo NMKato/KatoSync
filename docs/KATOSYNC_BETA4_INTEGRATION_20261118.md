@@ -58,23 +58,26 @@ keine Remote-Shell-, Datei- oder Git-Ausführung.
 
 ## Was der Integrationsstand ergänzt
 
-| Bereich | Implementierung | Erforderlicher Abnahmebeleg |
+| Bereich | Implementierung | Aktueller Abnahmebeleg und verbleibende Grenze |
 |---|---|---|
-| Geräte-UI | Frische Kontoliste, Auswahl, historische Registrierungen, Rollenwahl, native Zustandsanzeige | Native GUI auf beiden Macs |
-| Mesh-Dienst | Tatsächlicher mTLS-Socket, Heartbeat-Lease, Reconnect, Stop, Owner-Wechsel | Derselbe neue signierte Build auf M2 Pro und M3 |
+| Geräte-UI | Frische Kontoliste, Auswahl, historische Registrierungen, Rollenwahl, native Zustandsanzeige | b754-App auf beiden Macs gestartet; auf M3 Workspacewahl, Agent-Sync-Dashboard und Verbindungsseite sichtbar geprüft. Vollständiger nativer Mesh-Klickpfad offen; M2-Pixelaufnahme fehlgeschlagen. |
+| Mesh-Dienst | Tatsächlicher mTLS-Socket, Heartbeat-Lease, Reconnect, Stop, Owner-Wechsel | Derselbe signierte `b754d170`-Build auf M2 Pro und M3; zwei Clientläufe mit 8/9 Heartbeats und Stop bestanden. Server-Reconnect beobachtet, aber kein Server-Gesamt-PASS. |
 | Sitzung | Serialisierte Tokenrotation, MFA, Logout-Sperre und Generation-Fencing | Native Tests und Logout während laufender Operation |
 | MCP-Freigabe | Owner-/Ziel-Client-Trennung, frische MFA, einmalige geprüfte Entscheidung | Echte Owner-Bestätigung; keine vorbereiteten Approved-Datensätze |
 | MCP-Präsenz | Gepinnte signierte Challenge/ACK, kurzlebige WSS-Sitzung, Widerrufsprüfung | Produktiver Worker, echte DB-Rollen und echtes freigegebenes Gerät |
-| Verpackung | Eigener signierter/notarisierter Kandidat mit geprüftem Ressourcenbestand | Signatur, Staple, Start und Rollback auf beiden Geräten |
+| Verpackung | Eigener signierter/notarisierter Kandidat mit geprüftem Ressourcenbestand | Developer-ID-Signatur, Apple-Notarisierung, Staple und Gatekeeper bestanden; identisches Paket auf beiden Geräten verifiziert und gestartet. Bestehende Fallbacks bleiben erhalten. |
 
 ## Verifikation: Stand der Integration
 
-Die konkreten Ausführungsbelege werden hier nach den tatsächlichen Läufen
-ergänzt. Vorherige Stage4U/Stage4AA-Pairing- und TLS-Nachweise bleiben
-historische Belege; sie ersetzen nicht den Test dieses neuen Builds.
+Die konkreten Ausführungsbelege gelten jeweils für den genannten Quellstand
+und das geprüfte Paket. Vorherige Stage4U/Stage4AA-Pairing- und TLS-Nachweise
+bleiben historische Belege; sie ersetzen nicht den Test dieses neuen Builds.
 
-- Vollständiger Node-Lauf: **975/975 bestanden**, keine übersprungenen Tests
-  (18.11.2026). TypeScript und Vite-Produktionsbuild ebenfalls bestanden.
+- Historischer vollständiger Node-Lauf bei Commit
+  `2d9e4126b7123ce87c946284f0287fbddf05ec77`: **975/975 bestanden**,
+  keine übersprungenen Tests (18.11.2026). TypeScript und Vite-Produktionsbuild
+  bestanden ebenfalls an dieser Baseline. **Dieser Node-Count ist kein
+  Nachweis für b754 oder den nachfolgend geänderten Arbeitsbaum.**
 - Frühere Läufe fanden veraltete Quellenannahmen und zu kurze Prozess-
   Startfristen unter paralleler Mac-Last. Die Annahmen wurden an das neue
   Verhalten angepasst; negative Sicherheitsprüfungen bleiben bestehen.
@@ -87,14 +90,100 @@ historische Belege; sie ersetzen nicht den Test dieses neuen Builds.
   hat die tatsächliche Stage4J-Bibliothek auf `macos-15` kompiliert und getestet:
   **479 bestanden, 0 fehlgeschlagen, 8 bewusst ignorierte manuelle Live-Tests**.
   TypeScript und der Vite-Produktionsbuild bestanden im selben Lauf.
-- Signierter/notarisierter Paketbau, Start und native GUI-Prüfung auf beiden
-  tatsächlichen Macs sowie echte Benutzer-MFA und individuelle Gerätefreigabe
-  bleiben getrennt abzunehmen. Der erfolgreiche Bibliothekslauf ist kein
-  Installations- oder physischer Mesh-Nachweis.
+- Commit `b754d170`: Genau ein öffentlicher PR-Lauf
+  [44319035816](https://github.com/NMKato/KatoSync/actions/runs/44319035816)
+  baute die Desktop-App erfolgreich auf einem Standard-ARM64-Runner:
+  **479 Tests bestanden, 8 ignoriert**, Gesamtjobzeit **3:14 Minuten**,
+  Tauri-Build **1:15 Minuten**, vorhandener Build-Cache genutzt.
+- Der heruntergeladene `b754d170`-Build wurde unabhängig anhand des ZIPs,
+  der SHA-Prüfsummen, des Build-Receipts und des Mach-O-Formats geprüft.
+  Danach bestanden lokale **Developer-ID-Signatur**, Apple-Notarisierung
+  mit Status **Accepted**, `stapler` und `spctl`. Dasselbe signierte Paket
+  wurde anschließend auf M2 Pro und M3 verifiziert. Die früheren
+  funktionierenden Pakete bleiben als Fallback erhalten.
+- Die b754-App wurde auf beiden Macs als GUI gestartet. Auf M3 sind
+  Workspacewahl, Agent-Sync-Dashboard und die Verbindungsseite korrekt
+  sichtbar gerendert. Der native Mesh-Klickpfad bleibt in Prüfung. Der Einstieg
+  zur Verbindung liegt im Standardfenster noch hinter Sidebar-Scrolling,
+  die Mesh-Karte hinter anderen Providern. Auf M2 scheiterte die Pixelaufnahme;
+  damit liegt **kein vollständiger Visual-PASS und keine vollständige
+  Mesh-Klickpfad-Abnahme** vor.
 - Produktive DB-Migration, Worker-Freischaltung und echte MFA-/Gerätefreigabe
   sind noch nicht als abgeschlossen protokolliert.
-- Der Abhängigkeitsaudit bleibt ein eigener erforderlicher CI-Gate. Der
+- Der Abhängigkeitsaudit bleibt **rot** und ein eigener erforderlicher CI-Gate. Der
   bekannte Picomatch-Befund wird nicht durch Deaktivieren des Audits übergangen.
+
+### Paketidentität des tatsächlich getesteten Builds
+
+Die folgenden SHA-256-Werte gehören zum signierten, notarisierten
+`b754d170`-Kandidaten. Sie kennzeichnen keine spätere Quellcodeänderung.
+
+| Artefakt | SHA-256 |
+|---|---|
+| ZIP der App mit angeheftetem Notarisierungsticket | `31403ace43947f2ea1b1b2db4346c67e86b62b9f334ddff13fb3343b2942021d` |
+| Signierte Mach-O-App-Binärdatei | `5b8f119ad7abf75e8dfe3370d55560b5a574d50548d49dae3eb99f915538d709` |
+
+### Physischer Mesh-Test mit demselben b754-Paket
+
+Der M2 Pro lief als Server mit einem 300-Sekunden-Testfenster. Der M3
+verband sich zweimal nacheinander als Client für jeweils 60 Sekunden.
+Zwischen den Clientläufen blieb **derselbe M2-Serverprozess** bestehen.
+
+| Ausführung | Beobachtung | Ergebnis |
+|---|---|---|
+| M3-Client, erster Lauf | 8 echte Heartbeats, abschließender Live-Status und Stop bestätigt | Exit 0 / PASS |
+| M3-Client, zweiter Lauf | 9 echte Heartbeats, abschließender Live-Status und Stop bestätigt | Exit 0 / PASS |
+| M2-Server, dasselbe 300-Sekunden-Fenster | `connected → reconnecting → listening → connected`, insgesamt 18 Heartbeats, abschließender Stop bestätigt | Reconnect im selben Prozess belegt; am Ende kein Client mehr anwesend, daher Exit 5 / `SMOKE_ENDED_WITHOUT_LIVE_CHANNEL` |
+
+**Der Server-Gesamtlauf erhält keinen PASS.** Der abschließende
+Live-Kanal-Nachweis fehlte nach dem Ende der Clientläufe; die Abnahmebedingung
+wurde nicht abgeschwächt. Die erfolgreichen Clientläufe und der beobachtete
+Server-Reconnect bleiben die konkret belegten Ergebnisse. Es wurden keine
+Remote-Jobs ausgeführt oder daraus neue Ausführungsrechte abgeleitet.
+
+### Nachfolgende Korrekturen benötigen eigene Nachweise
+
+Im Arbeitsbaum nach b754 sind der enge Rust-Fix sowie die UI-Änderungen in
+`App.tsx` und `ProviderManager` angewendet. **TypeScript-Prüfung und
+Vite-Produktionsbuild bestanden** an diesem geänderten Baum: Die Prüffolge
+dauerte insgesamt **223,89 Sekunden**, der Vite-Build **6,72 Sekunden**
+bei **1.925 Modulen**. Ein neuer nativer Build liegt noch nicht vor.
+
+Der Rust-Fix erhält bei der erneuten Authority-Prüfung im
+Server-Heartbeat ausschließlich den bereits typisiert klassifizierten Fehler
+`MESH_ADMISSION_AUTHORITY_UNAVAILABLE` als wiederholbar. Andere
+Berechtigungsfehler bleiben terminal und erzeugen kein ACK. Für diese
+nachfolgende Korrektur liegt hier **noch kein ausgeführter nativer
+Test-/Buildnachweis** vor; sie gehört nicht zur getesteten b754-Binärdatei.
+
+Die zusätzliche UI-Korrektur ordnet den Verbindungseintrag (`agentProviders`)
+direkt nach dem Dashboard und die Mesh-/MCP-Karten an den Anfang. Trotz des
+bestandenen Web-Builds besitzt diese Änderung **noch keinen nativen Build-
+oder vollständigen GUI-Nachweis**. Die sichtbare M3-Prüfung von Workspacewahl,
+Dashboard und Verbindungsseite gehört weiterhin zur b754-App.
+
+Ein historischer AB1-Source-Contract wird fachlich an die seit `c93a0ab`
+vorhandene crate-interne `LiveTlsLease`-Brücke angepasst. Das bisherige
+pauschale Verbot auch von `pub(crate) fn` erzeugte dort einen Falschalarm.
+Die Verbote von direktem Tauri-IPC, öffentlichen `pub fn` und Transportzugriffen
+bleiben erhalten. Die vollständige vorhandene Node-Suite einschließlich
+des ergänzend ausgeführten AB1-MJS-Vertrags bestand anschließend mit
+**984/984 Tests, 0 Fehlern und 0 übersprungenen Tests**, Exit 0.
+Der Lauf dauerte am 18.11.2026 von 15:36:52 bis 15:39:06 Uhr MEZ;
+TAP-Dauer 130,318 Sekunden, npm-Prozess 134,04 Sekunden. Die SHA-256-Werte
+der fünf zu diesem Zeitpunkt geänderten Code-/Testeingaben blieben
+vor und nach dem Lauf identisch.
+
+Danach wurde anhand eines tatsächlichen M3-Screenshots die globale
+Textfeldbreite für die Rollen-Radiobuttons korrigiert: Der eng begrenzte
+Radio-Selektor verwendet nun 18-Pixel-Abmessungen statt `width: 100%`.
+Diese einzelne CSS-Regel ist nach dem genannten Web-/Node-Lauf geändert
+worden; ihr Build- und visueller Nachweis folgen im nächsten Kandidaten.
+
+Produktive DB-Migration, Cloudflare-Worker-Freischaltung, echte MFA- und
+Gerätefreigabe sowie der reale MCP-Gerätezugriff bleiben separate offene
+Gates. Das signierte, notarisierte und getestete b754-Paket ist keine vollständige
+4.0- oder Remote-MCP-Freigabe.
 
 ## CI-Ausführung und Kosten
 
@@ -107,7 +196,8 @@ gleichzusetzen; Speicher wird getrennt betrachtet.
 Derselbe Commit `c93a0ab` wurde durch `push` und `pull_request` doppelt im
 Beta4-Mac-Workflow geprüft: [Push-Lauf](https://github.com/NMKato/KatoSync/actions/runs/44294689069)
 mit 4:55 Minuten und [PR-Lauf](https://github.com/NMKato/KatoSync/actions/runs/44294697659)
-mit 5:08 Minuten Joblaufzeit. Der zusätzliche Branch-Push-Trigger wird entfernt.
+mit 5:08 Minuten Joblaufzeit. Der nachfolgende App-Build von `b754d170`
+lief in genau einem erfolgreichen PR-Lauf mit 3:14 Minuten Gesamtjobzeit.
 `pull_request` mit bestehenden Pfadfiltern und `workflow_dispatch`, Jobname,
 Pflichtprüfungen und Testumfang bleiben erhalten.
 

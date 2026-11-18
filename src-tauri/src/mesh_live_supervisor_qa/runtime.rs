@@ -730,14 +730,21 @@ mod tests {
     }
 
     #[test]
-    fn only_transport_and_clock_faults_retry_with_fresh_admission() {
+    fn only_proven_temporary_authority_transport_and_clock_faults_retry_with_fresh_admission() {
+        assert!(retryable("MESH_ADMISSION_AUTHORITY_UNAVAILABLE"));
         assert!(retryable("MESH_STAGE4AB2_HEARTBEAT_IO"));
         assert!(retryable("MESH_STAGE4AB32B_CLOCK_OR_SLEEP_GAP_DENIED"));
         for error in [
+            "MESH_STAGE4AB2_OWNER_OR_PIN_REVOKED",
+            "MESH_ADMISSION_LOGIN_REQUIRED",
             "MESH_ADMISSION_PEER_REVOKED",
+            "MESH_ADMISSION_PEER_CHANGED",
             "MESH_ADMISSION_ACCOUNT_CHANGED",
             "MESH_ADMISSION_LOCAL_IDENTITY_CHANGED",
+            "MESH_ADMISSION_ENROLLMENT_REVOKED",
             "MESH_STAGE4AB2_HEARTBEAT_DENIED",
+            "MESH_ADMISSION_AUTHORITY_UNAVAILABLE: revoked",
+            "SESSION_EXPIRED",
             "unknown",
         ] {
             assert!(!retryable(error));
