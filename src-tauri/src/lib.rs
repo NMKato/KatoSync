@@ -82,6 +82,8 @@ mod mesh_tailnet_qa;
 // Stage4AB.1 – internal, passive lease-state logic only. Deliberately has no
 // Tauri IPC/CLI, no long-lived socket, no runtime supervisor and no job grant.
 #[cfg(feature = "stage4j-qa")]
+mod mesh_account_control;
+#[cfg(feature = "stage4j-qa")]
 mod mesh_clock_gap_qa;
 #[cfg(feature = "stage4j-qa")]
 #[allow(dead_code)]
@@ -135,6 +137,249 @@ fn mesh_connection_status() -> Result<serde_json::Value, String> {
     #[cfg(not(feature = "stage4j-qa"))]
     {
         Err("MESH_CONNECTION_NOT_CONFIGURED".into())
+    }
+}
+
+// Account devices are UI-visible in every build. Only the isolated private
+// beta compiles account-bound networking; other builds return a fixed denial.
+#[cfg(feature = "stage4j-qa")]
+fn mesh_account_connection_mode(
+    value: &str,
+) -> Result<mesh_live_supervisor_qa::runtime::account::ConnectionMode, String> {
+    use mesh_live_supervisor_qa::runtime::account::ConnectionMode;
+    match value {
+        "ask" => Ok(ConnectionMode::Ask),
+        "automatic" => Ok(ConnectionMode::Automatic),
+        _ => Err("MESH_ACCOUNT_INVALID_MODE".into()),
+    }
+}
+#[cfg(feature = "stage4j-qa")]
+fn mesh_account_json(value: impl serde::Serialize) -> Result<serde_json::Value, String> {
+    serde_json::to_value(value).map_err(|_| "MESH_ACCOUNT_STATE_UNAVAILABLE".into())
+}
+
+#[tauri::command]
+async fn mesh_account_network_get() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        mesh_account_json(mesh_account_control::mesh_account_network_get().await?)
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
+    }
+}
+
+#[tauri::command]
+async fn mesh_account_network_set_primary(
+    device_id: String,
+    expected_revision: u64,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        mesh_account_json(
+            mesh_account_control::mesh_account_network_set_primary(device_id, expected_revision)
+                .await?,
+        )
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (device_id, expected_revision);
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
+    }
+}
+
+#[tauri::command]
+fn mesh_account_connection_status() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        mesh_account_json(
+            mesh_live_supervisor_qa::runtime::account::mesh_account_connection_status()?,
+        )
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
+    }
+}
+
+#[tauri::command]
+async fn mesh_account_connection_resume() -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        mesh_account_json(
+            mesh_live_supervisor_qa::runtime::account::mesh_account_connection_resume().await?,
+        )
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
+    }
+}
+
+#[tauri::command]
+async fn mesh_account_connection_start(
+    peer_device_id: String,
+    peer_fingerprint: String,
+    expected_revision: u64,
+    mode: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        let mode = mesh_account_connection_mode(&mode)?;
+        mesh_account_json(
+            mesh_live_supervisor_qa::runtime::account::mesh_account_connection_start(
+                peer_device_id,
+                peer_fingerprint,
+                expected_revision,
+                mode,
+            )
+            .await?,
+        )
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (peer_device_id, peer_fingerprint, expected_revision, mode);
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
+    }
+}
+
+#[tauri::command]
+async fn mesh_account_connection_stop(peer_device_id: String) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        mesh_account_json(
+            mesh_live_supervisor_qa::runtime::account::mesh_account_connection_stop(peer_device_id)
+                .await?,
+        )
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (peer_device_id,);
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
+    }
+}
+
+#[tauri::command]
+async fn mesh_account_connection_set_mode(
+    peer_device_id: String,
+    peer_fingerprint: String,
+    expected_revision: u64,
+    mode: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        let mode = mesh_account_connection_mode(&mode)?;
+        mesh_account_json(
+            mesh_live_supervisor_qa::runtime::account::mesh_account_connection_set_mode(
+                peer_device_id,
+                peer_fingerprint,
+                expected_revision,
+                mode,
+            )
+            .await?,
+        )
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (peer_device_id, peer_fingerprint, expected_revision, mode);
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
+    }
+}
+
+#[tauri::command]
+async fn mesh_account_peer_revoke(
+    peer_device_id: String,
+    peer_fingerprint: String,
+    expected_revision: u64,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        mesh_account_json(
+            mesh_live_supervisor_qa::runtime::account::mesh_account_peer_revoke(
+                peer_device_id,
+                peer_fingerprint,
+                expected_revision,
+            )
+            .await?,
+        )
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (peer_device_id, peer_fingerprint, expected_revision);
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
+    }
+}
+
+#[tauri::command]
+async fn mesh_account_peer_review(
+    peer_device_id: String,
+    peer_fingerprint: String,
+    expected_revision: u64,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        mesh_account_json(
+            mesh_live_supervisor_qa::runtime::account::mesh_account_peer_review(
+                peer_device_id,
+                peer_fingerprint,
+                expected_revision,
+            )
+            .await?,
+        )
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (peer_device_id, peer_fingerprint, expected_revision);
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
+    }
+}
+
+#[tauri::command]
+async fn mesh_account_peer_approve(
+    review_id: String,
+    peer_device_id: String,
+    peer_fingerprint: String,
+    expected_revision: u64,
+    mode: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        let mode = mesh_account_connection_mode(&mode)?;
+        mesh_account_json(
+            mesh_live_supervisor_qa::runtime::account::mesh_account_peer_approve(
+                review_id,
+                peer_device_id,
+                peer_fingerprint,
+                expected_revision,
+                mode,
+            )
+            .await?,
+        )
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (
+            review_id,
+            peer_device_id,
+            peer_fingerprint,
+            expected_revision,
+            mode,
+        );
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
+    }
+}
+
+#[tauri::command]
+fn mesh_account_peer_cancel_review(review_id: String) -> Result<(), String> {
+    #[cfg(feature = "stage4j-qa")]
+    {
+        mesh_live_supervisor_qa::runtime::account::mesh_account_peer_cancel_review(review_id)
+    }
+    #[cfg(not(feature = "stage4j-qa"))]
+    {
+        let _ = (review_id,);
+        Err("MESH_ACCOUNT_NOT_CONFIGURED".into())
     }
 }
 
@@ -967,6 +1212,17 @@ pub fn run() {
             mesh_connection_start,
             mesh_connection_stop,
             mesh_connection_status,
+            mesh_account_network_get,
+            mesh_account_network_set_primary,
+            mesh_account_connection_status,
+            mesh_account_connection_resume,
+            mesh_account_connection_start,
+            mesh_account_connection_stop,
+            mesh_account_connection_set_mode,
+            mesh_account_peer_revoke,
+            mesh_account_peer_review,
+            mesh_account_peer_approve,
+            mesh_account_peer_cancel_review,
             remote_mcp_owner_snapshot,
             remote_mcp_owner_request_client,
             remote_mcp_owner_prepare_decision,
