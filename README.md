@@ -30,7 +30,38 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
-## Aktueller Stand: private 4.0-Beta-Integration
+## Aktueller Stand: Geräte-UX und private Beta
+
+**Quellstand: 19. November 2026.** Der Einstieg bietet jetzt einen direkten
+Zugang zu **Meine Geräte**. Die Geräteverwaltung steht vor den Anbieteroptionen:
+Kontogeräte aktualisieren, ein Hauptgerät wählen, eine Gegenstelle auswählen
+und die Verbindung ausdrücklich bestätigen. Registrierung, gespeicherte
+Freigabe und tatsächlich aktive Verbindung bleiben getrennte Zustände.
+
+Der UI-Feinschliff vereinheitlicht Flächen, Abstände, Hell-/Dunkel-Kontraste und
+Tastaturfokus. Geräte- und Freigabekarten passen sich schmalen Inhaltsbereichen
+an; Escape schließt eine Prüfung ohne Freigabe und bringt den Fokus zum
+verfügbaren Auslöser zurück. Der Bereich für lokale KI unterscheidet den
+verbauten Arbeitsspeicher vom freien Festplattenspeicher und erklärt den
+unveränderten RAM-Schutz beim Start.
+
+Die native App begrenzt eigene Befehle zusätzlich auf ihre aufrufende
+Webview. Das QA-Statuswidget darf nur seine sechs Anzeige-, Navigations- und
+Fensterbefehle verwenden; Gerätefreigaben, Verbindungssteuerung und
+Arbeitsbefehle erreichen von dort aus den App-Dispatcher nicht.
+
+[Gestaltung und Komponentenprüfung](docs/KATOSYNC_DEVICE_UI_POLISH_20261119.md) dokumentiert den gezielten UI-Nachweis.
+
+Die reproduzierbare Komponentenprüfung läuft mit
+`node scripts/qa-account-mesh-ui.mjs <ausgabeordner>` und einem vorhandenen
+Playwright-Browser. Sie prüft beide Themen, Tastatur- und Freigabeabläufe,
+lange Namen, Übersetzungen und ausgewählte Textkontraste. Ihre Beispieldaten
+und Modellaktionen sind ausdrücklich synthetisch. Echte Geräteverbindungen,
+Modellantworten und persönliche MCP-Freigaben werden separat am jeweils
+signierten Kandidaten geprüft. Eine vollständige öffentliche 4.0-Freigabe ist
+damit weiterhin nicht verbunden.
+
+### Historische Beta-Integration vom 18. November 2026
 
 **Stand: 18. November 2026.** Der aktuelle Entwicklungszweig verbindet die
 vorhandene Kontoanmeldung, Geräteregistrierung und sichere Kopplung mit einem
@@ -46,7 +77,7 @@ Client mit Exit 5 und besitzt deshalb **keinen Server-Gesamt-PASS**.
 Paket-Hashes, Nachweise und Grenzen stehen im
 [Beta-Integrationsprotokoll](docs/KATOSYNC_BETA4_INTEGRATION_20261118.md).
 
-**Der vorgesehene Ablauf:** anmelden → **Verbinden** → eigene aktuelle
+**Der damalige Ablauf:** anmelden → **Verbinden** → eigene aktuelle
 Geräteregistrierungen laden → Gegenstelle auswählen → bei Bedarf Einladung
 und SAS bestätigen → **Server/Client** wählen → native Verbindung starten.
 „Verbunden“ verlangt eine frische, kryptografisch bestätigte Verbindung.

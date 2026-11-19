@@ -26,11 +26,18 @@ test("owner scoped registry and native crypto bind source and target before prep
  for(const required of [
   /verified_katosync_user\(\)/,/same_account_still_verified\(&uid\)/,
   /Accept-Profile/,/owner_user_id/,/signing_public_key/,
-  /membership_state != "discovered"/,/revoked_at\.is_some\(\)/,
+  /!matches!\(\s*record\.membership_state\.as_str\(\),\s*"discovered"\s*\|\s*"trusted"\s*\)/,/revoked_at\.is_some\(\)/,
   /source == target/,/identify_pair\(/,/key\.sign\(delivery_message/,
   /store_outbound_offer/]){
   assert.match(rust,required);
  }
+ // Beide Gerätepfade erlauben nur discovered/trusted und sperren widerrufene Geräte.
+ const identifyPair=rust.match(/fn identify_pair\([\s\S]*?\n\}/)?.[0]??"";
+ const membershipGuards=identifyPair.match(/!matches!\(\s*record\.membership_state\.as_str\(\),\s*"discovered"\s*\|\s*"trusted"\s*\)\s*\|\|\s*record\.revoked_at\.is_some\(\)/g)??[];
+ assert.equal(membershipGuards.length,2,"Sender und Empfänger müssen andere Statuswerte ablehnen");
+ assert.match(identifyPair,/record\.owner_user_id != owner/);
+ assert.match(identifyPair,/return Err\("MESH_INBOX_SOURCE_INELIGIBLE"\)/);
+ assert.match(identifyPair,/return Err\("MESH_INBOX_TARGET_INELIGIBLE"\)/);
  assert.doesNotMatch(prepareFunction,/\.post\(|\.patch\(|\.delete\(|TcpListener/);
 });
 test("new native UI marks preparation only, never delivered or paired",()=>{

@@ -1,3 +1,4 @@
+// C8-Inventar: acht geprüfte SQL-Dateien; weitere Migrationen bleiben ausgeschlossen.
 // NMKato Solutions — static regression gate for Stage4E hermetic QA only.
 // Runtime proofs are executed separately in PostgreSQL 17 and Deno 2.9.6.
 import assert from "node:assert/strict";
@@ -80,7 +81,7 @@ test("native Deno tests are isolated from ordinary Node test glob and cannot ope
 test("old migration files and signed cryptographic handlers remain untouched",()=>{
  const migrations=readdirSync(new URL("../supabase/migrations/",import.meta.url))
   .filter(x=>x.endsWith(".sql"));
- assert.equal(migrations.length,7);
+ assert.equal(migrations.length,8);
  assert.equal(migrations.some(x=>x.includes("stage4e")),false);
  const oldSource=read("supabase/functions/mesh-inbox-send/send.ts");
  assert.match(oldSource,/verifyStoredSignedMeshInvite/);

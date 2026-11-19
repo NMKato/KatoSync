@@ -1,0 +1,247 @@
+/* Gemeinsame Flächen und Abstände für den Einstieg und die Geräteverwaltung. */
+:root {
+  --experience-panel: #151e2b;
+  --experience-muted: #101925;
+  --experience-raised: #1d2b3c;
+  --experience-hover: #283c52;
+  --experience-line: #34465d;
+  --experience-line-strong: #657f9b;
+  --experience-selection: #183149;
+  --experience-selection-border: #759fc1;
+  --experience-accent: #9dccf0;
+  --experience-action: #9dccf0;
+  --experience-action-hover: #bcdef8;
+  --experience-action-ink: #102233;
+  --experience-focus: #a0d9ff;
+  --experience-success: #8bd9b9;
+  --experience-success-soft: #17382f;
+  --experience-success-line: #527e6e;
+  --experience-warning: #efc887;
+  --experience-warning-soft: #302718;
+  --experience-warning-line: #806642;
+  --experience-danger: #ffada6;
+  --experience-shadow: 0 8px 24px rgba(4, 11, 20, .14);
+  --experience-dialog-shadow: 0 24px 72px rgba(3, 9, 18, .42);
+}
+
+:root[data-theme="light"] {
+  --experience-panel: #ffffff;
+  --experience-muted: #f3f6fa;
+  --experience-raised: #eaf0f6;
+  --experience-hover: #dfe9f3;
+  --experience-line: #c6d1df;
+  --experience-line-strong: #7b8da5;
+  --experience-selection: #e8f2fb;
+  --experience-selection-border: #3973a0;
+  --experience-accent: #235f91;
+  --experience-action: #235f91;
+  --experience-action-hover: #1b4d79;
+  --experience-action-ink: #ffffff;
+  --experience-focus: #2165a2;
+  --experience-success: #126247;
+  --experience-success-soft: #e8f5ef;
+  --experience-success-line: #87b9a2;
+  --experience-warning: #815b17;
+  --experience-warning-soft: #fff5df;
+  --experience-warning-line: #b79b61;
+  --experience-danger: #9c3035;
+  --experience-shadow: 0 8px 24px rgba(29, 53, 81, .05);
+  --experience-dialog-shadow: 0 24px 72px rgba(21, 40, 65, .2);
+}
+
+/* Der direkte Geräte-Einstieg steht vor den ergänzenden Arbeitsbereichen. */
+.mode-gateway { place-items: start center; padding: 24px 32px; background: var(--bg); }
+.mode-gateway .mode-gateway-inner { width: min(940px, 100%); gap: 24px; margin-block: auto; }
+.mode-gateway .mode-gateway-ambient { opacity: .3; pointer-events: none; }
+.mode-gateway .orb { animation: none; }
+.mode-gateway .mode-gateway-head { gap: 8px; }
+.mode-gateway .mode-gateway-head img { width: 56px; height: 56px; }
+.mode-gateway .mode-gateway-head h1 { margin: 0; font-size: clamp(28px, 3.2vw, 36px); line-height: 1.2; letter-spacing: -.8px; }
+.mode-gateway .mode-gateway-head p { max-width: 60ch; margin: 4px auto 0; color: var(--text-muted); font-size: 14px; line-height: 1.6; }
+.gateway-device-entry { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 24px; border: 1px solid var(--experience-selection-border); border-radius: 18px; background: var(--experience-selection); box-shadow: var(--experience-shadow); }
+.gateway-device-icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border: 1px solid var(--experience-line-strong); border-radius: 12px; color: var(--experience-accent); background: var(--experience-panel); }
+.gateway-device-copy { min-width: 0; }
+.gateway-device-copy h2 { margin: 0; color: var(--text); font-size: 20px; line-height: 1.35; letter-spacing: -.3px; }
+.gateway-device-copy p { max-width: 58ch; margin: 8px 0 0; color: var(--text-muted); font-size: 14px; line-height: 1.55; }
+.mode-gateway .gateway-device-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; max-width: 240px; padding: 12px 20px; border: 1px solid var(--experience-action); border-radius: 10px; background: var(--experience-action); color: var(--experience-action-ink); box-shadow: none; font-size: 14px; line-height: 1.4; font-weight: 650; white-space: normal; }
+.mode-gateway .gateway-device-action:hover:not(:disabled) { border-color: var(--experience-action-hover); background: var(--experience-action-hover); transform: none; }
+.mode-gateway .mode-gateway-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.mode-gateway .mode-card { min-height: 0; padding: 20px; gap: 12px; border-color: var(--experience-line); border-radius: 16px; background: var(--experience-panel); box-shadow: var(--experience-shadow); backdrop-filter: none; -webkit-backdrop-filter: none; transition: border-color 140ms ease, background-color 140ms ease; }
+.mode-gateway .mode-card:hover { transform: none; border-color: var(--experience-line-strong); background: var(--experience-raised); box-shadow: var(--experience-shadow); }
+.mode-gateway .mode-card.remembered { border-color: var(--experience-line-strong); }
+.mode-gateway .mode-card-glow { opacity: .16; }
+.mode-gateway .mode-card-icon { width: 40px; height: 40px; border-radius: 10px; }
+.mode-gateway .mode-card > strong { font-size: 21px; line-height: 1.3; }
+.mode-gateway .mode-card-text { min-height: 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.mode-gateway .mode-card ul { gap: 8px; margin: 0; }
+.mode-gateway .mode-card li { color: var(--text-label); font-size: 13px; line-height: 1.5; }
+.mode-gateway .mode-card-badge { color: var(--text-label); background: var(--experience-muted); border-color: var(--experience-line); font-size: 11px; }
+.mode-gateway .mode-card-cta { color: var(--text); font-size: 14px; line-height: 1.5; }
+.mode-gateway .mode-gateway-foot { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+
+/* Die Verbindungskarten folgen der inhaltlichen Reihenfolge im Dokument. */
+.provider-manager { gap: 24px; }
+.provider-manager .provider-hero { align-items: flex-start; gap: 24px; padding: 24px; border: 1px solid var(--experience-line); border-radius: 18px; background: var(--experience-panel); box-shadow: var(--experience-shadow); }
+.provider-manager .provider-hero > div { min-width: 0; }
+.provider-manager .provider-hero h2 { margin: 4px 0 8px; font-size: clamp(24px, 2.4vw, 30px); line-height: 1.25; }
+.provider-manager .provider-hero p { max-width: 65ch; color: var(--text-muted); font-size: 14px; line-height: 1.6; }
+.provider-manager .provider-hero-actions { gap: 8px; }
+.provider-manager .connections-refresh-hint { margin: -12px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.connections-device-section { display: grid; gap: 24px; min-width: 0; }
+.provider-manager .provider-route-wrap { gap: 12px; min-width: 0; }
+.provider-manager .provider-route-title { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.provider-manager .provider-route { gap: 8px; padding: 8px; border: 1px solid var(--experience-line); border-radius: 14px; background: var(--experience-muted); }
+.provider-manager .provider-route-item { gap: 8px; min-width: 0; padding: 10px 12px; border-radius: 10px; color: var(--text-label); font-size: 12px; }
+.provider-manager .provider-route-item.active { color: var(--text); border-color: var(--experience-selection-border); background: var(--experience-selection); }
+.provider-manager .provider-route-name { overflow-wrap: anywhere; }
+.provider-manager .provider-cards { gap: 20px; }
+.provider-manager .provider-card { min-height: 0; padding: 24px; border-color: var(--experience-line); border-radius: 18px; background: var(--experience-panel); box-shadow: var(--experience-shadow); }
+.provider-manager .provider-card > header { gap: 12px; margin-bottom: 16px; }
+.provider-manager .provider-card h3 { margin: 0 0 4px; font-size: 17px; line-height: 1.4; }
+.provider-manager .provider-state { font-size: 12px; line-height: 1.5; }
+.provider-manager .provider-state.ok { color: var(--experience-success); }
+.provider-manager .provider-state.warn { color: var(--experience-warning); }
+.provider-manager .provider-state.danger { color: var(--experience-danger); }
+.provider-manager .provider-state:is(.ok, .warn, .danger) > span { background: currentColor; box-shadow: none; }
+.provider-manager .provider-auth-note { margin-bottom: 12px; padding: 12px; font-size: 13px; line-height: 1.6; }
+.provider-manager .provider-message { margin-bottom: 12px; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.provider-manager .provider-meta { gap: 8px; margin: 12px 0 16px; }
+.provider-manager .provider-meta div { gap: 12px; padding-bottom: 8px; }
+.provider-manager .provider-meta dt,
+.provider-manager .provider-meta dd { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.provider-manager .provider-info-grid { gap: 16px; }
+.provider-manager .provider-policy-note { gap: 12px; padding: 16px; border-color: var(--experience-line); background: var(--experience-panel); }
+.provider-manager .provider-policy-note span { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+
+/* Bedienelemente bleiben auch bei langen Beschriftungen gut erreichbar. */
+.provider-manager :is(.provider-hero-actions, .provider-card, .provider-info-grid, .remote-mcp-owner-card) :is(button.primary, button.secondary, button.ghost) { min-height: 44px; padding: 10px 16px; border-radius: 10px; font-size: 13px; line-height: 1.4; white-space: normal; }
+.provider-manager :is(.provider-hero-actions, .provider-card, .provider-info-grid, .remote-mcp-owner-card) button.primary { border: 1px solid var(--experience-action); background: var(--experience-action); color: var(--experience-action-ink); box-shadow: none; }
+.provider-manager :is(.provider-hero-actions, .provider-card, .provider-info-grid, .remote-mcp-owner-card) button.primary:hover:not(:disabled) { border-color: var(--experience-action-hover); background: var(--experience-action-hover); transform: none; }
+.provider-manager :is(.provider-hero-actions, .provider-card, .provider-info-grid, .remote-mcp-owner-card) button.secondary { border: 1px solid var(--experience-line-strong); background: var(--experience-raised); color: var(--text); box-shadow: none; }
+.provider-manager :is(.provider-hero-actions, .provider-card, .provider-info-grid, .remote-mcp-owner-card) button.secondary:hover:not(:disabled) { background: var(--experience-hover); transform: none; }
+.provider-manager :is(.provider-hero-actions, .provider-card, .provider-info-grid, .remote-mcp-owner-card) button.ghost { color: var(--text-label); }
+.provider-manager :is(.provider-hero-actions, .provider-card, .provider-info-grid, .remote-mcp-owner-card) button.ghost:hover:not(:disabled) { background: var(--experience-hover); transform: none; }
+.provider-manager :is(.provider-hero-actions, .provider-card, .provider-info-grid, .remote-mcp-owner-card) button.ghost.danger { color: var(--experience-danger); }
+.provider-manager :is(.provider-hero-actions, .provider-card, .provider-info-grid, .remote-mcp-owner-card) button:disabled { cursor: not-allowed; }
+
+/* Lokales Modell: Status, Kenndaten und Speicherhinweis sind getrennt lesbar. */
+.provider-manager .local-brain-card {
+  container: katosync-brain / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--experience-line);
+  border-radius: 14px;
+  background: var(--experience-muted);
+}
+.provider-manager .local-brain-card.running { border-color: var(--experience-success-line); box-shadow: none; }
+.provider-manager .local-brain-card.installed:not(.running) { border-color: var(--experience-line-strong); }
+.provider-manager .local-brain-head { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; align-items: start; }
+.provider-manager .local-brain-icon { width: 40px; height: 40px; border: 1px solid var(--experience-line); border-radius: 10px; color: var(--experience-accent); background: var(--experience-raised); }
+.provider-manager .local-brain-copy { min-width: 0; gap: 4px; }
+.provider-manager .local-brain-copy > span { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.provider-manager .local-brain-copy > strong { color: var(--text); font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.provider-manager .local-brain-copy > small { max-width: 65ch; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.provider-manager .local-brain-state { grid-column: auto; justify-self: end; max-width: 24ch; padding: 6px 10px; border: 1px solid var(--experience-line); border-radius: 8px; color: var(--text-muted); background: var(--experience-panel); font-size: 12px; line-height: 1.5; white-space: normal; }
+.provider-manager .local-brain-state.ok { color: var(--experience-accent); border-color: var(--experience-selection-border); background: var(--experience-selection); }
+.provider-manager .local-brain-state.live { color: var(--experience-success); border-color: var(--experience-success-line); background: var(--experience-success-soft); box-shadow: none; }
+.provider-manager .local-brain-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.provider-manager .local-brain-facts > span { min-width: 0; padding: 12px; border: 1px solid var(--experience-line); border-radius: 10px; background: var(--experience-panel); color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.provider-manager .local-brain-facts strong { color: var(--text); font-size: 14px; line-height: 1.5; }
+.provider-manager .local-brain-progress { grid-area: progress; font-size: 13px; }
+.provider-manager .local-brain-progress-track { height: 8px; border-radius: 8px; background: var(--experience-raised); }
+.provider-manager .local-brain-progress-track > span { background: var(--experience-accent); }
+.provider-manager .local-brain-actions { grid-area: actions; gap: 12px; flex-wrap: wrap; }
+.provider-manager .local-brain-actions button { min-width: 160px; }
+.provider-manager .local-brain-memory-note { grid-area: memory; display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--experience-selection-border); border-radius: 10px; background: var(--experience-selection); color: var(--text-label); font-size: 13px; line-height: 1.6; }
+.provider-manager .local-brain-memory-note > svg { flex: 0 0 16px; margin-top: 2px; color: var(--experience-accent); }
+.provider-manager .local-brain-memory-note > span { min-width: 0; }
+.provider-manager .local-brain-card > .provider-safe-note,
+.provider-manager .local-brain-card > .provider-field-error { grid-area: note; margin: 0; font-size: 12px; line-height: 1.6; }
+.provider-manager .local-brain-card > .provider-safe-note { color: var(--text-muted); }
+.provider-manager .local-brain-card > .provider-field-error { color: var(--experience-danger); }
+.provider-manager .local-provider-advanced { margin-top: 16px; border-color: var(--experience-line); }
+.provider-manager .local-provider-advanced > summary { min-height: 44px; padding: 12px 0; color: var(--text-label); font-size: 12px; line-height: 1.6; }
+.provider-manager .local-provider-advanced > summary::before { color: var(--experience-accent); }
+.provider-manager .local-provider-advanced-body { padding-top: 16px; }
+.provider-manager .local-provider-form { gap: 16px; }
+
+/* Freigaben behalten Zielgerät, Umfang, Hinweise und Sicherheitszustände. */
+.remote-mcp-owner-card.glass { padding: 24px; gap: 16px; border: 1px solid var(--experience-line); border-radius: 18px; background: var(--experience-panel); box-shadow: var(--experience-shadow); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.remote-mcp-owner-heading { align-items: flex-start; gap: 12px 24px; }
+.remote-mcp-owner-heading > div { min-width: 0; gap: 8px; }
+.remote-mcp-owner-heading strong { font-size: 16px; line-height: 1.5; }
+.remote-mcp-owner-card p { color: var(--text-muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.remote-mcp-owner-card .remote-mcp-owner-state { color: var(--text-label); }
+.remote-mcp-owner-card .remote-mcp-owner-target { padding: 16px; gap: 16px; border-color: var(--experience-line); background: var(--experience-muted); }
+.remote-mcp-owner-card .remote-mcp-owner-target dt { margin-bottom: 8px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.remote-mcp-owner-card .remote-mcp-owner-target dd { margin: 0; color: var(--text-label); font-size: 14px; line-height: 1.5; }
+.remote-mcp-owner-card .remote-mcp-owner-target dd small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.remote-mcp-owner-card .remote-mcp-owner-boundary { color: var(--text-muted); font-size: 12px; }
+.remote-mcp-owner-card .remote-mcp-owner-actions { gap: 12px; }
+.remote-mcp-owner-card .remote-mcp-owner-actions label { gap: 8px; color: var(--text-label); font-size: 13px; }
+.remote-mcp-owner-card :is(select, input:not([type="checkbox"])) { box-sizing: border-box; min-height: 44px; max-width: 100%; padding: 10px 12px; border: 1px solid var(--experience-line-strong); border-radius: 10px; color: var(--text); background: var(--experience-muted); font-size: 14px; }
+.remote-mcp-owner-card .remote-mcp-owner-review { gap: 12px; padding: 16px; border-color: var(--experience-warning-line); border-radius: 12px; background: var(--experience-warning-soft); }
+.remote-mcp-owner-card .remote-mcp-owner-review :is(label, small) { color: var(--text-label); font-size: 13px; line-height: 1.6; }
+.remote-mcp-owner-card .remote-mcp-owner-review input { font-size: 18px; letter-spacing: .3em; }
+.remote-mcp-owner-card .remote-mcp-owner-error { padding-top: 16px; color: var(--experience-danger); }
+.remote-mcp-owner-card .remote-mcp-relay { gap: 12px; padding-top: 16px; }
+.remote-mcp-owner-card .remote-mcp-relay > strong { font-size: 14px; line-height: 1.5; }
+.remote-mcp-owner-card .remote-mcp-relay p[data-live="yes"],
+.remote-mcp-owner-card .remote-mcp-device[data-approved="yes"] { color: var(--experience-success); }
+.remote-mcp-owner-card :is(.remote-mcp-device, .remote-mcp-enrollment) { margin-top: 16px; padding-top: 16px; }
+.remote-mcp-owner-card :is(.remote-mcp-device, .remote-mcp-enrollment) p { font-size: 13px; line-height: 1.6; }
+.remote-mcp-owner-card .remote-mcp-device code { font-size: 12px; line-height: 1.6; }
+.remote-mcp-owner-card .remote-mcp-git-projects { gap: 12px; padding: 16px; margin: 16px 0; border-color: var(--experience-line); border-radius: 12px; background: var(--experience-muted); }
+.remote-mcp-owner-card .remote-mcp-git-opt-in,
+.remote-mcp-owner-card .remote-mcp-git-projects label { gap: 12px; padding-block: 8px; font-size: 13px; line-height: 1.6; }
+.remote-mcp-owner-card input[type="checkbox"] { flex-shrink: 0; width: 18px; height: 18px; accent-color: var(--experience-accent); }
+.remote-mcp-owner-card .remote-mcp-git-projects small { color: var(--text-muted); font-size: 12px; opacity: 1; }
+
+.mode-gateway :is(button, a):focus-visible,
+.provider-manager :is(button, input, select, summary, a):focus-visible,
+.remote-mcp-owner-card :is(button, input, select, summary, a):focus-visible { outline: 3px solid var(--experience-focus); outline-offset: 3px; }
+
+@container katosync-brain (max-width: 560px) {
+  .provider-manager .local-brain-head { grid-template-columns: 40px minmax(0, 1fr); }
+  .provider-manager .local-brain-state { grid-column: 2; justify-self: start; }
+  .provider-manager .local-brain-facts { gap: 8px; }
+  .provider-manager .local-brain-facts > span { padding: 10px; }
+}
+@container katosync-brain (max-width: 360px) {
+  .provider-manager .local-brain-facts { grid-template-columns: 1fr; }
+  .provider-manager .local-brain-actions button { flex: 1 1 100%; min-width: 0; }
+}
+
+@media (max-width: 1180px) {
+  .provider-manager .provider-hero { flex-direction: column; gap: 16px; }
+  .provider-manager .provider-hero-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .provider-manager .provider-cards { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .mode-gateway { padding: 24px; }
+  .mode-gateway .mode-gateway-cards { grid-template-columns: 1fr; }
+  .gateway-device-entry { grid-template-columns: 40px minmax(0, 1fr); padding: 20px; }
+  .gateway-device-icon { width: 40px; height: 40px; }
+  .mode-gateway .gateway-device-action { grid-column: 2; justify-self: start; max-width: none; }
+  .provider-manager .provider-card,
+  .provider-manager .provider-hero,
+  .remote-mcp-owner-card.glass { padding: 20px; }
+}
+@media (max-width: 480px) {
+  .mode-gateway { padding: 20px 16px; }
+  .mode-gateway .mode-gateway-inner { gap: 20px; }
+  .gateway-device-entry { gap: 12px; padding: 16px; }
+  .gateway-device-copy h2 { font-size: 18px; }
+  .mode-gateway .gateway-device-action { grid-column: 1 / -1; width: 100%; }
+  .provider-manager .local-brain-card { padding: 16px; }
+  .remote-mcp-owner-card .remote-mcp-owner-target { grid-template-columns: 1fr; }
+  .remote-mcp-owner-card .remote-mcp-owner-actions { align-items: stretch; flex-direction: column; }
+  .remote-mcp-owner-card .remote-mcp-owner-actions > button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mode-gateway, .mode-gateway *,
+  .provider-manager, .provider-manager *,
+  .remote-mcp-owner-card, .remote-mcp-owner-card * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

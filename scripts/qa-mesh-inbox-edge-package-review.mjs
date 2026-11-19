@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// C8-Prüfstand 2d66076b243915d5ddd082e578104477d5d5aea0: feste Pins der bereits geprüften Inbox-Quellen.
 // NMKato Solutions — STAGE 2W: entirely OFFLINE / READ-ONLY Edge release review.
 // No deployments, credentials, HTTP requests, database writes, or generated files.
 import {build} from "esbuild";
@@ -11,9 +12,9 @@ import {verifyLocalContract,validateSnapshot,PROJECT,MIGRATIONS} from "./qa-mesh
 const ROOT=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const HASHES=Object.freeze({
  "supabase/functions/mesh-inbox-send/index.ts":"a53cd30a75f0a24d0cbab97d10d56679068fb18d0f4e99d4efe9c79e9196a916",
- "supabase/functions/mesh-inbox-send/send.ts":"74d27e69f91140fba8141b55d7bef1f6d96bf7c83226b1df81d4c5d03bd103ba",
+ "supabase/functions/mesh-inbox-send/send.ts":"7817880a92bc41e99760c10a8c9dc433c95cb46f8c60970fd7da8c07cbe75923",
  "supabase/functions/mesh-inbox-receive/index.ts":"88acdcfc08a23d39cae92460dfffb28666d8952fa3accce79d0fcc535b2c3b7d",
- "supabase/functions/mesh-inbox-receive/receive.ts":"bd76bbf3fa5c530760b510259f7a4f927c406f0d3c94aaf3e3fdd66dc4f4d099",
+ "supabase/functions/mesh-inbox-receive/receive.ts":"a293aaea3dda891b07577a6d69bbc952f188f5990b1f18e82eb1603146ed9351",
  "supabase/functions/mesh-device-enrollment/membership-gate.ts":"a51592178bd4a899b31686125f807836c0fed35de41453f820f459f95bf45f0c"
 });
 const sha256=b=>createHash("sha256").update(b).digest("hex");

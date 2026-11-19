@@ -30,8 +30,12 @@ test("heartbeats are local only and stale/invalid time cannot grant peer trust",
  assert.match(rust,/"stale"/);
  assert.match(rust,/return "unknown"/);
 });
-test("Connections mesh card shows explicitly unpaired peer and remote writer blocked",()=>{
- assert.match(source("../src/components/ProviderManager.tsx"),/<MeshConnectionCard\s+refreshEpoch=\{connectionRefreshEpoch\}\s*\/>/);
+test("Account device page replaces the legacy unpaired readiness card",()=>{
+ const provider=source("../src/components/ProviderManager.tsx");
+ assert.match(provider,/<AccountDevicesCard\s+refreshEpoch=\{connectionRefreshEpoch\}\s*\/>/);
+ assert.doesNotMatch(provider,/<MeshConnectionCard\b/);
+});
+test("Legacy local readiness component remains explicitly unpaired and blocks remote writes",()=>{
  assert.match(view,/invoke<MeshLocalReadiness>\("mesh_local_readiness"\)/);
  assert.match(view,/actual\.verifiedPeers!==0/);
  assert.match(view,/actual\.remoteReadOnlyDispatch \|\| actual\.crossDeviceWrites/);

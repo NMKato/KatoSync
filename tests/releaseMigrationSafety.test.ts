@@ -1,3 +1,4 @@
+// C8-Prüfstand 2d66076b243915d5ddd082e578104477d5d5aea0: exaktes lokales SQL-Inventar, keine Aussage über Cloud-Deployments.
 // QA-only migration safety; never runs SQL or accesses Supabase.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -6,7 +7,7 @@ import {readdirSync,readFileSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {join} from "node:path";
 const root=fileURLToPath(new URL("..",import.meta.url));
-const live=["20261028202403_katosync_mesh_owned_schema.sql", "20261028202503_katosync_add_to_existing_exposed_schemas.sql", "20261028204216_katosync_account_membership_admission.sql", "20261104222611_katosync_feature_approver_authority_gate5.sql", "20261104222901_katosync_feature_approver_activation_fix_gate5.sql", "20261105084427_katosync_feature_owner_one_time_challenge_gate7.sql", "20261105100122_katosync_reviewer_signed_attestation_gate9.sql"];
+const live=["20261028202403_katosync_mesh_owned_schema.sql", "20261028202503_katosync_add_to_existing_exposed_schemas.sql", "20261028204216_katosync_account_membership_admission.sql", "20261104222611_katosync_feature_approver_authority_gate5.sql", "20261104222901_katosync_feature_approver_activation_fix_gate5.sql", "20261105084427_katosync_feature_owner_one_time_challenge_gate7.sql", "20261105100122_katosync_reviewer_signed_attestation_gate9.sql", "20261119094236_mesh_account_network_control.sql"];
 const fixtures={
   "20261029211243_mesh_inbox_signed_send_guard.sql": "0d52bf08fe93e32e53b3e284d6a0bfd8db68d38d475a44479fa082ad61225124",
   "20261030072543_mesh_recipient_signed_inbox_atomic_decisions.sql": "ca57d61435f7f3620ec2f311d93a188210ef12d25ac7a520f74b781ac634197e",
@@ -17,7 +18,7 @@ const fixtures={
   "20261103162500_mesh_entitlement_expiry_guard.sql": "44111b4eb7feb3bef726caca49eef151b2d30b9af4eeeccd9532f8c23e356069",
   "20261103164548_katosync_billing_product_scoped.sql": "940375a79f5a03ff5d723ccf6f3fc092b05bc75ad77d7185d1a1969efc218a6a"
 };
-test("normal Supabase migrations directory contains only seven installed versions",()=>{
+test("normal Supabase migrations directory matches the exact reviewed C8 inventory",()=>{
  const files=readdirSync(join(root,"supabase/migrations")).filter(x=>x.endsWith(".sql")).sort();
  assert.deepEqual(files,live);
 });

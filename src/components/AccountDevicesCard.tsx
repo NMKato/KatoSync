@@ -22,10 +22,21 @@ function issueText(issue: AccountMeshModel["issue"], c: MeshDeviceCopy): string 
 }
 function Dialog({ title, children, onClose, busy, closeLabel }: { title: string; children: ReactNode; onClose: () => void; busy: boolean; closeLabel: string }) {
   const ref = useRef<HTMLDialogElement>(null), id = useId();
-  useEffect(() => { const dialog = ref.current; if (dialog && !dialog.open) dialog.showModal(); return () => { dialog?.close(); }; }, []);
+  useEffect(() => {
+    const dialog = ref.current;
+    // Den Auslöser vor showModal merken; React-autoFocus würde ihn zu früh ersetzen.
+    const previous = document.activeElement;
+    if (dialog && !dialog.open) dialog.showModal();
+    return () => {
+      if (dialog?.open) dialog.close();
+      if (previous instanceof HTMLElement && previous.isConnected && !previous.matches(":disabled")) {
+        previous.focus({ preventScroll: true });
+      }
+    };
+  }, []);
   return <dialog ref={ref} className="account-device-dialog" aria-labelledby={id}
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
-    <header><h3 id={id}>{title}</h3><button type="button" className="ghost" autoFocus disabled={busy}
+    <header><h3 id={id}>{title}</h3><button type="button" className="ghost" disabled={busy}
       aria-label={closeLabel} onClick={onClose}><X size={19} /></button></header>
     {children}
   </dialog>;
@@ -104,7 +115,7 @@ export function AccountDevicesCard({ refreshEpoch = 0 }: { refreshEpoch?: number
     </div>;
   };
 
-  return <section className="account-devices-card glass" aria-labelledby="account-devices-title" aria-busy={loading}>
+  return <section className="account-devices-card glass" id="section-account-devices" tabIndex={-1} aria-labelledby="account-devices-title" aria-busy={loading}>
     <header className="account-devices-heading">
       <div className="account-devices-heading-copy"><span className="account-devices-eyebrow"><ShieldCheck size={14} aria-hidden="true" />KatoSync</span>
         <h3 id="account-devices-title">{c.title}</h3><p>{c.subtitle}</p></div>

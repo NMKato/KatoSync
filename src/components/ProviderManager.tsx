@@ -12,6 +12,7 @@ import {
   Download,
   ExternalLink,
   KeyRound,
+  Info,
   Loader2,
   LogIn,
   PlugZap,
@@ -154,6 +155,13 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
       </div>
 
       <p className="connections-refresh-hint">{t("connections.refreshHint")}</p>
+      {vm.sessionStatus.loggedIn ? (
+        <div className="connections-device-section">
+          <AccountDevicesCard refreshEpoch={connectionRefreshEpoch} />
+          <RemoteMcpOwnerConsentCard key={vm.sessionStatus.email ?? "signed-in-owner"} refreshEpoch={connectionRefreshEpoch} />
+        </div>
+      ) : null}
+
       <div className="provider-route-wrap">
         <span className="provider-route-title">{t("providers.routeTitle")}</span>
         <ol className="provider-route" aria-label={t("providers.routeAria")}>
@@ -174,8 +182,6 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
       </div>
 
       <div className="provider-cards">
-        {vm.sessionStatus.loggedIn ? <AccountDevicesCard refreshEpoch={connectionRefreshEpoch} /> : null}
-        {vm.sessionStatus.loggedIn ? <RemoteMcpOwnerConsentCard key={vm.sessionStatus.email ?? "signed-in-owner"} refreshEpoch={connectionRefreshEpoch} /> : null}
         {cardProviders.map((provider) => (
           <Fragment key={provider}>
             {provider === "local" && vm.sessionStatus.loggedIn ? (
@@ -482,7 +488,12 @@ function ProviderCard({
   );
 }
 
-function LocalBrainInstaller({ vm }: { vm: ViewModel }) {
+type LocalBrainViewModel = Pick<ViewModel,
+  "localBrainStatus" | "localBrainProgress" | "localBrainBusy" |
+  "handleInstallLocalBrain" | "handleStartLocalBrain" | "handleStopLocalBrain" | "handleRemoveLocalBrain"
+>;
+
+export function LocalBrainInstaller({ vm }: { vm: LocalBrainViewModel }) {
   const { t } = useT();
   const brain = vm.localBrainStatus;
   const progress = vm.localBrainProgress;
@@ -559,6 +570,8 @@ function LocalBrainInstaller({ vm }: { vm: ViewModel }) {
           </button>
         ) : null}
       </div>
+
+      <p className="local-brain-memory-note"><Info size={16} aria-hidden="true" /><span>{t("providers.localBrain.memoryNote")}</span></p>
 
       {brain?.supported === false ? (
         <span className="provider-field-error">{t("providers.localBrain.unsupported")}</span>

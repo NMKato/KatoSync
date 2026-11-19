@@ -2,7 +2,7 @@
 // Root-Gateway vor beiden Workspaces + kompakter Moduswechsel fuer die Seitenleiste.
 // Reine View: der gewaehlte Modus wird von App.tsx gemerkt (lib/workspaceMode.ts).
 import { useEffect, useRef } from "react";
-import { ArrowRight, BookOpenText, Bot, Workflow } from "lucide-react";
+import { ArrowRight, BookOpenText, Bot, Monitor, Workflow } from "lucide-react";
 import { useT, type TKey } from "../i18n";
 import type { WorkspaceMode } from "../lib/workspaceMode";
 
@@ -25,10 +25,12 @@ const gatewayModes: Array<{
 
 export function ModeGateway({
   remembered,
-  onChoose
+  onChoose,
+  onOpenDevices
 }: {
   remembered: WorkspaceMode | null;
   onChoose: (mode: WorkspaceMode) => void;
+  onOpenDevices: () => void;
 }) {
   const { t } = useT();
   const rememberedRef = useRef<HTMLButtonElement | null>(null);
@@ -51,6 +53,16 @@ export function ModeGateway({
           <h1 id="mode-gateway-title">{t("gateway.title")}</h1>
           <p>{t("gateway.text")}</p>
         </header>
+        <section className="gateway-device-entry" aria-labelledby="gateway-devices-title">
+          <span className="gateway-device-icon" aria-hidden="true"><Monitor size={24} /></span>
+          <div className="gateway-device-copy">
+            <h2 id="gateway-devices-title">{t("gateway.devices.title")}</h2>
+            <p>{t("gateway.devices.text")}</p>
+          </div>
+          <button className="primary gateway-device-action" onClick={onOpenDevices} type="button">
+            {t("gateway.devices.open")}<ArrowRight size={16} aria-hidden="true" />
+          </button>
+        </section>
         <div className="mode-gateway-cards">
           {gatewayModes.map(({ mode, icon: Icon, points }) => {
             const isRemembered = remembered === mode;

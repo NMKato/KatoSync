@@ -1,149 +1,279 @@
-/* Created by NMKato Solutions */
-.account-devices-card { grid-column: 1 / -1; padding: 28px; border: 1px solid var(--line, #343d49); border-radius: 20px; background: var(--surface); color: var(--text); min-width: 0; }
-.account-devices-card h3,.account-devices-card h4,.account-device-dialog h3 { margin: 0; color: var(--text); }
-.account-devices-card h3 { font-size: 25px; letter-spacing: -.6px; }
-.account-devices-card h4 { font-size: 16px; line-height: 1.45; }
-.account-devices-card p,.account-device-dialog p { line-height: 1.6; }
-.account-devices-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.account-devices-heading-copy > p { margin: 7px 0 0; color: var(--text-muted); font-size: 13px; }
-.account-devices-eyebrow { display: flex; align-items: center; gap: 6px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1.2px; font-size: 10px; font-weight: 700; margin-bottom: 9px; }
+/* Erstellt von NMKato Solutions. Geräte und Freigaben mit klarer Hierarchie. */
+
+.account-devices-card.glass {
+  --device-content-inset: 98px;
+  container: katosync-devices / inline-size;
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--experience-line);
+  border-radius: 20px;
+  background: var(--experience-panel, var(--surface));
+  color: var(--text);
+  box-shadow: var(--experience-shadow);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  scroll-margin-block: 24px;
+}
+
+.account-devices-card h3,
+.account-devices-card h4,
+.account-device-dialog h3 { margin: 0; color: var(--text); }
+.account-devices-card h3 { font-size: 24px; line-height: 1.25; letter-spacing: -.5px; }
+.account-devices-card h4 { font-size: 16px; line-height: 1.5; }
+.account-devices-card p,
+.account-device-dialog p { line-height: 1.6; }
+
+.account-devices-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.account-devices-heading-copy { min-width: 0; }
+.account-devices-heading-copy > p { margin: 8px 0 0; color: var(--text-muted); font-size: 14px; max-width: 60ch; }
+.account-devices-eyebrow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-size: 11px; font-weight: 700; line-height: 1.5; }
 .account-devices-refresh { flex-shrink: 0; }
-.account-device-steps { display: flex; padding: 0; margin: 27px 0 25px; list-style: none; gap: 18px; }
-.account-device-steps li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
-.account-device-steps li > span { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line, #354353); border-radius: 50%; font-size: 11px; }
+
+:is(.account-devices-card, .account-device-dialog, .account-device-notification) button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: normal;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+:is(.account-devices-card, .account-device-dialog) button.primary {
+  color: var(--experience-action-ink);
+  background: var(--experience-action);
+  border: 1px solid var(--experience-action);
+  box-shadow: none;
+}
+:is(.account-devices-card, .account-device-dialog) button.primary:hover:not(:disabled) {
+  background: var(--experience-action-hover);
+  border-color: var(--experience-action-hover);
+  transform: none;
+}
+:is(.account-devices-card, .account-device-dialog) button.secondary {
+  color: var(--text);
+  background: var(--experience-raised);
+  border: 1px solid var(--experience-line);
+  box-shadow: none;
+}
+:is(.account-devices-card, .account-device-dialog) button.secondary:hover:not(:disabled),
+:is(.account-devices-card, .account-device-dialog, .account-device-notification) button.ghost:hover:not(:disabled) {
+  background: var(--experience-hover);
+  border-color: var(--experience-line-strong);
+  transform: none;
+}
+:is(.account-devices-card, .account-device-dialog, .account-device-notification) button.ghost {
+  color: var(--text-label);
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+}
+:is(.account-devices-card, .account-device-dialog, .account-device-notification) button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+
+.account-device-steps { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 24px 0; padding: 0; list-style: none; }
+.account-device-steps li { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.account-device-steps li > span { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 28px; border: 1px solid var(--experience-line-strong); border-radius: 50%; font-size: 12px; background: var(--experience-muted); }
 .account-device-steps li[data-complete="true"] { color: var(--text); }
-.account-device-steps li[data-complete="true"] > span { color: #6ccca9; border-color: #37715f; background: #2d695522; }
-.account-devices-own { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; color: var(--text-label); margin: 0 0 18px; font-size: 12px; }
-.account-devices-own > span { border-radius: 20px; padding: 3px 8px; background: var(--surface-2); color: var(--text-muted); font-size: 10px; }
-.account-devices-own > small { margin-left: auto; color: var(--text-muted); }
-.account-main-device { display: flex; gap: 16px; align-items: flex-start; padding: 22px; background: linear-gradient(120deg, #4178b516, #4178b508); border: 1px solid #5385ad50; border-radius: 14px; }
-.account-main-symbol { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; flex: 0 0 48px; border: 1px solid #6e94b545; border-radius: 12px; color: #84b2d8; background: #5e93ba12; }
-.account-main-copy { flex: 1; min-width: 0; }
-.account-main-copy .account-devices-eyebrow { margin: 0 0 5px; }
-.account-main-copy > p { font-size: 12px; color: var(--text-muted); margin: 6px 0 8px; max-width: 540px; }
-.account-main-status { font-size: 11px; color: var(--text-label); }
-.account-main-status[data-ready="true"] { color: #78cdb1; }
-.account-main-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.account-main-actions button { white-space: normal; text-align: center; font-size: 12px; max-width: 220px; }
-.account-device-picker { margin-top: 27px; }
-.account-device-section-heading { display: flex; justify-content: space-between; gap: 15px; align-items: baseline; margin-bottom: 14px; }
-.account-device-section-heading p { color: var(--text-muted); font-size: 12px; margin: 4px 0 0; }
-.account-device-section-heading > small { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
-.account-device-list { display: grid; gap: 9px; }
-.account-device-row { border: 1px solid var(--line, #343e4c); border-radius: 12px; background: var(--surface-2); transition: border-color .15s, background-color .15s; }
-.account-device-row[data-selected="true"] { border-color: #6a9bc5; background: #5d91b714; box-shadow: 0 0 0 1px #6a9bc51a; }
-.account-device-select { display: flex; gap: 14px; align-items: center; padding: 17px; cursor: pointer; }
+.account-device-steps li[data-complete="true"] > span { color: var(--experience-success); border-color: var(--experience-success-line); background: var(--experience-success-soft); }
+
+.account-devices-own { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 16px; color: var(--text-label); font-size: 13px; line-height: 1.5; }
+.account-devices-own > svg { flex-shrink: 0; }
+.account-devices-own > strong { overflow-wrap: anywhere; min-width: 0; }
+.account-devices-own > span { padding: 4px 8px; border-radius: 8px; background: var(--experience-muted); color: var(--text-muted); font-size: 12px; }
+.account-devices-own > small { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+
+.account-main-device { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 16px; align-items: start; padding: 20px; border: 1px solid var(--experience-selection-border); border-radius: 16px; background: var(--experience-selection); }
+.account-main-symbol { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border: 1px solid var(--experience-line-strong); border-radius: 12px; color: var(--experience-accent); background: var(--experience-panel); }
+.account-main-copy { min-width: 0; }
+.account-main-copy h4 { overflow-wrap: anywhere; }
+.account-main-copy .account-devices-eyebrow { margin: 0 0 4px; }
+.account-main-copy > p { max-width: 56ch; margin: 8px 0; color: var(--text-muted); font-size: 13px; }
+.account-main-status { color: var(--text-label); font-size: 12px; line-height: 1.5; }
+.account-main-status[data-ready="true"] { color: var(--experience-success); }
+.account-main-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.account-main-actions button { max-width: 224px; text-align: center; }
+
+.account-device-picker { margin-top: 32px; }
+.account-device-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.account-device-section-heading > div { min-width: 0; }
+.account-device-section-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; }
+.account-device-section-heading > small { flex-shrink: 0; color: var(--text-muted); font-size: 12px; }
+.account-device-list { display: grid; gap: 12px; }
+.account-device-row { min-width: 0; border: 1px solid var(--experience-line); border-radius: 14px; background: var(--experience-muted); transition: border-color 140ms ease, background-color 140ms ease; }
+.account-device-row[data-selected="true"] { border-color: var(--experience-selection-border); background: var(--experience-selection); box-shadow: inset 0 0 0 1px var(--experience-selection-border); }
+.account-device-row:has(.account-device-select:not([data-disabled="true"]):hover) { border-color: var(--experience-line-strong); }
+.account-device-row[data-selected="true"]:has(.account-device-select:hover) { border-color: var(--experience-selection-border); }
+.account-device-select { display: grid; grid-template-columns: 18px 40px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 16px; cursor: pointer; }
 .account-device-select[data-disabled="true"] { cursor: default; }
-.account-device-select > input,.account-device-modes input,.account-main-options input { accent-color: #568db9; width: 17px; height: 17px; flex: 0 0 17px; margin: 0; }
-.account-device-icon { width: 40px; height: 40px; flex: 0 0 40px; display: inline-flex; justify-content: center; align-items: center; background: var(--surface-raised); border: 1px solid var(--line, #384251); border-radius: 10px; color: var(--text-label); }
-.account-device-description { min-width: 0; display: flex; flex-direction: column; gap: 5px; flex: 1; }
-.account-device-description strong { font-size: 14px; overflow-wrap: anywhere; }
-.account-device-description small,.account-device-seen { font-size: 11px; color: var(--text-muted); }
-.account-device-seen { font-size: 10px; }
-.account-device-state { display: inline-flex; gap: 7px; align-items: center; font-size: 11px; white-space: nowrap; color: var(--text-label); }
-.account-device-state > span { width: 6px; height: 6px; border-radius: 50%; background: #939da8; }
-.account-device-state[data-state="connected"] { color: #74d1af; }
-.account-device-state[data-state="connected"] > span { background: #74d1af; box-shadow: 0 0 0 3px #74d1af15; }
-.account-device-state[data-state="approval"] > span,.account-device-state[data-state="blocked"] > span { background: #d9b56c; }
-.account-device-state[data-state="connecting"] > span { background: #75a9d3; }
-.account-device-manage { margin: -7px 14px 9px 89px; font-size: 10px; padding: 4px 0; color: var(--text-muted); }
-.account-device-via-main { display: block; margin: -5px 17px 12px 89px; color: var(--text-muted); font-size: 10px; }
-.account-device-older { margin-top: 12px; color: var(--text-muted); font-size: 12px; }
-.account-device-older > summary { cursor: pointer; padding: 8px 0; }
-.account-devices-empty { display: flex; align-items: center; flex-direction: column; gap: 10px; padding: 30px 20px; border: 1px dashed var(--line, #3b4655); border-radius: 13px; color: var(--text-muted); text-align: center; }
-.account-devices-empty > strong { color: var(--text-label); font-size: 14px; }
-.account-devices-empty > p { font-size: 12px; margin: 0; max-width: 470px; }
-.account-device-connect-area { margin-top: 22px; }
-.account-device-modes { border: 0; padding: 0; margin: 0; min-width: 0; }
-.account-device-modes > legend { font-size: 12px; font-weight: 650; color: var(--text-label); margin-bottom: 10px; padding: 0; }
-.account-device-modes > label { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line, #35404e); border-radius: 10px; margin-bottom: 7px; cursor: pointer; background: var(--surface-2); }
-.account-device-modes > label[data-selected="true"] { border-color: #6a9bc580; background: #4f85ac0c; }
-.account-device-modes label > span { display: flex; flex-direction: column; gap: 4px; }
-.account-device-modes strong { font-size: 12px; font-weight: 600; }
-.account-device-modes small { font-size: 11px; line-height: 1.5; color: var(--text-muted); }
-.account-device-scope { display: flex; gap: 7px; align-items: flex-start; font-size: 11px; color: var(--text-muted); margin: 12px 0 18px; }
-.account-device-scope > svg { flex: 0 0 16px; margin-top: 2px; }
-.account-device-connect-actions { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding-top: 16px; border-top: 1px solid var(--line, #303b49); }
-.account-device-connect-actions > p { display: flex; gap: 8px; align-items: center; margin: 0; font-size: 12px; min-width: 0; }
+.account-device-select > input,
+.account-device-modes input,
+.account-main-options input { flex: 0 0 18px; width: 18px; height: 18px; margin: 0; accent-color: var(--experience-accent); }
+.account-device-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 40px; width: 40px; height: 40px; border: 1px solid var(--experience-line); border-radius: 10px; color: var(--text-label); background: var(--experience-raised); }
+.account-device-description { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.account-device-description strong { overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.account-device-description small,
+.account-device-seen { color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.account-device-state { display: inline-flex; align-items: center; justify-self: start; gap: 8px; max-width: 24ch; min-height: 28px; color: var(--text-label); font-size: 12px; line-height: 1.5; white-space: normal; }
+.account-device-state > span { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.account-device-state[data-state="connected"] { color: var(--experience-success); }
+.account-device-state[data-state="approval"],
+.account-device-state[data-state="blocked"] { color: var(--experience-warning); }
+.account-device-state[data-state="connecting"] { color: var(--experience-accent); }
+.account-devices-card .account-device-manage { margin: -4px 16px 8px calc(var(--device-content-inset) - 8px); padding: 8px; color: var(--experience-accent); text-align: left; }
+.account-device-via-main { display: block; margin: 0 16px 16px var(--device-content-inset); color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+
+.account-device-older { margin-top: 12px; color: var(--text-muted); font-size: 13px; }
+.account-device-older > summary,
+.account-device-details > summary { min-height: 44px; padding: 12px 0; cursor: pointer; line-height: 1.5; }
+.account-device-older > summary::marker,
+.account-device-details > summary::marker { color: var(--experience-accent); }
+.account-devices-empty { display: flex; align-items: center; flex-direction: column; gap: 12px; padding: 32px 24px; border: 1px dashed var(--experience-line-strong); border-radius: 14px; color: var(--text-muted); background: var(--experience-muted); text-align: center; }
+.account-devices-empty > strong { color: var(--text-label); font-size: 15px; }
+.account-devices-empty > p { max-width: 48ch; margin: 0; font-size: 13px; }
+
+.account-device-connect-area { margin-top: 24px; }
+.account-device-modes { min-width: 0; margin: 0; padding: 0; border: 0; }
+.account-device-modes > legend { margin-bottom: 12px; padding: 0; color: var(--text-label); font-size: 14px; font-weight: 650; }
+.account-device-modes > label { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; padding: 16px; border: 1px solid var(--experience-line); border-radius: 12px; background: var(--experience-muted); cursor: pointer; }
+.account-device-modes > label[data-selected="true"] { border-color: var(--experience-selection-border); background: var(--experience-selection); }
+.account-device-modes label > input { margin-top: 2px; }
+.account-device-modes label > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.account-device-modes strong { font-size: 14px; line-height: 1.5; font-weight: 650; }
+.account-device-modes small { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.account-device-modes:disabled > label { cursor: not-allowed; }
+.account-device-scope { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 24px; color: var(--text-muted); font-size: 12px; }
+.account-device-scope > svg { flex: 0 0 16px; margin-top: 2px; color: var(--experience-accent); }
+.account-device-connect-actions { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-top: 20px; border-top: 1px solid var(--experience-line); }
+.account-device-connect-actions > p { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; margin: 0; font-size: 13px; }
 .account-device-connect-actions > p > span { color: var(--text-muted); }
-.account-device-connect-actions > p > strong { overflow-wrap: anywhere; }
-.account-device-connect-actions > button { min-width: 145px; }
-.account-device-progress { display: flex; gap: 13px; padding: 18px; border: 1px solid #6796bb55; border-radius: 12px; align-items: center; }
-.account-device-progress > div { flex: 1; }
-.account-device-progress strong { font-size: 13px; }
-.account-device-progress p { color: var(--text-muted); font-size: 12px; margin: 5px 0 0; }
-.account-device-secondary-note,.account-device-select-hint { font-size: 11px; color: var(--text-muted); margin: 12px 0 0; }
-.account-devices-footer { display: flex; gap: 9px; color: var(--text-muted); align-items: flex-start; padding-top: 21px; margin-top: 20px; border-top: 1px solid var(--line, #303b49); }
+.account-device-connect-actions > p > svg { flex-shrink: 0; }
+.account-device-connect-actions > p > strong { min-width: 0; overflow-wrap: anywhere; }
+.account-device-connect-actions > button { min-width: 160px; flex-shrink: 0; }
+.account-device-progress { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px; border: 1px solid var(--experience-selection-border); border-radius: 12px; background: var(--experience-selection); }
+.account-device-progress > svg { flex-shrink: 0; color: var(--experience-accent); }
+.account-device-progress > div { flex: 1 1 200px; min-width: 0; }
+.account-device-progress strong { font-size: 14px; }
+.account-device-progress p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
+.account-device-secondary-note,
+.account-device-select-hint { margin: 12px 0 0; color: var(--text-muted); font-size: 12px; }
+
+.account-devices-footer { display: flex; align-items: flex-start; gap: 12px; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--experience-line); color: var(--text-muted); }
 .account-devices-footer > svg { flex: 0 0 16px; margin-top: 3px; }
-.account-devices-footer > p { margin: 0; font-size: 11px; }
-.account-device-details { margin-top: 14px; font-size: 11px; color: var(--text-muted); }
-.account-device-details > summary { cursor: pointer; padding: 5px 0; }
-.account-device-details p { margin: 6px 0; }
-.account-device-details dl > div { display: flex; justify-content: space-between; margin-top: 5px; }
-.account-devices-feedback { padding: 13px 16px; background: #b28c3f15; border: 1px solid #c4a06855; border-radius: 10px; color: var(--text-label); font-size: 12px; margin: 16px 0; }
+.account-devices-footer > p { margin: 0; font-size: 12px; }
+.account-device-details { margin-top: 8px; color: var(--text-muted); font-size: 12px; }
+.account-device-details p { margin: 8px 0; overflow-wrap: anywhere; }
+.account-device-details dl { margin: 16px 0 0; }
+.account-device-details dl > div { display: flex; justify-content: space-between; gap: 16px; margin-top: 8px; }
+.account-device-details dt { flex: 0 1 auto; }
+.account-device-details dd { min-width: 0; margin: 0; color: var(--text-label); text-align: right; overflow-wrap: anywhere; }
+.account-devices-feedback { margin: 16px 0; padding: 16px; border: 1px solid var(--experience-warning-line); border-radius: 12px; background: var(--experience-warning-soft); color: var(--text-label); font-size: 13px; overflow-wrap: anywhere; }
 .account-devices-feedback > p { margin: 0; }
-.account-devices-feedback > button { margin-top: 10px; }
-.account-devices-add { display: flex; align-items: center; gap: 15px; padding: 20px; background: var(--surface-2); border-radius: 12px; border: 1px solid var(--line, #374352); margin-bottom: 18px; }
-.account-devices-add > div { flex: 1; }
-.account-devices-add p { font-size: 12px; color: var(--text-muted); margin: 5px 0 0; }
-.account-devices-loading { display: flex; gap: 12px; color: var(--text-muted); font-size: 13px; padding: 15px 0; }
-.account-device-dialog { background: var(--surface, #171c24); color: var(--text, #f4f5f6); border: 1px solid var(--line, #475364); border-radius: 18px; box-shadow: 0 32px 100px #0009; padding: 25px; width: min(540px, calc(100vw - 40px)); max-height: calc(100vh - 40px); overflow-y: auto; }
-.account-device-dialog::backdrop { background: #05090f99; backdrop-filter: blur(5px); }
-.account-device-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 14px; }
-.account-device-dialog h3 { font-size: 21px; line-height: 1.4; }
-.account-device-dialog > header > button { padding: 3px; }
-.account-device-dialog > p { color: var(--text-muted); font-size: 13px; }
-.account-device-dialog > footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding-top: 20px; }
-.account-device-dialog .danger { color: #e69a8c; }
-.account-device-review-name { display: flex; align-items: center; gap: 13px; padding: 18px; border: 1px solid #6c96b355; background: #5a8cad10; border-radius: 12px; margin: 18px 0; }
-.account-device-review-name > span { display: flex; flex-direction: column; gap: 6px; flex: 1; }
-.account-device-review-name strong { font-size: 15px; overflow-wrap: anywhere; }
-.account-device-review-name small { font-size: 11px; color: var(--text-muted); }
-.account-device-review-name > svg:last-child { color: #79c7a9; }
-.account-main-options { border: 0; padding: 0; margin: 18px 0 0; min-width: 0; }
-.account-main-options legend { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
-.account-main-options label { display: flex; gap: 12px; align-items: center; padding: 14px; border: 1px solid var(--line, #354352); border-radius: 10px; margin-bottom: 8px; cursor: pointer; }
-.account-main-options label[data-selected="true"] { border-color: #6b99bf; background: #6b99bf0c; }
-.account-main-options label > span { display: flex; flex-direction: column; gap: 5px; }
-.account-main-options strong { font-size: 13px; }
-.account-main-options small { font-size: 11px; color: var(--text-muted); }
-.account-device-notification { position: fixed; z-index: 150; bottom: 24px; right: 24px; width: min(380px, calc(100vw - 32px)); display: flex; gap: 13px; align-items: flex-start; background: var(--surface-raised, #171e27); border: 1px solid #708fab66; border-radius: 14px; padding: 18px; box-shadow: 0 12px 45px #0006; color: var(--text); }
+.account-devices-feedback > button { margin-top: 12px; }
+.account-devices-add { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; padding: 20px; border: 1px solid var(--experience-line); border-radius: 14px; background: var(--experience-muted); }
+.account-devices-add > svg { flex-shrink: 0; color: var(--experience-accent); }
+.account-devices-add > div { flex: 1 1 220px; min-width: 0; }
+.account-devices-add p { margin: 8px 0 0; color: var(--text-muted); font-size: 13px; }
+.account-devices-loading { display: flex; gap: 12px; margin: 16px 0; color: var(--text-muted); font-size: 13px; }
+
+.account-device-dialog {
+  box-sizing: border-box;
+  width: min(600px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  padding: 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--experience-line-strong);
+  border-radius: 20px;
+  background: var(--experience-panel, var(--surface));
+  color: var(--text);
+  box-shadow: var(--experience-dialog-shadow);
+}
+.account-device-dialog::backdrop { background: rgba(5, 11, 20, .68); backdrop-filter: blur(4px); }
+.account-device-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.account-device-dialog h3 { align-self: center; font-size: 22px; line-height: 1.35; letter-spacing: -.3px; }
+.account-device-dialog > header > button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; width: 44px; padding: 0; }
+.account-device-dialog > p { margin: 12px 0; color: var(--text-muted); font-size: 14px; }
+.account-device-dialog > footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--experience-line); }
+.account-device-dialog button.danger { color: var(--experience-danger); }
+.account-device-dialog > footer > .danger:first-child { margin-inline-end: auto; }
+.account-device-dialog-current { padding: 12px 16px; border-radius: 10px; background: var(--experience-muted); }
+.account-device-review-name { display: flex; align-items: center; gap: 12px; margin: 20px 0; padding: 16px; border: 1px solid var(--experience-selection-border); border-radius: 12px; background: var(--experience-selection); }
+.account-device-review-name > span { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+.account-device-review-name > svg { flex-shrink: 0; color: var(--experience-accent); }
+.account-device-review-name strong { overflow-wrap: anywhere; font-size: 15px; line-height: 1.5; }
+.account-device-review-name small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.account-main-options { min-width: 0; margin: 24px 0 0; padding: 0; border: 0; }
+.account-main-options legend { margin-bottom: 12px; color: var(--text-label); font-size: 14px; font-weight: 650; }
+.account-main-options label { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; padding: 16px; border: 1px solid var(--experience-line); border-radius: 12px; background: var(--experience-muted); cursor: pointer; }
+.account-main-options label[data-selected="true"] { border-color: var(--experience-selection-border); background: var(--experience-selection); }
+.account-main-options label > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.account-main-options label > svg { flex-shrink: 0; color: var(--experience-accent); }
+.account-main-options strong { overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.account-main-options small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.account-main-options:disabled label { cursor: not-allowed; }
+
+.account-device-notification { position: fixed; z-index: 150; right: 24px; bottom: 24px; display: flex; align-items: flex-start; gap: 12px; box-sizing: border-box; width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 20px; overflow-y: auto; border: 1px solid var(--experience-line-strong); border-radius: 16px; background: var(--experience-panel, var(--surface-raised)); box-shadow: var(--experience-dialog-shadow); color: var(--text); }
 .account-device-notification > div { flex: 1; min-width: 0; }
-.account-device-notification strong { font-size: 13px; }
-.account-device-notification p { margin: 6px 0 10px; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
-.account-device-notification .link-button { display: inline-flex; align-items: center; gap: 5px; color: var(--text-label); font-size: 12px; }
-.account-device-dismiss { padding: 0; }
-.account-devices-card button:focus-visible,.account-device-dialog button:focus-visible,.account-device-notification button:focus-visible,
-.account-devices-card input:focus-visible,.account-device-dialog input:focus-visible,.account-devices-card summary:focus-visible { outline: 2px solid #90b9df; outline-offset: 4px; }
-@media(max-width: 820px) {
-  .account-devices-card { padding: 21px; }
-  .account-main-device { flex-wrap: wrap; padding: 18px; }
-  .account-main-actions { flex-direction: row; width: 100%; align-items: center; padding-left: 64px; }
-  .account-device-select { gap: 10px; flex-wrap: wrap; }
-  .account-device-state { margin-left: 67px; }
-  .account-device-description { flex-basis: calc(100% - 90px); }
-  .account-device-section-heading { display: block; }
-  .account-device-section-heading > small { display: block; margin-top: 8px; }
-  .account-device-progress { flex-wrap: wrap; }
+.account-device-notification strong { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.account-device-notification p { margin: 8px 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.account-device-notification .link-button { display: inline-flex; align-items: center; gap: 8px; padding: 8px 0; color: var(--experience-accent); font-size: 13px; text-align: left; }
+.account-device-notification .account-device-dismiss { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; width: 44px; margin: -8px -8px 0 0; padding: 0; }
+
+.account-devices-card:focus-visible,
+:is(.account-devices-card, .account-device-dialog, .account-device-notification) :is(button, input, summary):focus-visible {
+  outline: 3px solid var(--experience-focus);
+  outline-offset: 3px;
 }
-@media(max-width: 480px) {
-  .account-devices-card { padding: 17px; border-radius: 14px; }
-  .account-devices-heading { align-items: flex-start; gap: 12px; }
-  .account-devices-card h3 { font-size: 22px; }
-  .account-devices-heading-copy > p { font-size: 12px; }
-  .account-devices-refresh { min-width: 0; padding: 9px; font-size: 11px; }
-  .account-device-steps { flex-direction: column; gap: 9px; margin: 20px 0; }
-  .account-devices-own > small { margin-left: 0; flex-basis: 100%; }
-  .account-main-symbol { width: 38px; height: 38px; flex-basis: 38px; }
-  .account-main-device { gap: 11px; }
-  .account-main-actions { padding-left: 0; flex-direction: column; align-items: stretch; }
+.account-device-row:has(input:focus-visible) { border-color: var(--experience-focus); }
+
+@container katosync-devices (max-width: 680px) {
+  .account-main-device { grid-template-columns: 48px minmax(0, 1fr); }
+  .account-main-actions { grid-column: 2; flex-direction: row; flex-wrap: wrap; align-items: center; }
   .account-main-actions button { max-width: none; }
-  .account-device-connect-actions { align-items: stretch; flex-direction: column; gap: 15px; }
-  .account-devices-add { flex-wrap: wrap; }
-  .account-devices-add > div { flex-basis: calc(100% - 50px); }
-  .account-devices-add > button { width: 100%; }
-  .account-device-dialog { padding: 20px; }
-  .account-device-dialog > footer > button { flex: 1 1 auto; }
-  .account-device-notification { right: 16px; bottom: 16px; }
+  .account-device-select { grid-template-columns: 18px 40px minmax(0, 1fr); }
+  .account-device-state { grid-column: 3; margin-top: -4px; }
+  .account-devices-own > small { flex-basis: 100%; margin-left: 0; }
 }
-@media(prefers-reduced-motion: reduce) { .account-devices-card *, .account-device-dialog * { transition: none !important; animation-duration: .01ms !important; } }
+
+@container katosync-devices (max-width: 500px) {
+  .account-devices-heading { flex-direction: column; gap: 16px; }
+  .account-device-steps { flex-direction: column; gap: 12px; }
+  .account-main-device { padding: 16px; }
+  .account-main-actions { grid-column: 1 / -1; width: 100%; }
+  .account-main-actions button { flex: 1 1 160px; }
+  .account-device-section-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .account-device-connect-actions { align-items: stretch; flex-direction: column; gap: 16px; }
+  .account-devices-add { padding: 16px; }
+  .account-devices-add > div { flex-basis: calc(100% - 48px); }
+  .account-devices-add > button { width: 100%; }
+}
+
+@container katosync-devices (max-width: 380px) {
+  .account-device-row { --device-content-inset: 86px; }
+  .account-device-select { grid-template-columns: 18px 36px minmax(0, 1fr); gap: 10px; padding: 12px; }
+  .account-device-select > .account-device-icon { width: 36px; height: 36px; }
+  .account-devices-card .account-device-manage { margin-inline-end: 12px; }
+  .account-device-via-main { margin-inline-end: 12px; }
+  .account-device-modes > label { padding: 12px; }
+  .account-device-details dl > div { flex-direction: column; gap: 4px; }
+  .account-device-details dd { text-align: left; }
+}
+
+@media (max-width: 480px) {
+  .account-devices-card.glass { padding: 20px; border-radius: 16px; }
+  .account-devices-card h3 { font-size: 22px; }
+  .account-device-dialog { width: calc(100vw - 32px); max-height: calc(100dvh - 32px); padding: 20px; border-radius: 16px; }
+  .account-device-dialog h3 { font-size: 20px; }
+  .account-device-dialog > footer > button { flex: 1 1 140px; }
+  .account-device-notification { right: 16px; bottom: 16px; padding: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.account-devices-card, .account-device-dialog, .account-device-notification),
+  :is(.account-devices-card, .account-device-dialog, .account-device-notification) * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}

@@ -1,3 +1,4 @@
+// Created by NMKato Solutions
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
@@ -5,17 +6,40 @@ const src=(p:string)=>readFileSync(new URL(p,import.meta.url),"utf8");
 const vision=src("../src/components/VisionWorkspace.tsx");
 const provider=src("../src/components/ProviderManager.tsx");
 const mesh=src("../src/components/MeshConnectionCard.tsx");
+const app=src("../src/App.tsx");
 test("Vision canvas remains clean",()=>{
  assert.ok(vision.includes("<VisionCanvas "));
  assert.ok(!vision.includes("MeshConnectionCard"));
  assert.ok(!vision.includes("renew_katoos_qa_session"));
 });
-test("Provider contains model, GitHub and Mesh connections",()=>{
- assert.ok(provider.includes("<MeshConnectionCard refreshEpoch={connectionRefreshEpoch} />"));
+test("Connections page mounts account devices under the signed-in gate alongside model and GitHub connections",()=>{
+ // Die Kontogerätekarte ersetzt den alten, stets ungepaarten V0-Diagnosestand.
+ const signedInDevices=[...provider.matchAll(/\{vm\.sessionStatus\.loggedIn\s*\?\s*\(([\s\S]*?)\)\s*:\s*null\}/g)]
+   .map(match=>match[1]).find(block=>/<AccountDevicesCard\b/.test(block));
+ assert.ok(signedInDevices,"Kontogeräte müssen innerhalb des angemeldeten Bereichs liegen");
+ assert.match(signedInDevices,/<AccountDevicesCard\s+refreshEpoch=\{connectionRefreshEpoch\}\s*\/>/);
+ assert.match(signedInDevices,/<RemoteMcpOwnerConsentCard\b[^>]*refreshEpoch=\{connectionRefreshEpoch\}[^>]*\/>/);
+ assert.equal((provider.match(/<AccountDevicesCard\b/g)??[]).length,1);
+ assert.doesNotMatch(provider,/<MeshConnectionCard\b/);
  assert.ok(provider.includes("GithubAppConnectionPanel"));
  assert.ok(provider.includes("cardProviders"));
 });
-test("Mesh card preserves secure backend gates",()=>{
+test("A single account mesh provider persists across gateway and workspace navigation",()=>{
+ const opening=/<AccountMeshProvider\b[^>]*>/.exec(app);
+ assert.ok(opening,"Der Kontokontext muss Gateway und Arbeitsbereiche umschließen");
+ assert.equal((app.match(/<AccountMeshProvider\b/g)??[]).length,1);
+ assert.equal((app.match(/<\/AccountMeshProvider>/g)??[]).length,1);
+ assert.match(opening[0],/key=\{vm\.sessionStatus\.email\s*\?\?\s*"signed-in-account"\}/);
+ assert.doesNotMatch(opening[0],/workspaceMode|visibleStep|activeStep/);
+ const closing=app.indexOf("</AccountMeshProvider>",opening.index);
+ assert.ok(closing>opening.index);
+ const sharedScope=app.slice(opening.index+opening[0].length,closing);
+ assert.match(sharedScope,/\{\s*!workspaceMode\s*\?\s*\(/);
+ for(const component of ["ModeGateway","ProviderManager","AccountDeviceNotifications"]){
+   assert.ok(sharedScope.includes("<"+component),"Gemeinsamer Kontokontext fehlt für "+component);
+ }
+});
+test("Legacy Mesh-v0 component preserves secure backend gates",()=>{
  assert.ok(mesh.includes("roster.discoveryOnly!==true"));
  assert.ok(mesh.includes("roster.transportReady!==false"));
  assert.ok(mesh.includes('actual.peerTransport!=="not_connected"'));

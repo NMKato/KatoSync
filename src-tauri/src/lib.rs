@@ -25,6 +25,7 @@ use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use walkdir::{DirEntry, WalkDir};
 
+mod app_command_scope;
 #[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
 mod app_instance;
 mod context_pack;
@@ -1118,7 +1119,7 @@ pub fn run() {
                 );
             }
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(app_command_scope::guard(tauri::generate_handler![
             desktop_widget::desktop_widget_show,
             desktop_widget::desktop_widget_hide,
             desktop_widget::desktop_widget_drag,
@@ -1298,7 +1299,7 @@ pub fn run() {
             remove_local_brain_model_version,
             test_provider,
             quit_app
-        ])
+        ]))
         .setup(|app| {
             let _ = app.path().app_data_dir().map(fs::create_dir_all);
             Ok(())

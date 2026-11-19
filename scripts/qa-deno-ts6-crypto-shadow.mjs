@@ -1,3 +1,4 @@
+// C8-Prüfstand 2d66076b243915d5ddd082e578104477d5d5aea0: feste Pins der bereits geprüften Inbox-Quellen.
 // NMKato Solutions — Shadow-only Deno 2.9.x crypto BufferSource compatibility QA.
 // Immutable SHA-pinned source never changes. No credentials, network or deploy.
 // Copies the whole local functions directory to an ephemeral 0700 QA folder,
@@ -13,10 +14,10 @@ import {spawnSync} from "node:child_process";
 const root=resolve(fileURLToPath(new URL("..",import.meta.url)));
 const src=join(root,"supabase/functions");
 const hashes={
- "mesh-inbox-send/send.ts":"74d27e69f91140fba8141b55d7bef1f6d96bf7c83226b1df81d4c5d03bd103ba",
+ "mesh-inbox-send/send.ts":"7817880a92bc41e99760c10a8c9dc433c95cb46f8c60970fd7da8c07cbe75923",
  "mesh-pairing-relay/protocol.ts":"539751297e03ecc6303915aac3287c7bcbcc8cce0c0812a7e1f81e8c3550bcdb",
  "mesh-device-presence-qa/heartbeat.ts":"b4f2f13e89a560f8a1b5b509cb5ba0485170d55b71f9018e898702b50ff8dd51",
- "mesh-inbox-receive/receive.ts":"bd76bbf3fa5c530760b510259f7a4f927c406f0d3c94aaf3e3fdd66dc4f4d099",
+ "mesh-inbox-receive/receive.ts":"a293aaea3dda891b07577a6d69bbc952f188f5990b1f18e82eb1603146ed9351",
 };
 for(const [name,expected] of Object.entries(hashes)){
  if(!expected)continue;

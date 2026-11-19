@@ -1,3 +1,4 @@
+// C8-Inventar: acht geprüfte SQL-Dateien; weitere Migrationen bleiben ausgeschlossen.
 // NMKato Solutions: QA-only Stage4E migration candidate and emergency freeze.
 // No Supabase network, no DDL outside the disposable Unix socket fixture.
 import test from "node:test";
@@ -20,7 +21,7 @@ test("QA gate rejects live network/unchecked SQL; candidate absent from Supabase
  }
  const actual=readdirSync(new URL("../supabase/migrations/",import.meta.url))
   .filter(x=>x.endsWith(".sql")).sort();
- assert.equal(actual.length,7);
+ assert.equal(actual.length,8);
  assert.equal(actual.includes("qa_only_hardening_candidate.sql"),false);
  assert.equal(actual.includes("qa_only_emergency_freeze.sql"),false);
 });

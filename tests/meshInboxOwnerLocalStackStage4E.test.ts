@@ -1,3 +1,4 @@
+// C8-Inventar: acht geprüfte SQL-Dateien; weitere Migrationen bleiben ausgeschlossen.
 // KatoSync Stage4E — static proof that the real-PG17 localstack QA
 // can only run as a disposable Unix-socket test, never a Cloud deployment.
 import test from "node:test";
@@ -64,5 +65,5 @@ test("CI integration container has no outbound network or writeable repository",
  assert.match(ci,/inbox-lifecycle-localstack/);
  assert.doesNotMatch(docker,/EXPOSE|COPY.*\.env|SUPABASE_SERVICE_ROLE_KEY/);
  assert.equal(readdirSync(new URL("../supabase/migrations/",import.meta.url))
-  .filter(p=>p.endsWith(".sql")).length,7);
+  .filter(p=>p.endsWith(".sql")).length,8);
 });

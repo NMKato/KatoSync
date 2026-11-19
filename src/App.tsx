@@ -302,6 +302,7 @@ export default function App() {
   // Root-Modus: pro Sitzung erst ueber das Gateway gewaehlt; der zuletzt genutzte Modus ist lokal
   // gemerkt und im Gateway vorausgewaehlt.
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | null>(null);
+  const [deviceFocusRequested, setDeviceFocusRequested] = useState(false);
   const [rememberedMode, setRememberedMode] = useState<WorkspaceMode | null>(() => readRememberedMode(localStorage));
   // The only auto-resume attempt is at authenticated startup, not whenever a
   // user intentionally switches back to the workspace gateway.
@@ -492,6 +493,25 @@ export default function App() {
     enterMode(mode);
   };
 
+  // Direkter Geräteeinstieg: nur navigieren; Registrierung und Freigabe bleiben explizit.
+  const openDevices = () => {
+    setDeviceFocusRequested(true);
+    enterModeAt("agentSync", "agentProviders");
+  };
+
+  useEffect(() => {
+    if (!deviceFocusRequested || workspaceMode !== "agentSync" || visibleStep !== "agentProviders" || licenseOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById("section-account-devices");
+      if (target) {
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ block: "start", behavior: "auto" });
+        setDeviceFocusRequested(false);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [deviceFocusRequested, workspaceMode, visibleStep, licenseOpen]);
+
   const acceptLicense = () => {
     localStorage.setItem(acceptedLicenseKey, licenseAgreement.version);
     setLicenseChecked(false);
@@ -670,7 +690,7 @@ export default function App() {
     <AccountMeshProvider key={vm.sessionStatus.email ?? "signed-in-account"}>
       {!workspaceMode ? (
         <>
-          <ModeGateway onChoose={enterMode} remembered={rememberedMode} />
+          <ModeGateway onChoose={enterMode} onOpenDevices={openDevices} remembered={rememberedMode} />
           {licenseDialog}
           {vm.logoutFlow ? <LogoutDialog vm={vm} /> : null}
           {vm.cloudPasswordPrompt ? <CloudPasswordDialog vm={vm} /> : null}
@@ -1596,7 +1616,7 @@ export default function App() {
       {vm.cloudPasswordPrompt ? <CloudPasswordDialog vm={vm} /> : null}
     </div>
       )}
-      <AccountDeviceNotifications devicesVisible={workspaceMode === "agentSync" && visibleStep === "agentProviders"} onOpenDevices={() => enterModeAt("agentSync", "agentProviders")} />
+      <AccountDeviceNotifications devicesVisible={workspaceMode === "agentSync" && visibleStep === "agentProviders"} onOpenDevices={openDevices} />
     </AccountMeshProvider>
   );
 }

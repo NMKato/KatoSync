@@ -1,3 +1,4 @@
+// C8-Inventar: acht geprüfte SQL-Dateien; weitere Migrationen bleiben ausgeschlossen.
 // NMKato Solutions: QA-only inbox terminal lifecycle, never a live migration.
 // Real PG17 behavior is covered by the separate hermetic runner.
 import test from "node:test";
@@ -132,7 +133,7 @@ test("race test uses two different local sessions, row lock and checks exact win
 });
 test("no new deployed migration or public Edge function, no client rights granted",()=>{
  const migrations=readdirSync(new URL("../supabase/migrations/",import.meta.url)).filter(x=>x.endsWith(".sql"));
- assert.equal(migrations.length,7);
+ assert.equal(migrations.length,8);
  assert.doesNotMatch(generator,/GRANT EXECUTE ON FUNCTION katosync\.mesh_inbox_terminal_close_qa\(uuid,uuid,text\)[\s\S]*?TO authenticated/);
  assert.match(generator,/REVOKE ALL ON FUNCTION katosync\.mesh_inbox_terminal_close_qa\(uuid,uuid,text\)/);
  assert.match(generator,/ALTER TABLE katosync\.mesh_inbox_lifecycle_audit_qa ENABLE ROW LEVEL SECURITY/);
