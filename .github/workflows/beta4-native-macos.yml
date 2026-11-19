@@ -73,6 +73,9 @@ jobs:
       - name: Build actual TypeScript and Vite frontend
         run: npm run build
 
+      - name: Verify account-device onboarding contracts
+        run: node --experimental-strip-types --test tests/accountMeshOnboarding.test.ts
+
       - name: Install the compiler pinned in rust-toolchain.toml
         shell: bash
         run: |
