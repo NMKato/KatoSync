@@ -662,21 +662,20 @@ export default function App() {
     />
   ) : null;
 
-  if (!workspaceMode) {
-    return (
-      <>
-        <ModeGateway onChoose={enterMode} remembered={rememberedMode} />
-        {licenseDialog}
-        {vm.logoutFlow ? <LogoutDialog vm={vm} /> : null}
-        {vm.cloudPasswordPrompt ? <CloudPasswordDialog vm={vm} /> : null}
-      </>
-    );
-  }
-
   const navSteps = isAgentSync ? agentSyncSteps : mistralSteps;
 
+  // Kontoverbindungen und Gerätehinweise leben ab der Anmeldung über beide
+  // Ansichten hinweg; die Workspacewahl darf diesen Zustand nicht neu starten.
   return (
     <AccountMeshProvider key={vm.sessionStatus.email ?? "signed-in-account"}>
+      {!workspaceMode ? (
+        <>
+          <ModeGateway onChoose={enterMode} remembered={rememberedMode} />
+          {licenseDialog}
+          {vm.logoutFlow ? <LogoutDialog vm={vm} /> : null}
+          {vm.cloudPasswordPrompt ? <CloudPasswordDialog vm={vm} /> : null}
+        </>
+      ) : (
     <div className={`app-shell mode-${workspaceMode}`}>
       <aside className="sidebar">
         <div className="brand">
@@ -1595,8 +1594,9 @@ export default function App() {
 
       {vm.logoutFlow ? <LogoutDialog vm={vm} /> : null}
       {vm.cloudPasswordPrompt ? <CloudPasswordDialog vm={vm} /> : null}
-      <AccountDeviceNotifications devicesVisible={visibleStep === "agentProviders"} onOpenDevices={() => enterModeAt("agentSync", "agentProviders")} />
     </div>
+      )}
+      <AccountDeviceNotifications devicesVisible={workspaceMode === "agentSync" && visibleStep === "agentProviders"} onOpenDevices={() => enterModeAt("agentSync", "agentProviders")} />
     </AccountMeshProvider>
   );
 }
