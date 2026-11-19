@@ -14,6 +14,10 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsStream;
 
+pub(crate) mod account;
+mod lan;
+mod profile;
+
 const PORT: u16 = 49284;
 const TAILSCALE: &str = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
 const STATUS_LIMIT: usize = 131_072;
@@ -132,6 +136,9 @@ fn snapshot_fresh(
 }
 
 pub fn mesh_connection_status() -> Result<ConnectionStatus, String> {
+    if let Some(status) = account::legacy_status() {
+        return Ok(status);
+    }
     let wall = now_ms()?;
     let mut current = runtime()
         .lock()
@@ -181,6 +188,7 @@ async fn cancel_previous() -> Result<u64, String> {
 /// Native auth lifecycle hook: invalidate visible state and all in-flight
 /// publications before credentials are cleared or the account is replaced.
 pub(crate) fn invalidate_owner_session() {
+    account::invalidate_owner_session();
     let mut current = match runtime().lock() {
         Ok(current) => current,
         Err(poisoned) => poisoned.into_inner(),
@@ -197,6 +205,7 @@ pub(crate) fn invalidate_owner_session() {
 }
 
 pub async fn mesh_connection_stop() -> Result<ConnectionStatus, String> {
+    account::stop_all().await?;
     cancel_previous().await?;
     mesh_connection_status()
 }
@@ -205,34 +214,8 @@ pub async fn mesh_connection_start(
     peer_fingerprint: String,
     role: ConnectionRole,
 ) -> Result<ConnectionStatus, String> {
-    if !cfg!(all(target_os = "macos", feature = "stage4j-qa")) {
-        return Err("MESH_CONNECTION_NOT_CONFIGURED".into());
-    }
-    if !public_pin(&peer_fingerprint) {
-        return Err("MESH_CONNECTION_INVALID_PEER".into());
-    }
-    let generation = cancel_previous().await?;
-    let (cancel, mut stopped) = watch::channel(false);
-    let mut current = runtime()
-        .lock()
-        .map_err(|_| "MESH_CONNECTION_STATE_UNAVAILABLE")?;
-    if current.generation != generation {
-        return Err("MESH_CONNECTION_CANCELLED".into());
-    }
-    current.status = ConnectionStatus {
-        state: "discovering",
-        role: Some(role),
-        peer_fingerprint: Some(peer_fingerprint.clone()),
-        ..ConnectionStatus::default()
-    };
-    current.cancellation = Some(cancel);
-    current.task = Some(tokio::spawn(async move {
-        tokio::select! {
-            _ = stopped.changed() => {},
-            _ = run(generation, role, peer_fingerprint) => {},
-        }
-    }));
-    Ok(current.status.clone())
+    // Auch der historische IPC-/Smoke-Einstieg darf die Cloud-Hauptrolle nicht umgehen.
+    account::start_legacy(peer_fingerprint, role).await
 }
 
 struct TailnetDiscovery {

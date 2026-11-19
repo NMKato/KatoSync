@@ -1,6 +1,7 @@
 // Created by NMKato Solutions
 //! Locally approved, revocable Ed25519 public-key pins. NOT connected peers.
-//! Approval requires a fresh, signed, two-way Stage-1B proof plus typed SAS.
+//! Approval requires a fresh signed two-way proof plus an explicit user review:
+//! either typed SAS or the exact key from the authenticated same-owner directory.
 //! No network listener, remote job, credentials or silent device acceptance.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -249,6 +250,170 @@ fn valid_sas(value: &str) -> bool {
                 && p.bytes()
                     .all(|x| x.is_ascii_hexdigit() && !x.is_ascii_lowercase())
         })
+}
+
+/// Native Kontofreigabe: der frische gegenseitige Besitznachweis bleibt Pflicht.
+/// Der vollständige registrierte Cloud-Schlüssel ersetzt ausschließlich den
+/// manuellen Codevergleich als authentisierte Schlüsselquelle. Kein IPC nimmt
+/// dafür ein vermeintliches `confirmedCode` entgegen.
+#[derive(Clone, Debug)]
+pub(crate) struct AccountPendingProof {
+    pub public_key: String,
+    pub fingerprint: String,
+    pub expires_at_ms: u64,
+    pub binding: String,
+}
+
+fn pending_binding(raw: &str) -> String {
+    use sha2::{Digest, Sha256};
+    URL_SAFE_NO_PAD.encode(Sha256::digest(raw.as_bytes()))
+}
+
+fn check_account_pending(
+    pending: &PendingApproval,
+    cloud_public_key: &str,
+    local_key: &VerifyingKey,
+    now: i64,
+) -> Result<VerifyingKey, String> {
+    if now >= pending.expires_at
+        || pending.expires_at > now + 300
+        || !valid_sas(&pending.comparison_code)
+        || pending.public_key != cloud_public_key
+    {
+        return Err("MESH_ACCOUNT_PROOF_CHANGED".into());
+    }
+    let peer = parse_key(&pending.public_key).map_err(|_| "MESH_ACCOUNT_PROOF_INVALID")?;
+    if peer == *local_key {
+        return Err("MESH_ACCOUNT_INVALID_PEER".into());
+    }
+    Ok(peer)
+}
+
+pub(crate) fn account_pending_proof(
+    owner_id: &str,
+    cloud_public_key: &str,
+) -> Result<AccountPendingProof, String> {
+    let signing = crate::mesh_identity::existing_identity(owner_id)
+        .map_err(|_| "MESH_ACCOUNT_LOCAL_IDENTITY_CHANGED")?;
+    let _guard = state_lock()
+        .lock()
+        .map_err(|_| "MESH_ACCOUNT_PROOF_UNAVAILABLE")?;
+    let raw = read_raw(owner_id, PENDING_ACCOUNT)?.ok_or("MESH_ACCOUNT_PROOF_REQUIRED")?;
+    if raw.len() > 1024 {
+        return Err("MESH_ACCOUNT_PROOF_INVALID".into());
+    }
+    let pending: PendingApproval =
+        serde_json::from_str(&raw).map_err(|_| "MESH_ACCOUNT_PROOF_INVALID")?;
+    let key = check_account_pending(
+        &pending,
+        cloud_public_key,
+        &signing.verifying_key(),
+        Utc::now().timestamp(),
+    )?;
+    Ok(AccountPendingProof {
+        public_key: pending.public_key.clone(),
+        fingerprint: fingerprint(&key),
+        expires_at_ms: u64::try_from(pending.expires_at)
+            .map_err(|_| "MESH_ACCOUNT_PROOF_INVALID")?
+            * 1000,
+        binding: pending_binding(&raw),
+    })
+}
+
+/// Nur der native, vom Nutzer bestätigte Review-Handler darf diesen Commit aufrufen.
+/// Seine Cloud-/Owner-/Revision-/Generationprüfung findet unmittelbar davor statt.
+pub(crate) fn approve_account_pending(
+    owner_id: &str,
+    cloud_public_key: &str,
+    expected_binding: &str,
+) -> Result<PeerInventory, String> {
+    let signing = crate::mesh_identity::existing_identity(owner_id)
+        .map_err(|_| "MESH_ACCOUNT_LOCAL_IDENTITY_CHANGED")?;
+    let _guard = state_lock()
+        .lock()
+        .map_err(|_| "MESH_ACCOUNT_PROOF_UNAVAILABLE")?;
+    let raw = read_raw(owner_id, PENDING_ACCOUNT)?.ok_or("MESH_ACCOUNT_PROOF_REQUIRED")?;
+    if raw.len() > 1024 || pending_binding(&raw) != expected_binding {
+        return Err("MESH_ACCOUNT_PROOF_CHANGED".into());
+    }
+    let pending: PendingApproval =
+        serde_json::from_str(&raw).map_err(|_| "MESH_ACCOUNT_PROOF_INVALID")?;
+    let now = Utc::now().timestamp();
+    let peer = check_account_pending(&pending, cloud_public_key, &signing.verifying_key(), now)?;
+    let mut peers = parse_inventory(read_raw(owner_id, TRUST_ACCOUNT)?)?;
+    approve_peer(&mut peers, &peer, now)?;
+    clear_raw(owner_id, PENDING_ACCOUNT)?;
+    save_raw(
+        owner_id,
+        TRUST_ACCOUNT,
+        &serde_json::to_string(&peers).map_err(|_| "MESH_ACCOUNT_PROOF_INVALID")?,
+    )?;
+    Ok(inventory(peers))
+}
+
+/// Owner und voller Schlüssel stammen aus der unmittelbar vorher nativ
+/// verifizierten Kontoliste. Der Aufrufer hält dabei seinen Logout-/Stop-Fence.
+/// Ein fremder ausstehender Besitznachweis wird nicht gelöscht.
+pub(crate) fn revoke_account_peer(
+    owner_id: &str,
+    cloud_public_key: &str,
+    expected_fingerprint: &str,
+) -> Result<(), String> {
+    let key = parse_key(cloud_public_key).map_err(|_| "MESH_ACCOUNT_PEER_CHANGED")?;
+    if fingerprint(&key) != expected_fingerprint {
+        return Err("MESH_ACCOUNT_PEER_CHANGED".into());
+    }
+    let _guard = state_lock()
+        .lock()
+        .map_err(|_| "MESH_ACCOUNT_PROOF_UNAVAILABLE")?;
+    let mut peers = parse_inventory(read_raw(owner_id, TRUST_ACCOUNT)?)?;
+    peers.retain(|peer| {
+        !(peer.public_key == cloud_public_key && peer.fingerprint == expected_fingerprint)
+    });
+    let encoded = serde_json::to_string(&peers).map_err(|_| "MESH_ACCOUNT_PROOF_INVALID")?;
+    save_raw(owner_id, TRUST_ACCOUNT, &encoded)?;
+    if read_raw(owner_id, TRUST_ACCOUNT)?.as_deref() != Some(encoded.as_str()) {
+        return Err("MESH_ACCOUNT_PROOF_UNAVAILABLE".into());
+    }
+    if let Some(raw) = read_raw(owner_id, PENDING_ACCOUNT)? {
+        if raw.len() <= 1024
+            && serde_json::from_str::<PendingApproval>(&raw)
+                .is_ok_and(|pending| pending.public_key == cloud_public_key)
+        {
+            clear_raw(owner_id, PENDING_ACCOUNT)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod account_pending_tests {
+    use super::*;
+    #[test]
+    fn account_approval_requires_fresh_mutual_proof_and_full_cloud_key() {
+        let own = ed25519_dalek::SigningKey::from_bytes(&[19; 32]);
+        let peer = ed25519_dalek::SigningKey::from_bytes(&[23; 32]);
+        let public = URL_SAFE_NO_PAD.encode(peer.verifying_key().as_bytes());
+        let pending = PendingApproval {
+            public_key: public.clone(),
+            comparison_code: "A123-B456-C789".into(),
+            expires_at: 1100,
+        };
+        assert!(check_account_pending(&pending, &public, &own.verifying_key(), 1000).is_ok());
+        assert!(check_account_pending(&pending, &public, &own.verifying_key(), 1100).is_err());
+        assert!(check_account_pending(&pending, &public, &own.verifying_key(), 700).is_err());
+        assert!(check_account_pending(
+            &pending,
+            &URL_SAFE_NO_PAD.encode(own.verifying_key().as_bytes()),
+            &own.verifying_key(),
+            1000
+        )
+        .is_err());
+        assert!(check_account_pending(&pending, &public, &peer.verifying_key(), 1000).is_err());
+        let raw = serde_json::to_string(&pending).unwrap();
+        let changed = raw.replace("1100", "1101");
+        assert_ne!(pending_binding(&raw), pending_binding(&changed));
+    }
 }
 
 #[tauri::command]
