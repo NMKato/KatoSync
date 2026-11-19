@@ -13,6 +13,7 @@ import { chromium } from "playwright";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const output = resolve(process.argv[2] || join(tmpdir(), "katosync-account-ui-" + Date.now()));
+const railOnly = process.argv.slice(3).includes("--rail-only");
 await mkdir(output, { recursive: true });
 await build({
   absWorkingDir: root, entryPoints: ["tests/fixtures/accountMeshUi.tsx"], bundle: true,
@@ -62,7 +63,7 @@ async function open({ scene = "ready", width = 1240, height = 820, lang = "de",
   const url = new URL(origin);
   for (const [key, value] of Object.entries({ scene, lang, theme, names, view, brain })) url.searchParams.set(key, value);
   await page.goto(url.href, { waitUntil: "load", timeout: 90_000 });
-  await page.locator(view === "gateway" ? ".mode-gateway" : view === "brain" ? ".local-brain-card" : ".account-devices-card").waitFor();
+  await page.locator(view === "gateway" ? ".mode-gateway" : view === "brain" ? ".local-brain-card" : view === "rail" ? ".qa-sidebar-rail" : ".account-devices-card").waitFor();
   const state = await page.evaluate(() => ({
     theme: document.documentElement.dataset.theme,
     background: getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
@@ -180,10 +181,65 @@ async function visibleKeyboardFocus(locator) {
     "Ein sichtbarer Fokusring muss vorhanden sein");
 }
 
+// Die Regression war innerhalb der App sichtbar, obwohl die Seite selbst nicht horizontal scrollte.
+async function sidebarRailChecks() {
+  for (const theme of ["dark", "light"]) {
+    await open({ view: "rail", theme, width: 1040, height: 720 });
+    await snapshot("sidebar-rail-" + theme + "-1040x720");
+    const geometry = await page.locator(".sidebar").evaluate(sidebar => {
+      const rect = element => element.getBoundingClientRect().toJSON();
+      const badge = sidebar.querySelector(".sidebar-katoos-family-badge");
+      return {
+        rail: rect(sidebar), modeButtons: [...sidebar.querySelectorAll(".mode-switch button")].map(rect),
+        footerButtons: [...sidebar.querySelectorAll(".sidebar-footer button")].map(rect),
+        badge: rect(badge), badgeContent: badge.scrollWidth, badgeWidth: badge.clientWidth
+      };
+    });
+    assert.equal(geometry.rail.width, 80, "1040 px müssen die echte kompakte Sidebar auslösen");
+    for (const button of geometry.modeButtons) {
+      assert.ok(button.left >= geometry.rail.left && button.right <= geometry.rail.right,
+        "Der Moduswechsel muss innerhalb der Sidebar bleiben: " + JSON.stringify(geometry));
+      assert.ok(button.width >= 44 && button.height >= 44, "Die Modusbuttons brauchen 44 px große Trefferflächen");
+    }
+    assert.ok(geometry.modeButtons[1].top >= geometry.modeButtons[0].bottom,
+      "Die beiden kompakten Modusbuttons dürfen sich nicht überlagern");
+    for (const button of geometry.footerButtons) {
+      assert.ok(button.width >= 44 && button.height >= 44, "Footerbuttons brauchen mindestens 44 px große Trefferflächen");
+      assert.ok(button.left >= geometry.rail.left && button.right <= geometry.rail.right,
+        "Ein Footerbutton ragt in den Arbeitsbereich");
+    }
+    assert.ok(geometry.badge.left >= geometry.rail.left && geometry.badge.right <= geometry.rail.right,
+      "Der Kontobadge muss innerhalb der Sidebar bleiben");
+    assert.ok(geometry.badgeContent <= geometry.badgeWidth, "Der Badge-Text darf nicht abgeschnitten sein");
+    assert.equal(await page.locator(".app-version-label").isVisible(), false,
+      "Die Versionszeile gehört nicht in die kompakte Icon-Leiste");
+    await noOverflow("sidebar-rail-" + theme);
+    const modes = page.getByRole("group", { name: "Workspace wechseln", exact: true });
+    const mistral = modes.getByRole("button", { name: "Zum Mistral Mode wechseln", exact: true });
+    const agent = modes.getByRole("button", { name: "Zu Agent Sync wechseln", exact: true });
+    await tabTo(mistral); await visibleKeyboardFocus(mistral); await page.keyboard.press("Enter");
+    assert.equal(await mistral.getAttribute("aria-pressed"), "true");
+    await page.keyboard.press("Tab"); await visibleKeyboardFocus(agent); await page.keyboard.press("Space");
+    assert.equal(await agent.getAttribute("aria-pressed"), "true");
+    assert.deepEqual(await actions(), [
+      { name: "choose", args: { mode: "mistral" } }, { name: "choose", args: { mode: "agentSync" } }
+    ], "Der Moduswechsel darf keine Geräte- oder Modellaktion auslösen");
+    await snapshot("sidebar-rail-focused-" + theme + "-1040x720");
+    log("sidebar-rail-contained-named-keyboard-controls", { theme, width: 1040, height: 720, geometry });
+  }
+  await open({ view: "rail", width: 1240, height: 820 });
+  assert.equal(await page.locator(".sidebar").evaluate(element => element.getBoundingClientRect().width), 232);
+  assert.equal(await page.locator(".app-version-label").isVisible(), true);
+  for (const label of await page.locator(".mode-switch button > span").all()) assert.equal(await label.isVisible(), true);
+  await noOverflow("sidebar-wide-control");
+  await snapshot("sidebar-wide-1240x820");
+  log("sidebar-wide-labels-preserved", { width: 1240, height: 820 });
+}
+
 const escapeHtml = value => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
 async function writeReport(status, failure) {
   await writeFile(join(output, "result.json"), JSON.stringify({
-    synthetic: true, scope: "components-with-mocked-handlers", status, browserVersion,
+    synthetic: true, scope: "components-with-mocked-handlers", selection: railOnly ? "sidebar-rail" : "all-components", status, browserVersion,
     reducedMotion: true, records, screenshots, contrastReports, errors, externalRequests,
     limitations: ["Keine Live-Geräte, Grants oder Modellstarts", "Kein vollständiger App-/Tauri-/WebKit-Nachweis",
       "390 px prüft nur eine isolierte Komponente", "Screenshots benötigen zusätzlich menschliche Sichtprüfung"],
@@ -208,6 +264,7 @@ try {
     if (new URL(route.request().url()).origin === origin) return route.continue();
     externalRequests.push(route.request().url()); return route.abort("blockedbyclient");
   });
+  if (!railOnly) {
   const dialog = page.getByRole("dialog");
 
   for (const theme of ["dark", "light"]) {
@@ -359,6 +416,8 @@ try {
       log("local-brain-synthetic-state", { brain, theme, width });
     }
   }
+  }
+  await sidebarRailChecks();
   assert.notEqual(themeBackgrounds.get("dark"), themeBackgrounds.get("light"), "Die beiden Themes müssen unterschiedliche Tokens verwenden");
   assert.deepEqual(errors, [], "Unerwartete Frontend-Ausnahme oder Konsolenfehler");
   assert.deepEqual(externalRequests, [], "Die Prüfung darf keine externen Browserrequests benötigen");

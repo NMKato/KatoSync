@@ -25,6 +25,9 @@ use tokio::{
 };
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
 
+#[path = "account_listener_recovery.rs"]
+mod listener_recovery;
+
 #[derive(Clone)]
 enum RouteKind {
     Lan(lan::LanInterface),
@@ -465,38 +468,57 @@ struct BoundListener {
     local: Ipv4Addr,
     kind: RouteKind,
 }
-async fn bind_listeners() -> Result<Vec<BoundListener>, String> {
-    let mut result = Vec::new();
-    if let Ok(local) = lan::local_interface().await {
-        if let Ok(listener) = TcpListener::bind(SocketAddr::V4(SocketAddrV4::new(
-            local.address,
-            legacy::PORT,
-        )))
-        .await
-        {
-            result.push(BoundListener {
-                listener,
-                local: local.address,
-                kind: RouteKind::Lan(local),
-            });
-        }
+fn listener_binding(listener: &BoundListener) -> listener_recovery::ListenerBinding {
+    listener_recovery::ListenerBinding {
+        kind: match &listener.kind {
+            RouteKind::Lan(_) => listener_recovery::ListenerKind::Lan,
+            RouteKind::Tailnet => listener_recovery::ListenerKind::Tailnet,
+        },
+        local: listener.local,
     }
-    if let Ok(tailnet) = legacy::discover().await {
-        if result.iter().all(|entry| entry.local != tailnet.local) {
-            if let Ok(listener) = TcpListener::bind(SocketAddr::V4(SocketAddrV4::new(
-                tailnet.local,
-                legacy::PORT,
-            )))
-            .await
-            {
-                result.push(BoundListener {
-                    listener,
-                    local: tailnet.local,
-                    kind: RouteKind::Tailnet,
-                });
+}
+async fn bind_missing_listeners(existing: &[BoundListener]) -> Vec<BoundListener> {
+    let occupied: Vec<_> = existing.iter().map(listener_binding).collect();
+    listener_recovery::bind_missing(
+        &occupied,
+        |kind| async move {
+            match kind {
+                listener_recovery::ListenerKind::Lan => {
+                    let local = lan::local_interface().await.ok()?;
+                    let listener = TcpListener::bind(SocketAddr::V4(SocketAddrV4::new(
+                        local.address,
+                        legacy::PORT,
+                    )))
+                    .await
+                    .ok()?;
+                    Some(BoundListener {
+                        listener,
+                        local: local.address,
+                        kind: RouteKind::Lan(local),
+                    })
+                }
+                listener_recovery::ListenerKind::Tailnet => {
+                    let tailnet = legacy::discover().await.ok()?;
+                    let listener = TcpListener::bind(SocketAddr::V4(SocketAddrV4::new(
+                        tailnet.local,
+                        legacy::PORT,
+                    )))
+                    .await
+                    .ok()?;
+                    Some(BoundListener {
+                        listener,
+                        local: tailnet.local,
+                        kind: RouteKind::Tailnet,
+                    })
+                }
             }
-        }
-    }
+        },
+        listener_binding,
+    )
+    .await
+}
+async fn bind_listeners() -> Result<Vec<BoundListener>, String> {
+    let result = bind_missing_listeners(&[]).await;
     if result.is_empty() {
         return Err("MESH_ACCOUNT_NETWORK_UNAVAILABLE".into());
     }
@@ -507,10 +529,10 @@ async fn server_cycle(owner: u64, intent: &ConnectionIntent) -> Result<(), Strin
     if intent.local_device_id != intent.main_device_id {
         return Err("MESH_ACCOUNT_ROLE_FROM_MAIN_ONLY".into());
     }
-    let listeners = bind_listeners().await?;
+    let mut listeners = bind_listeners().await?;
     // Ein Supervisor, höchstens je ein konkret gebundener LAN-/Overlaylistener;
     // keine neue Portbindung pro Teilnehmer und niemals eine Wildcardadresse.
-    let _bonjour = if listeners
+    let mut bonjour = if listeners
         .iter()
         .any(|entry| matches!(&entry.kind, RouteKind::Lan(_)))
     {
@@ -528,6 +550,13 @@ async fn server_cycle(owner: u64, intent: &ConnectionIntent) -> Result<(), Strin
         value.server_state = "listening";
         value.error_code = None;
     }
+    // Ein vorübergehender Discovery-/Bindfehler darf einen gültigen zweiten Pfad nicht dauerhaft ausschließen.
+    let retry_period = Duration::from_secs(10);
+    let mut listener_retry = tokio::time::interval_at(
+        tokio::time::Instant::now() + retry_period,
+        retry_period,
+    );
+    listener_retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         if !owner_current(owner) {
             return Err("MESH_ACCOUNT_OPERATION_CANCELLED".into());
@@ -542,10 +571,28 @@ async fn server_cycle(owner: u64, intent: &ConnectionIntent) -> Result<(), Strin
         let event = tokio::select! {
             result = listeners[0].listener.accept() => Some((0, result)),
             result = secondary => Some((1, result)),
-            _ = sleep(Duration::from_secs(10)) => None,
+            _ = listener_retry.tick() => None,
         };
         fresh(intent, None).await?;
         let Some((index, result)) = event else {
+            let additions = bind_missing_listeners(&listeners).await;
+            if !additions.is_empty() {
+                // Nach jeder asynchronen Wiederaufnahme bleiben Kontobindung und Eigentümergeneration verbindlich.
+                fresh(intent, None).await?;
+                if !owner_current(owner) {
+                    return Err("MESH_ACCOUNT_OPERATION_CANCELLED".into());
+                }
+                for listener in additions {
+                    if matches!(&listener.kind, RouteKind::Lan(_)) && bonjour.is_none() {
+                        let Ok(advertisement) = lan::advertise(&intent.local_fingerprint) else {
+                            // Der bestehende Overlaypfad bleibt auch bei fehlgeschlagener LAN-Ankündigung erhalten.
+                            continue;
+                        };
+                        bonjour = Some(advertisement);
+                    }
+                    listeners.push(listener);
+                }
+            }
             continue;
         };
         let (socket, source) = result.map_err(|_| "MESH_ACCOUNT_NETWORK_UNAVAILABLE")?;

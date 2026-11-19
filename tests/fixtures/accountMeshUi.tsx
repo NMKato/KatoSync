@@ -2,10 +2,12 @@
 // Ausschließlich synthetische UI-Daten: keine nativen Aufrufe, Downloads oder Gerätefreigaben.
 import React, { useEffect, useState, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
-import { I18nProvider } from "../../src/i18n";
+import { I18nProvider, useT } from "../../src/i18n";
+import { Bot, Eye, FileText, Gauge, Languages, LogOut, Power, ShieldCheck } from "lucide-react";
+import { HoverTip } from "../../src/components/Primitives";
 import { AccountMeshContext, type AccountMeshModel } from "../../src/contexts/AccountMeshContext";
 import { AccountDevicesCard, AccountDeviceNotifications } from "../../src/components/AccountDevicesCard";
-import { ModeGateway } from "../../src/components/ModeGateway";
+import { ModeGateway, ModeSwitch } from "../../src/components/ModeGateway";
 import { LocalBrainInstaller } from "../../src/components/ProviderManager";
 import type { AccountNetwork, AccountRuntime } from "../../src/lib/accountMeshContract";
 import type { LocalBrainStatus } from "../../src/lib/localBrainCatalog";
@@ -84,6 +86,57 @@ const initialBrain: LocalBrainStatus = {
   previousVersion: null, pinnedVersion: null, updateState: installed ? "current" : "not_installed"
 };
 
+// Echter ModeSwitch und echte Sidebar-Klassen; alle Handlungen bleiben synthetisch.
+function SidebarRailExample({ onChoose }: { onChoose: (mode: ComponentProps<typeof ModeSwitch>["mode"]) => void }) {
+  const { t } = useT();
+  const [mode, setMode] = useState<ComponentProps<typeof ModeSwitch>["mode"]>("agentSync");
+  return <div className={`app-shell mode-${mode} qa-sidebar-rail`}>
+    <aside className="sidebar">
+      <div className="brand">
+        <div className="brand-mark"><img alt="" src="/katosync_logo_centered.png" /></div>
+        <div className="brand-copy"><strong>KatoSync</strong><span>{t("mode.agentSyncTagline")}</span></div>
+      </div>
+      <ModeSwitch mode={mode} onChange={next => { setMode(next); onChoose(next); }} />
+      <nav className="steps" aria-label={t("mode.agentSyncNav")}>
+        <button className="step" type="button"><Gauge size={18} /><span>{t("nav.agentDashboard")}</span></button>
+        <button className="step active" type="button"><Bot size={18} /><span>{t("nav.agentProviders")}</span></button>
+      </nav>
+      <div className="sidebar-footer">
+        <HoverTip title={t("sidebar.presentation")} description={t("sidebar.presentationDesc")}>
+          <button className="ghost license-link" type="button"><Eye size={16} /><span>{t("sidebar.presentation")}</span></button>
+        </HoverTip>
+        <label className="ghost license-link lang-switch" title={t("sidebar.languageTitle")}>
+          <Languages size={16} />
+          <select aria-label={t("sidebar.languageTitle")} value={lang} onChange={() => {}}>
+            <option value="de">{t("lang.de")}</option><option value="en">{t("lang.en")}</option>
+            <option value="es">{t("lang.es")}</option><option value="ru">{t("lang.ru")}</option>
+          </select>
+        </label>
+        <HoverTip title={t("sidebar.license")} description={t("sidebar.licenseDesc")}>
+          <button className="ghost license-link" type="button"><FileText size={16} /><span>{t("sidebar.license")}</span></button>
+        </HoverTip>
+        <div className="sidebar-account">
+          <span className="sidebar-account-email" title={t("sidebar.account")}>Synthetisches Beispielkonto</span>
+          <span className="sidebar-katoos-family-badge" title={t("auth.katoosFamilyHint")}>
+            <ShieldCheck size={12} />{t("auth.katoosFamily")}
+          </span>
+          <HoverTip title={t("sidebar.logout")} description={t("sidebar.logoutDesc")}>
+            <button className="ghost license-link" type="button"><LogOut size={16} /><span>{t("sidebar.logout")}</span></button>
+          </HoverTip>
+        </div>
+        <HoverTip title={t("sidebar.quit")} description={t("sidebar.quitDesc")}>
+          <button className="ghost danger compact-danger" type="button"><Power size={16} /><span>{t("sidebar.quit")}</span></button>
+        </HoverTip>
+        <span className="app-version-label">KatoSync · synthetische Vorschau · Agent Sync</span>
+      </div>
+    </aside>
+    <main className="workspace">
+      <div className="qa-synthetic-banner" role="note">SYNTHETISCHE SIDEBAR-PRÜFUNG · KEINE LIVE-AKTIONEN</div>
+      <section className="provider-manager"><AccountDevicesCard /></section>
+    </main>
+  </div>;
+}
+
 function Example() {
   const [view, setView] = useState(initialView);
   const [focusDevices, setFocusDevices] = useState(false);
@@ -160,8 +213,8 @@ function Example() {
     if (view === "devices" && focusDevices) document.getElementById("section-account-devices")?.focus();
   }, [view, focusDevices]);
   return <I18nProvider><AccountMeshContext.Provider value={model}>
-    <div className="qa-synthetic-banner" role="note">KATOSYNC · SYNTHETISCHE UI-PRÜFUNG · KEINE LIVE-GERÄTE ODER FREIGABEN</div>
-    {view === "gateway" ? <ModeGateway remembered={null} onChoose={mode => act("choose", { mode })}
+    {view !== "rail" ? <div className="qa-synthetic-banner" role="note">KATOSYNC · SYNTHETISCHE UI-PRÜFUNG · KEINE LIVE-GERÄTE ODER FREIGABEN</div> : null}
+    {view === "rail" ? <SidebarRailExample onChoose={mode => act("choose", { mode })} /> : view === "gateway" ? <ModeGateway remembered={null} onChoose={mode => act("choose", { mode })}
       onOpenDevices={() => { act("view"); setFocusDevices(true); setView("devices"); }} /> :
       <main className="qa-component-workspace provider-manager" data-qa-view={view}>
         {view === "brain" ? <section className="provider-card"><LocalBrainInstaller vm={brainVm} /></section> : <AccountDevicesCard />}

@@ -112,23 +112,25 @@ export function ModeSwitch({
   return (
     <div className="mode-switch" role="group" aria-label={t("mode.switchAria")}>
       <button
+        aria-label={t("mode.toMistral")}
         aria-pressed={mode === "mistral"}
         className={mode === "mistral" ? "active" : ""}
         onClick={() => onChange("mistral")}
         title={t("mode.toMistral")}
         type="button"
       >
-        <BookOpenText size={14} />
+        <BookOpenText size={14} aria-hidden="true" />
         <span>{t("mode.mistral")}</span>
       </button>
       <button
+        aria-label={t("mode.toAgentSync")}
         aria-pressed={mode === "agentSync"}
         className={mode === "agentSync" ? "active" : ""}
         onClick={() => onChange("agentSync")}
         title={t("mode.toAgentSync")}
         type="button"
       >
-        <Bot size={14} />
+        <Bot size={14} aria-hidden="true" />
         <span>{t("mode.agentSync")}</span>
       </button>
     </div>

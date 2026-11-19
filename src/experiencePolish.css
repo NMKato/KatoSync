@@ -245,3 +245,45 @@
   .provider-manager, .provider-manager *,
   .remote-mcp-owner-card, .remote-mcp-owner-card * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Die kompakte Seitenleiste hält Moduswahl und Fußzeile innerhalb ihrer 80 px. */
+@media (max-width: 1120px) {
+  .sidebar .mode-switch {
+    grid-template-columns: minmax(0, 1fr);
+    align-self: center;
+    width: 50px;
+    max-width: 100%;
+    min-width: 0;
+    padding: 2px;
+    gap: 4px;
+  }
+  .sidebar .mode-switch button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0;
+    gap: 0;
+  }
+  .sidebar .mode-switch button > span,
+  .sidebar .app-version-label { display: none; }
+  .sidebar .mode-switch button > svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .sidebar .mode-switch button:focus-visible {
+    outline: 3px solid var(--experience-focus);
+    outline-offset: 2px;
+  }
+  .sidebar .sidebar-footer { width: 100%; min-width: 0; }
+  .sidebar .sidebar-footer .compact-danger { width: 46px; min-width: 46px; min-height: 44px; }
+  .sidebar .sidebar-katoos-family-badge {
+    display: block;
+    align-self: center;
+    width: 50px;
+    max-width: 100%;
+    padding: 4px 3px;
+    font-size: 10px;
+    letter-spacing: -0.15px;
+    line-height: 1.25;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+  .sidebar .sidebar-katoos-family-badge > svg { display: none; }
+}
