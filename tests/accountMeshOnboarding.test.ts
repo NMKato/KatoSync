@@ -1,7 +1,7 @@
 // Created by NMKato Solutions
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseAccountNetwork, parseAccountRuntime, eligiblePeer, devicePresentationState, sameDeviceBinding,
+import { parseAccountNetwork, parseAccountRuntime, eligiblePeer, devicePresentationState, sameDeviceBinding, deviceName,
   type AccountNetwork, type AccountRuntime } from "../src/lib/accountMeshContract.ts";
 import { AccountMeshPairing, type MeshInvoke } from "../src/lib/accountMeshPairing.ts";
 
@@ -34,6 +34,18 @@ test("account roster accepts registered devices and a genuinely unregistered loc
   assert.equal(parseAccountNetwork(network()).devices.length, 2);
   const n = network(); n.localDeviceId = null; n.localFingerprint = null; n.localPublicKey = null; n.devices.shift();
   assert.equal(parseAccountNetwork(n).localDeviceId, null);
+});
+test("device labels retain chosen names and replace only exact generated key-prefix names", () => {
+  const device = network().devices[0];
+  device.displayName = "Mein Arbeitsrechner";
+  assert.equal(deviceName(device), "Mein Arbeitsrechner");
+  device.displayName = "KatoSync macos aaaaa";
+  assert.equal(deviceName(device), "KAI Atlas Mac-1111");
+  device.personaName = "  Studio  ";
+  assert.equal(deviceName(device), "Studio");
+  device.personaName = null;
+  device.displayName = "KatoSync macos zzzzz";
+  assert.equal(deviceName(device), "KatoSync macos zzzzz");
 });
 test("mixed account rows, duplicate identity and local key substitutions are rejected", () => {
   const n = network(); n.devices[1].ownerUserId = third;

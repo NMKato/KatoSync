@@ -1,6 +1,7 @@
 // Created by NMKato Solutions
 // Account device presentation. Native authentication and policy remain authoritative.
 import { isMeshConnectionLive, parseMeshConnectionSnapshot, type MeshConnectionSnapshot } from "./meshConnectionState.ts";
+import { meshRegistrationAgentName } from "./meshDirectoryPresentation35.ts";
 
 export type ConnectionMode = "ask" | "automatic";
 export interface AccountDevice {
@@ -144,7 +145,14 @@ export function defaultPeer(network: AccountNetwork): string | null {
   return null; // Main device owners explicitly select a participant.
 }
 
-export function deviceName(device: AccountDevice): string { return device.personaName?.trim() || device.displayName; }
+export function deviceName(device: AccountDevice): string {
+  const persona = device.personaName?.trim();
+  if (persona) return persona;
+  const generated = PUBLIC_KEY.test(device.publicKey) &&
+    device.displayName === `KatoSync ${device.platformOs} ${device.publicKey.slice(0, 5)}`;
+  if (!generated) return device.displayName;
+  return meshRegistrationAgentName(device.fingerprint, device.platformOs) || device.displayName;
+}
 export function meshIssue(error: unknown): "account" | "changed" | "registration" | "expired" | "network" | "busy" | "start" | "retry" {
   const code = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   if (/PIN_APPROVED_CONNECTION_NOT_STARTED/.test(code)) return "start";
