@@ -1,6 +1,7 @@
 // Created by NMKato Solutions
 //! Frische, kontogebundene Mesh-Topologie aus der bestehenden Data API.
 //! Hauptrolle und gespeicherte Verbindung ersetzen weder Peer-Pin noch Auftragsfreigabe.
+use crate::github_app_auth::AuthorityCheckError;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
@@ -187,6 +188,16 @@ fn snapshot(wire: &NetworkWire, local_key: Option<&VerifyingKey>) -> AccountNetw
     }
 }
 
+// Eine vorübergehend nicht prüfbare Authority darf den gespeicherten Verbindungswunsch
+// nicht widerrufen. Jeder neue Versuch muss sämtliche Autoritätsprüfungen erneut bestehen.
+fn authority_failure(error: AuthorityCheckError, denied_code: &'static str) -> String {
+    if error.is_unavailable() {
+        "MESH_ACCOUNT_AUTHORITY_UNAVAILABLE".into()
+    } else {
+        denied_code.into()
+    }
+}
+
 fn check_generation(generation: u64) -> Result<(), String> {
     if generation != crate::native_owner_session_generation() {
         return Err("MESH_ACCOUNT_SESSION_CHANGED".into());
@@ -241,14 +252,19 @@ async fn request(
         return Err("MESH_ACCOUNT_NOT_CONFIGURED".into());
     }
     let generation = crate::native_owner_session_generation();
-    let owner = crate::github_app_auth::verified_katosync_user()
+    let owner = crate::github_app_auth::verified_katosync_user_classified()
         .await
-        .map_err(|_| "MESH_ACCOUNT_LOGIN_REQUIRED".to_string())?;
+        .map_err(|error| authority_failure(error, "MESH_ACCOUNT_LOGIN_REQUIRED"))?;
     check_generation(generation)?;
     let token = Zeroizing::new(
         crate::ensure_supabase_access_token()
             .await
-            .map_err(|_| "MESH_ACCOUNT_LOGIN_REQUIRED".to_string())?,
+            .map_err(|error| {
+                authority_failure(
+                    AuthorityCheckError::from_session(&error, "MESH_ACCOUNT_LOGIN_REQUIRED"),
+                    "MESH_ACCOUNT_LOGIN_REQUIRED",
+                )
+            })?,
     );
     let (rpc, body) = match selection {
         Some((device_id, revision)) => (
@@ -281,9 +297,9 @@ async fn request(
     }
     let wire: NetworkWire = serde_json::from_slice(&body).map_err(|_| invalid())?;
     validate_wire(&wire, &owner)?;
-    crate::mesh_identity::same_account_still_verified(&owner)
+    crate::mesh_identity::same_account_still_verified_classified(&owner)
         .await
-        .map_err(|_| "MESH_ACCOUNT_SESSION_CHANGED".to_string())?;
+        .map_err(|error| authority_failure(error, "MESH_ACCOUNT_SESSION_CHANGED"))?;
     check_generation(generation)?;
     // Ein reiner Refresh erzeugt keinen Schluessel und keine Registrierung.
     let local_key = crate::mesh_identity::existing_identity_if_present(&owner)
@@ -338,6 +354,138 @@ pub async fn verified_configuration() -> Result<VerifiedAccountConfiguration, St
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    // Echte typisierte reqwest-Fehler aus einer reinen Loopback-Autoritätsfixture;
+    // keine Zugangsdaten, Keychain-Lesezugriffe oder externen Dienste.
+    async fn authority_http_failure(status: u16) -> reqwest::Error {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 2048];
+            stream.read(&mut request).await.unwrap();
+            let response = format!(
+                "HTTP/1.1 {status} Synthetic\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap();
+        server.await.unwrap();
+        response.error_for_status().unwrap_err()
+    }
+
+    fn assert_authority_failure_codes(error: reqwest::Error, unavailable: bool) {
+        // Ownerprüfung und spätere Kontogleichheitsprüfung behalten jeweils ihren
+        // bisherigen terminalen Code; die typisierte temporäre Klasse bleibt erhalten.
+        for denied in [
+            "MESH_ACCOUNT_LOGIN_REQUIRED",
+            "MESH_ACCOUNT_SESSION_CHANGED",
+        ] {
+            let classified = AuthorityCheckError::from_request(&error, "synthetic authority");
+            assert_eq!(
+                authority_failure(classified, denied),
+                if unavailable {
+                    "MESH_ACCOUNT_AUTHORITY_UNAVAILABLE"
+                } else {
+                    denied
+                }
+            );
+        }
+        // Auch eine Refresh-Fehlerkette mit anyhow-Kontext darf die Klasse nicht verlieren.
+        let refresh_error = anyhow::Error::new(error).context("synthetic refresh context");
+        assert_eq!(
+            authority_failure(
+                AuthorityCheckError::from_session(&refresh_error, "synthetic refresh"),
+                "MESH_ACCOUNT_LOGIN_REQUIRED"
+            ),
+            if unavailable {
+                "MESH_ACCOUNT_AUTHORITY_UNAVAILABLE"
+            } else {
+                "MESH_ACCOUNT_LOGIN_REQUIRED"
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn account_authority_http_retries_do_not_become_terminal_login_failures() {
+        for (status, unavailable) in [
+            (401, false),
+            (403, false),
+            (429, true),
+            (500, true),
+            (503, true),
+        ] {
+            assert_authority_failure_codes(authority_http_failure(status).await, unavailable);
+        }
+    }
+
+    #[tokio::test]
+    async fn account_authority_connection_and_timeout_failures_remain_retryable() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let refused = client
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(refused.is_connect());
+        assert_authority_failure_codes(refused, true);
+
+        let stalled = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = stalled.local_addr().unwrap();
+        let timed_out = client
+            .get(format!("http://{address}/"))
+            .timeout(Duration::from_millis(50))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(timed_out.is_timeout());
+        assert_authority_failure_codes(timed_out, true);
+    }
+
+    #[test]
+    fn account_authority_owner_keychain_and_malformed_failures_stay_denied() {
+        assert_eq!(
+            authority_failure(
+                AuthorityCheckError::denied("synthetic owner changed"),
+                "MESH_ACCOUNT_SESSION_CHANGED"
+            ),
+            "MESH_ACCOUNT_SESSION_CHANGED"
+        );
+        let malformed = serde_json::from_str::<Value>("{").unwrap_err();
+        for error in [
+            anyhow::Error::new(keyring::Error::NoEntry).context("synthetic missing credential"),
+            anyhow::Error::new(malformed).context("synthetic malformed response"),
+            anyhow::anyhow!("timeout connect 429 503 is only text, not a typed transport failure"),
+        ] {
+            assert_eq!(
+                authority_failure(
+                    AuthorityCheckError::from_session(&error, "synthetic session"),
+                    "MESH_ACCOUNT_LOGIN_REQUIRED"
+                ),
+                "MESH_ACCOUNT_LOGIN_REQUIRED"
+            );
+        }
+    }
     const OWNER: &str = "11111111-1111-4111-8111-111111111111";
     const DEVICE: &str = "22222222-2222-4222-8222-222222222222";
     fn fixture() -> (NetworkWire, VerifyingKey) {
