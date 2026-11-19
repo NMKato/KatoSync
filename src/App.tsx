@@ -70,6 +70,8 @@ import { RemoteCommanderUsagePanel } from "./components/RemoteCommanderUsagePane
 import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
 import { AgentLiveMonitor } from "./components/AgentJobViews";
 import { ProviderManager } from "./components/ProviderManager";
+import { AccountMeshProvider } from "./contexts/AccountMeshContext";
+import { AccountDeviceNotifications } from "./components/AccountDevicesCard";
 import { ProjectRegistryWorkspace } from "./components/ProjectRegistryWorkspace";
 import { MasterChatWorkspace } from "./components/MasterChatWorkspace";
 import type { GithubIssueHandoff } from "./lib/githubChatHandoff";
@@ -674,6 +676,7 @@ export default function App() {
   const navSteps = isAgentSync ? agentSyncSteps : mistralSteps;
 
   return (
+    <AccountMeshProvider key={vm.sessionStatus.email ?? "signed-in-account"}>
     <div className={`app-shell mode-${workspaceMode}`}>
       <aside className="sidebar">
         <div className="brand">
@@ -1592,7 +1595,9 @@ export default function App() {
 
       {vm.logoutFlow ? <LogoutDialog vm={vm} /> : null}
       {vm.cloudPasswordPrompt ? <CloudPasswordDialog vm={vm} /> : null}
+      <AccountDeviceNotifications devicesVisible={visibleStep === "agentProviders"} onOpenDevices={() => enterModeAt("agentSync", "agentProviders")} />
     </div>
+    </AccountMeshProvider>
   );
 }
 

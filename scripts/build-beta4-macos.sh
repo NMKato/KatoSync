@@ -145,6 +145,13 @@ shutil.copy2(binary, app / "Contents/MacOS/katosync")
 assert hashlib.sha256((app / "Contents/MacOS/katosync").read_bytes()).hexdigest() == expected_binary, "Shared build output changed before staging"
 info_path = app / "Contents/Info.plist"
 info = plistlib.loads(info_path.read_bytes())
+privacy = plistlib.loads((root / "src-tauri/Info.plist").read_bytes())
+assert isinstance(privacy.get("NSLocalNetworkUsageDescription"), str) and privacy["NSLocalNetworkUsageDescription"].strip()
+assert privacy.get("NSBonjourServices") == ["_katosync-mesh._tcp"]
+# Prebuilt candidates inherit the existing signed identity. Carry only the
+# reviewed local-network declarations from this exact source into that bundle.
+for key in ("NSLocalNetworkUsageDescription", "NSBonjourServices"):
+    info[key] = privacy[key]
 version = json.loads((root / "package.json").read_text())["version"]
 assert info["CFBundleIdentifier"] == bundle_id
 info.update(CFBundleName="KatoSync Beta4", CFBundleDisplayName="KatoSync Beta4 Candidate",

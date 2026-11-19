@@ -5,4 +5,8 @@
 <string>KatoSync verarbeitet Diktate lokal auf dem Gerät und lädt keine Sprachaufnahmen hoch.</string>
 <key>NSSpeechRecognitionUsageDescription</key>
 <string>KatoSync wandelt gesprochene Fragen direkt auf diesem Gerät in Text um.</string>
+<key>NSLocalNetworkUsageDescription</key>
+<string>KatoSync verbindet Ihre freigegebenen Geräte im selben lokalen Netzwerk.</string>
+<key>NSBonjourServices</key>
+<array><string>_katosync-mesh._tcp</string></array>
 </dict></plist>

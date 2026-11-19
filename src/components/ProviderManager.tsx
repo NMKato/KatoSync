@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { GithubAppConnectionPanel } from "./GithubAppConnectionPanel";
-import { MeshConnectionCard } from "./MeshConnectionCard";
+import { AccountDevicesCard } from "./AccountDevicesCard";
 import { RemoteMcpOwnerConsentCard } from "./RemoteMcpOwnerConsentCard";
 import { ProviderBrandMark } from "./ProviderBrandMark";
 import type {GithubIssueHandoff} from "../lib/githubChatHandoff";
@@ -174,7 +174,7 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
       </div>
 
       <div className="provider-cards">
-        {vm.sessionStatus.loggedIn ? <MeshConnectionCard refreshEpoch={connectionRefreshEpoch} /> : null}
+        {vm.sessionStatus.loggedIn ? <AccountDevicesCard refreshEpoch={connectionRefreshEpoch} /> : null}
         {vm.sessionStatus.loggedIn ? <RemoteMcpOwnerConsentCard key={vm.sessionStatus.email ?? "signed-in-owner"} refreshEpoch={connectionRefreshEpoch} /> : null}
         {cardProviders.map((provider) => (
           <Fragment key={provider}>
