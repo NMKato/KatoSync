@@ -53,7 +53,7 @@ const make=(action:string,payload:unknown)=>new Request("https://staged.example/
  body:JSON.stringify({action,payload})
 });
 type Fixture=Awaited<ReturnType<typeof fixture>>;
-function backend(f:Fixture,options:{revoked?:boolean;pending?:boolean;member?:boolean;wrongReceipt?:boolean}={}){
+function backend(f:Fixture,options:{revoked?:boolean;pending?:boolean;member?:boolean;wrongReceipt?:boolean;sourceState?:string;targetState?:string;targetOwner?:string;targetKey?:string}={}){
  const state={writes:0,reads:0,proofs:0,messages:[] as Array<Record<string,unknown>>,
   used:new Set<string>()};
  const request=async(input:RequestInfo|URL,init?:RequestInit)=>{
@@ -64,8 +64,8 @@ function backend(f:Fixture,options:{revoked?:boolean;pending?:boolean;member?:bo
    return Response.json(options.member===false?[]:[{user_id:OWNER,access_state:"active",authorized_at:"2026-10-28T10:00:00Z",revoked_at:null}]);
   if(url.pathname==="/rest/v1/mesh_devices"){
    const filter=url.searchParams.get("device_id")??"";
-   const values=[{device_id:A,owner_user_id:OWNER,signing_public_key:f.aPub,membership_state:"discovered",revoked_at:null},
-    {device_id:B,owner_user_id:OWNER,signing_public_key:f.bPub,membership_state:options.revoked?"revoked":"discovered",
+   const values=[{device_id:A,owner_user_id:OWNER,signing_public_key:f.aPub,membership_state:options.sourceState??"discovered",revoked_at:null},
+    {device_id:B,owner_user_id:options.targetOwner??OWNER,signing_public_key:options.targetKey??f.bPub,membership_state:options.targetState??(options.revoked?"revoked":"discovered"),
      revoked_at:options.revoked?"2026-10-31T00:00:00Z":null}];
    return Response.json(values.filter(v=>filter.includes(v.device_id)));
   }
@@ -139,6 +139,25 @@ test("bidirectional signed Challenge(B→A) and Response(A→B) are independentl
  assert.equal(result.messages[0].senderDeviceId,A);
  assert.deepEqual([result.paired,result.transportReady,result.remoteJobsEnabled],[false,false,false]);
  assert.equal(b.state.messages.length,2);
+});
+test("trusted Registryeintrag ersetzt weder beidseitige Signatur noch aktuelle Berechtigung",async()=>{
+ const f=await fixture();
+ for(const sourceState of ["discovered","trusted"])for(const targetState of ["discovered","trusted"]){
+  const b=backend(f,{sourceState,targetState});
+  assert.equal((await handleMeshPairingRelay(make("send",f.c),env,b.request)).status,202);
+  const res=await handleMeshPairingRelay(make("list",await f.list(A)),env,b.request);
+  assert.equal(res.status,200);const body=await res.json();assert.equal(body.messages.length,1);
+  assert.deepEqual([body.paired,body.transportReady,body.remoteJobsEnabled],[false,false,false]);
+ }
+ for(const opts of [{sourceState:"pending"},{targetState:"pending"},{targetState:"trusted",revoked:true},
+  {targetState:"trusted",targetOwner:INV},{targetState:"trusted",targetKey:f.aPub}]){
+  const b=backend(f,opts);
+  assert.equal((await handleMeshPairingRelay(make("send",f.c),env,b.request)).status,403);
+  assert.equal(b.state.writes,0);
+ }
+ const b=backend(f,{sourceState:"trusted",targetState:"trusted"});
+ assert.equal((await handleMeshPairingRelay(make("send",{...f.c,signature:"A".repeat(86)}),env,b.request)).status,403);
+ assert.equal(b.state.writes,0);
 });
 test("tampered transport or missing accepted invite fails before database write",async()=>{
  const f=await fixture();

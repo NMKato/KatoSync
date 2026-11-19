@@ -91,7 +91,7 @@ export async function handleMeshInboxReceive(req:Request,env:Env,request:typeof 
   if(!Array.isArray(devices)||devices.length!==1)return fail(403,"DEVICE_NOT_REGISTERED");
   const device=devices[0] as Device;
   if(device.owner_user_id!==owner||device.device_id!==proof.deviceId||
-     device.membership_state!=="discovered"||device.revoked_at!==null||
+     !["discovered","trusted"].includes(device.membership_state)||device.revoked_at!==null||
      typeof device.signing_public_key!=="string"||!B43.test(device.signing_public_key))
     return fail(403,"DEVICE_NOT_ELIGIBLE");
   if(!await verifyDeviceProof(proof,owner,device.signing_public_key))return fail(403,"INVALID_DEVICE_SIGNATURE");
@@ -172,7 +172,7 @@ export async function handleMeshInboxReceive(req:Request,env:Env,request:typeof 
           return fail(503,"INBOX_SOURCE_UNVERIFIED");
         const source=item as Device;
         if(!sourceIds.includes(source.device_id)||sourceKeys.has(source.device_id)||
-          source.owner_user_id!==owner||source.membership_state!=="discovered"||
+          source.owner_user_id!==owner||!["discovered","trusted"].includes(source.membership_state)||
           source.revoked_at!==null||typeof source.signing_public_key!=="string"||
           !B43.test(source.signing_public_key))
           return fail(503,"INBOX_SOURCE_UNVERIFIED");

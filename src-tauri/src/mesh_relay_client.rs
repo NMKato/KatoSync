@@ -367,7 +367,10 @@ async fn context() -> Result<Context, String> {
     let mut roster = HashMap::new();
     let mut own = None;
     for r in records {
-        if r.owner_user_id != uid || r.membership_state != "discovered" || r.revoked_at.is_some() {
+        if r.owner_user_id != uid
+            || !matches!(r.membership_state.as_str(), "discovered" | "trusted")
+            || r.revoked_at.is_some()
+        {
             return Err("MESH_RELAY_INELIGIBLE_DEVICE".into());
         }
         let decoded = URL_SAFE_NO_PAD

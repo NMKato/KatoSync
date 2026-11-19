@@ -48,7 +48,7 @@ function makeRequest(body:unknown,token="valid-test-access-token-1234567890"){
   method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify(body)
  });
 }
-type Options={userRejected?:boolean;memberRejected?:boolean;deviceOwner?:string;
+type Options={userRejected?:boolean;memberRejected?:boolean;deviceOwner?:string;deviceState?:string;sourceState?:string;
  revoked?:boolean;deviceKey?:string;registryDown?:boolean;failedProof?:boolean;invalidProofReceipt?:boolean;invalidKeyReceipt?:boolean;invalidList?:boolean;
  sourceRevoked?:boolean;sourceWrongKey?:boolean;sourceWrongOwner?:boolean;
  sourceAbsent?:boolean;sourceRegistryDown?:boolean;tamperedOffer?:boolean;
@@ -72,12 +72,12 @@ function backend(f:Awaited<ReturnType<typeof fixture>>,opts:Options={}){
     return Response.json([{device_id:SOURCE,
       owner_user_id:opts.sourceWrongOwner?"99999999-9999-4999-8999-999999999999":OWNER,
       signing_public_key:opts.sourceWrongKey?f.publicKey:f.sourcePublicKey,
-      membership_state:opts.sourceRevoked?"revoked":"discovered",
+      membership_state:opts.sourceState??(opts.sourceRevoked?"revoked":"discovered"),
       revoked_at:opts.sourceRevoked?"2026-10-30T07:00:00Z":null}]);
    }
    if(opts.registryDown)return Response.json({error:"down"},{status:503});
    return Response.json([{device_id:DEVICE,owner_user_id:opts.deviceOwner??OWNER,signing_public_key:opts.deviceKey??f.publicKey,
-     membership_state:opts.revoked?"revoked":"discovered",revoked_at:opts.revoked?"2026-10-30T07:00:00Z":null}]);
+     membership_state:opts.deviceState??(opts.revoked?"revoked":"discovered"),revoked_at:opts.revoked?"2026-10-30T07:00:00Z":null}]);
   }
   if(url.includes("/rest/v1/mesh_inbox_proofs")){
    assert.equal(init?.method,"POST");
@@ -152,6 +152,27 @@ test("accepted decision updates pending invitation once, without trust",async()=
  const newProof=await f.proof("reject",INVITE);
  const after=await handleMeshInboxReceive(makeRequest(newProof),env,b.call);
  assert.equal(after.status,409);assert.equal(b.state.updates,2);
+});
+test("trusted Empfaenger und Absender behalten Key-, Owner- und Revoke-Pruefungen",async()=>{
+ const f=await fixture();
+ for(const deviceState of ["discovered","trusted"])for(const sourceState of ["discovered","trusted"]){
+  const b=backend(f,{deviceState,sourceState});
+  const res=await handleMeshInboxReceive(makeRequest(await f.proof()),env,b.call);
+  assert.equal(res.status,200);const body=await res.json();assert.equal(body.invitations.length,1);
+  assert.deepEqual([body.paired,body.transportReady,body.remoteJobsEnabled],[false,false,false]);
+ }
+ for(const opts of [{deviceState:"pending"},{deviceState:"trusted",revoked:true},
+  {deviceState:"trusted",deviceOwner:SOURCE},{deviceState:"trusted",deviceKey:f.sourcePublicKey}]){
+  const b=backend(f,opts);
+  assert.equal((await handleMeshInboxReceive(makeRequest(await f.proof()),env,b.call)).status,403);
+  assert.equal(b.state.nonceWrites,0);assert.equal(b.state.reads,0);
+ }
+ for(const opts of [{sourceState:"pending"},{sourceState:"trusted",sourceRevoked:true},
+  {sourceState:"trusted",sourceWrongOwner:true},{sourceState:"trusted",sourceWrongKey:true}]){
+  const b=backend(f,opts);
+  const res=await handleMeshInboxReceive(makeRequest(await f.proof()),env,b.call);
+  assert.equal(res.status,503);assert.equal((await res.json()).error,"INBOX_SOURCE_UNVERIFIED");
+ }
 });
 test("explicit rejection never grants trust",async()=>{
  const f=await fixture(),b=backend(f);

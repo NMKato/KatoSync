@@ -38,7 +38,7 @@ async function devices(owner:string,ids:string[],e:Env,request:typeof fetch,orig
   if(!record||typeof record!=="object"||Array.isArray(record))return null;
   const d=record as Device;
   if(!ids.includes(d.device_id)||mapped.has(d.device_id)||d.owner_user_id!==owner||
-   d.membership_state!=="discovered"||d.revoked_at!==null||
+   !["discovered","trusted"].includes(d.membership_state)||d.revoked_at!==null||
    typeof d.signing_public_key!=="string"||!/^[A-Za-z0-9_-]{43}$/.test(d.signing_public_key))return null;
   mapped.set(d.device_id,d.signing_public_key);
  }

@@ -12,7 +12,7 @@ const requestId="44444444-4444-4444-8444-444444444444";
 const env={SUPABASE_URL:ORIGIN,SUPABASE_ANON_KEY:"qa-anon",SUPABASE_SERVICE_ROLE_KEY:"qa-secret",KATOSYNC_MESH_INBOX_STAGE:"send-only"};
 const enc=new TextEncoder();
 const b64=(v:Uint8Array)=>Buffer.from(v).toString("base64url");
-type Options={authenticated?:boolean;membership?:boolean;targetOwner?:string;sourceKey?:string;targetRevoked?:boolean;writeError?:{code:string;message:string;status:number};registryFailure?:boolean};
+type Options={authenticated?:boolean;membership?:boolean;targetOwner?:string;sourceKey?:string;sourceState?:string;targetState?:string;targetRevoked?:boolean;writeError?:{code:string;message:string;status:number};registryFailure?:boolean};
 async function fixture(){
  const signing=await crypto.subtle.generateKey("Ed25519",true,["sign","verify"]);
  const pub=b64(new Uint8Array(await crypto.subtle.exportKey("raw",signing.publicKey)));
@@ -42,9 +42,9 @@ function backend(publicKey:string,opts:Options={}){
     calls.reads++;
     if(opts.registryFailure)return Response.json({error:"down"},{status:503});
     return Response.json([
-      {device_id:source,owner_user_id:uid,signing_public_key:opts.sourceKey??publicKey,membership_state:"discovered",revoked_at:null},
+      {device_id:source,owner_user_id:uid,signing_public_key:opts.sourceKey??publicKey,membership_state:opts.sourceState??"discovered",revoked_at:null},
       {device_id:target,owner_user_id:opts.targetOwner??uid,signing_public_key:"B".repeat(43),
-        membership_state:opts.targetRevoked?"revoked":"discovered",revoked_at:opts.targetRevoked?"2026-10-29T12:00:00Z":null}
+        membership_state:opts.targetState??(opts.targetRevoked?"revoked":"discovered"),revoked_at:opts.targetRevoked?"2026-10-29T12:00:00Z":null}
     ]);
   }
   if(url.endsWith("/rest/v1/mesh_invites")){
@@ -80,6 +80,20 @@ test("recipient switch invalidates target-bound signature",async()=>{
  f.targetDeviceId="55555555-5555-4555-8555-555555555555";
  const r=await submitSignedMeshInvite(api(f),env,remote.call);
  assert.equal(r.status,403);assert.equal(remote.calls.writes,0);
+});
+test("registrierte trusted-Geraete durchlaufen dieselbe signierte Einladung ohne neue Rechte",async()=>{
+ const f=await fixture();
+ for(const sourceState of ["discovered","trusted"])for(const targetState of ["discovered","trusted"]){
+  const b=backend(f.signedOffer.publicKey,{sourceState,targetState});
+  const res=await submitSignedMeshInvite(api(f),env,b.call);
+  assert.equal(res.status,202);const body=await res.json();
+  assert.deepEqual([body.paired,body.transportReady,body.remoteJobsEnabled],[false,false,false]);
+ }
+ for(const opts of [{sourceState:"pending"},{targetState:"pending"},{targetState:"trusted",targetRevoked:true},
+  {sourceState:"trusted",sourceKey:"C".repeat(43)},{targetState:"trusted",targetOwner:requestId}]){
+  const b=backend(f.signedOffer.publicKey,opts);
+  assert.equal((await submitSignedMeshInvite(api(f),env,b.call)).status,403);assert.equal(b.calls.writes,0);
+ }
 });
 test("invalid payload and self-invites rejected before network",async()=>{
  const f=await fixture();

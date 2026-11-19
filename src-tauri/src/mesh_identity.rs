@@ -87,6 +87,12 @@ pub(crate) fn existing_identity(uid: &str) -> Result<SigningKey, String> {
         .ok_or_else(|| "Geräteidentität fehlt; explizite Vorbereitung erforderlich.".into())
 }
 
+// Die Kontogeraeteliste darf einen fehlenden Schluessel anzeigen, aber nie
+// durch blosses Lesen erzeugen. Speicherfehler bleiben echte Fehler.
+pub(crate) fn existing_identity_if_present(uid: &str) -> Result<Option<SigningKey>, String> {
+    open_identity(uid)
+}
+
 pub(crate) fn ensure_identity(uid: &str) -> Result<SigningKey, String> {
     let _lock = IDENTITY_CREATION_LOCK
         .get_or_init(|| Mutex::new(()))

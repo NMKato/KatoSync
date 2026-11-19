@@ -310,7 +310,10 @@ async fn receiver_proof_and_token(
     if entries.len() != 1
         || entries[0].owner_user_id != owner
         || entries[0].signing_public_key != public
-        || entries[0].membership_state != "discovered"
+        || !matches!(
+            entries[0].membership_state.as_str(),
+            "discovered" | "trusted"
+        )
         || entries[0].revoked_at.is_some()
     {
         return Err("MESH_INBOX_DEVICE_NOT_ELIGIBLE".into());

@@ -126,14 +126,16 @@ fn identify_pair(
         }
         if record.signing_public_key == sender_key {
             if own.replace(record.device_id).is_some()
-                || record.membership_state != "discovered"
+                || !matches!(record.membership_state.as_str(), "discovered" | "trusted")
                 || record.revoked_at.is_some()
             {
                 return Err("MESH_INBOX_SOURCE_INELIGIBLE");
             }
         }
         if record.device_id == recipient {
-            if record.membership_state != "discovered" || record.revoked_at.is_some() {
+            if !matches!(record.membership_state.as_str(), "discovered" | "trusted")
+                || record.revoked_at.is_some()
+            {
                 return Err("MESH_INBOX_TARGET_INELIGIBLE");
             }
             target = Some(record.device_id);
@@ -434,6 +436,36 @@ mod tests {
         assert_eq!(
             identify_pair(&[revoked_source, b.clone()], owner, "A", b.device_id),
             Err("MESH_INBOX_SOURCE_INELIGIBLE")
+        );
+    }
+
+    #[test]
+    fn trusted_registry_does_not_replace_owner_key_or_revocation_checks() {
+        let owner = Uuid::from_bytes([1; 16]);
+        let mut a = device(2, owner, "A");
+        let mut b = device(3, owner, "B");
+        a.membership_state = "trusted".into();
+        b.membership_state = "trusted".into();
+        assert_eq!(
+            identify_pair(&[a.clone(), b.clone()], owner, "A", b.device_id),
+            Ok((a.device_id, b.device_id))
+        );
+        b.revoked_at = Some("2026-11-19T00:00:00Z".into());
+        assert_eq!(
+            identify_pair(&[a.clone(), b.clone()], owner, "A", b.device_id),
+            Err("MESH_INBOX_TARGET_INELIGIBLE")
+        );
+        b.revoked_at = None;
+        b.membership_state = "pending".into();
+        assert_eq!(
+            identify_pair(&[a.clone(), b.clone()], owner, "A", b.device_id),
+            Err("MESH_INBOX_TARGET_INELIGIBLE")
+        );
+        b.membership_state = "trusted".into();
+        b.owner_user_id = Uuid::from_bytes([9; 16]);
+        assert_eq!(
+            identify_pair(&[a, b.clone()], owner, "A", b.device_id),
+            Err("MESH_INBOX_INVALID_ROSTER")
         );
     }
 

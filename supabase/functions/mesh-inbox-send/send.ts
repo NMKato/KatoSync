@@ -82,7 +82,7 @@ export async function submitSignedMeshInvite(req:Request,env:Env,request:typeof 
   const rows:unknown=await r.json();
   if(!Array.isArray(rows)||rows.length!==2)return fail(403,"DEVICE_NOT_REGISTERED");
   const devices=rows as Device[],source=devices.find(x=>x.device_id===body.sourceDeviceId),target=devices.find(x=>x.device_id===body.targetDeviceId);
-  if(!source||!target||devices.some(x=>x.owner_user_id!==owner||x.membership_state!=="discovered"||x.revoked_at!==null)||
+  if(!source||!target||devices.some(x=>x.owner_user_id!==owner||!["discovered","trusted"].includes(x.membership_state)||x.revoked_at!==null)||
      source.signing_public_key!==body.signedOffer.publicKey||source.signing_public_key===target.signing_public_key)
     return fail(403,"DEVICE_NOT_ELIGIBLE");
   const current=await requireKatoSyncMembership(owner,headers,request);

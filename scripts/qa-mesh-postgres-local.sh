@@ -52,6 +52,7 @@ case "${1:-legacy}" in
   shared-rollout) TEST_FILE="$ROOT/tests/sql/mesh_stage3v_shared_schema_compat.sql" ;;
   shared-beta-failclose) TEST_FILE="$ROOT/tests/sql/mesh_shared_k2s_private_beta_failclosed_qa.sql" ;;
   inbox-relay-rust-e2e) TEST_FILE="$ROOT/tests/sql/mesh_relay_stage3k_setup.sql" ;;
+  account-network) TEST_FILE="$ROOT/tests/sql/mesh_account_network_qa.sql" ;;
   *) echo "MESH_QA_UNKNOWN_TEST_SELECTION" >&2; exit 2 ;;
 esac
 if test "${1:-legacy}" = "inbox-lifecycle" || test "${1:-legacy}" = "inbox-lifecycle-localstack"; then
@@ -91,5 +92,10 @@ elif test "${1:-legacy}" = "inbox-relay-rust-e2e"; then
   KATOSYNC_MESH_E2E_ALLOW=EPHEMERAL_UNIX_SOCKET_ONLY \
     KATOSYNC_MESH_E2E_SOCKET="$DIR" KATOSYNC_MESH_E2E_PORT="$PORT" \
     node --experimental-strip-types --test "$ROOT/tests/meshRelayRustEdgePostgresStage3K.qa.ts"
+elif test "${1:-legacy}" = "account-network"; then
+  KATOSYNC_ACCOUNT_NETWORK_RACE_ALLOW=EPHEMERAL_UNIX_SOCKET_ONLY \
+  KATOSYNC_MESH_E2E_SOCKET="$DIR" KATOSYNC_MESH_E2E_PORT="$PORT" \
+  KATOSYNC_PG_BIN="$PG_BIN" \
+    node "$ROOT/tests/qa/meshAccountNetworkRace.mjs"
 fi
 echo "MESH_QA_ALL_SQL_ASSERTIONS_PASSED"
