@@ -4,12 +4,15 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { I18nProvider, useT, type Lang } from "../../src/i18n";
 import { ConnectionCockpit, type ConnectionTile } from "../../src/components/ConnectionCockpit";
+import { AgentSyncOverview40 } from "../../src/components/AgentSyncOverview40";
+import { AccountMeshContext, type AccountMeshModel } from "../../src/contexts/AccountMeshContext";
 import { OperationalEvidenceDashboard } from "../../src/components/OperationalEvidenceDashboard";
 import type { useKatoSyncViewModel } from "../../src/viewmodels/useKatoSyncViewModel";
 import type { ProviderStatus, RegistryProject } from "../../src/types";
 import "../../src/styles.css";
 import "../../src/experiencePolish.css";
 import "../../src/uxCockpit40.css";
+import "../../src/uxFacelift4.css";
 
 declare global {
   interface Window {
@@ -47,6 +50,7 @@ const project: RegistryProject = {
   verification: null, capsule: null, resolutions: {}
 };
 const fakeVm = {
+  sessionStatus: { loggedIn: false },
   providerStatuses: [status("codex", true), status("claude", false)],
   providerBusy: {},
   providerHistory: [
@@ -73,6 +77,9 @@ function Scene() {
     <main className="ks40-qa-wrap">
       <div className="ks40-qa-banner" role="note">{copy}</div>
       <button type="button" data-testid="gateway-open-devices" onClick={() => setSelectedTile("devices")}>Gateway Devices (QA)</button>
+      <AccountMeshContext.Provider value={{network:null,runtime:null,approved:[],now:Date.now()} as unknown as AccountMeshModel}>
+        <AgentSyncOverview40 vm={fakeVm} onNavigate={(step) => window.__cockpitActions?.push("navigate:" + step)} />
+      </AccountMeshContext.Provider>
       <ConnectionCockpit vm={fakeVm} selectedTile={selectedTile} onSelect={setSelectedTile} />
       <OperationalEvidenceDashboard vm={fakeVm} onNavigate={(step) => {
         window.__cockpitActions?.push("navigate:" + step);
@@ -81,5 +88,5 @@ function Scene() {
   );
 }
 createRoot(document.getElementById("root")!).render(
-  <I18nProvider><Scene /></I18nProvider>
+  <I18nProvider><div className="app-shell mode-agentSync" style={{display:"block",minHeight:"100vh",height:"auto",overflow:"visible"}}><Scene /></div></I18nProvider>
 );

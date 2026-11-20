@@ -33,6 +33,8 @@ import { devicePresentationState } from "../lib/accountMeshContract";
 import { RemoteMcpOwnerConsentCard } from "./RemoteMcpOwnerConsentCard";
 import { ProviderBrandMark } from "./ProviderBrandMark";
 import { ConnectionCockpit, type ConnectionTile } from "./ConnectionCockpit";
+import { AgentSyncOverview40 } from "./AgentSyncOverview40";
+import type { StepId } from "../viewmodels/useKatoSyncViewModel";
 import { uxCopy } from "../lib/uxCopy40";
 import type {GithubIssueHandoff} from "../lib/githubChatHandoff";
 import { copyText } from "../lib/clipboard";
@@ -96,7 +98,7 @@ function formatTime(value: string | null | undefined, withDate = true): string {
   return withDate ? date.toLocaleString() : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function ProviderManager({ vm,onChatHandoff,openDevicesRequested = false }: { vm: ViewModel;onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void;openDevicesRequested?:boolean }) {
+export function ProviderManager({ vm,onChatHandoff,onNavigate,openDevicesRequested = false }: { vm: ViewModel;onNavigate?: (step: StepId) => void;onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void;openDevicesRequested?:boolean }) {
   const { t, lang } = useT();
   const copy = uxCopy(lang);
   const [activeDetail, setActiveDetail] = useState<ConnectionTile | null>(openDevicesRequested ? "devices" : null);
@@ -171,7 +173,9 @@ export function ProviderManager({ vm,onChatHandoff,openDevicesRequested = false 
         </div>
       </div>
 
-      <ConnectionCockpit vm={vm} connectedDevices={connectedDevices} selectedTile={visibleDetail} onSelect={setActiveDetail} />
+      {onNavigate ? <AgentSyncOverview40 vm={vm} onNavigate={onNavigate} onSelectConnection={setActiveDetail} section="guide" /> : null}
+      <ConnectionCockpit vm={vm} connectedDevices={connectedDevices} selectedTile={visibleDetail} onSelect={setActiveDetail} onNavigate={onNavigate} />
+      {onNavigate ? <AgentSyncOverview40 vm={vm} onNavigate={onNavigate} onSelectConnection={setActiveDetail} section="summary" /> : null}
       <p className="connections-refresh-hint">{t("connections.refreshHint")}</p>
       {vm.sessionStatus.loggedIn ? (
         <div className="connections-device-section ks40-active-detail" id="ks40-devices"

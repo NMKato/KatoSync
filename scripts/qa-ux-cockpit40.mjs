@@ -67,8 +67,14 @@ try {
     await page.setViewportSize({ width: scene.width, height: scene.height });
     await page.goto(origin + "/?lang=" + scene.lang + "&theme=" + scene.theme, { waitUntil: "load" });
     await page.locator(".ks40-cockpit-tile").first().waitFor();
-    assert.equal(await page.locator(".ks40-cockpit-tile").count(), 6);
+    assert.equal(await page.locator(".ks40-cockpit-tile").count(), 7);
     assert.equal(await page.locator(".ks40-evidence-panel").count(), 3);
+    assert.equal(await page.locator(".ks4-onboard-steps button").count(), 4, "Onboarding presents four factual steps");
+    assert.equal(await page.getByRole("progressbar").getAttribute("aria-valuenow"), "2",
+      "Only confirmed cloud provider and registered project complete; login and Mesh stay pending");
+    assert.equal(await page.locator(".ks4-summary-card").count(), 3);
+    assert.equal(await page.locator(".ks4-summary-card").nth(1).getByText(/nicht bestätigt|Not verified|Sin verificar|Не проверено/i).count(), 1,
+      "MCP approval must not be invented in synthetic QA");
     if (scene.width === 390) {
       const positions = await page.locator(".ks40-cockpit-tile").evaluateAll((tiles) =>
         tiles.map((tile) => ({ x: tile.getBoundingClientRect().x,
@@ -87,22 +93,22 @@ try {
     assert.deepEqual(initialActions, [], "Initial render never executes handlers");
     // Gateway deep link must select the device card, without pairing or logging in.
     await page.getByTestId("gateway-open-devices").click();
-    assert.equal(await page.locator(".ks40-cockpit-tile").first().getAttribute("aria-pressed"), "true",
+    assert.equal(await page.locator(".ks40-cockpit-tile").nth(4).getAttribute("aria-pressed"), "true",
       "Gateway deep link must visibly select the devices tile");
     assert.deepEqual(await page.evaluate(() => window.__cockpitActions || []), [],
       "A device deep link must never initiate an authorization or connection");
     // Pointer click must remain stable even when the tile is hovered.
-    await page.locator(".ks40-cockpit-tile").nth(1).click({ timeout: 15000 });
+    await page.locator(".ks40-cockpit-tile").nth(0).click({ timeout: 15000 });
     assert.deepEqual(await page.evaluate(() => window.__cockpitActions || []), [],
       "Pointer selection must not initiate a provider request");
-    for (let index = 0; index < 6; index++) {
+    for (let index = 0; index < 7; index++) {
       await page.locator(".ks40-cockpit-tile").nth(index).focus();
       await page.keyboard.press("Enter");
       assert.equal(await page.locator(".ks40-cockpit-tile[aria-pressed=true]").count(), 1);
       assert.deepEqual(await page.evaluate(() => window.__cockpitActions || []), [],
         "Selecting tiles cannot authorize or connect services");
     }
-    await page.locator(".ks40-cockpit-tile").nth(2).focus();
+    await page.locator(".ks40-cockpit-tile").nth(1).focus();
     await page.keyboard.press("Enter");
     const connect = page.locator(".ks40-cockpit-actions .primary");
     assert.equal(await connect.count(), 1, "Claude sign-in is explicitly actionable");

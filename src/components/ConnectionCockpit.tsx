@@ -1,16 +1,16 @@
 // Created by NMKato Solutions
 // Progressive disclosure over the existing, explicitly authorized handlers.
-import { ArrowRight, CheckCircle2, CircleHelp, LockKeyhole, Network, ShieldCheck } from "lucide-react";
+import { ArrowRight, CheckCircle2, CircleHelp, LockKeyhole, Monitor, Network, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useT, type TKey } from "../i18n";
 import { providerDisplayState } from "../lib/providerPolicy";
 import { uxCopy } from "../lib/uxCopy40";
 import type { ProviderId } from "../types";
-import type { useKatoSyncViewModel } from "../viewmodels/useKatoSyncViewModel";
+import type { StepId, useKatoSyncViewModel } from "../viewmodels/useKatoSyncViewModel";
 import { ProviderBrandMark } from "./ProviderBrandMark";
 
 type VM = ReturnType<typeof useKatoSyncViewModel>;
-export type ConnectionTile = "devices" | "codex" | "claude" | "github" | "mcp" | "local";
+export type ConnectionTile = "devices" | "codex" | "claude" | "github" | "mcp" | "local" | "localControl";
 const providerKeys: ProviderId[] = ["codex", "claude", "local"];
 
 function focusSection(id: string) {
@@ -22,7 +22,7 @@ function focusSection(id: string) {
   target.focus({ preventScroll: true });
 }
 
-export function ConnectionCockpit({ vm, connectedDevices = 0, selectedTile, onSelect }: { vm: VM; connectedDevices?: number; selectedTile?: ConnectionTile | null; onSelect?: (tile: ConnectionTile) => void }) {
+export function ConnectionCockpit({ vm, connectedDevices = 0, selectedTile, onSelect, onNavigate }: { vm: VM; connectedDevices?: number; selectedTile?: ConnectionTile | null; onSelect?: (tile: ConnectionTile) => void; onNavigate?: (step: StepId) => void }) {
   const { t, lang } = useT();
   const copy = uxCopy(lang);
   const [localSelected, setLocalSelected] = useState<ConnectionTile | null>(null);
@@ -33,17 +33,23 @@ export function ConnectionCockpit({ vm, connectedDevices = 0, selectedTile, onSe
     claude: "ks40-provider-claude",
     github: "ks40-github",
     mcp: "ks40-mcp",
-    local: "ks40-provider-local"
+    local: "ks40-provider-local",
+    localControl: "section-agent-monitor"
   };
   const items: Array<{ key: ConnectionTile; title: string }> = [
-    { key: "devices", title: copy.cockpitDevices },
     { key: "codex", title: copy.cockpitCodex },
     { key: "claude", title: copy.cockpitClaude },
-    { key: "github", title: copy.cockpitGithub },
+    { key: "local", title: copy.cockpitLocal },
+    { key: "localControl", title: copy.cockpitControl },
+    { key: "devices", title: copy.cockpitDevices },
     { key: "mcp", title: copy.cockpitMcp },
-    { key: "local", title: copy.cockpitLocal }
+    { key: "github", title: copy.cockpitGithub }
   ];
   const statusFor = (key: ConnectionTile) => {
+    if (key === "localControl") {
+      const verified = vm.agentSync.remote?.transport === "online";
+      return { text: verified ? copy.cockpitReady : copy.cockpitNotVerified, tone: verified ? "ready" : "neutral" };
+    }
     if (key === "devices") return connectedDevices > 0
       ? { text: copy.cockpitMeshConnected + " · " + connectedDevices, tone: "ready" }
       : { text: copy.cockpitRegistered, tone: "neutral" };
@@ -92,7 +98,7 @@ export function ConnectionCockpit({ vm, connectedDevices = 0, selectedTile, onSe
             <button
               aria-controls="ks40-cockpit-active"
               aria-pressed={selected === key}
-              className={"ks40-cockpit-tile state-" + state.tone + (selected === key ? " is-selected" : "")}
+              className={"ks40-cockpit-tile state-" + state.tone + (["devices","mcp","github"].includes(key) ? " is-utility" : "") + (selected === key ? " is-selected" : "")}
               key={key}
               onClick={() => { setLocalSelected(key); onSelect?.(key); }}
               type="button"
@@ -101,6 +107,7 @@ export function ConnectionCockpit({ vm, connectedDevices = 0, selectedTile, onSe
                 {key === "codex" || key === "claude" || key === "local"
                   ? <ProviderBrandMark provider={key} size="card" />
                   : key === "github" ? <ProviderBrandMark provider="github" size="card" />
+                  : key === "localControl" ? <Monitor size={24} />
                   : key === "devices" ? <Network size={24} /> : <ShieldCheck size={24} />}
               </span>
               <span className="ks40-tile-copy">
@@ -136,7 +143,8 @@ export function ConnectionCockpit({ vm, connectedDevices = 0, selectedTile, onSe
                   <CheckCircle2 size={16} /> {copy.cockpitCheck}
                 </button>
               ) : null}
-              <button className="secondary" type="button" onClick={() => focusSection(targets[selected])}>
+              <button className="secondary" type="button"
+                onClick={() => selected === "localControl" ? onNavigate?.("agentMonitor") : focusSection(targets[selected])}>
                 {selected === "devices" ? copy.cockpitRegistered
                   : selected === "mcp" ? copy.cockpitReview
                   : selected === "github" ? copy.cockpitCheck : copy.cockpitShow}

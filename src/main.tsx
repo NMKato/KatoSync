@@ -6,6 +6,13 @@ import { I18nProvider } from "./i18n";
 import "./styles.css";
 import "./experiencePolish.css";
 import "./uxCockpit40.css";
+import "./uxFacelift4.css";
+
+// Apply the selected theme before React paints to avoid a dark flash on first light launch.
+const savedTheme = localStorage.getItem("katosync.theme");
+document.documentElement.dataset.theme =
+  savedTheme === "dark" || (savedTheme === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches)
+    ? "dark" : "light";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

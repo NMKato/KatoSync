@@ -30,6 +30,22 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
+## 20.11.2026: 4.0-Agent-Sync-Facelift (privater UX-Kandidat)
+
+**Quellstand, noch nicht installiert:** Der isolierte Zweig `feat/ux4-compact-onboarding-20261120`
+setzt die freigegebene Hell-/Dunkel-Designvorlage direkt in React um: vier
+primäre Provider-/Control-Kacheln, drei sekundäre Integrationszugänge,
+kompaktes Onboarding und drei quellengebundene Gerätestatus-/Client-/Projektkarten.
+Die Agent-Sync-Navigation wird direkt sichtbar; der **Mistral/Agent-Sync-Schalter
+bleibt unverändert**. Hell ist der Default bei einer neuen Präferenz,
+Dunkel und Auto sind wählbar. Bestehende Präferenzen bleiben erhalten.
+
+Die Fußzeile zeigt **KatoSync 4.0 · UX Beta** als Designstand, nicht als
+bestätigtes natives 4.0-Produktrelease. Ein unbekannter MCP-Grant bleibt
+unbestätigt, und keine Aktion genehmigt heimlich Geräte, Tokens oder Projekte.
+Implementierung, Testverfahren und offene native Freigaben:
+[4.0 Facelift Design- und QA-Protokoll](docs/KATOSYNC_UX4_FACELIFT_20261120.md).
+
 ## 20.11.2026: 4.0-Cockpit-UX im isolierten Entwicklungsstand
 
 **Noch kein Release oder installiertes Upgrade:** Der konsolidierte Zweig

@@ -41,6 +41,7 @@ import {
   ShieldCheck,
   Settings,
   SlidersHorizontal,
+  Monitor,
   Square,
   StopCircle,
   Sun,
@@ -138,16 +139,16 @@ const agentSyncSteps: Array<{ id: StepId; icon: typeof Activity }> = [
   { id: "agentDashboard", icon: Gauge },
   { id: "agentProviders", icon: Bot },
   { id: "agentVision", icon: Orbit },
-  { id: "agentJobs", icon: Workflow },
-  { id: "agentMasterChat", icon: MessageSquareText },
-  { id: "agentMonitor", icon: Activity },
   { id: "agentProjects", icon: FolderOpen },
+  { id: "agentJobs", icon: Workflow },
+  { id: "agentMonitor", icon: Activity },
   { id: "agentHistory", icon: History },
+  { id: "agentMasterChat", icon: MessageSquareText },
   { id: "agentSettings", icon: Settings }
 ];
 
 const weekdays = Object.keys(weekdayLabels) as Weekday[];
-type ThemeMode = "dark" | "light";
+type ThemeMode = "dark" | "light" | "auto";
 const onboardingDoneKey = "katosync.onboarding.done";
 const acknowledgedHintsKey = "katosync.acknowledgedHints";
 const acceptedLicenseKey = "katosync.license.acceptedVersion";
@@ -275,9 +276,13 @@ export default function App() {
     }).catch(()=>{if(current)setKatoosBadgeVerified(false);});
     return ()=>{current=false;};
   },[vm.sessionStatus.loggedIn,vm.sessionStatus.email]);
-  const [theme, setTheme] = useState<ThemeMode>(() => {
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     const stored = localStorage.getItem("katosync.theme");
-    return stored === "light" ? "light" : "dark";
+    return stored === "dark" || stored === "auto" ? stored : "light";
+  });
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const stored = localStorage.getItem("katosync.theme");
+    return stored === "dark" || (stored === "auto" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
   });
   const [hintsOpen, setHintsOpen] = useState(false);
   const [acknowledgedHintSignature, setAcknowledgedHintSignature] = useState(
@@ -358,9 +363,14 @@ export default function App() {
   );
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem("katosync.theme", theme);
-  }, [theme]);
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setTheme(themeMode === "auto" ? (media.matches ? "dark" : "light") : themeMode);
+    update();
+    media.addEventListener("change", update);
+    localStorage.setItem("katosync.theme", themeMode);
+    return () => media.removeEventListener("change", update);
+  }, [themeMode]);
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
 
   useEffect(() => {
     if (["agentJobs", "agentMasterChat", "agentMonitor", "agentProjects", "agentHistory", "logs"].includes(visibleStep)) {
@@ -746,7 +756,7 @@ export default function App() {
 
         <nav className="steps ks40-sidebar-nav" aria-label={isAgentSync ? t("mode.agentSyncNav") : t("mode.mistralNav")}>
           <div className="ks40-nav-primary">
-            {navSteps.slice(0, 3).map((step) => (
+            {(isAgentSync ? navSteps : navSteps.slice(0, 3)).map((step) => (
               <StepButton active={visibleStep === step.id}
                 description={t(("nav." + step.id + ".desc") as TKey)}
                 icon={step.icon} key={step.id}
@@ -754,7 +764,7 @@ export default function App() {
                 onClick={() => handleStepSelect(step.id)} />
             ))}
           </div>
-          {navSteps.length > 3 ? (
+          {!isAgentSync && navSteps.length > 3 ? (
             <>
               <button aria-expanded={moreNavOpen}
                 aria-label={moreNavOpen ? ux.workspaceCollapse : ux.workspaceExpand}
@@ -810,10 +820,13 @@ export default function App() {
                     <option value="ru">{t("lang.ru")}</option>
                   </select>
                 </label>
-                <button className="ks40-settings-option" onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")} type="button">
-                  {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-                  <span><strong>{theme === "dark" ? ux.appearanceLight : ux.appearanceDark}</strong></span>
-                </button>
+                <div className="ks4-theme-choices" role="group" aria-label="Design">
+                  {(["light", "dark", "auto"] as const).map(mode =>
+                    <button key={mode} aria-pressed={themeMode === mode} onClick={() => setThemeMode(mode)} type="button">
+                      {mode === "light" ? <Sun size={14}/> : mode === "dark" ? <Moon size={14}/> : <Monitor size={14}/>}
+                      {mode === "light" ? "Hell" : mode === "dark" ? "Dunkel" : "Auto"}
+                    </button>)}
+                </div>
                 <button className="ks40-settings-option" onClick={() => {
                   setPreferencesOpen(false);
                   handleStepSelect(isAgentSync ? "agentSettings" : "settings");
@@ -852,15 +865,27 @@ export default function App() {
               <span>{t("sidebar.quit")}</span>
             </button>
           </HoverTip>
-          <span className="app-version-label">KatoSync {APP_VERSION_LABEL}</span>
+          {isAgentSync ? <div className="ks4-theme-choices ks4-theme-footer" role="group" aria-label="Farbschema">
+            {(["light", "dark", "auto"] as const).map(mode =>
+              <button key={mode} type="button" aria-pressed={themeMode === mode} onClick={() => setThemeMode(mode)}>
+                {mode === "light" ? <Sun size={14}/> : mode === "dark" ? <Moon size={14}/> : <Monitor size={14}/>}
+                {mode === "light" ? "Hell" : mode === "dark" ? "Dunkel" : "Auto"}
+              </button>)}
+          </div> : null}
+          <span className="app-version-label">{isAgentSync ? "KatoSync 4.0 · UX Beta" : "KatoSync " + APP_VERSION_LABEL}</span>
         </div>
       </aside>
 
       <main className="workspace">
         <header className={`topbar${isAgentSync ? " agent-sync-topbar" : ""}`}>
           <div>
-            <h1>{page.title}</h1>
-            <p>{page.text}</p>
+            <h1>{isAgentSync ? "Agent Sync" : page.title}</h1>
+            <p>{isAgentSync ? ({
+              de: "KI-Kontrollzentrum für Geräte, Provider und Aufgaben",
+              en: "AI control center for devices, providers and tasks",
+              es: "Centro de control de IA para dispositivos, proveedores y tareas",
+              ru: "Центр управления ИИ, устройствами и задачами"
+            })[lang] : page.text}</p>
           </div>
           {isAgentSync ? (
             <AgentReadinessStrip vm={vm} onNavigate={handleStepSelect} />
@@ -910,7 +935,7 @@ export default function App() {
               aria-label={theme === "dark" ? t("topbar.themeLight") : t("topbar.themeDark")}
               aria-pressed={theme === "light"}
               className={`theme-switch ${theme}`}
-              onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+              onClick={() => setThemeMode(theme === "dark" ? "light" : "dark")}
               title={theme === "dark" ? t("topbar.themeLight") : t("topbar.themeDark")}
               type="button"
             >
@@ -1024,7 +1049,7 @@ export default function App() {
             <AgentSyncJobs vm={vm} onOpenMistralTasks={() => enterModeAt("mistral", "projectBoard")} />
           ) : null}
           {visibleStep === "agentProviders" ? <>
-            <ProviderManager vm={vm} onChatHandoff={handleGithubChatHandoff} openDevicesRequested={deviceFocusRequested} />
+            <ProviderManager vm={vm} onNavigate={handleStepSelect} onChatHandoff={handleGithubChatHandoff} openDevicesRequested={deviceFocusRequested} />
           </> : null}
           {visibleStep === "agentMasterChat" ? <MasterChatWorkspace
             projects={vm.projects.registry.projects}

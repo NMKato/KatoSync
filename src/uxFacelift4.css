@@ -1,0 +1,194 @@
+/* Created by NMKato Solutions – KatoSync 4.0 design preview.
+ * Real state only; paint/spacing only, no authorization or transport changes.
+ */
+:root {
+  --ks4-green: #087e69;
+  --ks4-green-strong: #005a4e;
+  --ks4-faint: rgba(16, 153, 131, .10);
+}
+:root[data-theme="light"] {
+  --ks4-green: #086c60;
+  --ks4-green-strong: #005a4e;
+  --ks4-faint: rgba(12, 151, 126, .09);
+}
+.app-shell.mode-agentSync .workspace {
+  background-image:
+    radial-gradient(ellipse 45% 21% at 94% 0%, rgba(39, 184, 163, .13), transparent 75%),
+    radial-gradient(ellipse 42% 28% at 24% 22%, rgba(54, 122, 170, .07), transparent 78%);
+  background-attachment: local;
+}
+.app-shell.mode-agentSync .sidebar {gap: 12px; }
+.app-shell.mode-agentSync .sidebar .brand {min-height: 100px;}
+.app-shell.mode-agentSync .steps.ks40-sidebar-nav {
+  padding: 6px 0;
+  gap: 4px;
+  max-height: none;
+}
+.app-shell.mode-agentSync .ks40-nav-primary {gap: 3px;}
+.app-shell.mode-agentSync .ks40-nav-primary .step {
+  min-height: 40px;
+  font-size: 13px;
+  border-radius: 11px;
+}
+.app-shell.mode-agentSync .ks40-nav-primary .step.active {
+  background: linear-gradient(96deg, rgba(10, 154, 128, .22), rgba(10, 139, 138, .10));
+  box-shadow: inset 3px 0 0 #0b9f86;
+}
+.app-shell.mode-agentSync .sidebar-footer {
+  margin-top: auto;
+  padding-top: 9px;
+}
+.ks4-theme-choices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px; padding: 4px;
+  border: 1px solid var(--ks40-line);
+  border-radius: 13px; background: var(--ks40-panel);
+}
+.ks4-theme-choices button {
+  display: flex; justify-content: center; align-items: center; gap: 5px;
+  min-height: 38px; padding: 5px 4px;
+  min-width: 0; border: 1px solid transparent; border-radius: 9px;
+  background: transparent; color: var(--ks40-muted);
+  font-size: 11px; font-weight: 650;
+}
+.ks4-theme-choices button[aria-pressed="true"] {
+  background: var(--ks4-faint); color: var(--ks40-ink);
+  border-color: rgba(23, 158, 138, .3);
+  box-shadow: 0 2px 9px rgba(0, 0, 0, .09);
+}
+.ks4-theme-choices button:focus-visible {outline: 3px solid var(--ks40-focus); outline-offset: 2px;}
+.app-shell.mode-agentSync .app-version-label {padding: 2px 6px; font-size: 11px;}
+.app-shell.mode-agentSync .topbar.agent-sync-topbar {
+  padding-block: 12px;
+  border-bottom: 1px solid var(--ks40-line);
+}
+.app-shell.mode-agentSync .provider-manager {
+  gap: 13px;
+}
+.app-shell.mode-agentSync .provider-hero {
+  padding: 14px 18px !important;
+  box-shadow: none !important;
+  border-radius: 15px !important;
+}
+.app-shell.mode-agentSync .provider-hero h2 {font-size: clamp(20px, 2.3vw, 27px);}
+.ks4-hub {display: grid; gap: 14px; min-width: 0;}
+.ks4-onboarding {
+  padding: 16px;
+  border: 1px solid var(--ks40-line);
+  border-radius: 20px;
+  background: linear-gradient(118deg, var(--ks40-panel), var(--ks40-panel-raised));
+  box-shadow: var(--ks40-frost);
+}
+.ks4-onboard-head {display:flex; align-items:center; justify-content:space-between; gap:15px; margin-bottom:13px;}
+.ks4-heading {display:flex; align-items:center; gap:13px; min-width:0;}
+.ks4-heading-icon, .ks4-card-heading > span {
+  display:grid; place-items:center; flex:0 0 42px; width:42px; height:42px;
+  border-radius:13px; color:var(--ks4-green); background:var(--ks4-faint);
+}
+.ks4-onboard-head h2 {margin:0 0 5px; font-size:17px; line-height:1.2; color:var(--ks40-ink);}
+.ks4-onboard-head p {margin:0; color:var(--ks40-muted); font-size:12px;}
+.ks4-progress {display:grid; gap:7px; width:140px; flex:0 0 140px; text-align:right; color:var(--ks40-ink); font-size:12px;}
+.ks4-progress > div {height:8px; border-radius:7px; background:var(--ks40-line); overflow:hidden;}
+.ks4-progress > div span {display:block; height:100%; background:linear-gradient(90deg, #0a947a, #26c49d); border-radius:inherit;}
+.ks4-onboard-steps {
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0;
+  border:1px solid var(--ks40-line); border-radius:12px;
+  overflow:hidden; background:var(--ks40-tile);
+}
+.ks4-onboard-steps button {
+  display:flex; gap:9px; align-items:center;
+  min-height:65px; padding:11px; border:none;
+  border-right:1px solid var(--ks40-line); background:transparent;
+  color:var(--ks40-ink); font-size:12px; text-align:left;
+}
+.ks4-onboard-steps button:last-child {border-right:none;}
+.ks4-onboard-steps button svg:first-child {color:var(--ks40-muted); flex:0 0 auto;}
+.ks4-onboard-steps button.is-done {background:var(--ks4-faint);}
+.ks4-onboard-steps button.is-done svg:first-child {color:var(--ks4-green);}
+.ks4-onboard-steps button span {flex:1;}
+.ks4-onboard-steps button svg:last-child {color:var(--ks40-muted);}
+.ks4-onboard-steps button:hover {background:var(--ks40-panel-raised);}
+.ks4-section-heading {display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;}
+.ks4-section-heading h2 {margin:0; font-size:20px; color:var(--ks40-ink);}
+.ks4-section-heading small {font-size:11px; color:var(--ks40-muted);}
+.ks4-summary-grid {display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; min-width:0;}
+.ks4-summary-card {
+  display:flex; flex-direction:column; gap:12px; min-width:0; min-height:210px;
+  padding:15px; border:1px solid var(--ks40-line);
+  border-radius:19px; background:var(--ks40-panel);
+  box-shadow:var(--ks40-frost);
+}
+.ks4-card-heading {display:flex; align-items:center; gap:10px; min-width:0;}
+.ks4-card-heading > span {width:37px; height:37px; flex-basis:37px;}
+.ks4-card-heading > div {min-width:0; flex:1;}
+.ks4-card-heading h3 {margin:0 0 4px; font-size:14px; color:var(--ks40-ink);}
+.ks4-card-heading p {margin:0; color:var(--ks40-muted); font-size:10px; line-height:1.35;}
+.ks4-card-heading b {font-size:12px; color:var(--ks40-muted);}
+.ks4-device-mini {display:grid; gap:5px; min-height:65px;}
+.ks4-device-mini > div, .ks4-mini-copy {
+  display:flex; align-items:center; gap:8px; padding:8px;
+  border:1px solid var(--ks40-line); border-radius:10px;
+  min-width:0; color:var(--ks40-ink); font-size:11px;
+}
+.ks4-device-mini span, .ks4-mini-copy span {min-width:0; flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;}
+.ks4-device-mini small, .ks4-mini-copy small {font-size:10px; color:var(--ks40-muted);}
+.ks4-device-mini small.ks4-live {color:var(--ks4-green);}
+.ks4-device-mini p, .ks4-card-note {margin:0; font-size:11px; color:var(--ks40-muted); line-height:1.5;}
+.ks4-card-action {
+  display:flex; align-items:center; justify-content:center; gap:7px;
+  width:100%; min-height:39px; margin-top:auto;
+  background:var(--ks4-faint); color:var(--ks40-ink); border:1px solid var(--ks40-line);
+  border-radius:10px; font-weight:680; font-size:12px;
+}
+.ks4-card-action:hover {border-color:var(--ks4-green);}
+.app-shell.mode-agentSync .ks40-cockpit {
+  padding:17px; gap:12px; border-radius:20px; box-shadow:var(--ks40-frost);
+}
+.app-shell.mode-agentSync .ks40-cockpit-grid {
+  grid-template-columns:repeat(12,minmax(0,1fr)); gap:11px;
+}
+.app-shell.mode-agentSync .ks40-cockpit-tile { grid-column:span 3; }
+.app-shell.mode-agentSync .ks40-cockpit-tile.is-utility {
+  grid-column:span 4; min-height:75px; padding:10px; background:var(--ks40-panel-raised);
+}
+.app-shell.mode-agentSync .ks40-cockpit-tile {
+  min-height:107px; flex-wrap:wrap; padding:12px;
+  border-radius:16px; transform-style:preserve-3d;
+  box-shadow:0 5px 14px rgba(0,0,0,.06), inset 0 1px 0 rgba(255,255,255,.07);
+}
+.app-shell.mode-agentSync .ks40-cockpit-tile:hover {
+  transform:translateY(-3px) perspective(700px) rotateX(1deg);
+  box-shadow:0 11px 24px rgba(0,23,40,.14), inset 0 1px 0 rgba(255,255,255,.09);
+}
+.app-shell.mode-agentSync .ks40-cockpit-tile.state-ready {
+  border-color:rgba(13,158,132,.38);
+  background:linear-gradient(135deg, var(--ks4-faint), var(--ks40-tile));
+}
+.app-shell.mode-agentSync .ks40-tile-copy strong {font-size:13px;}
+.app-shell.mode-agentSync .ks40-cockpit-detail {
+  min-height:67px; padding:12px 14px; border-radius:13px;
+}
+.app-shell.mode-agentSync .ks40-evidence-panel {min-height:214px; padding:15px;}
+@media (max-width: 1180px) {
+  .ks4-summary-grid {grid-template-columns:repeat(2,minmax(0,1fr));}
+  .ks4-summary-card:last-child {grid-column:1/-1;}
+}
+@media (max-width: 900px) {
+  .ks4-onboard-steps {grid-template-columns:repeat(2,minmax(0,1fr));}
+  .ks4-onboard-steps button:nth-child(2) {border-right:0;}
+  .ks4-onboard-steps button:nth-child(-n+2) {border-bottom:1px solid var(--ks40-line);}
+  .app-shell.mode-agentSync .ks40-cockpit-tile,
+  .app-shell.mode-agentSync .ks40-cockpit-tile.is-utility {grid-column:span 6;}
+}
+@media (max-width: 650px) {
+  .ks4-summary-grid {grid-template-columns:minmax(0,1fr);}
+  .ks4-summary-card:last-child {grid-column:auto;}
+  .ks4-onboard-head {align-items:flex-start; flex-direction:column;}
+  .ks4-progress {width:100%; flex-basis:auto; text-align:left;}
+  .app-shell.mode-agentSync .ks40-cockpit-tile {min-height:106px;}
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell.mode-agentSync .ks40-cockpit-tile {transition:none!important; transform:none!important;}
+  .app-shell.mode-agentSync .ks40-cockpit-tile:hover {transform:none!important;}
+}

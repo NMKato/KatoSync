@@ -26,6 +26,7 @@ import {
 import { useT, type TFunc, type TKey } from "../i18n";
 import { ProjectMvpPortfolio } from "./ProjectMvpPortfolio";
 import { OperationalEvidenceDashboard } from "./OperationalEvidenceDashboard";
+import { AgentSyncOverview40 } from "./AgentSyncOverview40";
 import { ReadOnlyDispatchPanel } from "./ReadOnlyDispatchPanel";
 import { partitionMvpDashboard } from "../lib/mvpDashboardLayout.ts";
 import { providerDisplayState } from "../lib/providerPolicy";
@@ -192,6 +193,7 @@ export function AgentSyncDashboard({ vm, onNavigate, presentation = false }: { v
 
   return (
     <section className="agent-dashboard" id="section-agent-dashboard">
+      <AgentSyncOverview40 vm={vm} onNavigate={onNavigate} />
       <ControlTower state={state} />
       <OperationalEvidenceDashboard vm={vm} onNavigate={onNavigate} presentation={presentation} />
 
