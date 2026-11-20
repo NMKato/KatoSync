@@ -30,6 +30,20 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
+## UX-Cockpit und geplante 4.0-Abnahme (20. November 2026)
+
+Die aktuelle, noch **nicht paketierte** C12-Designstufe führt eine kompaktere
+Agent-Sync-Navigation, ein Anzeige-/Einstellungsmenü, fünf direkte
+Verbindungskacheln und die vorhandenen lokalen OpenAI-/Anthropic-Marken in Vision
+ein. Statuskacheln sind ausschließlich Navigation und ersetzen keine Anmeldung,
+Clientfreigabe oder Geräteautorisierung. Die bisher auf beiden Macs getestete
+private Candidate-11-Beta bleibt unverändert installiert.
+
+[Designumfang, Roadmap-Abgleich und kurzer manueller Testplan](docs/KATOSYNC_C12_UX_COCKPIT_TESTPLAN_20261120.md).
+Die zusätzlichen Dashboard-Zeitreihen, offlinefähige Projektstand-Indizierung,
+ressourcenbewusste automatische Modellaktivierung sowie echte MCP-/Remote-Aufträge
+sind weiterhin gesondert zu implementieren und abzunehmen. **Kein 4.0-GO.**
+
 ## Aktueller Stand: Geräte-UX und private Beta
 
 **Quellstand: 19. November 2026.** Der Einstieg bietet jetzt einen direkten

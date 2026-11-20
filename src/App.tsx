@@ -711,7 +711,7 @@ export default function App() {
         <ModeSwitch mode={workspaceMode} onChange={enterMode} />
 
         <nav className="steps" aria-label={isAgentSync ? t("mode.agentSyncNav") : t("mode.mistralNav")}>
-          {navSteps.map((step) => (
+          {navSteps.slice(0, isAgentSync ? 3 : navSteps.length).map((step) => (
             <StepButton
               active={visibleStep === step.id}
               description={t(`nav.${step.id}.desc` as TKey)}
@@ -721,9 +721,37 @@ export default function App() {
               onClick={() => handleStepSelect(step.id)}
             />
           ))}
+          {isAgentSync ? (
+            <details className="nav-more" defaultOpen={agentSyncSteps.slice(3).some((step) => step.id === visibleStep)}>
+              <summary aria-label={lang === "de" ? "Weitere Bereiche" : lang === "es" ? "Más secciones" : lang === "ru" ? "Другие разделы" : "More sections"}>
+                <LayoutGrid size={17} aria-hidden="true" />
+                <span>{lang === "de" ? "Weitere Bereiche" : lang === "es" ? "Más secciones" : lang === "ru" ? "Другие разделы" : "More sections"}</span>
+                <ChevronDown className="nav-more-chevron" size={16} aria-hidden="true" />
+              </summary>
+              <div className="nav-more-items">
+                {agentSyncSteps.slice(3).map((step) => (
+                  <StepButton
+                    active={visibleStep === step.id}
+                    description={t(`nav.${step.id}.desc` as TKey)}
+                    icon={step.icon}
+                    key={step.id}
+                    label={t(`nav.${step.id}` as TKey)}
+                    onClick={() => handleStepSelect(step.id)}
+                  />
+                ))}
+              </div>
+            </details>
+          ) : null}
         </nav>
 
         <div className="sidebar-footer">
+          <details className="sidebar-preferences">
+            <summary aria-label={lang === "de" ? "Anzeige und Einstellungen" : lang === "es" ? "Pantalla y ajustes" : lang === "ru" ? "Вид и настройки" : "Display and settings"}>
+              <Settings size={18} aria-hidden="true" />
+              <span>{lang === "de" ? "Anzeige und Einstellungen" : lang === "es" ? "Pantalla y ajustes" : lang === "ru" ? "Вид и настройки" : "Display and settings"}</span>
+              <ChevronDown size={16} className="sidebar-preferences-chevron" aria-hidden="true" />
+            </summary>
+            <div className="sidebar-preferences-panel">
           <HoverTip
             description={presentation ? t("sidebar.presentationTitleOn") : t("sidebar.presentationDesc")}
             title={presentation ? t("sidebar.presentationOn") : t("sidebar.presentation")}
@@ -756,6 +784,8 @@ export default function App() {
               <span>{t("sidebar.license")}</span>
             </button>
           </HoverTip>
+            </div>
+          </details>
           {vm.sessionStatus.loggedIn ? (
             <div className="sidebar-account">
               <span className="sidebar-account-email" title={t("sidebar.account")}>

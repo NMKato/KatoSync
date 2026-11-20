@@ -239,6 +239,10 @@ test("projection reflects the canonical sources and nothing else", () => {
   assert.equal(rex.label, "REX");
   assert.equal(rex.asset, "kai");
   assert.equal(graph.nodes.find((node) => node.id === HUB_NODE_ID)!.asset, "katosync");
+  // Markenzeichen nur an belegte Provider-Lanes binden, nicht an unbekannte Dienste.
+  assert.equal(graph.nodes.find((node) => node.id === "lane:codex")!.asset, "openai");
+  assert.equal(graph.nodes.find((node) => node.id === "lane:claude")!.asset, "anthropic");
+  assert.equal(graph.nodes.find((node) => node.id === "service:local_control")!.asset ?? null, null);
   // Job on an alias resolves to the canonical project; unknown projects never become nodes.
   assert.ok(edge(graph, "works_on:lane:codex->project:beta"));
   assert.ok(!nodeIds.some((id) => id.includes("ghost")));

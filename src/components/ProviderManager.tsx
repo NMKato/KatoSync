@@ -12,6 +12,7 @@ import {
   Download,
   ExternalLink,
   KeyRound,
+  Laptop,
   Info,
   Loader2,
   LogIn,
@@ -93,7 +94,7 @@ function formatTime(value: string | null | undefined, withDate = true): string {
 }
 
 export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [connectionRefreshEpoch,setConnectionRefreshEpoch]=useState(0);
   const [connectionRefreshBusy,setConnectionRefreshBusy]=useState(false);
   const config = vm.config;
@@ -106,6 +107,16 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
   );
   const anyBusy = Object.keys(vm.providerBusy).length > 0;
   const localControl = vm.providerStatuses.find((status) => status.provider === "local_control");
+  const cockpitWords = {
+    de: { devices: "Geräte & Mesh", approval: "Client-Freigabe", local: "Lokale KI", running: "Läuft", onDemand: "Bei Bedarf" },
+    en: { devices: "Devices & Mesh", approval: "Client approval", local: "Local AI", running: "Running", onDemand: "On demand" },
+    es: { devices: "Dispositivos y Mesh", approval: "Permiso de cliente", local: "IA local", running: "En ejecución", onDemand: "Bajo demanda" },
+    ru: { devices: "Устройства и Mesh", approval: "Доступ клиента", local: "Локальный ИИ", running: "Работает", onDemand: "По запросу" }
+  }[lang];
+  const providerCockpitStatus = (provider: ProviderId): string => {
+    const state = providerDisplayState(vm.providerStatuses.find((entry) => entry.provider === provider), provider);
+    return t(state === "disabled" ? "providers.state.disconnected" : (`providers.state.${state}` as TKey));
+  };
 
   // Read-only refresh: model diagnostics + GitHub account/repository status +
   // local Mesh readiness. Never log in, clear tokens, enroll or pair devices.
@@ -154,6 +165,35 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
         </div>
       </div>
 
+      <nav className="connection-cockpit" aria-label={lang === "de" ? "Verbindungen auswählen" : lang === "es" ? "Elegir conexiones" : lang === "ru" ? "Выбор подключений" : "Choose connections"}>
+        {([
+          { id: "devices", target: "#section-account-devices", title: "SmartMesh", detail: cockpitWords.devices, enabled: vm.sessionStatus.loggedIn },
+          { id: "mcp", target: ".remote-mcp-owner-card", title: "ChatGPT MCP", detail: cockpitWords.approval, enabled: vm.sessionStatus.loggedIn },
+          { id: "codex", target: ".provider-card-codex", title: "OpenAI Codex", detail: providerCockpitStatus("codex"), enabled: true },
+          { id: "claude", target: ".provider-card-claude", title: "Claude Code", detail: providerCockpitStatus("claude"), enabled: true },
+          { id: "local", target: ".provider-card-local", title: cockpitWords.local, detail: vm.localBrainStatus?.running ? cockpitWords.running : cockpitWords.onDemand, enabled: true }
+        ] as const).map((item) => (
+          <button
+            className="connection-cockpit-tile"
+            disabled={!item.enabled}
+            key={item.id}
+            onClick={() => {
+              const target = document.querySelector<HTMLElement>(item.target);
+              target?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+              target?.focus({ preventScroll: true });
+            }}
+            type="button"
+          >
+            <span className="connection-cockpit-icon" aria-hidden="true">
+              {item.id === "codex" ? <ProviderBrandMark provider="codex" size="card" />
+                : item.id === "claude" ? <ProviderBrandMark provider="claude" size="card" />
+                : item.id === "local" ? <Cpu size={24} /> : item.id === "mcp" ? <ShieldCheck size={24} /> : <Laptop size={24} />}
+            </span>
+            <strong>{item.title}</strong>
+            <span className="connection-cockpit-detail">{item.detail}</span>
+          </button>
+        ))}
+      </nav>
       <p className="connections-refresh-hint">{t("connections.refreshHint")}</p>
       {vm.sessionStatus.loggedIn ? (
         <div className="connections-device-section">

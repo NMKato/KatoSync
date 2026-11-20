@@ -55,7 +55,7 @@ export type VisionSource =
   | "remote_orchestrator"
   | "mistral_library";
 /** Freigegebene lokale Marken-Assets (public/). Alles andere zeigt Initialen. */
-export type VisionAsset = "katosync" | "kai";
+export type VisionAsset = "katosync" | "kai" | "openai" | "anthropic";
 /** Quellen, die in dieser Projektion fehlen (ehrlich ausgewiesen statt erfunden). */
 export type VisionOmission = "device_identity" | "project_registry" | "memory_fabric" | "agent_lanes" | "local_brain";
 
@@ -681,6 +681,7 @@ export function buildVisionGraph(input: VisionGraphInput): VisionGraph {
       id: nodeId,
       kind,
       label: LANE_LABEL[lane.id],
+      asset: lane.id === "codex" ? "openai" : lane.id === "claude" ? "anthropic" : null,
       short: lane.id === "local_control" ? "LC" : lane.id === "remote_orchestrator" ? "RO" : initials(LANE_LABEL[lane.id]),
       subtitle: lane.model ?? null,
       scope,

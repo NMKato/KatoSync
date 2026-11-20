@@ -287,3 +287,91 @@
   }
   .sidebar .sidebar-katoos-family-badge > svg { display: none; }
 }
+
+/* UX-Polish C12: primäre Navigation sichtbar lassen, weitere Bereiche nach Bedarf. */
+.mode-agentSync .sidebar { gap: 12px; }
+.mode-agentSync .brand { min-height: 108px; gap: 4px; }
+.mode-agentSync .brand-mark { width: 68px; height: 68px; flex-basis: 68px; border-radius: 17px; }
+.mode-agentSync .brand-mark img { width: 64px; height: 64px; }
+.mode-agentSync .steps { gap: 5px; scrollbar-width: thin; }
+.mode-agentSync .steps > .step { min-height: 44px; }
+.nav-more { min-width: 0; }
+.nav-more > summary, .sidebar-preferences > summary {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px;
+  border: 1px solid transparent; border-radius: 11px; list-style: none;
+  color: var(--text-label); cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.nav-more > summary::-webkit-details-marker, .sidebar-preferences > summary::-webkit-details-marker { display: none; }
+.nav-more > summary:hover, .nav-more[open] > summary,
+.sidebar-preferences > summary:hover, .sidebar-preferences[open] > summary {
+  color: var(--text); border-color: var(--experience-line);
+  background: color-mix(in srgb, var(--experience-raised) 65%, transparent);
+}
+.nav-more > summary span, .sidebar-preferences > summary span { flex: 1; min-width: 0; font-weight: 570; font-size: 13px; }
+.nav-more-chevron, .sidebar-preferences-chevron { margin-left: auto; transition: transform 180ms ease; }
+.nav-more[open] .nav-more-chevron, .sidebar-preferences[open] .sidebar-preferences-chevron { transform: rotate(180deg); }
+.nav-more-items { display: grid; gap: 4px; margin: 6px 0 0 12px; padding-left: 8px; border-left: 1px solid var(--experience-line); }
+.nav-more-items .step { min-height: 42px; border-radius: 9px; }
+.nav-more > summary:focus-visible, .sidebar-preferences > summary:focus-visible,
+.nav-more-items .step:focus-visible { outline: 3px solid var(--experience-focus); outline-offset: 2px; }
+.sidebar-preferences { position: relative; min-width: 0; }
+.sidebar-preferences > summary { min-height: 44px; border-color: var(--experience-line); background: var(--experience-muted); }
+.sidebar-preferences-panel {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 55;
+  display: grid; gap: 8px; width: max(100%, 225px); padding: 12px;
+  border: 1px solid var(--experience-line-strong); border-radius: 16px;
+  background: var(--experience-panel); box-shadow: var(--experience-dialog-shadow);
+  backdrop-filter: blur(22px) saturate(135%); -webkit-backdrop-filter: blur(22px) saturate(135%);
+}
+.sidebar-preferences-panel .license-link { width: 100%; min-width: 0; }
+.mode-agentSync .sidebar-footer { gap: 8px; }
+.mode-agentSync .provider-manager .provider-hero,
+.mode-agentSync .connections-device-section > section {
+  box-shadow: var(--experience-shadow);
+  backdrop-filter: blur(15px) saturate(120%);
+  -webkit-backdrop-filter: blur(15px) saturate(120%);
+}
+@media (max-width: 1120px) {
+  .mode-agentSync .brand { min-height: 60px; }
+  .mode-agentSync .brand-mark { width: 50px; height: 50px; flex-basis: 50px; border-radius: 12px; }
+  .mode-agentSync .brand-mark img { width: 48px; height: 48px; }
+  .nav-more > summary, .sidebar-preferences > summary { width: 46px; min-width: 46px; min-height: 44px; padding: 0; justify-content: center; }
+  .nav-more > summary span, .sidebar-preferences > summary span,
+  .nav-more-chevron, .sidebar-preferences-chevron { display: none; }
+  .nav-more-items { margin: 5px 0 0; padding: 0; border: none; }
+  .nav-more-items .step { min-height: 44px; justify-content: center; padding: 0; }
+  .sidebar-preferences-panel { left: calc(100% + 8px); bottom: -60px; width: 230px; }
+  .sidebar-preferences-panel .license-link span { display: inline; }
+  .sidebar-preferences-panel .lang-switch select { position: static; width: auto; height: auto; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-more *, .sidebar-preferences *, .nav-more > summary, .sidebar-preferences > summary { transition: none !important; animation: none !important; }
+}
+
+/* Keine eigene Verbindungsmagie: diese Cockpit-Kacheln navigieren nur zu den vorhandenen Freigabe-/Providerkarten. */
+.connection-cockpit { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; min-width: 0; }
+.connection-cockpit-tile {
+  display: grid; grid-template-rows: 44px auto auto; justify-items: start; align-content: start;
+  min-width: 0; min-height: 132px; gap: 5px; padding: 14px;
+  border: 1px solid var(--experience-line); border-radius: 16px;
+  color: var(--text); background: color-mix(in srgb, var(--experience-panel) 87%, transparent);
+  text-align: left; box-shadow: var(--experience-shadow);
+  backdrop-filter: blur(18px) saturate(130%); -webkit-backdrop-filter: blur(18px) saturate(130%);
+  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+.connection-cockpit-tile:hover:not(:disabled), .connection-cockpit-tile:focus-visible {
+  transform: translateY(-2px); border-color: var(--experience-selection-border);
+  background: var(--experience-raised);
+}
+.connection-cockpit-tile:focus-visible { outline: 3px solid var(--experience-focus); outline-offset: 2px; }
+.connection-cockpit-tile:disabled { opacity: .6; cursor: not-allowed; }
+.connection-cockpit-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 11px;
+  color: var(--experience-accent); background: var(--experience-muted); border: 1px solid var(--experience-line); }
+.connection-cockpit-icon .provider-brand-mark { margin: 0; }
+.connection-cockpit-tile > strong { font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; }
+.connection-cockpit-detail { font-size: 12px; line-height: 1.4; color: var(--text-muted); overflow-wrap: anywhere; }
+@media (max-width: 1450px) { .connection-cockpit { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 850px) { .connection-cockpit { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 490px) { .connection-cockpit { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .connection-cockpit-tile { transition: none !important; transform: none !important; } }

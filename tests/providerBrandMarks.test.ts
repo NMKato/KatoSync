@@ -36,3 +36,27 @@ test("Non-brand local and local-control providers retain fallback icons", () => 
   assert.match(brands, /provider === "local_control" \? ShieldCheck : Cpu/);
   assert.match(brands, /aria-hidden="true"/);
 });
+
+
+test("Vision uses the exact same bundled OpenAI and Anthropic marks on the matching lanes", () => {
+  const graph = read("../src/lib/visionGraph.ts");
+  const vision = read("../src/components/VisionWorkspace.tsx");
+  assert.match(graph, /asset: lane\.id === "codex" \? "openai" : lane\.id === "claude" \? "anthropic" : null/);
+  assert.match(vision, /openai: "\/agent-openai\.png"/);
+  assert.match(vision, /anthropic: "\/agent-claude\.png"/);
+  assert.doesNotMatch(vision, /https?:\/\/[^\s]+agent-(?:openai|claude)/);
+});
+
+test("Navigation and cockpit keep authentication and approval in their existing handlers", () => {
+  const app = read("../src/App.tsx");
+  const providers = read("../src/components/ProviderManager.tsx");
+  const polish = read("../src/experiencePolish.css");
+  assert.match(app, /className="nav-more"/);
+  assert.match(app, /className="sidebar-preferences"/);
+  assert.match(app, /agentSyncSteps\.slice\(3\)\.map/);
+  assert.match(providers, /className="connection-cockpit"/);
+  assert.match(providers, /scrollIntoView/);
+  assert.match(providers, /section-account-devices/);
+  assert.match(providers, /remote-mcp-owner-card/);
+  assert.match(polish, /prefers-reduced-motion: reduce/);
+});

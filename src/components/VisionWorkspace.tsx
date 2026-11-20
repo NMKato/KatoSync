@@ -48,7 +48,9 @@ interface Transform {
 
 const ASSET_SRC: Record<VisionAsset, string> = {
   katosync: "/katosync_logo_centered.png",
-  kai: "/kai-ai-icon.png"
+  kai: "/kai-ai-icon.png",
+  openai: "/agent-openai.png",
+  anthropic: "/agent-claude.png"
 };
 
 const KIND_ICON: Record<VisionNodeKind, typeof Bot> = {
