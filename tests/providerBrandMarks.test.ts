@@ -52,6 +52,9 @@ test("Navigation and cockpit keep authentication and approval in their existing 
   const providers = read("../src/components/ProviderManager.tsx");
   const polish = read("../src/experiencePolish.css");
   assert.match(app, /className="nav-more"/);
+  assert.match(app, /open=\{advancedNavigationOpen\}/);
+  assert.match(app, /onToggle=\{\(event\) => setAdvancedNavigationOpen\(event.currentTarget.open\)\}/);
+  assert.doesNotMatch(app, /<details[^>]+defaultOpen=/);
   assert.match(app, /className="sidebar-preferences"/);
   assert.match(app, /agentSyncSteps\.slice\(3\)\.map/);
   assert.match(providers, /className="connection-cockpit"/);

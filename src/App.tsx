@@ -318,6 +318,10 @@ export default function App() {
   const WorkIcon = workState?.icon;
   const activities = buildActivities(vm, t);
   const visibleStep = toVisibleStep(vm.activeStep);
+  const [advancedNavigationOpen, setAdvancedNavigationOpen] = useState(false);
+  useEffect(() => {
+    if (agentSyncSteps.slice(3).some((step) => step.id === visibleStep)) setAdvancedNavigationOpen(true);
+  }, [visibleStep]);
   const page = pageCopy(visibleStep, t);
   const isAgentSync = workspaceMode === "agentSync";
   const widgetPreviewEnabled=import.meta.env.VITE_KATOSYNC_DESKTOP_WIDGET_QA==="1";
@@ -722,7 +726,7 @@ export default function App() {
             />
           ))}
           {isAgentSync ? (
-            <details className="nav-more" defaultOpen={agentSyncSteps.slice(3).some((step) => step.id === visibleStep)}>
+            <details className="nav-more" open={advancedNavigationOpen} onToggle={(event) => setAdvancedNavigationOpen(event.currentTarget.open)}>
               <summary aria-label={lang === "de" ? "Weitere Bereiche" : lang === "es" ? "Más secciones" : lang === "ru" ? "Другие разделы" : "More sections"}>
                 <LayoutGrid size={17} aria-hidden="true" />
                 <span>{lang === "de" ? "Weitere Bereiche" : lang === "es" ? "Más secciones" : lang === "ru" ? "Другие разделы" : "More sections"}</span>
