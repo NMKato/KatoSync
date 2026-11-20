@@ -1,0 +1,390 @@
+/* Created by NMKato Solutions
+ * KatoSync cockpit polish: additive, scoped, accessible, GPU-conscious.
+ * Fine glass layers on chrome only; avoid blur on every graph/card surface.
+ */
+:root {
+  --ks40-panel: rgba(24, 37, 54, .76);
+  --ks40-panel-raised: rgba(34, 52, 73, .84);
+  --ks40-tile: rgba(19, 30, 45, .9);
+  --ks40-line: rgba(157, 197, 231, .2);
+  --ks40-line-active: rgba(134, 216, 247, .7);
+  --ks40-ink: #f3f8fd;
+  --ks40-muted: #b5c5d5;
+  --ks40-accent: #8be2e8;
+  --ks40-success: #8fe4be;
+  --ks40-warning: #ffd28f;
+  --ks40-frost: 0 18px 52px rgba(0, 5, 16, .24), inset 0 1px 0 rgba(245, 252, 255, .055);
+  --ks40-focus: #a3eaff;
+}
+:root[data-theme="light"] {
+  --ks40-panel: rgba(255, 255, 255, .88);
+  --ks40-panel-raised: rgba(244, 249, 253, .94);
+  --ks40-tile: rgba(244, 248, 252, .95);
+  --ks40-line: rgba(43, 80, 108, .22);
+  --ks40-line-active: #2e789a;
+  --ks40-ink: #1b3044;
+  --ks40-muted: #465f73;
+  --ks40-accent: #176878;
+  --ks40-success: #11734f;
+  --ks40-warning: #91611b;
+  --ks40-frost: 0 16px 40px rgba(20, 56, 85, .12), inset 0 1px 0 #fff;
+  --ks40-focus: #116c96;
+}
+.app-shell.mode-agentSync .sidebar,
+.app-shell.mode-mistral .sidebar {
+  z-index: 12;
+  gap: 14px;
+  background: linear-gradient(160deg, rgba(15, 24, 36, .95), rgba(11, 20, 31, .91));
+  border-right: 1px solid var(--ks40-line);
+  backdrop-filter: blur(24px) saturate(130%);
+  -webkit-backdrop-filter: blur(24px) saturate(130%);
+}
+:root[data-theme="light"] .app-shell .sidebar {
+  background: linear-gradient(150deg, rgba(245, 250, 255, .96), rgba(234, 244, 252, .94));
+}
+.app-shell .sidebar .brand { min-height: 112px; }
+.app-shell .sidebar .steps.ks40-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 1px 2px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ks40-line) transparent;
+}
+.ks40-nav-primary,
+.ks40-nav-secondary { display: grid; align-content: start; gap: 5px; min-width: 0; }
+.app-shell .ks40-nav-primary .step,
+.app-shell .ks40-nav-secondary .step,
+.app-shell .ks40-nav-group-toggle {
+  min-height: 44px;
+  border-radius: 12px;
+}
+.app-shell .ks40-nav-primary .step:hover,
+.app-shell .ks40-nav-secondary .step:hover,
+.app-shell .ks40-nav-group-toggle:hover { background: var(--ks40-panel-raised); }
+.app-shell .ks40-nav-primary .step.active,
+.app-shell .ks40-nav-secondary .step.active {
+  background: linear-gradient(100deg, rgba(68, 182, 205, .19), rgba(77, 132, 188, .09));
+  box-shadow: inset 3px 0 0 var(--ks40-accent);
+  color: var(--ks40-ink);
+}
+.app-shell .ks40-nav-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0 11px;
+  background: transparent;
+  color: var(--ks40-muted);
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  border: 1px solid transparent;
+}
+.ks40-nav-group-toggle > span { flex: 1; }
+.ks40-nav-group-toggle > svg:last-child { transition: transform .2s ease; }
+.ks40-nav-group-toggle > svg.is-open { transform: rotate(180deg); }
+.ks40-nav-secondary {
+  margin: 0 0 0 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--ks40-line);
+  animation: ks40-slide-in .24s ease both;
+}
+.app-shell .sidebar .sidebar-footer {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  border-top: 1px solid var(--ks40-line);
+  padding-top: 12px;
+}
+.ks40-settings-holder { position: relative; min-width: 0; width: 100%; }
+.app-shell .sidebar .ks40-settings-button {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  min-height: 44px;
+  width: 100%;
+  border: 1px solid var(--ks40-line);
+  border-radius: 12px;
+  background: var(--ks40-panel);
+  color: var(--ks40-ink);
+  font-weight: 650;
+}
+.app-shell .sidebar .ks40-settings-button:hover,
+.app-shell .sidebar .ks40-settings-button.is-open {
+  background: var(--ks40-panel-raised);
+  border-color: var(--ks40-line-active);
+}
+.ks40-settings-panel {
+  position: absolute;
+  z-index: 100;
+  left: calc(100% + 16px);
+  bottom: -40px;
+  display: grid;
+  gap: 5px;
+  width: min(342px, calc(100vw - 285px));
+  min-width: 0;
+  max-height: min(80vh, 520px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--ks40-line-active);
+  border-radius: 20px;
+  background: var(--ks40-panel-raised);
+  box-shadow: 0 24px 72px rgba(0, 5, 15, .48);
+  backdrop-filter: blur(28px) saturate(145%);
+  -webkit-backdrop-filter: blur(28px) saturate(145%);
+  animation: ks40-slide-in .2s ease both;
+}
+.ks40-settings-panel header { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 8px 6px 12px; border-bottom: 1px solid var(--ks40-line); }
+.ks40-settings-panel header > div { display: grid; gap: 5px; }
+.ks40-settings-panel header strong { color: var(--ks40-ink); font-size: 17px; }
+.ks40-settings-panel header small { color: var(--ks40-muted); font-size: 12px; line-height: 1.45; }
+.ks40-icon-close { border-radius: 10px; min-width: 40px; min-height: 40px; background: var(--ks40-tile); color: var(--ks40-ink); }
+.ks40-settings-option {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 12px;
+  text-align: left;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--ks40-ink);
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+.ks40-settings-option:hover, .ks40-settings-option:focus-within {
+  border-color: var(--ks40-line);
+  background: var(--ks40-tile);
+}
+.ks40-settings-option > svg:first-child { flex-shrink: 0; color: var(--ks40-accent); }
+.ks40-settings-option > span:nth-child(2) { display: grid; flex: 1; gap: 5px; min-width: 0; }
+.ks40-settings-option small { color: var(--ks40-muted); font-size: 11px; line-height: 1.4; }
+.ks40-settings-option select {
+  max-width: 137px;
+  min-height: 36px;
+  border-radius: 9px;
+  padding: 3px 8px;
+  border: 1px solid var(--ks40-line);
+  color: var(--ks40-ink);
+  background: var(--ks40-tile);
+}
+.ks40-choice-indicator { flex-shrink: 0; width: 24px; height: 13px; border: 1px solid var(--ks40-line); border-radius: 999px; background: var(--ks40-tile); }
+.ks40-choice-indicator:before { content: ""; display: block; width: 9px; height: 9px; margin: 1px; border-radius: 999px; background: var(--ks40-muted); transition: transform .2s ease; }
+.ks40-choice-indicator.is-on { border-color: var(--ks40-accent); }
+.ks40-choice-indicator.is-on:before { transform: translateX(11px); background: var(--ks40-success); }
+
+.ks40-cockpit, .ks40-evidence { display: grid; min-width: 0; gap: 16px; }
+.ks40-cockpit {
+  padding: clamp(18px, 2.5vw, 28px);
+  border: 1px solid var(--ks40-line);
+  border-radius: 24px;
+  background: linear-gradient(125deg, var(--ks40-panel), rgba(17, 29, 45, .63));
+  box-shadow: var(--ks40-frost);
+}
+:root[data-theme="light"] .ks40-cockpit {
+  background: linear-gradient(125deg, var(--ks40-panel), rgba(232, 244, 255, .74));
+}
+.ks40-section-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; min-width: 0; }
+.ks40-eyebrow { display: inline-flex; align-items: center; gap: 7px; text-transform: uppercase; letter-spacing: .095em; font-size: 11px; font-weight: 700; color: var(--ks40-accent); }
+.ks40-section-heading h2, .ks40-section-heading h3 { margin: 6px 0 5px; font-size: clamp(19px, 2vw, 25px); line-height: 1.25; letter-spacing: -.025em; color: var(--ks40-ink); }
+.ks40-section-heading p { color: var(--ks40-muted); font-size: 13px; line-height: 1.6; max-width: 65ch; margin: 4px 0 0; }
+.ks40-cockpit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; min-width: 0; }
+.ks40-cockpit-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 88px;
+  padding: 13px;
+  text-align: left;
+  color: var(--ks40-ink);
+  background: var(--ks40-tile);
+  border: 1px solid var(--ks40-line);
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+  transition: background-color .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease;
+}
+.ks40-cockpit-tile:hover { border-color: var(--ks40-line-active); background: var(--ks40-panel-raised); box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 8px 20px rgba(0, 10, 26, .15); }
+.ks40-cockpit-tile:active { transform: scale(.985); }
+.ks40-cockpit-tile.is-selected { border-color: var(--ks40-line-active); background: var(--ks40-panel-raised); box-shadow: inset 0 0 0 1px rgba(134, 216, 247, .2), 0 0 0 3px rgba(134, 216, 247, .075); }
+.ks40-tile-icon { display: grid; place-items: center; flex: 0 0 46px; width: 46px; height: 46px; border-radius: 14px; background: rgba(122, 173, 206, .1); color: var(--ks40-accent); overflow: hidden; }
+.ks40-tile-icon .provider-brand-mark { min-width: 0; width: 35px; height: 35px; background: transparent; border: none; box-shadow: none; }
+.ks40-tile-icon .provider-brand-mark img { width: 33px; height: 33px; object-fit: contain; }
+/* White GitHub artwork must remain visible in the light theme. */
+.ks40-tile-icon .provider-brand-mark-github { background: #17293c; border-radius: 10px; padding: 5px; }
+.ks40-tile-copy { min-width: 0; flex: 1; display: grid; gap: 5px; }
+.ks40-tile-copy strong { font-size: 13px; font-weight: 690; overflow-wrap: anywhere; }
+.ks40-tile-copy small { color: var(--ks40-muted); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.ks40-tile-state { display: grid; place-items: center; color: var(--ks40-muted); flex: 0 0 20px; }
+.state-ready .ks40-tile-state { color: var(--ks40-success); }
+.state-warning .ks40-tile-state { color: var(--ks40-warning); }
+.state-busy .ks40-tile-state svg { animation: ks40-pulse 1.6s ease-in-out infinite; }
+.ks40-cockpit-detail { display: flex; align-items: center; gap: 18px; justify-content: space-between; min-height: 82px; padding: 15px 17px; border-radius: 16px; border: 1px solid var(--ks40-line); background: var(--ks40-tile); color: var(--ks40-ink); }
+.ks40-cockpit-placeholder { color: var(--ks40-muted); font-size: 13px; margin: 0; }
+.ks40-cockpit-selection { display: grid; gap: 5px; min-width: 0; }
+.ks40-cockpit-selection strong { font-size: 15px; }
+.ks40-cockpit-selection small { color: var(--ks40-muted); font-size: 12px; }
+.ks40-cockpit-selection .ks40-safe-note { font-size: 11px; }
+.ks40-cockpit-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+.ks40-cockpit-actions button { min-height: 44px; display: inline-flex; gap: 9px; align-items: center; justify-content: center; border-radius: 12px; }
+/* One service at a time: keep advanced forms accessible, but not permanently stacked. */
+.ks40-active-detail { min-width: 0; animation: ks40-slide-in .22s ease both; }
+/* Keep owner/consent/CLI forms mounted while switching cards; hidden must beat grid/flex rules. */
+.ks40-active-detail[hidden], .provider-cards[hidden],
+.provider-cards > .provider-card[hidden],
+.provider-cards > .github-provider-card[hidden] { display: none !important; }
+.ks40-detail-login-hint { margin: 0; padding: 16px 19px; background: var(--ks40-panel);
+  color: var(--ks40-muted); border: 1px solid var(--ks40-line); border-radius: 16px; }
+.ks40-advanced-block {
+  min-width: 0;
+  border: 1px solid var(--ks40-line);
+  border-radius: 15px;
+  background: var(--ks40-panel);
+  overflow: clip;
+}
+.ks40-advanced-block > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  list-style: none;
+  padding: 14px 18px;
+  min-height: 46px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ks40-muted);
+}
+.ks40-advanced-block > summary::-webkit-details-marker { display: none; }
+.ks40-advanced-block > summary::before { content: "›"; display: inline-block;
+  color: var(--ks40-accent); font-size: 21px; line-height: 12px;
+  transition: transform .15s ease; }
+.ks40-advanced-block[open] > summary::before { transform: rotate(90deg); }
+.ks40-advanced-block > summary:hover { background: var(--ks40-panel-raised); color: var(--ks40-ink); }
+.ks40-advanced-block > summary:focus-visible { outline: 3px solid var(--ks40-focus); outline-offset: -3px; }
+.ks40-advanced-block > .provider-route-wrap,
+.ks40-advanced-block > .provider-info-grid,
+.ks40-advanced-block > .provider-transitions {
+  margin: 0 16px 16px;
+}
+.ks40-advanced-block .provider-route-title { display: none; }
+#ks40-devices, #ks40-mcp, #ks40-github, [id^="ks40-provider-"] { scroll-margin-top: 30px; }
+#ks40-devices:focus-visible, #ks40-mcp:focus-visible, #ks40-github:focus-visible, [id^="ks40-provider-"]:focus-visible { outline: 2px solid var(--ks40-focus); outline-offset: 4px; }
+
+.ks40-evidence { gap: 13px; margin-bottom: 4px; }
+.ks40-evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 13px; }
+.ks40-evidence-panel { display: flex; flex-direction: column; gap: 12px; min-height: 255px; min-width: 0; padding: 20px; border: 1px solid var(--ks40-line); border-radius: 20px; background: var(--ks40-panel); box-shadow: var(--ks40-frost); }
+.ks40-evidence-panel > header { display: flex; align-items: center; gap: 9px; color: var(--ks40-accent); min-width: 0; }
+.ks40-evidence-panel > header h3 { font-size: 14px; color: var(--ks40-ink); letter-spacing: -.015em; margin: 0; }
+.ks40-donut-row { display: flex; align-items: center; gap: 13px; }
+.ks40-donut { flex: 0 0 116px; width: 116px; height: 116px; max-width: 48%; overflow: visible; }
+.ks40-donut-track { stroke: var(--ks40-line); }
+.ks40-donut-value { stroke: var(--ks40-success); stroke-linecap: round; transition: stroke-dasharray .45s ease; }
+.ks40-donut-count { fill: var(--ks40-ink); font-size: 22px; font-weight: 760; }
+.ks40-donut-sub { fill: var(--ks40-muted); font-size: 10px; }
+.ks40-donut-detail { display: grid; gap: 6px; min-width: 0; }
+.ks40-donut-detail strong { color: var(--ks40-ink); font-size: 13px; }
+.ks40-donut-detail p { color: var(--ks40-muted); font-size: 11px; line-height: 1.5; margin: 0; }
+.ks40-service-logos { display: flex; gap: 7px; margin-top: 7px; }
+.ks40-service-logos img { width: 28px; height: 28px; padding: 4px; border-radius: 9px; object-fit: contain; background: rgba(112,143,165,.15); }
+.ks40-text-action { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; margin-top: auto; color: var(--ks40-accent); border-radius: 8px; padding: 6px 0; font-size: 12px; font-weight: 650; background: transparent; }
+.ks40-activity-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; color: var(--ks40-muted); font-size: 11px; }
+.ks40-activity-legend span::before { content: ""; display: inline-block; vertical-align: middle; width: 8px; height: 8px; border-radius: 3px; margin-right: 6px; background: var(--ks40-accent); }
+.ks40-activity-legend span.transitions::before { background: var(--ks40-warning); }
+.ks40-activity-bars { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; height: 132px; width: 100%; border-bottom: 1px solid var(--ks40-line); }
+.ks40-bar-day { height: 100%; min-width: 0; display: flex; flex-direction: column; justify-content: end; align-items: center; gap: 7px; color: var(--ks40-muted); font-variant-numeric: tabular-nums; }
+.ks40-bar-day small { font-size: 10px; margin-bottom: 7px; }
+.ks40-bar-pair { flex: 1; display: flex; align-items: end; justify-content: center; gap: 3px; width: 100%; }
+.ks40-bar { display: block; width: clamp(5px, 26%, 20px); min-width: 5px; border-radius: 5px 5px 0 0; transition: height .4s ease; }
+.ks40-bar.jobs { background: var(--ks40-accent); }
+.ks40-bar.transitions { background: var(--ks40-warning); }
+.ks40-source-note { color: var(--ks40-muted); font-size: 11px; line-height: 1.5; margin: 0; }
+.ks40-commit-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.ks40-commit-list li { display: flex; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--ks40-line); min-width: 0; }
+.ks40-commit-dot { width: 8px; height: 8px; flex: 0 0 8px; background: var(--ks40-warning); border-radius: 50%; }
+.ks40-commit-dot.verified { background: var(--ks40-success); }
+.ks40-commit-main { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.ks40-commit-main strong { color: var(--ks40-ink); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ks40-commit-main small { color: var(--ks40-muted); font-size: 10px; }
+.ks40-commit-list time { white-space: nowrap; color: var(--ks40-muted); font-size: 10px; }
+.ks40-no-evidence { min-height: 114px; display: grid; place-items: center; text-align: center; color: var(--ks40-muted); font-size: 12px; line-height: 1.6; padding: 16px; background: var(--ks40-tile); border-radius: 13px; border: 1px dashed var(--ks40-line); }
+.ks40-visually-hidden { position: absolute !important; width: 1px; height: 1px; clip: rect(0,0,0,0); clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+
+/* Restrained shared surface treatment. Translucent chrome, opaque enough for legibility. */
+.app-shell.mode-agentSync .provider-manager .provider-hero,
+.app-shell.mode-agentSync .agent-card,
+.app-shell.mode-agentSync .agent-project-linker,
+.app-shell.mode-agentSync .provider-card {
+  border: 1px solid var(--ks40-line);
+  border-radius: 20px;
+  background: var(--ks40-panel);
+  box-shadow: var(--ks40-frost);
+}
+.app-shell.mode-agentSync .provider-manager { gap: 20px; }
+.app-shell.mode-agentSync .provider-manager .provider-hero { padding: clamp(18px, 2.3vw, 26px); }
+.app-shell.mode-agentSync .provider-manager .provider-card { padding: clamp(17px, 2vw, 24px); }
+.app-shell.mode-agentSync .agent-dashboard { gap: 18px; }
+.app-shell.mode-agentSync .agent-ready-chip { border-radius: 12px; }
+.app-shell.mode-agentSync .vision-canvas { border-radius: 22px; }
+
+@media (max-width: 1250px) {
+  .ks40-cockpit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ks40-evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ks40-evidence-commits { grid-column: 1 / -1; }
+}
+@media (max-width: 1120px) {
+  .app-shell .sidebar .brand { min-height: 65px; }
+  .app-shell .sidebar .ks40-nav-group-toggle { width: 46px; min-height: 44px; justify-content: center; padding: 0; margin: 0 auto; }
+  .app-shell .sidebar .ks40-nav-group-toggle > span,
+  .app-shell .sidebar .ks40-nav-group-toggle > svg:last-child,
+  .app-shell .sidebar .ks40-settings-button > span { display: none; }
+  .app-shell .sidebar .ks40-nav-secondary { margin-left: 0; padding-left: 0; border-left: none; }
+  .app-shell .sidebar .ks40-settings-button { width: 46px; min-height: 44px; padding: 0; justify-content: center; margin: auto; }
+  .ks40-settings-panel { left: calc(100% + 13px); width: min(340px, calc(100vw - 124px)); bottom: -34px; }
+  .app-shell .sidebar .steps.ks40-sidebar-nav { gap: 6px; }
+}
+@media (max-width: 900px) {
+  .ks40-cockpit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ks40-evidence-grid { grid-template-columns: minmax(0, 1fr); }
+  .ks40-evidence-commits { grid-column: auto; }
+  .ks40-evidence-panel { min-height: 220px; }
+}
+@media (max-width: 650px) {
+  /* Compact 2x3 cockpit; cards remain comfortably >=44px interactive targets. */
+  .ks40-cockpit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .ks40-cockpit-tile { flex-direction: column; align-items: flex-start; position: relative;
+    min-height: 128px; gap: 8px; padding: 11px; }
+  .ks40-tile-icon { flex-basis: auto; width: 38px; height: 38px; border-radius: 11px; }
+  .ks40-tile-icon .provider-brand-mark { width: 32px; height: 32px; }
+  .ks40-tile-icon .provider-brand-mark img { width: 30px; height: 30px; }
+  .ks40-tile-state { position: absolute; top: 12px; right: 12px; }
+  .ks40-tile-copy strong { font-size: 12px; line-height: 1.3; }
+  .ks40-tile-copy small { font-size: 10px; line-height: 1.35; }
+  .ks40-cockpit-detail { flex-direction: column; align-items: stretch; }
+  .ks40-cockpit-actions > button { flex: 1; }
+  .ks40-commit-list li { flex-wrap: wrap; }
+  .ks40-commit-list time { margin-left: 20px; }
+}
+@media (max-width: 340px) {
+  .ks40-cockpit-grid { grid-template-columns: minmax(0, 1fr); }
+  .ks40-cockpit-tile { min-height: 86px; flex-direction: row; align-items: center; }
+}
+:where(.ks40-cockpit, .ks40-evidence, .ks40-settings-panel, .ks40-sidebar-nav) button:focus-visible,
+.ks40-settings-option select:focus-visible {
+  outline: 3px solid var(--ks40-focus);
+  outline-offset: 3px;
+}
+@keyframes ks40-slide-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes ks40-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .ks40-settings-panel, .ks40-nav-secondary, .ks40-cockpit-tile, .ks40-donut-value,
+  .ks40-active-detail, .ks40-advanced-block summary::before,
+  .ks40-choice-indicator:before, .ks40-bar, .ks40-nav-group-toggle > svg,
+  .state-busy .ks40-tile-state svg { animation: none !important; transition: none !important; transform: none !important; }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .ks40-settings-panel { background: var(--ks40-panel-raised); }
+}

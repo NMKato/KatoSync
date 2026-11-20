@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useT, type TFunc, type TKey } from "../i18n";
 import { ProjectMvpPortfolio } from "./ProjectMvpPortfolio";
+import { OperationalEvidenceDashboard } from "./OperationalEvidenceDashboard";
 import { ReadOnlyDispatchPanel } from "./ReadOnlyDispatchPanel";
 import { partitionMvpDashboard } from "../lib/mvpDashboardLayout.ts";
 import { providerDisplayState } from "../lib/providerPolicy";
@@ -168,7 +169,7 @@ export function AgentReadinessStrip({ vm, onNavigate }: { vm: ViewModel; onNavig
 }
 
 // ===== Dashboard =====
-export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNavigate: Navigate }) {
+export function AgentSyncDashboard({ vm, onNavigate, presentation = false }: { vm: ViewModel; onNavigate: Navigate; presentation?: boolean }) {
   const { t } = useT();
   const readiness = buildAgentReadiness(vm);
   const state = vm.agentSync;
@@ -192,6 +193,7 @@ export function AgentSyncDashboard({ vm, onNavigate }: { vm: ViewModel; onNaviga
   return (
     <section className="agent-dashboard" id="section-agent-dashboard">
       <ControlTower state={state} />
+      <OperationalEvidenceDashboard vm={vm} onNavigate={onNavigate} presentation={presentation} />
 
       <section className="glass agent-project-linker" aria-label={t("agent.projects.quickTitle")}>
         <div className="agent-project-linker-copy">

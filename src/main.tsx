@@ -5,6 +5,7 @@ import {GithubLoginQaApp} from "./components/GithubLoginQaApp";
 import { I18nProvider } from "./i18n";
 import "./styles.css";
 import "./experiencePolish.css";
+import "./uxCockpit40.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

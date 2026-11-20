@@ -30,22 +30,32 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
-## UX-Cockpit und geplante 4.0-Abnahme (20. November 2026)
+## 20.11.2026: 4.0-Cockpit-UX im isolierten Entwicklungsstand
 
-Die aktuelle, noch **nicht paketierte** C12-Designstufe führt eine kompaktere
-Agent-Sync-Navigation, ein Anzeige-/Einstellungsmenü, fünf direkte
-Verbindungskacheln und die vorhandenen lokalen OpenAI-/Anthropic-Marken in Vision
-ein. Statuskacheln sind ausschließlich Navigation und ersetzen keine Anmeldung,
-Clientfreigabe oder Geräteautorisierung. Die bisher auf beiden Macs getestete
-private Candidate-11-Beta bleibt unverändert installiert.
+**Noch kein Release oder installiertes Upgrade:** Der konsolidierte Zweig
+`feat/c12-unified-best-of-20261120` vereint das GitHub-C12-Cockpit, die lokale
+Sechs-Kachel-Variante und Candidate 11 als unveränderten Rückfallstand.
+Er ordnet die Desktop-Navigation neu, bündelt Darstellung/Sprache/Nutzungsvereinbarung
+in einem eigenen Einstellungsmenü und zeigt Geräte, Codex, Claude, GitHub,
+ChatGPT MCP und lokale KI als ausdrücklich wählbare Verbindungskacheln.
+Die Auswahl selbst führt **keine** Anmeldung, Kopplung oder Schreibaktion aus.
 
-[Designumfang, Roadmap-Abgleich und kurzer manueller Testplan](docs/KATOSYNC_C12_UX_COCKPIT_TESTPLAN_20261120.md).
-Visuelle Synthetik- und Zugänglichkeitstests für das echte Cockpit:
-`node scripts/qa-c12-cockpit-ui.mjs /tmp/katosync-c12-cockpit`.
-Dieser Lauf ersetzt **nicht** die native Tauri/WebKit-Geräteprüfung.
-Die zusätzlichen Dashboard-Zeitreihen, offlinefähige Projektstand-Indizierung,
-ressourcenbewusste automatische Modellaktivierung sowie echte MCP-/Remote-Aufträge
-sind weiterhin gesondert zu implementieren und abzunehmen. **Kein 4.0-GO.**
+Die Übersicht erhält echte, herkunftsgebundene Statusgrafiken aus vorhandenen
+Job-Ereignissen, Provider-Wechseln und lokalen Git-Commit-Daten. Ein
+Commit-Datum wird nicht fälschlich als Push-Zeitpunkt bezeichnet; fehlende
+Messdaten erhalten keine erfundenen Kurven. Vision zeigt die OpenAI-/Anthropic-
+Marken auf vorhandenen Provider-Knoten; Verbindungsstatus und Frische werden
+unabhängig davon aus den tatsächlichen Lane-Zuständen abgeleitet.
+
+**Nicht als fertig deklarieren:** vollständige 4.0-Agentenaktivierung,
+offline-sichere automatische Modellübernahme und Hintergrund-Konterxtpflege,
+M3-Modellstart, native ChatGPT-MCP-Jobs, direkter LAN-Test, Windows-Installer
+und die übrigen Release-Gates. Die Sicherheits- und Speichergrenzen bleiben
+unverändert. Architektur, Tests und manueller Beta-Prüfplan:
+[4.0 UX-Cockpit](docs/KATOSYNC_4_0_UX_COCKPIT_20261120.md) und
+[Best-of-/MCP-Abnahmegrenzen](docs/KATOSYNC_C12_UNIFIED_MCP_GATES_20261120.md).
+Der ursprüngliche [C12-Fünf-Kachel-Testplan](docs/KATOSYNC_C12_UX_COCKPIT_TESTPLAN_20261120.md)
+bleibt als historischer Vergleich erhalten.
 
 ## Aktueller Stand: Geräte-UX und private Beta
 

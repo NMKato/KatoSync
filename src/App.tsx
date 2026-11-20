@@ -70,6 +70,7 @@ import { RemoteCommanderUsagePanel } from "./components/RemoteCommanderUsagePane
 import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
 import { AgentLiveMonitor } from "./components/AgentJobViews";
 import { ProviderManager } from "./components/ProviderManager";
+import { uxCopy } from "./lib/uxCopy40";
 import { AccountMeshProvider } from "./contexts/AccountMeshContext";
 import { AccountDeviceNotifications } from "./components/AccountDevicesCard";
 import { ProjectRegistryWorkspace } from "./components/ProjectRegistryWorkspace";
@@ -312,16 +313,17 @@ export default function App() {
     () => localStorage.getItem(acceptedLicenseKey) !== licenseAgreement.version
   );
   const [licenseChecked, setLicenseChecked] = useState(false);
+  const [moreNavOpen, setMoreNavOpen] = useState(false);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const preferencesButtonRef = useRef<HTMLButtonElement | null>(null);
+  const preferencesPanelRef = useRef<HTMLDivElement | null>(null);
   const { config } = vm;
   const { t, lang, setLang } = useT();
+  const ux = uxCopy(lang);
   const workState = getWorkState(vm.busy, t);
   const WorkIcon = workState?.icon;
   const activities = buildActivities(vm, t);
   const visibleStep = toVisibleStep(vm.activeStep);
-  const [advancedNavigationOpen, setAdvancedNavigationOpen] = useState(false);
-  useEffect(() => {
-    if (agentSyncSteps.slice(3).some((step) => step.id === visibleStep)) setAdvancedNavigationOpen(true);
-  }, [visibleStep]);
   const page = pageCopy(visibleStep, t);
   const isAgentSync = workspaceMode === "agentSync";
   const widgetPreviewEnabled=import.meta.env.VITE_KATOSYNC_DESKTOP_WIDGET_QA==="1";
@@ -359,6 +361,34 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("katosync.theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (["agentJobs", "agentMasterChat", "agentMonitor", "agentProjects", "agentHistory", "logs"].includes(visibleStep)) {
+      setMoreNavOpen(true);
+    }
+  }, [visibleStep]);
+
+  // Only local UI behavior: no account, model, queue or grant action.
+  useEffect(() => {
+    if (!preferencesOpen) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPreferencesOpen(false);
+        preferencesButtonRef.current?.focus();
+      }
+    };
+    const onPointer = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (!preferencesPanelRef.current?.contains(event.target) &&
+          !preferencesButtonRef.current?.contains(event.target)) setPreferencesOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    };
+  }, [preferencesOpen]);
 
   // Verlauf: jeden abgeschlossenen Lauf in den lokalen Run-Ring schreiben (dedupliziert ueber finishedAt).
   // In State gehalten, damit der frisch beendete Lauf sofort im Cockpit erscheint (kein Render-Lag, kein Parse pro Render).
@@ -714,82 +744,90 @@ export default function App() {
 
         <ModeSwitch mode={workspaceMode} onChange={enterMode} />
 
-        <nav className="steps" aria-label={isAgentSync ? t("mode.agentSyncNav") : t("mode.mistralNav")}>
-          {navSteps.slice(0, isAgentSync ? 3 : navSteps.length).map((step) => (
-            <StepButton
-              active={visibleStep === step.id}
-              description={t(`nav.${step.id}.desc` as TKey)}
-              icon={step.icon}
-              key={step.id}
-              label={t(`nav.${step.id}` as TKey)}
-              onClick={() => handleStepSelect(step.id)}
-            />
-          ))}
-          {isAgentSync ? (
-            <details className="nav-more" open={advancedNavigationOpen} onToggle={(event) => setAdvancedNavigationOpen(event.currentTarget.open)}>
-              <summary aria-label={lang === "de" ? "Weitere Bereiche" : lang === "es" ? "Más secciones" : lang === "ru" ? "Другие разделы" : "More sections"}>
-                <LayoutGrid size={17} aria-hidden="true" />
-                <span>{lang === "de" ? "Weitere Bereiche" : lang === "es" ? "Más secciones" : lang === "ru" ? "Другие разделы" : "More sections"}</span>
-                <ChevronDown className="nav-more-chevron" size={16} aria-hidden="true" />
-              </summary>
-              <div className="nav-more-items">
-                {agentSyncSteps.slice(3).map((step) => (
-                  <StepButton
-                    active={visibleStep === step.id}
-                    description={t(`nav.${step.id}.desc` as TKey)}
-                    icon={step.icon}
-                    key={step.id}
-                    label={t(`nav.${step.id}` as TKey)}
-                    onClick={() => handleStepSelect(step.id)}
-                  />
-                ))}
-              </div>
-            </details>
+        <nav className="steps ks40-sidebar-nav" aria-label={isAgentSync ? t("mode.agentSyncNav") : t("mode.mistralNav")}>
+          <div className="ks40-nav-primary">
+            {navSteps.slice(0, 3).map((step) => (
+              <StepButton active={visibleStep === step.id}
+                description={t(("nav." + step.id + ".desc") as TKey)}
+                icon={step.icon} key={step.id}
+                label={t(("nav." + step.id) as TKey)}
+                onClick={() => handleStepSelect(step.id)} />
+            ))}
+          </div>
+          {navSteps.length > 3 ? (
+            <>
+              <button aria-expanded={moreNavOpen}
+                aria-label={moreNavOpen ? ux.workspaceCollapse : ux.workspaceExpand}
+                className="ks40-nav-group-toggle"
+                onClick={() => setMoreNavOpen((open) => !open)} type="button">
+                <LayoutGrid size={17} />
+                <span>{ux.workspace}</span>
+                <ChevronDown className={moreNavOpen ? "is-open" : ""} size={15} />
+              </button>
+              {moreNavOpen ? (
+                <div className="ks40-nav-secondary">
+                  {navSteps.slice(3).filter((step) => step.id !== "settings" && step.id !== "agentSettings").map((step) => (
+                    <StepButton active={visibleStep === step.id}
+                      description={t(("nav." + step.id + ".desc") as TKey)}
+                      icon={step.icon} key={step.id}
+                      label={t(("nav." + step.id) as TKey)}
+                      onClick={() => handleStepSelect(step.id)} />
+                  ))}
+                </div>
+              ) : null}
+            </>
           ) : null}
         </nav>
 
         <div className="sidebar-footer">
-          <details className="sidebar-preferences">
-            <summary aria-label={lang === "de" ? "Anzeige und Einstellungen" : lang === "es" ? "Pantalla y ajustes" : lang === "ru" ? "Вид и настройки" : "Display and settings"}>
-              <Settings size={18} aria-hidden="true" />
-              <span>{lang === "de" ? "Anzeige und Einstellungen" : lang === "es" ? "Pantalla y ajustes" : lang === "ru" ? "Вид и настройки" : "Display and settings"}</span>
-              <ChevronDown size={16} className="sidebar-preferences-chevron" aria-hidden="true" />
-            </summary>
-            <div className="sidebar-preferences-panel">
-          <HoverTip
-            description={presentation ? t("sidebar.presentationTitleOn") : t("sidebar.presentationDesc")}
-            title={presentation ? t("sidebar.presentationOn") : t("sidebar.presentation")}
-          >
-            <button
-              className={`ghost license-link${presentation ? " is-active" : ""}`}
-              onClick={togglePresentation}
-              type="button"
-            >
-              {presentation ? <EyeOff size={16} /> : <Eye size={16} />}
-              <span>{presentation ? t("sidebar.presentationOn") : t("sidebar.presentation")}</span>
+          <div className="ks40-settings-holder">
+            <button aria-controls="ks40-preferences-panel" aria-expanded={preferencesOpen}
+              aria-label={ux.preferences} className={"ghost ks40-settings-button" + (preferencesOpen ? " is-open" : "")}
+              onClick={() => setPreferencesOpen((open) => !open)}
+              ref={preferencesButtonRef} type="button">
+              <Settings size={18} /><span>{ux.preferences}</span>
             </button>
-          </HoverTip>
-          <label className="ghost license-link lang-switch" title={t("sidebar.languageTitle")}>
-            <Languages size={16} />
-            <select
-              aria-label={t("sidebar.languageTitle")}
-              onChange={(event) => setLang(event.target.value as Lang)}
-              value={lang}
-            >
-              <option value="de">{t("lang.de")}</option>
-              <option value="en">{t("lang.en")}</option>
-              <option value="es">{t("lang.es")}</option>
-              <option value="ru">{t("lang.ru")}</option>
-            </select>
-          </label>
-          <HoverTip description={t("sidebar.licenseDesc")} title={t("sidebar.license")}>
-            <button className="ghost license-link" onClick={() => setLicenseOpen(true)} type="button">
-              <FileText size={16} />
-              <span>{t("sidebar.license")}</span>
-            </button>
-          </HoverTip>
-            </div>
-          </details>
+            {preferencesOpen ? (
+              <div aria-label={ux.preferences} className="ks40-settings-panel"
+                id="ks40-preferences-panel" ref={preferencesPanelRef} role="group">
+                <header><div><strong>{ux.preferences}</strong><small>{ux.preferencesHint}</small></div>
+                  <button aria-label={ux.close} className="ks40-icon-close" onClick={() => {
+                    setPreferencesOpen(false); preferencesButtonRef.current?.focus();
+                  }} type="button"><X size={17} /></button>
+                </header>
+                <button aria-pressed={presentation} className="ks40-settings-option" onClick={togglePresentation} type="button">
+                  {presentation ? <EyeOff size={18} /> : <Eye size={18} />}
+                  <span><strong>{ux.presentation}</strong><small>{ux.presentationHint}</small></span>
+                  <span className={"ks40-choice-indicator" + (presentation ? " is-on" : "")} aria-hidden="true" />
+                </button>
+                <label className="ks40-settings-option ks40-language-option">
+                  <Languages size={18} />
+                  <span><strong>{ux.language}</strong></span>
+                  <select aria-label={ux.language} onChange={(event) => setLang(event.target.value as Lang)} value={lang}>
+                    <option value="de">{t("lang.de")}</option>
+                    <option value="en">{t("lang.en")}</option>
+                    <option value="es">{t("lang.es")}</option>
+                    <option value="ru">{t("lang.ru")}</option>
+                  </select>
+                </label>
+                <button className="ks40-settings-option" onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")} type="button">
+                  {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+                  <span><strong>{theme === "dark" ? ux.appearanceLight : ux.appearanceDark}</strong></span>
+                </button>
+                <button className="ks40-settings-option" onClick={() => {
+                  setPreferencesOpen(false);
+                  handleStepSelect(isAgentSync ? "agentSettings" : "settings");
+                }} type="button">
+                  <SlidersHorizontal size={18} /><span><strong>{ux.advancedSettings}</strong></span><ChevronRight size={16} />
+                </button>
+                <button className="ks40-settings-option" onClick={() => {
+                  setPreferencesOpen(false); setLicenseOpen(true);
+                }} type="button">
+                  <FileText size={18} /><span><strong>{ux.terms}</strong></span><ChevronRight size={16} />
+                </button>
+              </div>
+            ) : null}
+          </div>
           {vm.sessionStatus.loggedIn ? (
             <div className="sidebar-account">
               <span className="sidebar-account-email" title={t("sidebar.account")}>
@@ -979,14 +1017,14 @@ export default function App() {
           {visibleStep === "dashboard" ? <CockpitPanel vm={vm} runHistory={runHistory} /> : null}
 
           {visibleStep === "agentDashboard" ? (
-            <AgentSyncDashboard vm={vm} onNavigate={handleStepSelect} />
+            <AgentSyncDashboard vm={vm} onNavigate={handleStepSelect} presentation={presentation} />
           ) : null}
           {visibleStep === "agentVision" ? <VisionWorkspace vm={vm} /> : null}
           {visibleStep === "agentJobs" ? (
             <AgentSyncJobs vm={vm} onOpenMistralTasks={() => enterModeAt("mistral", "projectBoard")} />
           ) : null}
           {visibleStep === "agentProviders" ? <>
-            <ProviderManager vm={vm} onChatHandoff={handleGithubChatHandoff} />
+            <ProviderManager vm={vm} onChatHandoff={handleGithubChatHandoff} openDevicesRequested={deviceFocusRequested} />
           </> : null}
           {visibleStep === "agentMasterChat" ? <MasterChatWorkspace
             projects={vm.projects.registry.projects}

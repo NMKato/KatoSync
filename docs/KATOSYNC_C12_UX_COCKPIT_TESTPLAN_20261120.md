@@ -1,5 +1,7 @@
 # KatoSync – UX Cockpit / Teilabnahme C12 (20.11.2026)
 
+> Historischer Fünf-Kachel-Stand. Die neue konsolidierte Sechs-Kachel-Version und deren eigene Abnahmegrenzen stehen im [C12-Unified-MCP-Protokoll](KATOSYNC_C12_UNIFIED_MCP_GATES_20261120.md). Die alten Testergebnisse sind kein Beleg für den neuen Stand.
+
 Created by NMKato Solutions
 
 **Status: Entwicklungszweig, kein neues signiertes App-Paket und kein 4.0-GO.** Ausgangspunkt ist die auf M2/M3 geprüfte private Candidate-11-Beta (Commit `3ddd71e`). Dieser Arbeitsschritt verbessert ausschließlich Navigation, Darstellung und die Zuordnung lokaler Markenassets. Die installierte Beta wird hier nicht überschrieben.

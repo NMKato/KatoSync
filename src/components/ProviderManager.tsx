@@ -25,12 +25,15 @@ import {
   Unplug,
   X
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GithubAppConnectionPanel } from "./GithubAppConnectionPanel";
 import { AccountDevicesCard } from "./AccountDevicesCard";
+import { useAccountMesh } from "../contexts/AccountMeshContext";
+import { devicePresentationState } from "../lib/accountMeshContract";
 import { RemoteMcpOwnerConsentCard } from "./RemoteMcpOwnerConsentCard";
 import { ProviderBrandMark } from "./ProviderBrandMark";
-import { ConnectionCockpit } from "./ConnectionCockpit";
+import { ConnectionCockpit, type ConnectionTile } from "./ConnectionCockpit";
+import { uxCopy } from "../lib/uxCopy40";
 import type {GithubIssueHandoff} from "../lib/githubChatHandoff";
 import { copyText } from "../lib/clipboard";
 import {
@@ -93,8 +96,21 @@ function formatTime(value: string | null | undefined, withDate = true): string {
   return withDate ? date.toLocaleString() : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void }) {
-  const { t } = useT();
+export function ProviderManager({ vm,onChatHandoff,openDevicesRequested = false }: { vm: ViewModel;onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void;openDevicesRequested?:boolean }) {
+  const { t, lang } = useT();
+  const copy = uxCopy(lang);
+  const [activeDetail, setActiveDetail] = useState<ConnectionTile | null>(openDevicesRequested ? "devices" : null);
+  useEffect(() => {
+    if (openDevicesRequested) setActiveDetail("devices");
+  }, [openDevicesRequested]);
+  const visibleDetail = openDevicesRequested ? "devices" : activeDetail;
+  const accountMesh = useAccountMesh();
+  const connectedDevices = accountMesh.network
+    ? accountMesh.network.devices.filter((device) =>
+        device.deviceId !== accountMesh.network!.localDeviceId &&
+        devicePresentationState(accountMesh.network!, accountMesh.runtime,
+          device.deviceId, accountMesh.approved, accountMesh.now) === "connected").length
+    : 0;
   const [connectionRefreshEpoch,setConnectionRefreshEpoch]=useState(0);
   const [connectionRefreshBusy,setConnectionRefreshBusy]=useState(false);
   const config = vm.config;
@@ -107,6 +123,7 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
   );
   const anyBusy = Object.keys(vm.providerBusy).length > 0;
   const localControl = vm.providerStatuses.find((status) => status.provider === "local_control");
+
   // Read-only refresh: model diagnostics + GitHub account/repository status +
   // local Mesh readiness. Never log in, clear tokens, enroll or pair devices.
   const refreshConnections=async()=>{
@@ -154,20 +171,26 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
         </div>
       </div>
 
-      <ConnectionCockpit
-        loggedIn={vm.sessionStatus.loggedIn}
-        localRunning={vm.localBrainStatus?.running === true}
-        statuses={vm.providerStatuses}
-      />
+      <ConnectionCockpit vm={vm} connectedDevices={connectedDevices} selectedTile={visibleDetail} onSelect={setActiveDetail} />
       <p className="connections-refresh-hint">{t("connections.refreshHint")}</p>
       {vm.sessionStatus.loggedIn ? (
-        <div className="connections-device-section">
+        <div className="connections-device-section ks40-active-detail" id="ks40-devices"
+          tabIndex={-1} hidden={visibleDetail !== "devices"}>
           <AccountDevicesCard refreshEpoch={connectionRefreshEpoch} />
+        </div>
+      ) : null}
+      {vm.sessionStatus.loggedIn ? (
+        <div className="connections-device-section ks40-active-detail" hidden={visibleDetail !== "mcp"}>
           <RemoteMcpOwnerConsentCard key={vm.sessionStatus.email ?? "signed-in-owner"} refreshEpoch={connectionRefreshEpoch} />
         </div>
       ) : null}
+      {visibleDetail && ["devices", "mcp", "github"].includes(visibleDetail) && !vm.sessionStatus.loggedIn ? (
+        <p className="ks40-detail-login-hint" role="status">{copy.cockpitNeedsLogin}</p>
+      ) : null}
 
-      <div className="provider-route-wrap">
+      <details className="ks40-advanced-block">
+        <summary>{t("providers.routeTitle")}</summary>
+        <div className="provider-route-wrap">
         <span className="provider-route-title">{t("providers.routeTitle")}</span>
         <ol className="provider-route" aria-label={t("providers.routeAria")}>
           {priority.map((provider, index) => {
@@ -184,26 +207,31 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
             );
           })}
         </ol>
-      </div>
+        </div>
+      </details>
 
-      <div className="provider-cards">
+      <div className="provider-cards"
+        hidden={visibleDetail !== "github" && !cardProviders.some((provider) => provider === visibleDetail)}>
+        {vm.sessionStatus.loggedIn ? (
+          <GithubAppConnectionPanel key={vm.sessionStatus.email ?? "signed-in-account"}
+            variant="provider" hidden={visibleDetail !== "github"}
+            refreshEpoch={connectionRefreshEpoch} onChatHandoff={onChatHandoff} />
+        ) : null}
         {cardProviders.map((provider) => (
-          <Fragment key={provider}>
-            {provider === "local" && vm.sessionStatus.loggedIn ? (
-              <GithubAppConnectionPanel key={vm.sessionStatus.email ?? "signed-in-account"} variant="provider" refreshEpoch={connectionRefreshEpoch} onChatHandoff={onChatHandoff} />
-            ) : null}
-            <ProviderCard
-              provider={provider}
-              rank={priority.indexOf(provider)}
-              lastMovable={priority.length - 2}
-              status={vm.providerStatuses.find((entry) => entry.provider === provider)}
-              vm={vm}
-            />
-          </Fragment>
+          <ProviderCard key={provider}
+            provider={provider}
+            hidden={visibleDetail !== provider}
+            rank={priority.indexOf(provider)}
+            lastMovable={priority.length - 2}
+            status={vm.providerStatuses.find((entry) => entry.provider === provider)}
+            vm={vm}
+          />
         ))}
       </div>
 
-      <div className="provider-info-grid">
+      <details className="ks40-advanced-block ks40-policy-block">
+        <summary>{copy.cockpitAdvanced}</summary>
+        <div className="provider-info-grid">
         <div className="provider-policy-note">
           <ShieldCheck size={19} />
           <div>
@@ -251,6 +279,7 @@ export function ProviderManager({ vm,onChatHandoff }: { vm: ViewModel;onChatHand
           </ul>
         </div>
       ) : null}
+      </details>
     </section>
   );
 }
@@ -260,13 +289,15 @@ function ProviderCard({
   rank,
   lastMovable,
   status,
-  vm
+  vm,
+  hidden = false
 }: {
   provider: ProviderId;
   rank: number;
   lastMovable: number;
   status: ProviderStatus | undefined;
   vm: ViewModel;
+  hidden?: boolean;
 }) {
   const { t } = useT();
   const [loginCode, setLoginCode] = useState("");
@@ -306,7 +337,8 @@ function ProviderCard({
   }, [connecting]);
 
   return (
-    <article className={`provider-card provider-card-${provider} ${tone}`} aria-busy={Boolean(action)} tabIndex={-1}>
+    <article className={`provider-card provider-card-${provider} ${tone}`} id={"ks40-provider-" + provider}
+      hidden={hidden} tabIndex={-1} aria-busy={Boolean(action)}>
       <header>
         <ProviderBrandMark provider={provider} size="card" />
         <div className="provider-card-title">

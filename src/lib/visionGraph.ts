@@ -680,8 +680,9 @@ export function buildVisionGraph(input: VisionGraphInput): VisionGraph {
     g.node({
       id: nodeId,
       kind,
-      label: LANE_LABEL[lane.id],
+      // Brand identity belongs to an existing lane; connectivity/truth is a separate state.
       asset: lane.id === "codex" ? "openai" : lane.id === "claude" ? "anthropic" : null,
+      label: LANE_LABEL[lane.id],
       short: lane.id === "local_control" ? "LC" : lane.id === "remote_orchestrator" ? "RO" : initials(LANE_LABEL[lane.id]),
       subtitle: lane.model ?? null,
       scope,

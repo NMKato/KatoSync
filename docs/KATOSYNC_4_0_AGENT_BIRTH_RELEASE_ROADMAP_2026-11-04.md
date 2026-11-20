@@ -4,6 +4,23 @@
 
 **Entscheidungsdatum:** 04.11.2026 · **Status:** verbindliche Zielarchitektur und QA-Fahrplan, **kein Release** · **Owner:** KatoSync/NMKato Solutions.
 
+## Ergänzung 20. November 2026: getrenntes UI-Cockpit-Gate
+
+Der private Desktop-Candidate 11 hat M2↔M3 mit automatischer
+Wiederaufnahme nach normalem App-Neustart nachgewiesen; die lokale
+M2-Modellprobe bestand. Der unmittelbare ChatGPT-MCP-End-to-End-Auftrag,
+der M3-Modellstart und der direkte WLAN-/LAN-Transport bleiben offen.
+
+Die neue [UX-Cockpit-Fortsetzung](KATOSYNC_4_0_UX_COCKPIT_20261120.md)
+ist **nur ein Quellcode-/Design-Entwicklungsstand** auf dem isolierten
+Zweig `feat/ui-cockpit-20261120`, kein installierter Kandidat
+oder Release-GO. Sie vereinheitlicht Navigation, Glasflächen,
+Provider-Kacheln und echte Diagrammquellen. Der UI-Stand erhält ein
+eigenes Code-, Sicherheits-, visuelles und natives Geräte-Abnahme-Gate.
+Die unten benannten P0-Aufgaben für Agent Birth, sichere Aufgabenübergaben,
+Projektgedächtnis, Windows, Billing und kontrollierten Offline-Failover
+bleiben ausdrücklich unverändert offen.
+
 ## Abgleich vom 18. November 2026: erste eigene Mesh-Beta
 
 **Aktuelle Priorität:** Den vorhandenen Pairing-/Sicherheitsstand zu einer

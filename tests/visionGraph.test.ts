@@ -239,10 +239,6 @@ test("projection reflects the canonical sources and nothing else", () => {
   assert.equal(rex.label, "REX");
   assert.equal(rex.asset, "kai");
   assert.equal(graph.nodes.find((node) => node.id === HUB_NODE_ID)!.asset, "katosync");
-  // Markenzeichen nur an belegte Provider-Lanes binden, nicht an unbekannte Dienste.
-  assert.equal(graph.nodes.find((node) => node.id === "lane:codex")!.asset, "openai");
-  assert.equal(graph.nodes.find((node) => node.id === "lane:claude")!.asset, "anthropic");
-  assert.equal(graph.nodes.find((node) => node.id === "service:local_control")!.asset ?? null, null);
   // Job on an alias resolves to the canonical project; unknown projects never become nodes.
   assert.ok(edge(graph, "works_on:lane:codex->project:beta"));
   assert.ok(!nodeIds.some((id) => id.includes("ghost")));
@@ -253,6 +249,25 @@ test("projection reflects the canonical sources and nothing else", () => {
   assert.ok(edge(graph, `retrieves_from:${LOCAL_BRAIN_NODE_ID}->${MEMORY_STORE_NODE_ID}`));
   assert.ok(edge(graph, `runs_on:${LOCAL_BRAIN_NODE_ID}->${THIS_DEVICE_NODE_ID}`));
   assert.ok(edge(graph, `routes_to:${HUB_NODE_ID}->${LOCAL_BRAIN_NODE_ID}`));
+});
+
+test("provider logos identify existing lanes without inventing a live connection", () => {
+  const connected = buildVisionGraph(fullInput({
+    agentSync: agentSync([lane("codex"), lane("claude")])
+  }));
+  assert.equal(connected.nodes.find((node) => node.id === "lane:codex")?.asset, "openai");
+  assert.equal(connected.nodes.find((node) => node.id === "lane:claude")?.asset, "anthropic");
+
+  const disconnected = buildVisionGraph(fullInput({
+    agentSync: agentSync([
+      lane("codex", { connectivity: "disconnected" }),
+      lane("claude", { connectivity: "limited" })
+    ])
+  }));
+  assert.equal(disconnected.nodes.find((node) => node.id === "lane:codex")?.asset, "openai");
+  assert.equal(disconnected.nodes.find((node) => node.id === "lane:claude")?.asset, "anthropic");
+  assert.ok(disconnected.nodes.find((node) => node.id === "lane:codex")?.activity !== "active");
+  assert.ok(disconnected.nodes.find((node) => node.id === "lane:claude")?.activity !== "active");
 });
 
 test("unavailable sources are omitted, never invented", () => {

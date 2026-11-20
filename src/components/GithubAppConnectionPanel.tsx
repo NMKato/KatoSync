@@ -18,7 +18,7 @@ type Device = {
  sessionId:string;userCode:string;verificationUri:string;expiresIn:number;interval:number;
 };
 type Poll = {state:string;retryAfterSeconds:number;login:string|null};
-export function GithubAppConnectionPanel({variant="nested",refreshEpoch=0,onChatHandoff}:{variant?:"nested"|"provider";refreshEpoch?:number;onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void}){
+export function GithubAppConnectionPanel({variant="nested",refreshEpoch=0,onChatHandoff,hidden=false}:{variant?:"nested"|"provider";refreshEpoch?:number;hidden?:boolean;onChatHandoff?:(handoff:Omit<GithubIssueHandoff,"revision">)=>void}){
  const {t}=useT();
  const [status,setStatus]=useState<Status|null>(null);
  const [device,setDevice]=useState<Device|null>(null);
@@ -212,7 +212,7 @@ export function GithubAppConnectionPanel({variant="nested",refreshEpoch=0,onChat
     {result?<p role="status" className="agent-empty">{result}</p>:null}
   </>;
  if(variant==="provider"){
-  return <article className="github-provider-card" aria-label={t("github.integration.section")} aria-busy={busy}>
+  return <article className="github-provider-card" hidden={hidden} id="ks40-github" tabIndex={-1} aria-label={t("github.integration.section")} aria-busy={busy}>
    <header className="github-provider-card-head">
     <ProviderBrandMark provider="github" size="card" />
     <div className="github-provider-card-title">

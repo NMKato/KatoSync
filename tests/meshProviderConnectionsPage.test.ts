@@ -14,11 +14,16 @@ test("Vision canvas remains clean",()=>{
 });
 test("Connections page mounts account devices under the signed-in gate alongside model and GitHub connections",()=>{
  // Die Kontogerätekarte ersetzt den alten, stets ungepaarten V0-Diagnosestand.
- const signedInDevices=[...provider.matchAll(/\{vm\.sessionStatus\.loggedIn\s*\?\s*\(([\s\S]*?)\)\s*:\s*null\}/g)]
-   .map(match=>match[1]).find(block=>/<AccountDevicesCard\b/.test(block));
- assert.ok(signedInDevices,"Kontogeräte müssen innerhalb des angemeldeten Bereichs liegen");
- assert.match(signedInDevices,/<AccountDevicesCard\s+refreshEpoch=\{connectionRefreshEpoch\}\s*\/>/);
- assert.match(signedInDevices,/<RemoteMcpOwnerConsentCard\b[^>]*refreshEpoch=\{connectionRefreshEpoch\}[^>]*\/>/);
+ const signedInBlocks=[...provider.matchAll(/\{vm\.sessionStatus\.loggedIn\s*\?\s*\(([\s\S]*?)\)\s*:\s*null\}/g)]
+   .map(match=>match[1]);
+ const devices=signedInBlocks.find(block=>/<AccountDevicesCard\b/.test(block));
+ const ownerReview=signedInBlocks.find(block=>/<RemoteMcpOwnerConsentCard\b/.test(block));
+ assert.ok(devices,"Kontogeräte müssen innerhalb des angemeldeten Bereichs liegen");
+ assert.ok(ownerReview,"Owner-MCP-Review muss einzeln angemeldet eingebunden bleiben");
+ assert.match(devices,/<AccountDevicesCard\s+refreshEpoch=\{connectionRefreshEpoch\}\s*\/>/);
+ assert.match(ownerReview,/<RemoteMcpOwnerConsentCard\b[^>]*refreshEpoch=\{connectionRefreshEpoch\}[^>]*\/>/);
+ assert.match(devices,/hidden=\{visibleDetail !== "devices"\}/);
+ assert.match(ownerReview,/hidden=\{visibleDetail !== "mcp"\}/);
  assert.equal((provider.match(/<AccountDevicesCard\b/g)??[]).length,1);
  assert.doesNotMatch(provider,/<MeshConnectionCard\b/);
  assert.ok(provider.includes("GithubAppConnectionPanel"));
