@@ -21,6 +21,9 @@ test("CLI is double-gated by isolated QA build, owner opt-in and one-shot concur
   assert.match(lib,/#\[cfg\(feature = "stage4j-qa"\)\]/);
   assert.match(lib,/MESH_STAGE4Y_QA_NOT_CONFIGURED/);
   assert.match(native,/pub\(crate\) async fn run_cli_admission_diagnostic_once/);
+  // The caller and its native adapter must share the Stage4J feature gate.
+  // Default and other QA flavors must compile without enabling Stage4Y.
+  assert.match(native,/#\[cfg\(feature = "stage4j-qa"\)\]\s*pub\(crate\) async fn run_cli_admission_diagnostic_once/);
   const diagnostic=native.slice(native.indexOf("pub(crate) async fn run_cli_admission_diagnostic_once"),native.indexOf("pub(crate) async fn run_cli_once"));
   assert.match(diagnostic,/gate\(\)\?/);
   assert.match(diagnostic,/SingleQaPermit::acquire\(\)/);

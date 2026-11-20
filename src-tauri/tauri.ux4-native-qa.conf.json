@@ -1,0 +1,16 @@
+{
+  "productName": "KatoSync 4.0 UX QA",
+  "identifier": "com.nmkato.katosync.ux4qa20261120",
+  "build": {"beforeBuildCommand": ""},
+  "app": {
+    "windows": [{
+      "title": "KatoSync 4.0 UX QA",
+      "width": 1380, "height": 860,
+      "minWidth": 1040, "minHeight": 720,
+      "resizable": true, "center": true
+    }]
+  },
+  "bundle": {
+    "macOS": { "hardenedRuntime": false, "signingIdentity": null }
+  }
+}

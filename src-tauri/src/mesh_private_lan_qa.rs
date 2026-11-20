@@ -238,6 +238,8 @@ pub(crate) async fn mesh_private_lan_connect_once_qa(
 
 /// Stage4Y read-only admission diagnosis. Uses exactly the same build, runtime
 /// owner opt-in and single-operation gate as the existing one-shot TLS probe.
+// Keep this function behind the same compile-time gate as its caller and diagnostic adapter.
+#[cfg(feature = "stage4j-qa")]
 pub(crate) async fn run_cli_admission_diagnostic_once(args: Vec<String>) -> Result<(), String> {
     gate()?;
     let _permit = SingleQaPermit::acquire()?;

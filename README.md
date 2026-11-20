@@ -30,6 +30,25 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
+## 20.11.2026: Native M3-UX4-QA (noch kein Release)
+
+Im separaten Zweig `qa/ux4-native-macos-20261120` wurde die vollständige
+KatoSync-4.0-Facelift-Quelle erfolgreich unter macOS 27.2 in ein **eigenes,
+lokal ad-hoc signiertes** Tauri-App-Bundle überführt. Die App
+**KatoSync 4.0 UX QA** (separate Bundle-ID) läuft auf dem M3 aus der externen SSD;
+die unveränderte Candidate-11-App bleibt parallel aktiv. Rust 1.95.0 wurde
+isoliert installiert, und eine fehlerhafte Stage4Y-Feature-Abgrenzung für
+Nicht-Stage4J-QA-Builds wurde mit Regressionstest korrigiert.
+
+Der **native Start und der Login-Screen** wurden geprüft. Eine Anmeldung aus
+dem produktiv verwendeten C11-Schlüsselbund wird bewusst nicht übernommen.
+Daher müssen die neue Agent-Sync-Ansicht, die Owner-MFA, die Geräteverbindung
+und der Live-MCP-Auftrag noch persönlich/eigenständig abgenommen werden.
+**Ad-hoc-Signierung ist keine Developer-ID-Notarisierung und keine Freigabe
+für einen öffentlichen Installer.**
+
+[Native M3-QA-Nachweis und Reproduktionsschritte](docs/KATOSYNC_UX4_NATIVE_M3_QA_20261120.md).
+
 ## 20.11.2026: 4.0-Agent-Sync-Facelift (privater UX-Kandidat)
 
 **Quellstand, noch nicht installiert:** Der isolierte Zweig `feat/ux4-compact-onboarding-20261120`
