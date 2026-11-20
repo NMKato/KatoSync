@@ -148,7 +148,7 @@ export function RemoteMcpOwnerConsentCard({ refreshEpoch = 0 }: { refreshEpoch?:
   const clientReady = snapshot?.clientGrant?.status === "approved" && !grantExpired;
   const status = !snapshot ? busy ? "loading" : "unavailable" : grantExpired ? "expired" :
     snapshot.clientGrant?.status === "approved" ? "approved" : snapshot.clientGrant ? "pending" : "notRequested";
-  return <section className="remote-mcp-owner-card glass" aria-label={t("remoteMcp.owner.title")}>
+  return <section className="remote-mcp-owner-card glass" aria-label={t("remoteMcp.owner.title")} tabIndex={-1}>
     <div className="remote-mcp-owner-heading">
       <div><ShieldCheck size={19} aria-hidden="true" /><strong>{t("remoteMcp.owner.title")}</strong></div>
       <button className="ghost compact-button" type="button" disabled={busy || !!review || childBusy}

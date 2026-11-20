@@ -9,6 +9,7 @@ import { AccountMeshContext, type AccountMeshModel } from "../../src/contexts/Ac
 import { AccountDevicesCard, AccountDeviceNotifications } from "../../src/components/AccountDevicesCard";
 import { ModeGateway, ModeSwitch } from "../../src/components/ModeGateway";
 import { LocalBrainInstaller } from "../../src/components/ProviderManager";
+import { ConnectionCockpit } from "../../src/components/ConnectionCockpit";
 import type { AccountNetwork, AccountRuntime } from "../../src/lib/accountMeshContract";
 import type { LocalBrainStatus } from "../../src/lib/localBrainCatalog";
 import "../../src/styles.css";
@@ -229,7 +230,15 @@ function Example() {
     {view === "rail" ? <SidebarRailExample onChoose={mode => act("choose", { mode })} /> : view === "gateway" ? <ModeGateway remembered={null} onChoose={mode => act("choose", { mode })}
       onOpenDevices={() => { act("view"); setFocusDevices(true); setView("devices"); }} /> :
       <main className="qa-component-workspace provider-manager" data-qa-view={view}>
-        {view === "brain" ? <section className="provider-card"><LocalBrainInstaller vm={brainVm} /></section> : <AccountDevicesCard />}
+        {view === "brain" ? <section className="provider-card"><LocalBrainInstaller vm={brainVm} /></section>
+          : view === "cockpit" ? <>
+            <ConnectionCockpit loggedIn={scene !== "guest"} localRunning={brain.running} statuses={[]} />
+            <AccountDevicesCard />
+            <section className="remote-mcp-owner-card glass" tabIndex={-1}><h3>ChatGPT MCP · synthetisches Ziel</h3></section>
+            <article className="provider-card provider-card-codex" tabIndex={-1}><h3>OpenAI Codex · synthetisches Ziel</h3></article>
+            <article className="provider-card provider-card-claude" tabIndex={-1}><h3>Claude Code · synthetisches Ziel</h3></article>
+            <article className="provider-card provider-card-local" tabIndex={-1}><h3>Lokale KI · synthetisches Ziel</h3></article>
+          </> : <AccountDevicesCard />}
       </main>}
     {view === "devices" ? <AccountDeviceNotifications devicesVisible onOpenDevices={() => act("view")} /> : null}
   </AccountMeshContext.Provider></I18nProvider>;

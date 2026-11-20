@@ -50,6 +50,7 @@ test("Vision uses the exact same bundled OpenAI and Anthropic marks on the match
 test("Navigation and cockpit keep authentication and approval in their existing handlers", () => {
   const app = read("../src/App.tsx");
   const providers = read("../src/components/ProviderManager.tsx");
+  const cockpit = read("../src/components/ConnectionCockpit.tsx");
   const polish = read("../src/experiencePolish.css");
   assert.match(app, /className="nav-more"/);
   assert.match(app, /open=\{advancedNavigationOpen\}/);
@@ -57,9 +58,11 @@ test("Navigation and cockpit keep authentication and approval in their existing 
   assert.doesNotMatch(app, /<details[^>]+defaultOpen=/);
   assert.match(app, /className="sidebar-preferences"/);
   assert.match(app, /agentSyncSteps\.slice\(3\)\.map/);
-  assert.match(providers, /className="connection-cockpit"/);
-  assert.match(providers, /scrollIntoView/);
-  assert.match(providers, /section-account-devices/);
-  assert.match(providers, /remote-mcp-owner-card/);
+  assert.match(providers, /<ConnectionCockpit/);
+  assert.match(cockpit, /className="connection-cockpit"/);
+  assert.match(cockpit, /scrollIntoView/);
+  assert.match(cockpit, /section-account-devices/);
+  assert.match(cockpit, /remote-mcp-owner-card/);
+  assert.match(cockpit, /Known, literal targets only/);
   assert.match(polish, /prefers-reduced-motion: reduce/);
 });

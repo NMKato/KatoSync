@@ -40,6 +40,9 @@ Clientfreigabe oder Geräteautorisierung. Die bisher auf beiden Macs getestete
 private Candidate-11-Beta bleibt unverändert installiert.
 
 [Designumfang, Roadmap-Abgleich und kurzer manueller Testplan](docs/KATOSYNC_C12_UX_COCKPIT_TESTPLAN_20261120.md).
+Visuelle Synthetik- und Zugänglichkeitstests für das echte Cockpit:
+`node scripts/qa-c12-cockpit-ui.mjs /tmp/katosync-c12-cockpit`.
+Dieser Lauf ersetzt **nicht** die native Tauri/WebKit-Geräteprüfung.
 Die zusätzlichen Dashboard-Zeitreihen, offlinefähige Projektstand-Indizierung,
 ressourcenbewusste automatische Modellaktivierung sowie echte MCP-/Remote-Aufträge
 sind weiterhin gesondert zu implementieren und abzunehmen. **Kein 4.0-GO.**

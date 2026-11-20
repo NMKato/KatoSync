@@ -355,7 +355,7 @@
   display: grid; grid-template-rows: 44px auto auto; justify-items: start; align-content: start;
   min-width: 0; min-height: 132px; gap: 5px; padding: 14px;
   border: 1px solid var(--experience-line); border-radius: 16px;
-  color: var(--text); background: color-mix(in srgb, var(--experience-panel) 87%, transparent);
+  color: var(--text); background: var(--experience-panel); background: color-mix(in srgb, var(--experience-panel) 87%, transparent);
   text-align: left; box-shadow: var(--experience-shadow);
   backdrop-filter: blur(18px) saturate(130%); -webkit-backdrop-filter: blur(18px) saturate(130%);
   transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease;
@@ -373,5 +373,15 @@
 .connection-cockpit-detail { font-size: 12px; line-height: 1.4; color: var(--text-muted); overflow-wrap: anywhere; }
 @media (max-width: 1450px) { .connection-cockpit { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 850px) { .connection-cockpit { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 490px) { .connection-cockpit { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 490px) {
+  .connection-cockpit { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .connection-cockpit-tile { grid-template-rows: 36px auto auto; min-height: 116px; padding: 11px; }
+  .connection-cockpit-icon { width: 36px; height: 36px; }
+  .connection-cockpit-tile > strong { font-size: 12px; }
+  .connection-cockpit-detail { font-size: 11px; }
+}
 @media (prefers-reduced-motion: reduce) { .connection-cockpit-tile { transition: none !important; transform: none !important; } }
+
+/* Keep the compact settings popover above the scrollable workspace. */
+.mode-agentSync .sidebar { z-index: 12; }
+.connection-cockpit-tile:focus-visible, .provider-card:focus-visible, .remote-mcp-owner-card:focus-visible { scroll-margin-top: 22px; }

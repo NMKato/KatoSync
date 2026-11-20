@@ -12,6 +12,39 @@ Created by NMKato Solutions
 - Vision zeigt lokale OpenAI-/Anthropic-Markenassets auf den tatsächlichen `lane:codex`- bzw. `lane:claude`-Knoten. Andere Knoten behalten ihre bisherigen Symbole. Ohne vorhandene Lane wird kein Provider-Knoten erfunden.
 - Einheitliche 44px-Trefferflächen, dunkle/helle Glaskarten, klare Fokusumrandungen, responsives Mehrspaltenraster und reduzierte Animationen bei `prefers-reduced-motion`.
 
+## Automatisierte visuelle C12-Abnahme und Codegrenzen (20.11.2026)
+
+Die Verbindungskacheln sind als **echte** eigenständige React-Komponente
+`src/components/ConnectionCockpit.tsx` extrahiert. Nur die Ansicht wurde
+umgebaut, nicht die API-, Auth-, Pairing- oder Modellschnittstelle. Das
+Komponentenharness `node scripts/qa-c12-cockpit-ui.mjs /tmp/c12-cockpit`
+verwendet echte Komponenten und synthetische Zielkarten (kein Tauri-IPC,
+keine echten Freigaben).
+
+- Visueller Test **4/4 Szenarien** bestanden: 1240 px/dunkel/DE,
+  1040 px/dunkel/EN, 820 px/hell/ES und 390 px/hell/RU. Alle fünf
+  Navigationskacheln, deren lokale Logos, Trefferflächen, kein horizontaler
+  Overflow, Ziel-Fokussierung sowie keine externen Requests, Browserfehler
+  oder Freigabeaktionen wurden geprüft.
+- Die manuell betrachtete 390-px-Aufnahme zeigte zunächst einen
+  unnötig hohen einspaltigen Kacheleinstieg. Der gezielte Mobil-Fix setzt
+  auf zwei Spalten, der **Mobile-Nachtest 1/1** besteht ohne Overflow.
+- **33/33** gezielte Tests für Geräte-Onboarding, Providerlogo-Zuordnung
+  und Vision-Projektion; lokaler Vite-Frontend-Build erfolgreich.
+- Statischer Sicherheitscheck: ausschließlich bekannte CSS-Selektoren,
+  keine neuen Netzaufrufe, keine nativen Aufrufe, keine Zugangsdaten und
+  keine neuen Freigabepfade. Die Provider- und MCP-Zielkarten erhalten nur
+  einen programmatisch möglichen Tastaturfokus (`tabIndex=-1`).
+- npm-Audit im vorherigen C12-Diff: null bekannte Sicherheitsmeldungen,
+  Paketabhängigkeiten in dieser Runde unverändert. Die isolierte
+  Komplettprüfung 1025/1026 und der einzeln bestandene ältere
+  Timeout-Test (3/3) bleiben als abgegrenzte Vorgeschichte protokolliert.
+
+**Noch offen:** vollständige TypeScript- und native CI-Validierung des
+finalen Quellstands, signiertes/Apple-notarisiertes Paket, echte
+WebKit-Ansicht auf M2/M3 und Benutzerabnahme. Keine tatsächliche
+C12-Beta-Installation oder 4.0-Freigabe behauptet.
+
 ## Noch nicht implementiert / getrennt zu verifizieren
 
 1. Durchgängiges geführtes Connection-Onboarding mit Login-Popups und expliziten, einmaligen Geräte-/Clientfreigaben. Keine stillen Autorisierungen.
