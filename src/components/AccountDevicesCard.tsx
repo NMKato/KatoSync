@@ -4,7 +4,7 @@ import { Check, ChevronRight, Laptop, Monitor, RefreshCcw, Server, ShieldCheck, 
 import { useT } from "../i18n";
 import { useAccountMesh, type AccountMeshModel } from "../contexts/AccountMeshContext";
 import { accountMeshCopy, type MeshDeviceCopy } from "../lib/accountMeshCopy";
-import { defaultPeer, deviceConnection, deviceName, devicePresentationState, eligiblePeer, type AccountDevice, type ConnectionMode } from "../lib/accountMeshContract";
+import { accountMainRecovery, accountPeerRecovery, defaultPeer, deviceConnection, deviceName, devicePresentationState, eligiblePeer, type AccountConnectionRecovery, type AccountDevice, type ConnectionMode } from "../lib/accountMeshContract";
 import { hasMeshConnectionActivity } from "../lib/meshConnectionState";
 import "./accountDevices.css";
 
@@ -53,9 +53,32 @@ function ModeChoices({ mode, onChange, disabled, c }: { mode: ConnectionMode; on
   </fieldset>;
 }
 
+function ConnectionRecoveryNotice({ recovery, label, c, id, heading }: {
+  recovery: AccountConnectionRecovery; label: string; c: MeshDeviceCopy; id?: string; heading?: string;
+}) {
+  const [expanded, setExpanded] = useState(false), detailsId = useId();
+  const text = { network: c.issueNetwork, account: c.issueAccount, peer: c.connectionPeerIssue,
+    changed: c.issueChanged, retry: c.issueRetry }[recovery.kind];
+  return <div className="account-device-recovery" data-recovery={recovery.kind}>
+    {heading ? <strong>{heading}</strong> : null}
+    <p id={id} role="status">{text}</p>
+    {recovery.code ? <>
+      <button type="button" className="ghost account-device-recovery-toggle" aria-expanded={expanded}
+        aria-controls={detailsId} aria-label={`${c.connectionDetails}: ${label}`}
+        onClick={() => setExpanded(value => !value)}>
+        {c.connectionDetails}<ChevronRight size={14} aria-hidden="true" />
+      </button>
+      <p className="account-device-recovery-code" id={detailsId} hidden={!expanded}>
+        <span>{c.connectionCode}</span><code>{recovery.code}</code>
+      </p>
+    </> : null}
+  </div>;
+}
+
 export function AccountDevicesCard({ refreshEpoch = 0 }: { refreshEpoch?: number }) {
   const model = useAccountMesh(), { lang } = useT();
   const c = accountMeshCopy(lang), { network, runtime, approved, loading, busy, now } = model;
+  const recoveryPrefix = useId();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<ConnectionMode>("ask");
   const [mainDialog, setMainDialog] = useState<{ selected: string; revision: number } | null>(null);
@@ -91,15 +114,18 @@ export function AccountDevicesCard({ refreshEpoch = 0 }: { refreshEpoch?: number
   const hasMain = !!main && network?.mainDeviceAvailable;
   const serverReady = runtime?.serverState === "listening" && runtime.accountRevision === network?.accountRevision &&
     runtime.mainDeviceId === own?.deviceId && own?.deviceId === network?.mainDeviceId;
+  const mainRecovery = network ? accountMainRecovery(network, runtime) : null;
   const openMain = () => network && setMainDialog({ selected: own?.deviceId ?? network.devices.find(d => d.membershipState !== "revoked")?.deviceId ?? "", revision: network.accountRevision });
 
   const renderDevice = (device: AccountDevice) => {
     const mainRole = device.deviceId === network?.mainDeviceId;
     const selectable = network ? !!eligiblePeer(network, device.deviceId) : false;
     const status = network ? devicePresentationState(network, runtime, device.deviceId, approved, now) : "registered";
+    const recovery = network ? accountPeerRecovery(network, runtime, device.deviceId) : null;
+    const hintId = `${recoveryPrefix}-${peers.indexOf(device)}`;
     return <div className="account-device-row" key={device.deviceId} data-selected={selectedId === device.deviceId}>
       <label className="account-device-select" data-disabled={!selectable}>
-        <input type="radio" name="account-device-selection" checked={selectedId === device.deviceId}
+        <input type="radio" name="account-device-selection" checked={selectedId === device.deviceId} aria-describedby={recovery ? hintId : undefined}
           disabled={!selectable || busy || pairingActive} onChange={() => setSelectedId(device.deviceId)} />
         <span className="account-device-icon"><DeviceIcon device={device} main={mainRole} /></span>
         <span className="account-device-description"><strong>{deviceName(device)}</strong>
@@ -108,6 +134,7 @@ export function AccountDevicesCard({ refreshEpoch = 0 }: { refreshEpoch?: number
         </span>
         <span className="account-device-state" data-state={status}><span aria-hidden="true" />{c[status]}</span>
       </label>
+      {recovery ? <ConnectionRecoveryNotice recovery={recovery} label={deviceName(device)} c={c} id={hintId} /> : null}
       {approved.includes(device.fingerprint) ? <button type="button" className="ghost account-device-manage" disabled={busy}
         onClick={() => { setManageId(device.deviceId); setManageMode(runtime?.profiles.find(p => p.peerDeviceId === device.deviceId)?.mode ?? "ask"); setRevokeConfirm(false); }}>
         {c.manage}<ChevronRight size={14} aria-hidden="true" /></button> : null}
@@ -153,6 +180,7 @@ export function AccountDevicesCard({ refreshEpoch = 0 }: { refreshEpoch?: number
           onClick={openMain}>{main ? c.changeMain : c.chooseMain}</button>
       </div>
     </section> : null}
+    {mainRecovery ? <ConnectionRecoveryNotice recovery={mainRecovery} label={main ? deviceName(main) : c.main} c={c} heading={c.mainConnectionIssue} /> : null}
     {network ? <section className="account-device-picker" aria-labelledby="account-device-picker-title">
       <div className="account-device-section-heading"><div><h4 id="account-device-picker-title">{c.selectTitle}</h4><p>{c.selectHelp}</p></div>
         <small>{network.devices.length} {c.deviceCount}</small></div>

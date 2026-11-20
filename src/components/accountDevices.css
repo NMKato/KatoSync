@@ -120,6 +120,17 @@
 .account-device-state[data-state="blocked"] { color: var(--experience-warning); }
 .account-device-state[data-state="connecting"] { color: var(--experience-accent); }
 .account-devices-card .account-device-manage { margin: -4px 16px 8px calc(var(--device-content-inset) - 8px); padding: 8px; color: var(--experience-accent); text-align: left; }
+
+/* Der nächste Schritt bleibt sichtbar; der begrenzte Fehlercode öffnet sich über einen echten Button. */
+.account-device-recovery { margin: 16px 0; padding: 16px; min-width: 0; border: 1px solid var(--experience-warning-line); border-radius: 12px; background: var(--experience-warning-soft); color: var(--text-label); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.account-device-row > .account-device-recovery { margin: 0 16px 16px; }
+.account-device-recovery > strong { display: block; margin-bottom: 8px; font-size: 14px; }
+.account-device-recovery > p { margin: 0; }
+.account-devices-card .account-device-recovery-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin: 8px 0 0; padding: 8px; color: var(--experience-accent); font-size: 12px; text-align: left; }
+.account-device-recovery-toggle[aria-expanded="true"] > svg { transform: rotate(90deg); }
+.account-device-recovery .account-device-recovery-code { margin-top: 8px; color: var(--text-muted); font-size: 12px; }
+.account-device-recovery-code > code { display: block; margin-top: 4px; color: var(--text-label); font-size: 12px; overflow-wrap: anywhere; }
+
 .account-device-via-main { display: block; margin: 0 16px 16px var(--device-content-inset); color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 
 .account-device-older { margin-top: 12px; color: var(--text-muted); font-size: 13px; }

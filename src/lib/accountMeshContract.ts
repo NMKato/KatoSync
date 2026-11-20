@@ -1,6 +1,6 @@
 // Created by NMKato Solutions
 // Account device presentation. Native authentication and policy remain authoritative.
-import { isMeshConnectionLive, parseMeshConnectionSnapshot, type MeshConnectionSnapshot } from "./meshConnectionState.ts";
+import { isMeshConnectionLive, meshConnectionRecovery, parseMeshConnectionSnapshot, type MeshConnectionSnapshot } from "./meshConnectionState.ts";
 import { meshRegistrationAgentName } from "./meshDirectoryPresentation35.ts";
 
 export type ConnectionMode = "ask" | "automatic";
@@ -124,6 +124,211 @@ export function deviceConnection(network: AccountNetwork, runtime: AccountRuntim
   const state = runtime.connections.find(c => c.peerDeviceId === peerId && c.peerFingerprint === peer.fingerprint);
   const expectedRole = network.localDeviceId === network.mainDeviceId ? "server" : "client";
   return state && (state.role === null || state.role === expectedRole) ? state : null;
+}
+
+// Nur diese festen, im nativen Account-/Admission-Vertrag vorhandenen Codes dürfen angezeigt werden.
+// Das Literal dient zugleich als begrenzter öffentlicher Vertrag für sichere Diagnose-Leser.
+export const ACCOUNT_MESH_PUBLIC_ERROR_CODES = [
+  "MESH_ACCOUNT_AUTHORITY_UNAVAILABLE",
+  "MESH_ACCOUNT_CONFIRM_CONNECTION_REQUIRED",
+  "MESH_ACCOUNT_CONNECTION_NOT_STARTED",
+  "MESH_ACCOUNT_DEVICE_NOT_REGISTERED",
+  "MESH_ACCOUNT_DEVICE_UNAVAILABLE",
+  "MESH_ACCOUNT_IDENTITY_UNAVAILABLE",
+  "MESH_ACCOUNT_INVALID_RESPONSE",
+  "MESH_ACCOUNT_INVALID_SELECTION",
+  "MESH_ACCOUNT_LAN_UNAVAILABLE",
+  "MESH_ACCOUNT_LOCAL_DEVICE_UNAVAILABLE",
+  "MESH_ACCOUNT_LOCAL_IDENTITY_CHANGED",
+  "MESH_ACCOUNT_LOGIN_REQUIRED",
+  "MESH_ACCOUNT_MAIN_REQUIRED",
+  "MESH_ACCOUNT_MAIN_UNAVAILABLE",
+  "MESH_ACCOUNT_MEMBERSHIP_REQUIRED",
+  "MESH_ACCOUNT_NETWORK_UNAVAILABLE",
+  "MESH_ACCOUNT_NOT_AVAILABLE",
+  "MESH_ACCOUNT_NOT_CONFIGURED",
+  "MESH_ACCOUNT_OPERATION_CANCELLED",
+  "MESH_ACCOUNT_PEER_CHANGED",
+  "MESH_ACCOUNT_PEER_REVOKED",
+  "MESH_ACCOUNT_PIN_APPROVED_CONNECTION_NOT_STARTED",
+  "MESH_ACCOUNT_PROFILE_INVALID",
+  "MESH_ACCOUNT_PROFILE_REQUIRED",
+  "MESH_ACCOUNT_PROOF_CHANGED",
+  "MESH_ACCOUNT_PROOF_EXPIRED",
+  "MESH_ACCOUNT_REVIEW_CHANGED",
+  "MESH_ACCOUNT_REVIEW_EXPIRED",
+  "MESH_ACCOUNT_REVIEW_LIMIT",
+  "MESH_ACCOUNT_REVISION_CHANGED",
+  "MESH_ACCOUNT_REVISION_CONFLICT",
+  "MESH_ACCOUNT_ROLE_FROM_MAIN_ONLY",
+  "MESH_ACCOUNT_SELECT_MAIN_DEVICE",
+  "MESH_ACCOUNT_SESSION_CHANGED",
+  "MESH_ACCOUNT_STATE_UNAVAILABLE",
+  "MESH_ACCOUNT_UNAVAILABLE",
+  "MESH_ADMISSION_ACCOUNT_CHANGED",
+  "MESH_ADMISSION_AUTHORITY_UNAVAILABLE",
+  "MESH_ADMISSION_CERTIFICATE_UNAVAILABLE",
+  "MESH_ADMISSION_ENROLLMENT_REQUIRED",
+  "MESH_ADMISSION_ENROLLMENT_REVOKED",
+  "MESH_ADMISSION_LOCAL_IDENTITY_CHANGED",
+  "MESH_ADMISSION_LOCAL_IDENTITY_MISSING",
+  "MESH_ADMISSION_LOGIN_REQUIRED",
+  "MESH_ADMISSION_NOT_CONFIGURED",
+  "MESH_ADMISSION_PEER_CHANGED",
+  "MESH_ADMISSION_PEER_NOT_APPROVED",
+  "MESH_ADMISSION_PEER_REVOKED",
+  "MESH_CONNECTION_ADDRESS_DENIED",
+  "MESH_CONNECTION_AUTHORITY_TIMEOUT",
+  "MESH_CONNECTION_CLOCK_UNAVAILABLE",
+  "MESH_CONNECTION_DISCOVERY_LIMIT",
+  "MESH_CONNECTION_HEARTBEAT_EXPIRED",
+  "MESH_CONNECTION_LISTEN_UNAVAILABLE",
+  "MESH_CONNECTION_LOCAL_IDENTITY_UNAVAILABLE",
+  "MESH_CONNECTION_NETWORK_UNAVAILABLE",
+  "MESH_CONNECTION_NO_PEER",
+  "MESH_CONNECTION_PEER_PIN_MISMATCH",
+  "MESH_CONNECTION_SEQUENCE_EXHAUSTED",
+  "MESH_CONNECTION_STATE_UNAVAILABLE",
+  "MESH_CONNECTION_TLS_DENIED",
+  "MESH_STAGE4AA_TAILSCALE_PEER_UNVERIFIED",
+  "MESH_STAGE4AA_TAILSCALE_UNAVAILABLE",
+  "MESH_STAGE4AB2_ACCEPT_DENIED",
+  "MESH_STAGE4AB2_ACCEPT_TIMEOUT",
+  "MESH_STAGE4AB2_ADMISSION_DENIED",
+  "MESH_STAGE4AB2_ADMISSION_REVOKED",
+  "MESH_STAGE4AB2_ARGUMENTS_DENIED",
+  "MESH_STAGE4AB2_BAD_INIT_ACK",
+  "MESH_STAGE4AB2_BAD_INIT_HELLO",
+  "MESH_STAGE4AB2_BAD_INIT_NONCE",
+  "MESH_STAGE4AB2_BIND_DENIED",
+  "MESH_STAGE4AB2_CERT_PIN_DENIED",
+  "MESH_STAGE4AB2_CONCURRENT_PROBE_DENIED",
+  "MESH_STAGE4AB2_CONNECT_DENIED",
+  "MESH_STAGE4AB2_CONNECT_TIMEOUT",
+  "MESH_STAGE4AB2_HEARTBEAT_DENIED",
+  "MESH_STAGE4AB2_HEARTBEAT_IO",
+  "MESH_STAGE4AB2_HEARTBEAT_LEASE_DENIED",
+  "MESH_STAGE4AB2_HEARTBEAT_REPLAY_OR_MISMATCH",
+  "MESH_STAGE4AB2_HEARTBEAT_TIMEOUT",
+  "MESH_STAGE4AB2_INIT_IO",
+  "MESH_STAGE4AB2_INIT_TIMEOUT",
+  "MESH_STAGE4AB2_LEASE_DENIED",
+  "MESH_STAGE4AB2_LEASE_EXPIRED",
+  "MESH_STAGE4AB2_LOCAL_TLS_DENIED",
+  "MESH_STAGE4AB2_OWNER_DENIED",
+  "MESH_STAGE4AB2_OWNER_OR_PIN_REVOKED",
+  "MESH_STAGE4AB2_PEER_PIN_DENIED",
+  "MESH_STAGE4AB2_PORT_DENIED",
+  "MESH_STAGE4AB2_SOCKET_DENIED",
+  "MESH_STAGE4AB2_SOURCE_BIND_DENIED",
+  "MESH_STAGE4AB2_SOURCE_IP_DENIED",
+  "MESH_STAGE4AB2_SOURCE_OR_PEER_IP_DENIED",
+  "MESH_STAGE4AB2_TLS_NAME_DENIED",
+  "MESH_STAGE4AB2_TLS_REJECTED",
+  "MESH_STAGE4AB2_TLS_TIMEOUT",
+  "MESH_STAGE4AB32B_CLOCK_OR_SLEEP_GAP_DENIED",
+] as const;
+export type AccountMeshPublicErrorCode = (typeof ACCOUNT_MESH_PUBLIC_ERROR_CODES)[number];
+const RECOVERY_OVERRIDES: Partial<Record<AccountMeshPublicErrorCode, ReturnType<typeof meshConnectionRecovery> | "changed">> = {
+  MESH_ACCOUNT_AUTHORITY_UNAVAILABLE: "retry",
+  MESH_ACCOUNT_CONFIRM_CONNECTION_REQUIRED: "retry",
+  MESH_ACCOUNT_CONNECTION_NOT_STARTED: "retry",
+  MESH_ACCOUNT_DEVICE_NOT_REGISTERED: "retry",
+  MESH_ACCOUNT_DEVICE_UNAVAILABLE: "retry",
+  MESH_ACCOUNT_IDENTITY_UNAVAILABLE: "retry",
+  MESH_ACCOUNT_INVALID_RESPONSE: "retry",
+  MESH_ACCOUNT_INVALID_SELECTION: "retry",
+  MESH_ACCOUNT_LAN_UNAVAILABLE: "network",
+  MESH_ACCOUNT_LOCAL_DEVICE_UNAVAILABLE: "retry",
+  MESH_ACCOUNT_LOCAL_IDENTITY_CHANGED: "changed",
+  MESH_ACCOUNT_MAIN_REQUIRED: "retry",
+  MESH_ACCOUNT_MAIN_UNAVAILABLE: "retry",
+  MESH_ACCOUNT_NETWORK_UNAVAILABLE: "network",
+  MESH_ACCOUNT_NOT_AVAILABLE: "retry",
+  MESH_ACCOUNT_NOT_CONFIGURED: "retry",
+  MESH_ACCOUNT_OPERATION_CANCELLED: "retry",
+  MESH_ACCOUNT_PEER_CHANGED: "changed",
+  MESH_ACCOUNT_PEER_REVOKED: "peer",
+  MESH_ACCOUNT_PIN_APPROVED_CONNECTION_NOT_STARTED: "retry",
+  MESH_ACCOUNT_PROFILE_INVALID: "retry",
+  MESH_ACCOUNT_PROFILE_REQUIRED: "retry",
+  MESH_ACCOUNT_PROOF_CHANGED: "changed",
+  MESH_ACCOUNT_PROOF_EXPIRED: "retry",
+  MESH_ACCOUNT_REVIEW_CHANGED: "changed",
+  MESH_ACCOUNT_REVIEW_EXPIRED: "retry",
+  MESH_ACCOUNT_REVIEW_LIMIT: "retry",
+  MESH_ACCOUNT_REVISION_CHANGED: "changed",
+  MESH_ACCOUNT_REVISION_CONFLICT: "changed",
+  MESH_ACCOUNT_ROLE_FROM_MAIN_ONLY: "retry",
+  MESH_ACCOUNT_SELECT_MAIN_DEVICE: "retry",
+  MESH_ACCOUNT_STATE_UNAVAILABLE: "retry",
+  MESH_ACCOUNT_UNAVAILABLE: "retry",
+  MESH_ADMISSION_ACCOUNT_CHANGED: "changed",
+  MESH_ADMISSION_AUTHORITY_UNAVAILABLE: "retry",
+  MESH_ADMISSION_CERTIFICATE_UNAVAILABLE: "retry",
+  MESH_ADMISSION_LOCAL_IDENTITY_CHANGED: "changed",
+  MESH_ADMISSION_LOCAL_IDENTITY_MISSING: "retry",
+  MESH_ADMISSION_NOT_CONFIGURED: "retry",
+  MESH_ADMISSION_PEER_CHANGED: "changed",
+  MESH_CONNECTION_ADDRESS_DENIED: "network",
+  MESH_CONNECTION_AUTHORITY_TIMEOUT: "retry",
+  MESH_CONNECTION_CLOCK_UNAVAILABLE: "retry",
+  MESH_CONNECTION_DISCOVERY_LIMIT: "retry",
+  MESH_CONNECTION_HEARTBEAT_EXPIRED: "network",
+  MESH_CONNECTION_LISTEN_UNAVAILABLE: "network",
+  MESH_CONNECTION_LOCAL_IDENTITY_UNAVAILABLE: "retry",
+  MESH_CONNECTION_SEQUENCE_EXHAUSTED: "retry",
+  MESH_CONNECTION_STATE_UNAVAILABLE: "retry",
+  MESH_CONNECTION_TLS_DENIED: "peer",
+  MESH_STAGE4AB2_ACCEPT_DENIED: "retry",
+  MESH_STAGE4AB2_ACCEPT_TIMEOUT: "network",
+  MESH_STAGE4AB2_ARGUMENTS_DENIED: "retry",
+  MESH_STAGE4AB2_BAD_INIT_ACK: "peer",
+  MESH_STAGE4AB2_BAD_INIT_HELLO: "peer",
+  MESH_STAGE4AB2_BAD_INIT_NONCE: "peer",
+  MESH_STAGE4AB2_BIND_DENIED: "network",
+  MESH_STAGE4AB2_CONCURRENT_PROBE_DENIED: "retry",
+  MESH_STAGE4AB2_CONNECT_DENIED: "retry",
+  MESH_STAGE4AB2_HEARTBEAT_DENIED: "retry",
+  MESH_STAGE4AB2_HEARTBEAT_IO: "network",
+  MESH_STAGE4AB2_HEARTBEAT_LEASE_DENIED: "retry",
+  MESH_STAGE4AB2_HEARTBEAT_REPLAY_OR_MISMATCH: "peer",
+  MESH_STAGE4AB2_HEARTBEAT_TIMEOUT: "network",
+  MESH_STAGE4AB2_INIT_IO: "network",
+  MESH_STAGE4AB2_INIT_TIMEOUT: "network",
+  MESH_STAGE4AB2_LEASE_DENIED: "retry",
+  MESH_STAGE4AB2_LEASE_EXPIRED: "retry",
+  MESH_STAGE4AB2_LOCAL_TLS_DENIED: "retry",
+  MESH_STAGE4AB2_OWNER_DENIED: "peer",
+  MESH_STAGE4AB2_PORT_DENIED: "network",
+  MESH_STAGE4AB2_SOCKET_DENIED: "network",
+  MESH_STAGE4AB2_SOURCE_BIND_DENIED: "network",
+  MESH_STAGE4AB2_SOURCE_OR_PEER_IP_DENIED: "network",
+  MESH_STAGE4AB2_TLS_NAME_DENIED: "peer",
+  MESH_STAGE4AB2_TLS_REJECTED: "peer",
+  MESH_STAGE4AB2_TLS_TIMEOUT: "network",
+  MESH_STAGE4AB32B_CLOCK_OR_SLEEP_GAP_DENIED: "retry",
+};
+export interface AccountConnectionRecovery {
+  kind: ReturnType<typeof meshConnectionRecovery> | "changed";
+  code: AccountMeshPublicErrorCode | null;
+}
+function connectionRecovery(code: string | null): AccountConnectionRecovery {
+  const safe = ACCOUNT_MESH_PUBLIC_ERROR_CODES.find(value => value === code) ?? null;
+  return { kind: safe ? RECOVERY_OVERRIDES[safe] ?? meshConnectionRecovery(safe) : "retry", code: safe };
+}
+export function accountPeerRecovery(network: AccountNetwork, runtime: AccountRuntime | null, peerId: string): AccountConnectionRecovery | null {
+  const connection = deviceConnection(network, runtime, peerId);
+  return connection?.state === "blocked" ? connectionRecovery(connection.errorCode) : null;
+}
+export function accountMainRecovery(network: AccountNetwork, runtime: AccountRuntime | null): AccountConnectionRecovery | null {
+  // runtime.errorCode kann einen Peerfehler spiegeln. Nur ein ausdrücklich blockierter lokaler Server
+  // erhält einen eigenen Hinweis; der globale Code wird niemals einem anderen Gerät zugeordnet.
+  if (!runtime || !network.localDeviceId || network.localDeviceId !== network.mainDeviceId ||
+      !network.mainDeviceAvailable || runtime.ownerId !== network.ownerId ||
+      runtime.localDeviceId !== network.localDeviceId || runtime.mainDeviceId !== network.mainDeviceId ||
+      runtime.accountRevision !== network.accountRevision || runtime.serverState !== "blocked") return null;
+  return connectionRecovery(runtime.errorCode);
 }
 
 export type DevicePresentationState = "connected" | "connecting" | "offline" | "blocked" | "registered" | "approval" | "revoked";

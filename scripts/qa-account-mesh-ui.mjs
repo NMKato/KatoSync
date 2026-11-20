@@ -14,6 +14,8 @@ import { chromium } from "playwright";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const output = resolve(process.argv[2] || join(tmpdir(), "katosync-account-ui-" + Date.now()));
 const railOnly = process.argv.slice(3).includes("--rail-only");
+const recoveryOnly = process.argv.slice(3).includes("--recovery-only");
+assert.ok(!(railOnly && recoveryOnly), "Nur eine gezielte Szenarienauswahl ist erlaubt");
 await mkdir(output, { recursive: true });
 await build({
   absWorkingDir: root, entryPoints: ["tests/fixtures/accountMeshUi.tsx"], bundle: true,
@@ -58,10 +60,10 @@ const actions = () => page.evaluate(() => window.__meshActions);
 const count = async name => (await actions()).filter(action => action.name === name).length;
 
 async function open({ scene = "ready", width = 1240, height = 820, lang = "de",
-  theme = "dark", names = "normal", view = "devices", brain = "installed" } = {}) {
+  theme = "dark", names = "normal", view = "devices", brain = "installed", recovery = "" } = {}) {
   await page.setViewportSize({ width, height });
   const url = new URL(origin);
-  for (const [key, value] of Object.entries({ scene, lang, theme, names, view, brain })) url.searchParams.set(key, value);
+  for (const [key, value] of Object.entries({ scene, lang, theme, names, view, brain, recovery })) url.searchParams.set(key, value);
   await page.goto(url.href, { waitUntil: "load", timeout: 90_000 });
   await page.locator(view === "gateway" ? ".mode-gateway" : view === "brain" ? ".local-brain-card" : view === "rail" ? ".qa-sidebar-rail" : ".account-devices-card").waitFor();
   const state = await page.evaluate(() => ({
@@ -236,10 +238,72 @@ async function sidebarRailChecks() {
   log("sidebar-wide-labels-preserved", { width: 1240, height: 820 });
 }
 
+// Der sichtbare nächste Schritt und die Code-Details bleiben reine Darstellung ohne Geräteaktion.
+async function blockedConnectionChecks() {
+  for (const sample of [
+    { lang: "de", recovery: "peer", kind: "peer", theme: "dark", width: 1040, label: "Technische Details: Studio Mac", code: "MESH_ACCOUNT_PEER_REVOKED" },
+    { lang: "en", recovery: "network", kind: "network", theme: "light", width: 1040, label: "Technical details: Studio Mac", code: "MESH_ACCOUNT_NETWORK_UNAVAILABLE" },
+    { lang: "es", recovery: "account", kind: "account", theme: "light", width: 390, label: "Detalles técnicos: Studio Mac", code: "MESH_ACCOUNT_LOGIN_REQUIRED" },
+    { lang: "ru", recovery: "peer", kind: "peer", theme: "dark", width: 390, label: "Технические сведения: Studio Mac", code: "MESH_ACCOUNT_PEER_REVOKED" },
+  ]) {
+    await open({ ...sample, height: 720 });
+    const notice = page.locator(".account-device-row .account-device-recovery");
+    assert.equal(await notice.count(), 1);
+    assert.equal(await notice.getAttribute("data-recovery"), sample.kind);
+    assert.equal(await notice.locator("p[role=status]").isVisible(), true);
+    assert.ok(!(await notice.textContent()).includes("Tailscale"));
+    const toggle = page.getByRole("button", { name: sample.label, exact: true });
+    assert.equal(await toggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await notice.locator("code").isVisible(), false);
+    await tabTo(toggle); await visibleKeyboardFocus(toggle); await page.keyboard.press("Enter");
+    assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+    assert.equal(await notice.locator("code").isVisible(), true);
+    assert.equal(await notice.locator("code").textContent(), sample.code);
+    const dimensions = await toggle.boundingBox();
+    assert.ok(dimensions && dimensions.height >= 44, "Der Diagnose-Button braucht eine 44-px-Trefferfläche");
+    await noOverflow("blocked-" + sample.lang);
+    await snapshot("blocked-details-" + sample.lang + "-" + sample.theme + "-" + sample.width);
+    await page.keyboard.press("Space");
+    assert.equal(await toggle.getAttribute("aria-expanded"), "false");
+    assert.equal(await notice.locator("code").isVisible(), false);
+    assert.deepEqual(await actions(), [], "Diagnose-Details dürfen keine Geräte-, Freigabe- oder Modellaktion auslösen");
+    log("blocked-localized-keyboard-safe-details", sample);
+  }
+  await open({ recovery: "unknown", width: 1040, height: 720 });
+  assert.equal(await page.locator(".account-device-recovery[data-recovery=retry]").count(), 1);
+  assert.equal(await page.locator(".account-device-recovery-toggle").count(), 0);
+  assert.ok(!(await page.locator(".account-devices-card").textContent()).includes("MESH_SYNTHETIC_UNKNOWN_PRIVATE_VALUE"));
+  assert.deepEqual(await actions(), []);
+  log("blocked-unknown-code-hidden");
+
+  await open({ recovery: "stale", width: 1040, height: 720 });
+  assert.equal(await page.locator(".account-device-recovery").count(), 0);
+  assert.deepEqual(await actions(), []);
+  log("blocked-stale-revision-hidden");
+
+  await open({ recovery: "server-peer", width: 1040, height: 720 });
+  assert.equal(await page.locator(".account-device-connect-area").count(), 0);
+  assert.equal(await page.locator(".account-device-row .account-device-recovery[data-recovery=peer]").count(), 1);
+  assert.equal(await page.locator(".account-devices-card > .account-device-recovery").count(), 0);
+  await page.locator(".account-device-recovery").scrollIntoViewIfNeeded();
+  await snapshot("blocked-main-peer-without-selection-1040");
+  assert.deepEqual(await actions(), []);
+  log("blocked-peer-visible-without-selection-or-global-fallback");
+
+  await open({ recovery: "main", theme: "light", width: 1040, height: 720 });
+  assert.equal(await page.locator(".account-devices-card > .account-device-recovery[data-recovery=network]").count(), 1);
+  assert.equal(await page.locator(".account-device-row .account-device-recovery").count(), 0);
+  await page.getByRole("button", { name: "Technische Details: MacBook Air", exact: true }).click();
+  assert.equal(await page.locator(".account-device-recovery code").textContent(), "MESH_ACCOUNT_LAN_UNAVAILABLE");
+  await noOverflow("blocked-main-server"); await snapshot("blocked-main-server-light-1040");
+  assert.deepEqual(await actions(), []);
+  log("blocked-main-server-reason-separated");
+}
+
 const escapeHtml = value => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
 async function writeReport(status, failure) {
   await writeFile(join(output, "result.json"), JSON.stringify({
-    synthetic: true, scope: "components-with-mocked-handlers", selection: railOnly ? "sidebar-rail" : "all-components", status, browserVersion,
+    synthetic: true, scope: "components-with-mocked-handlers", selection: railOnly ? "sidebar-rail" : recoveryOnly ? "blocked-connections" : "all-components", status, browserVersion,
     reducedMotion: true, records, screenshots, contrastReports, errors, externalRequests,
     limitations: ["Keine Live-Geräte, Grants oder Modellstarts", "Kein vollständiger App-/Tauri-/WebKit-Nachweis",
       "390 px prüft nur eine isolierte Komponente", "Screenshots benötigen zusätzlich menschliche Sichtprüfung"],
@@ -264,7 +328,7 @@ try {
     if (new URL(route.request().url()).origin === origin) return route.continue();
     externalRequests.push(route.request().url()); return route.abort("blockedbyclient");
   });
-  if (!railOnly) {
+  if (!railOnly && !recoveryOnly) {
   const dialog = page.getByRole("dialog");
 
   for (const theme of ["dark", "light"]) {
@@ -417,7 +481,8 @@ try {
     }
   }
   }
-  await sidebarRailChecks();
+  if (!recoveryOnly) await sidebarRailChecks();
+  if (!railOnly) await blockedConnectionChecks();
   assert.notEqual(themeBackgrounds.get("dark"), themeBackgrounds.get("light"), "Die beiden Themes müssen unterschiedliche Tokens verwenden");
   assert.deepEqual(errors, [], "Unerwartete Frontend-Ausnahme oder Konsolenfehler");
   assert.deepEqual(externalRequests, [], "Die Prüfung darf keine externen Browserrequests benötigen");

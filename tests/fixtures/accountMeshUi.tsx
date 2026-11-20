@@ -23,6 +23,13 @@ declare global {
 
 const params = new URL(location.href).searchParams;
 const scene = params.get("scene") || "ready";
+const recoveryScene = params.get("recovery") || "";
+const recoveryCodes: Record<string, string> = {
+  network: "MESH_ACCOUNT_NETWORK_UNAVAILABLE", account: "MESH_ACCOUNT_LOGIN_REQUIRED",
+  peer: "MESH_ACCOUNT_PEER_REVOKED", "server-peer": "MESH_ACCOUNT_PEER_REVOKED",
+  stale: "MESH_ADMISSION_PEER_REVOKED", unknown: "MESH_SYNTHETIC_UNKNOWN_PRIVATE_VALUE"
+};
+
 const lang = params.get("lang") || "de";
 const theme = params.get("theme") === "light" ? "light" : "dark";
 const initialView = params.get("view") || "devices";
@@ -59,6 +66,7 @@ const base: AccountNetwork = {
       publicKey: "c".repeat(43), lastSeenAt: new Date(now - 500000).toISOString() }
   ]
 };
+if (recoveryScene === "main" || recoveryScene === "server-peer") base.mainDeviceId = own;
 if (scene === "empty") base.devices = [base.devices[0]];
 if (scene === "setup" || scene === "empty") {
   base.mainDeviceId = null; base.mainDeviceAvailable = false; base.accountRevision = 0;
@@ -142,16 +150,20 @@ function Example() {
   const [focusDevices, setFocusDevices] = useState(false);
   const [network, setNetwork] = useState(base);
   const [approved, setApproved] = useState(
-    ["connected", "offline", "approved"].includes(scene) ? [fp("22")] : []);
+    ["connected", "offline", "approved"].includes(scene) || recoveryScene ? [fp("22")] : []);
   const [review, setReview] = useState<AccountMeshModel["review"]>(scene === "review" ? proof : null);
   const [reviewOpen, setReviewOpen] = useState(scene === "review");
   const [pairing, setPairing] = useState(idle);
   const [brain, setBrain] = useState(initialBrain);
   const [runtime, setRuntime] = useState<AccountRuntime>({
-    ownerId: owner, localDeviceId: own, mainDeviceId: base.mainDeviceId, accountRevision: base.accountRevision,
-    serverState: "idle", errorCode: null, remoteJobsEnabled: false,
+    ownerId: owner, localDeviceId: own, mainDeviceId: base.mainDeviceId, accountRevision: recoveryScene === "stale" ? base.accountRevision - 1 : base.accountRevision,
+    serverState: recoveryScene === "main" ? "blocked" : recoveryScene === "server-peer" ? "listening" : "idle",
+    errorCode: recoveryScene === "main" ? "MESH_ACCOUNT_LAN_UNAVAILABLE" : recoveryScene ? "MESH_ACCOUNT_LOGIN_REQUIRED" : null, remoteJobsEnabled: false,
     profiles: scene === "approved" ? [{ peerDeviceId: peer, peerFingerprint: fp("22"), mode: "ask", enabled: false }] : [],
-    connections: scene === "connected" || scene === "offline" ? [{
+    connections: recoveryScene && recoveryScene !== "main" ? [{
+      peerDeviceId: peer, peerFingerprint: fp("22"), role: base.mainDeviceId === own ? "server" : "client", state: "blocked",
+      lastHeartbeatAt: null, expiresAt: null, errorCode: recoveryCodes[recoveryScene] ?? null, remoteJobsEnabled: false
+    }] : scene === "connected" || scene === "offline" ? [{
       peerDeviceId: peer, peerFingerprint: fp("22"), role: "client", state: scene,
       lastHeartbeatAt: now, expiresAt: now + 180000, errorCode: null, remoteJobsEnabled: false
     }] : []

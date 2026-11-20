@@ -1,7 +1,7 @@
 // Created by NMKato Solutions
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseAccountNetwork, parseAccountRuntime, eligiblePeer, devicePresentationState, sameDeviceBinding, deviceName,
+import { ACCOUNT_MESH_PUBLIC_ERROR_CODES, accountMainRecovery, accountPeerRecovery, parseAccountNetwork, parseAccountRuntime, eligiblePeer, devicePresentationState, sameDeviceBinding, deviceName,
   type AccountNetwork, type AccountRuntime } from "../src/lib/accountMeshContract.ts";
 import { AccountMeshPairing, type MeshInvoke } from "../src/lib/accountMeshPairing.ts";
 
@@ -87,6 +87,67 @@ test("runtime payload cannot claim job permissions or cross-account connections"
   assert.throws(() => parseAccountRuntime({ ...runtime(), remoteJobsEnabled: true }, network()));
   assert.throws(() => parseAccountRuntime({ ...runtime(), ownerId: third }, network()));
 });
+
+test("blocked peer recovery exposes only known codes and uses the peer's own reason", () => {
+  const n = network(), state = runtime(n);
+  state.connections[0].state = "blocked";
+  state.errorCode = "MESH_ACCOUNT_LOGIN_REQUIRED";
+  for (const [code, kind] of [
+    ["MESH_ACCOUNT_NETWORK_UNAVAILABLE", "network"], ["MESH_ACCOUNT_LOGIN_REQUIRED", "account"],
+    ["MESH_ACCOUNT_PEER_REVOKED", "peer"], ["MESH_ADMISSION_AUTHORITY_UNAVAILABLE", "retry"],
+    ["MESH_ACCOUNT_REVISION_CHANGED", "changed"], ["MESH_STAGE4AB2_OWNER_OR_PIN_REVOKED", "peer"],
+    ["MESH_CONNECTION_CLOCK_UNAVAILABLE", "retry"], ["MESH_STAGE4AB2_INIT_IO", "network"],
+    ["MESH_ACCOUNT_UNAVAILABLE", "retry"],
+  ]) {
+    state.connections[0].errorCode = code;
+    assert.deepEqual(accountPeerRecovery(n, state, peer), { kind, code });
+  }
+  assert.equal(new Set(ACCOUNT_MESH_PUBLIC_ERROR_CODES).size, ACCOUNT_MESH_PUBLIC_ERROR_CODES.length);
+  assert.ok(ACCOUNT_MESH_PUBLIC_ERROR_CODES.every(code => /^MESH_[A-Z0-9_]{1,115}$/.test(code)));
+});
+test("unknown, missing and non-public reasons never fall back to a global or raw error", () => {
+  const n = network(), state = runtime(n);
+  state.connections[0].state = "blocked"; state.errorCode = "MESH_ACCOUNT_LOGIN_REQUIRED";
+  for (const code of [null, "MESH_SYNTHETIC_UNKNOWN_PRIVATE_VALUE", "raw /synthetic/private/path",
+    "MESH_ACCOUNT_LOGIN_REQUIRED\nSYNTHETIC_TOKEN"]) {
+    state.connections[0].errorCode = code;
+    assert.deepEqual(accountPeerRecovery(n, state, peer), { kind: "retry", code: null });
+  }
+});
+test("recovery is hidden when account, primary, revision, fingerprint or role no longer match", () => {
+  for (const change of [
+    (s: AccountRuntime) => { s.ownerId = third; },
+    (s: AccountRuntime) => { s.localDeviceId = third; },
+    (s: AccountRuntime) => { s.mainDeviceId = third; },
+    (s: AccountRuntime) => { s.accountRevision++; },
+    (s: AccountRuntime) => { s.connections[0].peerFingerprint = fp("33"); },
+    (s: AccountRuntime) => { s.connections[0].role = "server"; },
+    (s: AccountRuntime) => { s.connections[0].state = "connected"; },
+  ]) {
+    const n = network(), state = runtime(n);
+    state.connections[0].state = "blocked"; state.connections[0].errorCode = "MESH_ADMISSION_PEER_REVOKED";
+    change(state); assert.equal(accountPeerRecovery(n, state, peer), null);
+  }
+});
+test("global recovery belongs only to an exactly bound blocked local main server", () => {
+  const n = network(), state = runtime(n);
+  state.serverState = "blocked"; state.errorCode = "MESH_ACCOUNT_LAN_UNAVAILABLE";
+  assert.equal(accountMainRecovery(n, state), null);
+  n.mainDeviceId = own; state.mainDeviceId = own;
+  assert.deepEqual(accountMainRecovery(n, state), { kind: "network", code: "MESH_ACCOUNT_LAN_UNAVAILABLE" });
+  for (const change of [
+    (s: AccountRuntime) => { s.ownerId = third; },
+    (s: AccountRuntime) => { s.localDeviceId = third; },
+    (s: AccountRuntime) => { s.mainDeviceId = third; },
+    (s: AccountRuntime) => { s.accountRevision++; },
+    (s: AccountRuntime) => { s.serverState = "listening"; },
+    (s: AccountRuntime) => { s.serverState = "idle"; },
+  ]) {
+    const changed = { ...state }; change(changed); assert.equal(accountMainRecovery(n, changed), null);
+  }
+  n.mainDeviceAvailable = false; assert.equal(accountMainRecovery(n, state), null);
+});
+
 test("one connect click negotiates proofs but never auto-approves or starts a channel", async () => {
   const calls: string[] = [];
   const bridge = (async (command: string) => {

@@ -1,16 +1,48 @@
-# Geräte-UX: Gestaltung und Prüfstand C9/C10
+# Geräte-UX: Gestaltung und Prüfstand C9–C11
 
 Created by NMKato Solutions
 
-Stand: 19. November 2026, 23:00 UTC. C9 ist durch den unten genannten CI-Lauf belegt; die begrenzten C10-Nachbesserungen sind lokal geprüft und im UI eingefroren. Native C10-CI und Paketabnahme stehen noch aus.
+Stand: 20. November 2026. C10 ist nativ gebaut und privat installiert. Seine anschließende Verbindungsabnahme hat einen blockierten Peerzustand und eine bislang unzureichende Fehleranzeige aufgedeckt. C11 ergänzt gezielt diese Anzeige; eine behobene Transportursache wird damit noch nicht behauptet.
 
-## Änderung
+## C11: nachvollziehbare Hinweise bei blockierter Verbindung
+
+Die Gerätekarte unterscheidet jetzt zwischen **„Verbindung prüfen“** für eine blockierte Verbindung und **„Freigabe nötig“** für eine fehlende Gerätefreigabe. Der nächste Schritt steht direkt am betroffenen Gerät, auch wenn am Hauptgerät noch kein Teilnehmer ausgewählt ist. Hinweise zu Konto, Netzwerk, Geräteprüfung und geänderter Geräteauswahl werden aus dem tatsächlich gebundenen Zustand abgeleitet.
+
+Technische Einzelheiten erscheinen erst nach einem eigenen, per Tastatur bedienbaren Detailsbutton. Der Button besitzt mindestens 44 px Höhe, einen sichtbaren Fokus und einen eindeutigen gerätespezifischen Namen. Fehlertexte und Details verwenden die vorhandenen Hell-/Dunkelfarben und Abstände; lange Codes dürfen umbrechen.
+
+Die Ausgabe verwendet ausschließlich **98 feste öffentliche Fehlercodes** aus dem nativen Quellvertrag. Unbekannte, fehlende oder zusammengesetzte Werte bleiben verborgen und erhalten einen allgemeinen Hinweis. Ein Fehlercode allein beweist keinen tatsächlich widerrufenen Pin: Einige native Fehlerkategorien fassen mehrere Prüfursachen zusammen.
+
+Ein Peerhinweis verlangt weiterhin die vorhandene Bindung an Konto, lokales Gerät, Hauptgerät, Revision, Fingerprint und Rolle. Ein globaler Fehler wird einem einzelnen Gerät nicht ersatzweise zugeordnet. Ein eigener Hauptgerätehinweis erscheint nur für den exakt gebundenen, verfügbaren lokalen Hauptserver im blockierten Zustand. Parser, Context, native Befehle, Authentifizierung, TLS und Freigabe-Callbacks sind unverändert; das Öffnen der Details ändert ausschließlich lokalen Darstellungszustand.
+
+## C11: Review und lokale Verifikation
+
+Der unabhängige Sicherheitsreview der sieben Produkt-/Prüfdateien fand keinen konkreten Blocker. Alle 98 ausgegebenen Enumwerte wurden gegen vorhandene native Stringliterale geprüft. Der Browserharness bleibt auf feste Loopback-Assets begrenzt und verweigert externe Requests.
+
+Der erste C11-Prüfstand bestand **18 von 18 Onboarding-Tests** sowie **1.024 von 1.024 Tests der vollständigen Node-Suite**, ohne Fehler oder übersprungene Tests. TypeScript und Vite-Produktionsbuild waren erfolgreich. Alle **967 erfassten Dateiinputs** blieben während dieses Gesamtlaufs unverändert; Abschluss: 20. November 2026, 00:08:37 UTC.
+
+Der gezielte Komponentenlauf bestand mit **acht Szenarien und sechs Aufnahmen**. Geprüft wurden vier Sprachen, Hell-/Dunkelansichten, Tastaturbedienung, schmale Karten, unbekannte Codes, veraltete Bindungen, Hinweise ohne Teilnehmerauswahl und die Trennung zwischen Peer- und Hauptgerätefehler. Die Mock-Aufzeichnung bestätigt, dass die Detailanzeige keine Geräte-, Freigabe- oder Modellaktion auslöst.
+
+Die Bildprüfung fand anschließend noch eine zu spezifische Netzwerkformulierung für den lokalen Hauptserver. Die vier Sprachfassungen wurden deshalb auf einen neutralen ersten Satz eingegrenzt. Der Gesamtlauf oben bezieht sich auf den Stand vor dieser reinen Textkorrektur. Der abschließende gezielte Nachtest bestand mit **vier Szenarien und vier tatsächlich angesehenen Bildern** (Deutsch/Englisch breit, Spanisch/Russisch schmal), ohne Frontendfehler oder externe Requests. Die sieben UI-/Prüfdateien blieben während des Nachtests unverändert; eine inverse Textprüfung bestätigt ausschließlich diese vier Satzänderungen seit dem Gesamtlauf.
+
+**Native C11-CI, signiertes Paket und physische Verbindungsabnahme stehen noch aus.** Die neue Diagnoseanzeige ersetzt keinen Nachweis einer stabilen, authentifizierten Verbindung.
+
+## C10: nach dem damaligen Quellfreeze verifiziert
+
+[CI-Lauf 44634391972](https://github.com/NMKato/KatoSync/actions/runs/44634391972) für Quelle 9fbd76586def90a83fd1dc2a83abf1b1fd635f27 bestand mit **14 Onboarding-Tests und 540 Rust-Tests**. Acht bereits vorhandene native Tests blieben als ignoriert ausgewiesen. Alle 13 Guard-/Listener-Recovery-Regressionen bestanden.
+
+Das signierte, von Apple akzeptierte Paket wurde privat installiert. Die tatsächliche native Ansicht bestätigte den korrigierten kompakten Sidebar-Bereich. Die spätere Verbindungsabnahme zeigte jedoch erneut blockierte Verbindungen. Automatisch aufgebaute TCP-Sockets allein wurden ausdrücklich nicht als vollständiger authentifizierter Mesh-Nachweis gewertet. C11 macht die bereits vorhandenen nativen Gründe dafür beobachtbar, ohne die zugrunde liegenden Prüfungen zu lockern.
+
+## Historischer Prüfstand C9/C10 beim Quellfreeze
+
+Die folgenden Abschnitte dokumentieren den Stand vom 19. November 2026, 23:00 UTC. Damals als ausstehend bezeichnete C10-Gates sind anhand des aktuellen Abschnitts oben einzuordnen.
+
+### Änderung
 
 Der Gateway bietet den direkten Zugang „Meine Geräte“. Die aktive Geräteverwaltung steht vor der Anbieterreihenfolge und erhält nach dem Einstieg den Fokus. Navigation registriert oder bestätigt kein Gerät. Kontogebundener Kontext, Freigaben, Hauptgeräte-Revision und bestehende Aktionshandler bleiben erhalten.
 
 Ein gemeinsamer Satz von Farbwerten und Abständen gibt Einstieg, Geräteverwaltung, Freigabedialogen und lokalem Modellbereich ruhige Flächen. Schaltflächen erhalten großzügige Trefferflächen, lange Bezeichnungen dürfen umbrechen und Hell/Dunkel haben eigene Statusfarben. Die RAM-Angabe bezeichnet den verbauten Arbeitsspeicher. Der Speicherhinweis erläutert, warum freier Festplattenspeicher keinen verfügbaren RAM ersetzt.
 
-## Komponentenlauf im C9-Vorlauf
+### Komponentenlauf im C9-Vorlauf
 
 Der zweite vollständige Komponentenlauf bestand mit **56 Prüfungen und 26 Aufnahmen**. Keine Frontend-Ausnahme und kein externer Browserrequest wurde registriert. Die tatsächlichen React-Komponenten liefen mit ausdrücklich synthetischen Konten, Geräten, Modellzuständen und Handlern; der Lauf verwendet keine Tauri-Brücke und erteilt keine echten Freigaben.
 
@@ -18,7 +50,7 @@ Geprüft wurden beide Themen, Gateway bei 1240 × 820 und 1040 × 720, lange Ger
 
 Der erste Lauf fand einen verlorenen Fokus nach Escape. Ursache war die vorzeitige React-Fokussierung vor `showModal()`. Der korrigierte Dialog merkt den vorherigen Auslöser und stellt Fokus nur zu einem weiterhin vorhandenen, aktivierbaren Element wieder her. Der zweite Lauf prüfte Escape ohne Freigabe, Fokusrückkehr und anschließende erneute Bedienung erfolgreich.
 
-## Gemessene ausgewählte Textkontraste
+### Gemessene ausgewählte Textkontraste
 
 Die Prüfung berechnet sRGB-Kontrast aus den tatsächlichen Farben und deckenden Hintergrundschichten, einschließlich Alpha-Komposition. Sie verlangt mindestens 4,5:1 für die ausgewählten normalen Texte. Unbestimmte Bilder oder Filter zählen nicht als belastbarer Nachweis.
 
@@ -35,7 +67,7 @@ Die Prüfung berechnet sRGB-Kontrast aus den tatsächlichen Farben und deckenden
 
 Dies ist eine gezielte Messung dieser Komponenten und keine Konformitätsbescheinigung für die gesamte App. Die erzeugten Bilder wurden zusätzlich visuell geprüft; in diesen synthetischen Komponenten wurde kein Layoutblocker gefunden. Der spätere native Sidebar-Befund betrifft einen zuvor nicht enthaltenen Teil der vollständigen App.
 
-## Sicherheitskorrektur und C9-CI
+### Sicherheitskorrektur und C9-CI
 
 Ein nativer Guard beschränkt eigene App-Kommandos anhand der tatsächlichen Window- und Webview-Labels. Das Hauptfenster behält den bestehenden Dispatcher. Das QA-Widget erhält ausschließlich seine sechs verwendeten Anzeige-, Navigations- und Fensterbefehle; unbekannte oder widersprüchliche Herkunft wird vor Dispatch abgelehnt. Der Schutz ergänzt die bestehenden Plugin-Capabilities und fachlichen Konto-/Freigabeprüfungen.
 
@@ -43,7 +75,7 @@ Sechs gezielte Rust-Tests prüfen die erlaubten und verweigerten Pfade einschlie
 
 TypeScript-Prüfung und Vite-Produktionsbuild waren für C9 erfolgreich. Vite meldete weiterhin eine Größenwarnung für den Haupt-JavaScript-Chunk; dies ist kein Buildfehler und bleibt ein gesondertes Optimierungsthema.
 
-## Nativer C9-Befund und begrenzte C10-Rail-Korrektur
+### Nativer C9-Befund und begrenzte C10-Rail-Korrektur
 
 Die tatsächliche native C9-Fensterprüfung bei einem äußeren Fenstermaß von **1040 × 720** zeigte einen Sidebar-Fehler: Die zweispaltige Moduswahl ragte aus der 80-px-Leiste, und spätere CSS-Regeln beeinträchtigten die kompakte Fußzeile. Das Außenmaß ist kein Nachweis eines gleich großen CSS- oder Webview-Inhaltsbereichs.
 
@@ -55,7 +87,7 @@ Die zusätzliche Sichtprüfung fand noch einen Wortumbruch im Badge. Nach der le
 
 Diese Nachweise sind synthetische Browserprüfungen mit echten Komponenten und Mockhandlern. Die native C10-WebKit-Abnahme bleibt ein eigener Schritt.
 
-## C10: Wiederaufnahme fehlender Listener
+### C10: Wiederaufnahme fehlender Listener
 
 Ein vorübergehend fehlgeschlagener Discovery- oder Bindversuch konnte einen zweiten Verbindungspfad dauerhaft fehlen lassen, obwohl bereits ein anderer Listener aktiv war. Die C10-Korrektur ergänzt fehlende LAN-/Overlay-Listener über einen periodischen Tick, ohne vorhandene Listener oder Peer-Tasks neu zu starten. Es bleiben höchstens zwei Listener mit unterschiedlichen konkreten Adressen zulässig.
 
@@ -65,7 +97,7 @@ Nach dem asynchronen Nachbinden werden Kontobindung und aktuelle Eigentümergene
 
 Der gezielte Lauf verwendete weder Cargo/CI noch echte Ports oder App-Aktionen. Er belegt die Recovery-Policy; die vollständige Runtime-/Tokio-Integration und der native Wiederverbindungstest folgen mit C10.
 
-## Lokale Gesamtprüfung und verbleibende Gates
+### Lokale Gesamtprüfung und verbleibende Gates
 
 Der vollständige C10-Node-Lauf endete am **19. November 2026 um 22:55 UTC** erfolgreich: **1.020 von 1.020 Tests**, null Fehler und null übersprungene Tests. Die zusätzlichen Remote-Nutzungstests bestanden mit **16 von 16**, ebenfalls ohne Fehler oder übersprungene Tests. Alle **634 erfassten Eingabedateien** blieben während dieses Laufs unverändert.
 
@@ -77,7 +109,7 @@ Im C9-Vorlauf meldete `npm audit --package-lock-only` null bekannte Schwachstell
 
 **Noch ausstehend sind die native C10-CI, die Prüfung des daraus erzeugten signierten Pakets und die tatsächliche C10-App-Abnahme einschließlich Wiederverbindung nach normalem Neustart.** Die lokalen Befunde oder der bestandene C9-CI-Lauf ersetzen diese C10-Gates nicht.
 
-## Wiederholen
+### Wiederholen
 
 ```sh
 node scripts/qa-account-mesh-ui.mjs /tmp/katosync-ui-review
