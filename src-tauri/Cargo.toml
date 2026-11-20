@@ -51,6 +51,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 [features]
 github-login-qa = [] # Isolated local test app; never include in production builds
 katoos-auth-qa = ["github-login-qa", "dep:futures-util", "dep:tokio-tungstenite"] # Canonical KATOOS Auth; RC70 transport QA-only, never auto-started
+ux4-auth-qa = ["katoos-auth-qa"] # QA only: canonical KATOOS issuer with UX4-specific Keychain and data namespaces
 stage3x-qa = ["katoos-auth-qa"] # Dedicated Stage3X app Keychain/config/logs/LaunchAgent isolation
 stage35-qa = ["stage3x-qa"] # Distinct Stage35 hardware/auto-discovery QA namespace
 stage4j-qa = ["stage35-qa"] # NEW independent Stage4J runtime; never share Stage35 credentials

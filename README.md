@@ -30,6 +30,20 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
+## 20.11.2026: UX4-KatoOS-Loginfix (privater QA-Build)
+
+Der erste native UX4-QA-Build nutzte versehentlich das historische
+`github-login-qa`-Auth-Profil; KatoOS-Mitglieder erhielten dabei HTTP 400.
+Der isolierte Fix baut **Frontend und Rust gemeinsam** gegen den richtigen
+KatoOS-Issuer (`VITE_KATOOS_AUTH_QA=1` + `--features ux4-auth-qa`).
+Schlüsselbund, Datenverzeichnis und App-Kennung bleiben getrennt von Candidate 11.
+
+**KatoSync 4.0 KATOOS QA.app** wurde nativ gebaut, lokal signiert und
+auf dem M3 gestartet. Die Anmeldung zeigt jetzt korrekt den bestehenden
+KatoOS-/KSP-Zugang ohne zweite Registrierung. **Die tatsächliche persönliche
+Passwortanmeldung ist noch nicht bestätigt.** Candidate 11 bleibt unverändert.
+[Ursache, Fix, QA-Gates und reproduzierbarer Build](docs/KATOSYNC_UX4_KATOOS_AUTH_FIX_20261120.md).
+
 ## 20.11.2026: Native M3-UX4-QA (noch kein Release)
 
 Im separaten Zweig `qa/ux4-native-macos-20261120` wurde die vollständige

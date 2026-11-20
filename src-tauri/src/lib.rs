@@ -693,13 +693,15 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
 #[cfg(all(feature = "github-login-qa", not(feature = "katoos-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
-#[cfg(all(feature = "katoos-auth-qa", not(feature = "stage3x-qa")))]
+#[cfg(feature = "ux4-auth-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.ux4.qa";
+#[cfg(all(feature = "katoos-auth-qa", not(feature = "stage3x-qa"), not(feature = "ux4-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.auth.qa";
-#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa")))]
+#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa"), not(feature = "ux4-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage3x.qa";
-#[cfg(all(feature = "stage35-qa", not(feature = "stage4j-qa")))]
+#[cfg(all(feature = "stage35-qa", not(feature = "stage4j-qa"), not(feature = "ux4-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage35.qa";
-#[cfg(feature = "stage4j-qa")]
+#[cfg(all(feature = "stage4j-qa", not(feature = "ux4-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage4j.qa";
 const KEYCHAIN_ACCOUNT: &str = "mistral-api-key";
 const MCP_CONNECTOR_ACCOUNT: &str = "mcp-connector-token";
@@ -707,13 +709,15 @@ const SUPABASE_SESSION_ACCOUNT: &str = "supabase-refresh-token";
 const USER_AGENT: &str = "KatoSync/1.0.1";
 #[cfg(not(feature = "github-login-qa"))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.sync";
-#[cfg(all(feature = "github-login-qa", not(feature = "stage3x-qa")))]
+#[cfg(feature = "ux4-auth-qa")]
+const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.ux4.qa.sync";
+#[cfg(all(feature = "github-login-qa", not(feature = "stage3x-qa"), not(feature = "ux4-auth-qa")))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.github.login.qa.sync";
-#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa")))]
+#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa"), not(feature = "ux4-auth-qa")))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage3x.sync";
-#[cfg(all(feature = "stage35-qa", not(feature = "stage4j-qa")))]
+#[cfg(all(feature = "stage35-qa", not(feature = "stage4j-qa"), not(feature = "ux4-auth-qa")))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage35.sync";
-#[cfg(feature = "stage4j-qa")]
+#[cfg(all(feature = "stage4j-qa", not(feature = "ux4-auth-qa")))]
 const LAUNCH_AGENT_ID: &str = "com.nmkato.katosync.meshqa.stage4j.sync";
 // KATOOS canonical issuer on explicit, isolated QA feature only. Never silently
 // migrate or reinterpret existing KatoSync tenants/sessions on stable builds.
@@ -6035,7 +6039,9 @@ fn app_support_dir() -> Result<PathBuf> {
     let dir = dirs::data_dir()
         .or_else(dirs::home_dir)
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
-        .join(if cfg!(feature = "stage4j-qa") {
+        .join(if cfg!(feature = "ux4-auth-qa") {
+            "KatoSync UX4 KATOOS Auth QA"
+        } else if cfg!(feature = "stage4j-qa") {
             "KatoSync Mesh QA Stage4J"
         } else if cfg!(feature = "stage35-qa") {
             "KatoSync Mesh QA Stage35"
@@ -6061,7 +6067,9 @@ fn logs_dir() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("Home-Verzeichnis nicht gefunden"))?
         .join("Library")
         .join("Logs")
-        .join(if cfg!(feature = "stage4j-qa") {
+        .join(if cfg!(feature = "ux4-auth-qa") {
+            "KatoSync UX4 KATOOS Auth QA"
+        } else if cfg!(feature = "stage4j-qa") {
             "KatoSync Mesh QA Stage4J"
         } else if cfg!(feature = "stage35-qa") {
             "KatoSync Mesh QA Stage35"

@@ -21,13 +21,15 @@ const CLIENT_ID: Option<&str> = match option_env!("KATOSYNC_GITHUB_APP_CLIENT_ID
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync";
 #[cfg(all(feature = "github-login-qa", not(feature = "katoos-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.github.login.qa";
-#[cfg(all(feature = "katoos-auth-qa", not(feature = "stage3x-qa")))]
+#[cfg(feature = "ux4-auth-qa")]
+const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.ux4.qa";
+#[cfg(all(feature = "katoos-auth-qa", not(feature = "stage3x-qa"), not(feature = "ux4-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.auth.qa";
-#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa")))]
+#[cfg(all(feature = "stage3x-qa", not(feature = "stage35-qa"), not(feature = "ux4-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage3x.qa";
-#[cfg(all(feature = "stage35-qa", not(feature = "stage4j-qa")))]
+#[cfg(all(feature = "stage35-qa", not(feature = "stage4j-qa"), not(feature = "ux4-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage35.qa";
-#[cfg(feature = "stage4j-qa")]
+#[cfg(all(feature = "stage4j-qa", not(feature = "ux4-auth-qa")))]
 const KEYCHAIN_SERVICE: &str = "com.nmkato.katosync.katoos.stage4j.qa";
 const ACCOUNT_PREFIX: &str = "github-app-user-device-v2:";
 static ACTIVE_USER: OnceLock<Mutex<Option<String>>> = OnceLock::new();

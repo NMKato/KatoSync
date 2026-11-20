@@ -1,0 +1,17 @@
+{
+  "productName": "KatoSync 4.0 KATOOS QA",
+  "identifier": "com.nmkato.katosync.ux4katoosqa20261120",
+  "build": { "beforeBuildCommand": "" },
+  "app": {
+    "windows": [{
+      "title": "KatoSync 4.0 KATOOS QA",
+      "width": 1380,
+      "height": 860,
+      "minWidth": 1040,
+      "minHeight": 720,
+      "resizable": true,
+      "center": true
+    }]
+  },
+  "bundle": { "macOS": { "hardenedRuntime": false, "signingIdentity": null } }
+}

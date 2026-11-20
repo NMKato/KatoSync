@@ -14,15 +14,16 @@ const binaryAudit=read("scripts/qa-stage4j-native-namespace-audit.py");
 test("Stage4J inherits gated QA behavior but must isolate its OS credential namespace",()=>{
   assert.match(features,/stage4j-qa = \["stage35-qa"\]/);
   for(const source of [rust,gh]){
-    assert.match(source,/#\[cfg\(all\(feature = "stage35-qa", not\(feature = "stage4j-qa"\)\)\)\]\s*const KEYCHAIN_SERVICE: &str = "com\.nmkato\.katosync\.katoos\.stage35\.qa";/);
-    assert.match(source,/#\[cfg\(feature = "stage4j-qa"\)\]\s*const KEYCHAIN_SERVICE: &str = "com\.nmkato\.katosync\.katoos\.stage4j\.qa";/);
+    assert.match(source,/#\[cfg\(all\(feature = "stage35-qa", not\(feature = "stage4j-qa"\), not\(feature = "ux4-auth-qa"\)\)\)\]\s*const KEYCHAIN_SERVICE: &str = "com\.nmkato\.katosync\.katoos\.stage35\.qa";/);
+    assert.match(source,/#\[cfg\(all\(feature = "stage4j-qa", not\(feature = "ux4-auth-qa"\)\)\)\]\s*const KEYCHAIN_SERVICE: &str = "com\.nmkato\.katosync\.katoos\.stage4j\.qa";/);
   }
 });
 
 test("Stage4J uses its own launch agent, config directory and logs",()=>{
-  assert.match(rust,/#\[cfg\(all\(feature = "stage35-qa", not\(feature = "stage4j-qa"\)\)\)\]\s*const LAUNCH_AGENT_ID: &str = "com\.nmkato\.katosync\.meshqa\.stage35\.sync";/);
-  assert.match(rust,/#\[cfg\(feature = "stage4j-qa"\)\]\s*const LAUNCH_AGENT_ID: &str = "com\.nmkato\.katosync\.meshqa\.stage4j\.sync";/);
-  assert.equal((rust.match(/\.join\(if cfg!\(feature = "stage4j-qa"\)/g)??[]).length,2);
+  assert.match(rust,/#\[cfg\(all\(feature = "stage35-qa", not\(feature = "stage4j-qa"\), not\(feature = "ux4-auth-qa"\)\)\)\]\s*const LAUNCH_AGENT_ID: &str = "com\.nmkato\.katosync\.meshqa\.stage35\.sync";/);
+  assert.match(rust,/#\[cfg\(all\(feature = "stage4j-qa", not\(feature = "ux4-auth-qa"\)\)\)\]\s*const LAUNCH_AGENT_ID: &str = "com\.nmkato\.katosync\.meshqa\.stage4j\.sync";/);
+  assert.equal((rust.match(/else if cfg!\(feature = "stage4j-qa"\)/g)??[]).length,2);
+  assert.equal((rust.match(/\.join\(if cfg!\(feature = "ux4-auth-qa"\)/g)??[]).length,2);
   assert.equal((rust.match(/"KatoSync Mesh QA Stage4J"/g)??[]).length,2);
   assert.match(rust,/fn app_support_dir\(\)/);
   assert.match(rust,/fn logs_dir\(\)/);

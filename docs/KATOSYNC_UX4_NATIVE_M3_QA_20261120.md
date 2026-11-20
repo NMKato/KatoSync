@@ -48,3 +48,7 @@ Die native QA-App ist lokal auf der externen SSD gebaut und gestartet. Da sie ab
 7. Erst nach persönlicher Anmeldung Hell/Dunkel/Auto, 4+3-Cards, echte Statusanzeigen, Onboarding, Device-/MCP-Detailaufrufe, Fenstergrößen und Quit/Rollback nativ abnehmen.
 
 **Nicht freigegeben:** direkter Remote-Desktop-Commander-Ersatz, produktive Remote-Git-/Terminalbefehle, Serieninstaller oder Merge nach main.
+
+## Nachtrag 20.11.2026 – ursprünglicher UX4-QA-Login ersetzt
+
+Die in diesem Dokument zuerst gebaute native QA-App (`github-login-qa`) war **kein gültiger Test des bestehenden KatoOS-Kontos**: Sie verwendete den historischen KatoSync-Auth-Issuer und ein unpassendes Frontendflag. Der persönliche Login schlug mit HTTP 400 fehl. Das isolierte Folgepaket `KatoSync 4.0 KATOOS QA.app` verwendet nun den korrekten KatoOS-/KSP-Issuer mit neuem, eigenem Schlüsselbund- und Daten-Namensraum. Die fehlerhafte Vorgänger-QA wurde beendet. Siehe [KatoOS-Loginfix](KATOSYNC_UX4_KATOOS_AUTH_FIX_20261120.md). Der erste Buildnachweis bleibt als historische Evidenz erhalten, darf aber nicht als erfolgreicher KatoOS-Login interpretiert werden.
