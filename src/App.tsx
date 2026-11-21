@@ -331,6 +331,16 @@ export default function App() {
   const visibleStep = toVisibleStep(vm.activeStep);
   const page = pageCopy(visibleStep, t);
   const isAgentSync = workspaceMode === "agentSync";
+  // A successful sign-in should not occupy Agent Sync screen space indefinitely.
+  // Do not automatically hide errors, warnings or newer notices.
+  useEffect(() => {
+    const message = vm.notice;
+    if (!isAgentSync || message?.kind !== "ok" || !message.text.startsWith("Angemeldet als ")) return;
+    const timeout = window.setTimeout(() => {
+      vm.setNotice((current) => current === message ? null : current);
+    }, 6500);
+    return () => window.clearTimeout(timeout);
+  }, [isAgentSync, vm.notice, vm.setNotice]);
   const widgetPreviewEnabled=import.meta.env.VITE_KATOSYNC_DESKTOP_WIDGET_QA==="1";
   const [widgetError,setWidgetError]=useState(false);
   const widgetReport=useMemo(()=>projectDesktopWidget(
@@ -792,10 +802,12 @@ export default function App() {
         <div className="sidebar-footer">
           <div className="ks40-settings-holder">
             <button aria-controls="ks40-preferences-panel" aria-expanded={preferencesOpen}
-              aria-label={ux.preferences} className={"ghost ks40-settings-button" + (preferencesOpen ? " is-open" : "")}
+              aria-label={isAgentSync ? `${ux.appearance} / ${ux.language}` : ux.preferences}
+              title={isAgentSync ? `${ux.appearance} / ${ux.language}` : ux.preferences}
+              className={"ghost ks40-settings-button" + (preferencesOpen ? " is-open" : "")}
               onClick={() => setPreferencesOpen((open) => !open)}
               ref={preferencesButtonRef} type="button">
-              <Settings size={18} /><span>{ux.preferences}</span>
+              <Settings size={18} /><span>{isAgentSync ? `${ux.appearance} · ${ux.language}` : ux.preferences}</span>
             </button>
             {preferencesOpen ? (
               <div aria-label={ux.preferences} className="ks40-settings-panel"
@@ -822,9 +834,12 @@ export default function App() {
                 </label>
                 <div className="ks4-theme-choices" role="group" aria-label="Design">
                   {(["light", "dark", "auto"] as const).map(mode =>
-                    <button key={mode} aria-pressed={themeMode === mode} onClick={() => setThemeMode(mode)} type="button">
+                    <button key={mode} aria-pressed={themeMode === mode}
+                      aria-label={mode === "light" ? ux.themeLight : mode === "dark" ? ux.themeDark : ux.themeAuto}
+                      title={mode === "light" ? ux.themeLight : mode === "dark" ? ux.themeDark : ux.themeAuto}
+                      onClick={() => setThemeMode(mode)} type="button">
                       {mode === "light" ? <Sun size={14}/> : mode === "dark" ? <Moon size={14}/> : <Monitor size={14}/>}
-                      {mode === "light" ? "Hell" : mode === "dark" ? "Dunkel" : "Auto"}
+                      <span className="ks4-theme-label">{mode === "light" ? ux.themeLight : mode === "dark" ? ux.themeDark : ux.themeAuto}</span>
                     </button>)}
                 </div>
                 <button className="ks40-settings-option" onClick={() => {
@@ -867,9 +882,12 @@ export default function App() {
           </HoverTip>
           {isAgentSync ? <div className="ks4-theme-choices ks4-theme-footer" role="group" aria-label="Farbschema">
             {(["light", "dark", "auto"] as const).map(mode =>
-              <button key={mode} type="button" aria-pressed={themeMode === mode} onClick={() => setThemeMode(mode)}>
+              <button key={mode} type="button" aria-pressed={themeMode === mode}
+                aria-label={mode === "light" ? ux.themeLight : mode === "dark" ? ux.themeDark : ux.themeAuto}
+                title={mode === "light" ? ux.themeLight : mode === "dark" ? ux.themeDark : ux.themeAuto}
+                onClick={() => setThemeMode(mode)}>
                 {mode === "light" ? <Sun size={14}/> : mode === "dark" ? <Moon size={14}/> : <Monitor size={14}/>}
-                {mode === "light" ? "Hell" : mode === "dark" ? "Dunkel" : "Auto"}
+                <span className="ks4-theme-label">{mode === "light" ? ux.themeLight : mode === "dark" ? ux.themeDark : ux.themeAuto}</span>
               </button>)}
           </div> : null}
           <span className="app-version-label">{isAgentSync ? "KatoSync 4.0 · UX Beta" : "KatoSync " + APP_VERSION_LABEL}</span>

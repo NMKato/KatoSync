@@ -30,6 +30,19 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
+## 21.11.2026: Native UX4-Bedienprüfung und Responsive-Patch (privater QA-Zweig)
+
+Die authentifizierte UX4-KatoOS-Test-App wurde auf M3 mittels echter
+macOS-Bedienung durch neun Agent-Sync-Ansichten geführt. Hell/Dunkel/Auto und
+das Verkleinern des Fensters wurden kontrolliert geprüft. Candidate 11 ist
+regulär geschlossen, die aktuelle QA-App blieb aktiv.
+
+Der getrennte UX-Quellpatch verbessert das 1040-px-Sidebar-Verhalten, benennt
+„Darstellung · Sprache“ eindeutig und beendet ausschließlich temporäre
+Login-Erfolgshinweise. Alle Freigabe- und Ausführungsgrenzen bleiben unverändert.
+Der Patch ist **noch nicht** in die angemeldete laufende native App eingespielt:
+[Native UX-Review, Befunde und QA-Gates](docs/KATOSYNC_UX4_NATIVE_UX_AUDIT_20261121.md).
+
 ## 20.11.2026: UX4-KatoOS-Loginfix (privater QA-Build)
 
 Der erste native UX4-QA-Build nutzte versehentlich das historische

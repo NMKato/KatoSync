@@ -20,7 +20,7 @@ test("Light defaults on a fresh preference; dark and auto remain explicit", () =
   assert.match(app, /media\.addEventListener\("change", update\)/);
   assert.match(app, /media\.removeEventListener\("change", update\)/);
   assert.match(app, /localStorage\.setItem\("katosync\.theme", themeMode\)/);
-  assert.match(app, /"Hell" : mode === "dark" \? "Dunkel" : "Auto"/);
+  assert.match(app, /ux\.themeLight : mode === "dark" \? ux\.themeDark : ux\.themeAuto/);
 });
 test("Guide only confirms independently observed account, provider, Mesh and local projects", () => {
   assert.match(guide, /sessionStatus\.loggedIn/);

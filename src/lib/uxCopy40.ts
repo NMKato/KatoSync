@@ -9,6 +9,7 @@ const de = {
   preferences: "Einstellungen",
   preferencesHint: "Darstellung, Sprache und rechtliche Hinweise",
   appearance: "Darstellung",
+  themeLight: "Hell", themeDark: "Dunkel", themeAuto: "Auto",
   presentation: "Präsentationsmodus",
   presentationHint: "Vertrauliche Angaben für Bildschirmaufnahmen maskieren",
   appearanceLight: "Helles Design",
@@ -66,7 +67,7 @@ type Copy = typeof de;
 const en: Copy = {
   workspace: "Workspace", workspaceExpand: "Show more workspaces", workspaceCollapse: "Hide more workspaces",
   preferences: "Settings", preferencesHint: "Appearance, language and legal information",
-  appearance: "Appearance", presentation: "Presentation mode",
+  appearance: "Appearance", themeLight: "Light", themeDark: "Dark", themeAuto: "Auto", presentation: "Presentation mode",
   presentationHint: "Hide sensitive values in screenshots and presentations",
   appearanceLight: "Light appearance", appearanceDark: "Dark appearance",
   language: "Language", terms: "Terms of use", advancedSettings: "Advanced settings", close: "Close",
@@ -95,7 +96,7 @@ const en: Copy = {
 const es: Copy = {
   workspace: "Área de trabajo", workspaceExpand: "Mostrar más áreas", workspaceCollapse: "Ocultar áreas adicionales",
   preferences: "Ajustes", preferencesHint: "Aspecto, idioma e información legal",
-  appearance: "Apariencia", presentation: "Modo presentación",
+  appearance: "Apariencia", themeLight: "Claro", themeDark: "Oscuro", themeAuto: "Auto", presentation: "Modo presentación",
   presentationHint: "Ocultar datos sensibles en capturas y presentaciones",
   appearanceLight: "Tema claro", appearanceDark: "Tema oscuro", language: "Idioma",
   terms: "Condiciones de uso", advancedSettings: "Ajustes avanzados", close: "Cerrar",
@@ -126,7 +127,7 @@ const es: Copy = {
 const ru: Copy = {
   workspace: "Рабочая область", workspaceExpand: "Показать остальные разделы", workspaceCollapse: "Скрыть остальные разделы",
   preferences: "Настройки", preferencesHint: "Оформление, язык и юридическая информация",
-  appearance: "Оформление", presentation: "Режим презентации",
+  appearance: "Оформление", themeLight: "Светлая", themeDark: "Тёмная", themeAuto: "Авто", presentation: "Режим презентации",
   presentationHint: "Скрывать конфиденциальные данные на снимках и при показе",
   appearanceLight: "Светлая тема", appearanceDark: "Тёмная тема", language: "Язык",
   terms: "Условия использования", advancedSettings: "Расширенные настройки", close: "Закрыть",
