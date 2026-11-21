@@ -3284,7 +3284,7 @@ function LicenseDialog({
             </p>
           </div>
         </header>
-        <div className="license-body">
+        <div className="license-body" role="region" tabIndex={0} aria-label={license.title}>
           <p className="license-intro">{license.intro}</p>
           {license.sections.map((section) => (
             <article key={section.title}>

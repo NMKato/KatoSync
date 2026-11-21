@@ -30,6 +30,23 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
+## 21.11.2026: Lizenzdialog bei angedocktem Web Inspector (privater UX-Fix)
+
+Der Owner-Screenshot deckte ein echtes Layoutproblem auf: Bei einer auf 390px
+verkürzten WebView schrumpft der bisherige Lizenztextbereich auf ca. 53px.
+Der isolierte QA-Fix scrollt bei geringer Höhe den **gesamten** Dialog, hält
+alle neun Rechtsabschnitte lesbar und erhält die ausdrückliche, nicht
+vorausgewählte Zustimmung. Test: **1056/1056 Node**, vier Browsergrößen,
+TypeScript/Vite und lokaler nativer Build bestanden.
+
+**Native Sichtabnahme weiterhin gesperrt:** Im neuen nativen Bundle lädt
+WebKit den Frontend-Einstieg noch nicht zuverlässig (Issue #284). Die
+bestehende Lizenz v2.0 ist außerdem ein eigener Produkt-/Legal-Reviewpunkt
+(Issue #285). Keine automatische Zustimmung und keine Änderung an Geräte-,
+MCP-, Auth- oder Betriebssystemfreigaben.
+
+[Lizenzdialog-UX und QA-Protokoll](docs/KATOSYNC_UX4_LICENSE_DIALOG_QA_20261121.md).
+
 ## 21.11.2026: P0 Native-WebKit-Startgate (Beta-Sperre)
 
 **Kein öffentliches oder natives UX4-Release freigeben:** Der neue
