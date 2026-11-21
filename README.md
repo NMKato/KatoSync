@@ -30,6 +30,22 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
+## 21.11.2026: P0 Native-WebKit-Startgate (Beta-Sperre)
+
+**Kein öffentliches oder natives UX4-Release freigeben:** Der neue
+UX4-/Mesh-Quellstand besteht Node-/Browser-/Cargo-Prüfungen, aber die
+tatsächlich gestartete macOS-App zeigt ein leeres Fenster. HTML lädt in
+der isolierten Diagnose; JavaScript/React dagegen nicht nachgewiesen.
+Neue App-Kennung und ein lokaler CSP-Versuch haben den Fehler **nicht**
+behoben. Die bisher funktionierende KatoOS-QA-App wurde wiederhergestellt;
+Geräte, Schlüsselbund und Candidate11 bleiben geschützt.
+
+**P0-Nachweis:** [Issue #284](https://github.com/NMKato/KatoSync/issues/284)
+und [WebKit-Boot-Diagnose](docs/KATOSYNC_UX4_NATIVE_WEBKIT_BOOT_DIAG_20261121.md).
+Der nächste Schritt ist ein **gesonderter WebKit-inspectable QA-Build**
+zur Identifizierung des konkreten Resource-/JavaScript-Fehlers. Keine
+spekulative CSP-Lockerung oder Pairing-Freigabe.
+
 ## 21.11.2026: UX4 + Stage4J Mesh-Zusammenführung (private Beta-Quelle)
 
 Der neue QA-Quellzweig `qa/ux4-mesh-composition-20261121` kombiniert
