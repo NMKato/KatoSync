@@ -35,9 +35,17 @@ Created by NMKato Solutions · 21.11.2026 · privater QA-Kandidat
 
 ## Offene Freigaben
 
-- Native macOS QA-Paketaktualisierung mit eigener signierter Candidate-ID; anschließende Sichtabnahme des korrigierten 1040-px-Footers.
+- Native macOS QA-Paketaktualisierung ist **isoliert gebaut und lokal ad-hoc signiert**, jedoch absichtlich nicht gestartet. Die native Sichtabnahme des korrigierten 1040-px-Footers bleibt offen.
 - Kein Release 4.0 und keine Notarisierung. Ein ad-hoc signierter Testkandidat ist keine Developer-ID-Distribution.
 - MCP-Client-/Device-/Owner-MFA und echter ChatGPT→KatoSync-Git-/Terminaljob weiterhin eigene, offene Gates.
 - UI-Kandidaten für späteren Polishing-Review: kompakter Headerstatus, globale Queue-Anzeige bei leerem isoliertem Projektregister, nachrangige Formulare in Projekte und Agenten-Einstellungen.
 
 **Entscheid:** Native, authentifizierte Grundbedienung bestanden; UX-Patch als Quell- und Browsertestkandidat, aber noch keine native Installer-/Produktivfreigabe.
+
+## Isoliertes natives QA-Paket auf SSD vorbereitet
+
+- Der Quellcommit **0604d07ec896ef135de227fa6f9378b4d396fe36** wurde mit kanonischem KatoOS-QA-Feature und unverändertem Rust-Cargo-Lockfile separat zu einer macOS-arm64-App kompiliert: **Tauri Release Build Exit 0**; Rust zeigte lediglich bekannte ungenutzte QA-Funktionswarnungen.
+- Das neue Paket liegt ausschließlich in einem zweiten externen SSD-Buildverzeichnis (`ux4-native-polish-20261121/target/release/bundle/macos`) und heißt weiterhin **KatoSync 4.0 KATOOS QA.app**. Es wurde lokal ad-hoc signiert; `codesign --verify --deep --strict` ist PASS. App-Größe circa 91 MB, Bundle-ID wie der bestehende QA-Kandidat; native SemVer weiterhin 2.0.0 – kein 4.0-Release.
+- Der neue ausführbare Binärstand unterscheidet sich vom laufenden alten QA-Bundle. SHA-256 des neuen Executables: `c5d527adcd41b98037de1fb66983b2d7f8444eccfeb8aef2d068d62c22476164`. QA-Quellfix und isoliertes Buildziel sind damit reproduzierbar zuordenbar.
+- **Bewusst nicht gestartet, nicht installiert und nicht über die laufende App kopiert.** Die bisher angemeldete QA-Version läuft weiterhin unverändert. Wegen identischer Test-Bundle-ID/Keychain-Konfiguration darf nicht unkontrolliert eine zweite Instanz eröffnet werden; vor dem nächsten visuellen Test den bestehenden QA-Prozess geordnet schließen und den neuen Kandidaten separat starten. Noch keine native Sicht-/E2E-Freigabe des neuen Pakets.
+- Developer-ID-Signierung, Notarisierung und öffentlicher Installer bleiben **NO-GO**; ad-hoc nur für lokale M3-QA.
