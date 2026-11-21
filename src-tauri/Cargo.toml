@@ -52,6 +52,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 github-login-qa = [] # Isolated local test app; never include in production builds
 katoos-auth-qa = ["github-login-qa", "dep:futures-util", "dep:tokio-tungstenite"] # Canonical KATOOS Auth; RC70 transport QA-only, never auto-started
 ux4-auth-qa = ["katoos-auth-qa"] # QA only: canonical KATOOS issuer with UX4-specific Keychain and data namespaces
+ux4-mesh-qa = ["ux4-auth-qa", "stage4j-qa"] # Explicit UX4 native Mesh pilot: inherit existing Stage4J authority, transport and consent gates
 stage3x-qa = ["katoos-auth-qa"] # Dedicated Stage3X app Keychain/config/logs/LaunchAgent isolation
 stage35-qa = ["stage3x-qa"] # Distinct Stage35 hardware/auto-discovery QA namespace
 stage4j-qa = ["stage35-qa"] # NEW independent Stage4J runtime; never share Stage35 credentials

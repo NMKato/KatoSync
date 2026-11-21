@@ -99,6 +99,11 @@ export function AccountDevicesCard({ refreshEpoch = 0 }: { refreshEpoch?: number
   const own = network?.devices.find(d => d.deviceId === network.localDeviceId);
   const main = network?.devices.find(d => d.deviceId === network.mainDeviceId);
   const selected = network?.devices.find(d => d.deviceId === selectedId);
+  // Never invite an unapproved peer unless this explicit private-beta build
+  // opted in to sender QA. This is UI defense-in-depth; native + server gates
+  // still deny unauthorized transport or approval independently.
+  const firstPairingSendAvailable = import.meta.env.VITE_MESH_INBOX_SEND_QA === "1";
+  const firstPairingBlocked = !!selected && !approved.includes(selected.fingerprint) && !firstPairingSendAvailable;
   const peers = network?.devices.filter(d => d.deviceId !== network.localDeviceId) ?? [];
   const old = peers.filter(d => d.deviceId !== network?.mainDeviceId && !approved.includes(d.fingerprint) &&
     (!d.lastSeenAt || now - Date.parse(d.lastSeenAt) > 7 * 86_400_000));
@@ -199,8 +204,11 @@ export function AccountDevicesCard({ refreshEpoch = 0 }: { refreshEpoch?: number
       </div> : <div className="account-device-connect-actions">
         <p><span>{c.thisDevice}</span><ChevronRight size={17} aria-hidden="true" /><strong>{deviceName(selected)}</strong></p>
         {active ? <button type="button" className="secondary" disabled={busy} onClick={() => void model.stop(selected.deviceId)}><Unplug size={16} aria-hidden="true" />{c.stop}</button> :
-          <button type="button" className="primary" disabled={busy || loading} onClick={() => void model.connect(selected.deviceId, mode)}><Wifi size={17} aria-hidden="true" />{c.connect}</button>}
+          <button type="button" className="primary" disabled={busy || loading || firstPairingBlocked}
+            title={firstPairingBlocked ? c.pairingSendDisabled : undefined}
+            onClick={() => void model.connect(selected.deviceId, mode)}><Wifi size={17} aria-hidden="true" />{c.connect}</button>}
       </div>}
+      {!active && !pairingActive && firstPairingBlocked ? <p className="account-device-secondary-note" role="status">{c.pairingSendDisabled}</p> : null}
       {active || runtime?.profiles.some(p => p.peerDeviceId === selected.deviceId && !p.enabled) ? <p className="account-device-secondary-note">{c.stoppedHint}</p> : null}
     </section> : peers.length && hasMain ? <p className="account-device-select-hint">{c.selectFirst}</p> : null}
     <footer className="account-devices-footer"><Wifi size={16} aria-hidden="true" /><p>{c.networkHint}</p></footer>

@@ -30,6 +30,24 @@ Projekte verstehen, Kontext übergeben, Ressourcen überwachen und KI-Arbeit kon
 
 **Kato AI** bezeichnet dabei unsere lokale Intelligenzschicht: Modell-Runtime, Ressourcensteuerung, Kontext-/Memory-Anbindung und zukünftiges Tool-Routing. Ein konkretes Foundation-Modell ist austauschbare Laufzeitkomponente, nicht die Identität des Produkts. Mistral bleibt eine mögliche externe Integration und ist nicht länger das Zentrum der Architektur.
 
+## 21.11.2026: UX4 + Stage4J Mesh-Zusammenführung (private Beta-Quelle)
+
+Der neue QA-Quellzweig `qa/ux4-mesh-composition-20261121` kombiniert
+die geprüfte UX4-KatoOS-Anmeldung mit den vorhandenen Stage4J-Mesh-
+Sicherheitsgates. Auf dem M3 lieferte die reale native App erstmals wieder
+den **lesenden Gerätebestand**; die eigenständige Testinstanz wurde mit
+Owner-Go über die signierte Enrollment-UI als siebtes Kontogerät registriert.
+Das Hauptgerät bleibt unverändert.
+
+Wichtig: Die **erste Gerätefreigabe und ein echter Remote-Auftrag sind
+noch gesperrt**. Der bisherige QA-Build hat die gesonderten
+Pairing-Sende-/Empfänger-Flags nicht aktiviert. Der Verbindungsdialog
+kennzeichnet das jetzt ausdrücklich und deaktiviert den Erst-Pairing-Button,
+statt einen nicht ausgelösten Vorgang als Verbindung darzustellen.
+
+[Live-Nachweise, Feature-Gates, QA und Beta-Grenzen](docs/KATOSYNC_UX4_MESH_BETA_READINESS_20261121.md).
+Das Paket ist kein offizielles KatoSync-4.0-Release.
+
 ## 21.11.2026: Native UX4-Bedienprüfung und Responsive-Patch (privater QA-Zweig)
 
 Die authentifizierte UX4-KatoOS-Test-App wurde auf M3 mittels echter
