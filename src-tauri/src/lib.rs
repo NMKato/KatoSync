@@ -29,6 +29,7 @@ mod app_command_scope;
 #[cfg(all(target_os = "macos", feature = "stage4j-qa"))]
 mod app_instance;
 mod context_pack;
+mod startup_blocking;
 mod desktop_widget;
 mod github_app_auth;
 mod local_brain;
@@ -1867,7 +1868,13 @@ fn locally_resumable_session(email: Option<&str>, refresh_token: Option<&str>) -
 }
 
 #[tauri::command]
-fn supabase_session_status() -> Result<SupabaseSessionStatus, String> {
+async fn supabase_session_status() -> Result<SupabaseSessionStatus, String> {
+    // macOS can wait for an explicit Keychain decision here. Never block the
+    // native event loop: the window and permission prompt must remain usable.
+    startup_blocking::read(supabase_session_status_inner).await
+}
+
+fn supabase_session_status_inner() -> SupabaseSessionStatus {
     let email = read_supabase_session_email();
     // Keep an existing offline-capable cached login usable, but never accept
     // a stale email marker when the corresponding keychain token is absent.
@@ -1877,10 +1884,10 @@ fn supabase_session_status() -> Result<SupabaseSessionStatus, String> {
     if let Some(ref mut token) = refresh {
         zeroize::Zeroize::zeroize(token);
     }
-    Ok(SupabaseSessionStatus {
+    SupabaseSessionStatus {
         logged_in,
         email: if logged_in { email } else { None },
-    })
+    }
 }
 
 #[derive(Debug, Serialize)]
