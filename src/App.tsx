@@ -67,6 +67,7 @@ import {
   Toggle
 } from "./components/Primitives";
 import { RichMarkdown } from "./components/RichMarkdown";
+import { StartupScreen } from "./components/StartupScreen";
 import { RemoteCommanderUsagePanel } from "./components/RemoteCommanderUsagePanel";
 import { LocalControlLiveMonitor } from "./components/LocalControlLiveMonitor";
 import { AgentLiveMonitor } from "./components/AgentJobViews";
@@ -708,12 +709,7 @@ export default function App() {
   }
 
   if (!config) {
-    return (
-      <div className="boot-screen">
-        <Loader2 className="spin" size={28} />
-        <span>{t("shell.preparing")}</span>
-      </div>
-    );
+    return <StartupScreen pending={vm.bootPending} error={vm.bootError} onRetry={vm.retryBoot} />;
   }
 
   if (!vm.sessionStatus.loggedIn) {

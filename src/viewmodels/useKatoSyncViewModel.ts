@@ -201,6 +201,9 @@ function dedupRateLimits(list: RateLimitMetric[]): RateLimitMetric[] {
 export function useKatoSyncViewModel() {
   const [activeStep, setActiveStep] = useState<StepId>("dashboard");
   const [config, setConfig] = useState<AppConfig | null>(null);
+  const [bootPending, setBootPending] = useState(true);
+  const [bootError, setBootError] = useState<string | null>(null);
+  const bootInFlight = useRef(false);
   const [keyInput, setKeyInput] = useState("");
   const [mcpTokenInput, setMcpTokenInput] = useState("");
   const [keyStatus, setKeyStatus] = useState<KeyStatus>({ exists: false });
@@ -321,14 +324,15 @@ export function useKatoSyncViewModel() {
   }, []);
 
   const boot = useCallback(async () => {
+    // Never queue another OS credential prompt while the first startup is waiting.
+    if (bootInFlight.current) return;
+    bootInFlight.current = true;
+    setBootPending(true);
+    setBootError(null);
+    const startupReads = [loadConfig(), getApiKeyStatus(), getMcpConnectorTokenStatus(),
+      getLaunchAgentStatus(), getSupabaseSession()] as const;
     try {
-      const [loadedConfig, loadedKey, loadedMcpToken, loadedLaunch, loadedSession] = await Promise.all([
-        loadConfig(),
-        getApiKeyStatus(),
-        getMcpConnectorTokenStatus(),
-        getLaunchAgentStatus(),
-        getSupabaseSession()
-      ]);
+      const [loadedConfig, loadedKey, loadedMcpToken, loadedLaunch, loadedSession] = await Promise.all(startupReads);
       const [loadedPlans, loadedBriefings] = await Promise.all([
         loadActionPlans(loadedConfig),
         loadBriefings(loadedConfig)
@@ -346,7 +350,15 @@ export function useKatoSyncViewModel() {
         // Der restliche App-Start bleibt nutzbar; Agent Sync zeigt den Fehler beim manuellen Test.
       }
     } catch (error) {
-      show("error", getMessage(error));
+      const message = getMessage(error);
+      setBootError(message);
+      show("error", message);
+    } finally {
+      // A different read may fail before an OS prompt is answered. Keep Retry
+      // disabled until every initial read settles; never duplicate that prompt.
+      await Promise.allSettled(startupReads);
+      bootInFlight.current = false;
+      setBootPending(false);
     }
   }, [applyProviderSnapshot, show]);
 
@@ -2580,6 +2592,9 @@ export function useKatoSyncViewModel() {
 
   return {
     activeStep,
+    bootPending,
+    bootError,
+    retryBoot: boot,
     agentSync,
     actionPlans,
     agentActionPlans: effectiveActionPlans,

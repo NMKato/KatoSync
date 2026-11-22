@@ -141,10 +141,29 @@ button:disabled {
 .boot-screen {
   display: grid;
   place-items: center;
-  gap: 12px;
-  min-height: 100vh;
-  color: #c9d1d9;
+  min-height: 100dvh;
+  padding: 24px;
+  color: var(--text);
+  background: var(--bg);
 }
+
+.boot-card {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  width: min(520px, 100%);
+  padding: 28px;
+  text-align: center;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.boot-card h1 { margin: 0; font-size: 22px; line-height: 1.3; }
+.boot-card p { margin: 0; color: var(--text-label); line-height: 1.6; }
+.boot-card button { min-height: 44px; }
+.boot-card button:focus-visible { outline: 3px solid var(--text); outline-offset: 3px; }
 
 .startup-splash {
   position: fixed;
