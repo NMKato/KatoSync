@@ -12,6 +12,7 @@ export interface LicenseAgreement {
   contact: string;
   title: string;
   intro: string;
+  permissionNotice: LicenseSection;
   sections: LicenseSection[];
   acceptance: string;
 }
@@ -19,41 +20,43 @@ export interface LicenseAgreement {
 // Sprachneutral (Firmenname/Kontakt/Version gelten ueberall gleich; updatedAt ist landesueblich formatiert).
 const PROVIDER = "MK Heartbeat UG (haftungsbeschränkt)";
 const CONTACT = "info@mkheartbeat.de";
-const VERSION = "2.0.0";
+// New factual scope requires explicit reacceptance; never migrate a previous consent silently.
+const VERSION = "4.0.0-beta.1";
 
 const de: LicenseAgreement = {
   version: VERSION,
-  updatedAt: "29. Juni 2026",
+  updatedAt: "22. November 2026",
   provider: PROVIDER,
   contact: CONTACT,
   title: "Lizenz- und Nutzungsvereinbarung für KatoSync",
   intro:
-    "Bitte lies diese Vereinbarung sorgfältig. Mit der Nutzung von KatoSync bestätigst du, dass du die folgenden Bedingungen verstanden hast und akzeptierst.",
+    "Bitte lies diese Vereinbarung sorgfältig. Die Zustimmung erfolgt ausdrücklich über die unten stehende Auswahl und die Schaltfläche „Akzeptieren und starten“.",
+  permissionNotice: {"title": "Zugriffsfreigaben bleiben getrennt", "body": "Hier akzeptierst du die Nutzungsbedingungen. Zugriffe auf Projektordner, Anbieter, Mesh-Geräte, MCP und Betriebssystemfunktionen werden gesondert eingerichtet und freigegeben. Diese Zustimmung erteilt keine pauschale Fernsteuerungs- oder Geräteberechtigung."},
   sections: [
     {
       title: "1. Zweck der App",
       body:
-        "KatoSync ist ein lokaler Project Memory Uploader für Mistral Libraries. Die App scannt von dir ausgewählte Projektordner, erzeugt daraus CURRENT-Dateien und synchronisiert freigegebene Inhalte über deinen eigenen Mistral API-Key mit deiner ausgewählten Mistral Library."
+        "KatoSync unterstützt lokale Projektarbeit, Project Memory und RAG, Agent Sync sowie optional lokale Modelle und Mesh-Verbindungen zwischen Geräten. Der verfügbare Funktionsumfang hängt von Build, Einrichtung und Freigaben ab. Die Mistral-Library-Synchronisierung ist eine optionale Funktion; externe Anbieter und lokale Modelle werden getrennt konfiguriert."
     },
     {
-      title: "2. Eigene Verantwortung für Auswahl und Upload",
+      title: "2. Auswahl von Projekten und Aufträgen",
       body:
-        "Du entscheidest, welche Ordner verbunden werden. Verbinde nur Dateien und Projektstände, die du an Mistral übertragen darfst. KatoSync enthält einen Secret-Scanner, dieser ersetzt aber keine eigene Prüfung und garantiert nicht, dass alle vertraulichen Inhalte erkannt werden."
+        "Du entscheidest, welche Projektordner, Anbieter und Geräte du für die jeweilige Funktion freigibst. Übertrage nur Inhalte, zu deren Verarbeitung und Weitergabe du berechtigt bist. Ein Secret-Scanner unterstützt die Prüfung, ersetzt sie jedoch nicht und garantiert keine vollständige Erkennung vertraulicher Inhalte. Prüfe Aufträge und Ergebnisse vor ihrer Übernahme."
     },
     {
-      title: "3. API-Key, Mistral Konto und Kosten",
+      title: "3. Anbieterzugänge und Kosten",
       body:
-        "Für die Nutzung benötigst du einen eigenen Mistral API-Key und eine eigene Mistral Library ID. Dein API-Key wird im Betriebssystem-Schlüsselbund gespeichert. Mistral Nutzung, Limits, Gebühren, Verfügbarkeit und Datenschutz richten sich nach den Bedingungen deines Mistral Kontos."
+        "Für externe Dienste können eigene Konten, Abonnements, API-Schlüssel oder eine Anmeldung beim jeweiligen Anbieter nötig sein. Es gelten dessen Bedingungen, Limits, Gebühren und Datenschutzregeln. Lokale Modelle benötigen keinen Mistral-Schlüssel. Von KatoSync verwaltete Zugangsdaten werden im Betriebssystem-Schlüsselbund gespeichert; Zugangsdaten einer Anbieter-CLI verbleiben bei dieser CLI."
     },
     {
       title: "4. Lokale Daten und Übertragung",
       body:
-        "KatoSync speichert lokale Konfigurationen, Logs und generierte CURRENT-Dateien auf deinem Gerät. Im MVP werden Inhalte nur an die von dir konfigurierte Mistral Library übertragen; es gibt keine separate KatoSync Cloud von MK Heartbeat für diese Synchronisierung."
+        "KatoSync speichert lokale Konfigurationen, Protokolle und Projektartefakte. Aktivierte Konto-, Mesh- und Remote-Funktionen können Konto-, Geräte- und Auftragsmetadaten über die zugehörigen Dienste verarbeiten. Projektinhalte werden im Rahmen der gewählten Funktion und ihrer Freigaben an konfigurierte Anbieter oder Geräte übergeben. Die Anmeldung allein erteilt keinen allgemeinen Zugriff auf Projektordner oder andere Geräte."
     },
     {
-      title: "5. Automatischer Uploadplan",
+      title: "5. Automatische Abläufe und Hintergrunddienste",
       body:
-        "Wenn du den lokalen Uploadplan aktivierst, kann macOS KatoSync zur gewählten Zeit starten. Der Rechner muss dafür eingeschaltet, angemeldet und netzwerkfähig sein. Wenn KatoSync komplett beendet wird, laufen keine automatischen Uploads aus dieser App."
+        "Zeitpläne, Warteschlangen und Hintergrunddienste arbeiten entsprechend ihrer Einrichtung und den vorhandenen Freigaben. Geräte und benötigte Dienste müssen verfügbar sein. Das Schließen eines Fensters beendet nicht zwingend eingerichtete Hintergrunddienste. Prüfe den angezeigten Laufstatus und verwende die vorgesehene Stopp- oder Beenden-Funktion für den jeweiligen Ablauf."
     },
     {
       title: "6. Keine Nutzung für Hochrisiko- oder Pflichtentscheidungen",
@@ -77,42 +80,43 @@ const de: LicenseAgreement = {
     }
   ],
   acceptance:
-    "Ich habe die Lizenz- und Nutzungsvereinbarung gelesen und akzeptiere, dass KatoSync ausgewählte lokale Projektinhalte über meinen Mistral API-Key mit meiner Mistral Library synchronisieren darf."
+    "Ich habe die Lizenz- und Nutzungsvereinbarung gelesen und stimme diesen Bedingungen zu. Konkrete Projekt-, Anbieter- und Gerätezugriffe werden gesondert freigegeben."
 };
 
 const en: LicenseAgreement = {
   version: VERSION,
-  updatedAt: "June 29, 2026",
+  updatedAt: "November 22, 2026",
   provider: PROVIDER,
   contact: CONTACT,
   title: "License and Terms of Use for KatoSync",
   intro:
-    "Please read this agreement carefully. By using KatoSync, you confirm that you have read, understood, and accept the following terms.",
+    "Please read this agreement carefully. Consent is given explicitly through the selection below and the “Accept and start” button.",
+  permissionNotice: {"title": "Access permissions remain separate", "body": "Here you accept the terms of use. Access to project folders, providers, Mesh devices, MCP and operating system capabilities is configured and authorized separately. This acceptance does not grant unrestricted remote control or device access."},
   sections: [
     {
       title: "1. Purpose of the App",
       body:
-        "KatoSync is a local project memory uploader for Mistral Libraries. The app scans the project folders you select, generates CURRENT files from them, and synchronizes the content you approve for sharing to your selected Mistral Library using your own Mistral API key."
+        "KatoSync supports local project work, Project Memory and RAG, Agent Sync, and optional local models and Mesh connections between devices. Available functionality depends on the build, configuration and permissions. Mistral Library synchronization is optional; external providers and local models are configured separately."
     },
     {
-      title: "2. Your Responsibility for Selection and Upload",
+      title: "2. Selection of Projects and Jobs",
       body:
-        "You decide which folders are connected. Connect only files and project states that you are permitted to transfer to Mistral. KatoSync includes a secret scanner, but it does not replace your own review and does not guarantee that all confidential content will be detected."
+        "You decide which project folders, providers and devices to authorize for each function. Transfer only content that you are entitled to process and share. A secret scanner supports your review but does not replace it or guarantee that all confidential content is detected. Review jobs and results before adopting them."
     },
     {
-      title: "3. API Key, Mistral Account, and Costs",
+      title: "3. Provider Accounts and Costs",
       body:
-        "To use the app, you need your own Mistral API key and your own Mistral Library ID. Your API key is stored in the operating system keychain. Mistral usage, limits, fees, availability, and data protection are governed by the terms of your Mistral account."
+        "External services may require your own accounts, subscriptions, API keys or provider sign-in. Their terms, limits, fees and data protection rules apply. Local models do not require a Mistral key. Credentials managed by KatoSync are stored in the operating system keychain; credentials belonging to a provider CLI remain with that CLI."
     },
     {
       title: "4. Local Data and Transmission",
       body:
-        "KatoSync stores local configurations, logs, and generated CURRENT files on your device. In the MVP, content is transmitted only to the Mistral Library you have configured; there is no separate KatoSync cloud operated by MK Heartbeat UG for this synchronization."
+        "KatoSync stores local configuration, logs and project artifacts. Enabled account, Mesh and remote functions may process account, device and job metadata through their associated services. Project content is passed to configured providers or devices within the selected function and its permissions. Signing in alone does not grant general access to project folders or other devices."
     },
     {
-      title: "5. Automatic Upload Schedule",
+      title: "5. Automated Workflows and Background Services",
       body:
-        "If you enable the local upload schedule, macOS may launch KatoSync at the time you select. For this, your computer must be powered on, logged in, and connected to a network. If KatoSync is fully quit, no automatic uploads will run from this app."
+        "Schedules, queues and background services operate according to their configuration and existing permissions. Devices and required services must be available. Closing a window does not necessarily stop configured background services. Check the displayed runtime status and use the designated stop or quit action for the relevant workflow."
     },
     {
       title: "6. No Use for High-Risk or Mandatory Decisions",
@@ -136,42 +140,43 @@ const en: LicenseAgreement = {
     }
   ],
   acceptance:
-    "I have read the License and Terms of Use and accept that KatoSync may synchronize selected local project content with my Mistral Library using my Mistral API key."
+    "I have read the License and Terms of Use and agree to these terms. Specific project, provider and device access is authorized separately."
 };
 
 const es: LicenseAgreement = {
   version: VERSION,
-  updatedAt: "29 de junio de 2026",
+  updatedAt: "22 de noviembre de 2026",
   provider: PROVIDER,
   contact: CONTACT,
   title: "Contrato de Licencia y Condiciones de Uso de KatoSync",
   intro:
-    "Le rogamos que lea atentamente este contrato. Al utilizar KatoSync, usted confirma que ha comprendido y que acepta las siguientes condiciones.",
+    "Lea atentamente este acuerdo. El consentimiento se otorga expresamente mediante la selección inferior y el botón «Aceptar e iniciar».",
+  permissionNotice: {"title": "Los permisos de acceso se conceden por separado", "body": "Aquí acepta las condiciones de uso. El acceso a carpetas de proyectos, proveedores, dispositivos Mesh, MCP y funciones del sistema operativo se configura y autoriza por separado. Esta aceptación no concede control remoto ni acceso ilimitado a dispositivos."},
   sections: [
     {
       title: "1. Finalidad de la aplicación",
       body:
-        "KatoSync es un cargador local de memoria de proyectos (Project Memory Uploader) para Mistral Libraries. La aplicación analiza las carpetas de proyecto que usted seleccione, genera a partir de ellas archivos CURRENT y sincroniza los contenidos autorizados con su Mistral Library seleccionada a través de su propio Mistral API key."
+        "KatoSync permite trabajar con proyectos locales, Project Memory y RAG, Agent Sync y, de forma opcional, modelos locales y conexiones Mesh entre dispositivos. Las funciones disponibles dependen de la compilación, la configuración y los permisos. La sincronización con Mistral Library es opcional; los proveedores externos y los modelos locales se configuran por separado."
     },
     {
-      title: "2. Responsabilidad propia respecto a la selección y la carga",
+      title: "2. Selección de proyectos y tareas",
       body:
-        "Usted decide qué carpetas se conectan. Conecte únicamente archivos y estados de proyecto que esté autorizado a transmitir a Mistral. KatoSync incluye un escáner de secretos (Secret-Scanner), pero este no sustituye su propia verificación ni garantiza que se detecten todos los contenidos confidenciales."
+        "Usted decide qué carpetas de proyectos, proveedores y dispositivos autoriza para cada función. Transfiera únicamente contenidos que tenga derecho a procesar y compartir. El escáner de secretos ayuda a la revisión, pero no la sustituye ni garantiza detectar todo el contenido confidencial. Revise las tareas y los resultados antes de adoptarlos."
     },
     {
-      title: "3. API key, cuenta de Mistral y costos",
+      title: "3. Cuentas de proveedores y costos",
       body:
-        "Para el uso necesita un Mistral API key propio y un Mistral Library ID propio. Su API key se almacena en el llavero del sistema operativo. El uso de Mistral, los límites, las tarifas, la disponibilidad y la protección de datos se rigen por las condiciones de su cuenta de Mistral."
+        "Los servicios externos pueden requerir cuentas, suscripciones, claves API o una sesión propia con el proveedor. Se aplican sus condiciones, límites, tarifas y normas de protección de datos. Los modelos locales no requieren una clave de Mistral. Las credenciales administradas por KatoSync se guardan en el llavero del sistema operativo; las credenciales de una CLI del proveedor permanecen en esa CLI."
     },
     {
       title: "4. Datos locales y transmisión",
       body:
-        "KatoSync almacena configuraciones locales, registros (logs) y los archivos CURRENT generados en su dispositivo. En el MVP, los contenidos se transmiten únicamente a la Mistral Library que usted haya configurado; no existe una nube KatoSync independiente de MK Heartbeat para esta sincronización."
+        "KatoSync almacena configuraciones, registros y artefactos de proyectos locales. Las funciones activadas de cuenta, Mesh y acceso remoto pueden procesar metadatos de cuentas, dispositivos y tareas mediante sus servicios asociados. Los contenidos de los proyectos se entregan a los proveedores o dispositivos configurados dentro de la función elegida y sus permisos. Iniciar sesión no concede por sí solo acceso general a carpetas de proyectos ni a otros dispositivos."
     },
     {
-      title: "5. Plan de carga automático",
+      title: "5. Procesos automáticos y servicios en segundo plano",
       body:
-        "Si activa el plan de carga local, macOS puede iniciar KatoSync a la hora seleccionada. Para ello, el equipo debe estar encendido, con la sesión iniciada y con acceso a la red. Si KatoSync se cierra por completo, no se ejecutarán cargas automáticas desde esta aplicación."
+        "Los horarios, las colas y los servicios en segundo plano funcionan según su configuración y los permisos existentes. Los dispositivos y servicios necesarios deben estar disponibles. Cerrar una ventana no detiene necesariamente los servicios en segundo plano configurados. Compruebe el estado de ejecución mostrado y utilice la acción de detener o salir correspondiente al proceso."
     },
     {
       title: "6. Prohibición de uso para decisiones de alto riesgo u obligatorias",
@@ -195,42 +200,43 @@ const es: LicenseAgreement = {
     }
   ],
   acceptance:
-    "He leído el Contrato de Licencia y Condiciones de Uso y acepto que KatoSync pueda sincronizar contenidos locales de proyecto seleccionados con mi Mistral Library a través de mi Mistral API key."
+    "He leído el Contrato de Licencia y Condiciones de Uso y acepto estas condiciones. El acceso concreto a proyectos, proveedores y dispositivos se autoriza por separado."
 };
 
 const ru: LicenseAgreement = {
   version: VERSION,
-  updatedAt: "29 июня 2026 г.",
+  updatedAt: "22 ноября 2026 г.",
   provider: PROVIDER,
   contact: CONTACT,
   title: "Лицензионное соглашение и условия использования KatoSync",
   intro:
-    "Пожалуйста, внимательно ознакомьтесь с настоящим Соглашением. Используя KatoSync, вы подтверждаете, что поняли и принимаете изложенные ниже условия.",
+    "Внимательно прочитайте это соглашение. Согласие даётся явно с помощью отметки ниже и кнопки «Принять и начать».",
+  permissionNotice: {"title": "Разрешения на доступ выдаются отдельно", "body": "Здесь вы принимаете условия использования. Доступ к папкам проектов, провайдерам, устройствам Mesh, MCP и функциям операционной системы настраивается и разрешается отдельно. Принятие этих условий не даёт неограниченного удалённого управления или доступа к устройствам."},
   sections: [
     {
       title: "1. Назначение приложения",
       body:
-        "KatoSync — это локальное приложение для загрузки проектной памяти (Project Memory Uploader) в Mistral Library. Приложение сканирует выбранные вами папки проектов, формирует на их основе CURRENT-файлы и синхронизирует предоставленное вами содержимое с выбранной вами Mistral Library, используя ваш собственный Mistral API key."
+        "KatoSync поддерживает работу с локальными проектами, Project Memory и RAG, Agent Sync, а также дополнительные локальные модели и Mesh-соединения между устройствами. Доступные функции зависят от сборки, настройки и разрешений. Синхронизация с Mistral Library является дополнительной функцией; внешние провайдеры и локальные модели настраиваются отдельно."
     },
     {
-      title: "2. Ваша ответственность за выбор и загрузку данных",
+      title: "2. Выбор проектов и заданий",
       body:
-        "Вы самостоятельно решаете, какие папки подключать. Подключайте только те файлы и состояния проектов, которые вы вправе передавать в Mistral. KatoSync включает в себя сканер секретов (Secret Scanner), однако он не заменяет вашу собственную проверку и не гарантирует выявления всех конфиденциальных данных."
+        "Вы решаете, какие папки проектов, провайдеры и устройства разрешить для каждой функции. Передавайте только содержимое, которое вы вправе обрабатывать и предоставлять другим сторонам. Сканер секретов помогает проверке, но не заменяет её и не гарантирует обнаружения всех конфиденциальных данных. Проверяйте задания и результаты перед их принятием."
     },
     {
-      title: "3. API key, учётная запись Mistral и расходы",
+      title: "3. Учётные записи провайдеров и расходы",
       body:
-        "Для использования приложения вам необходимы собственный Mistral API key и собственный Mistral Library ID. Ваш API key хранится в системном хранилище ключей операционной системы. Условия использования, лимиты, тарифы, доступность и защита данных при работе с Mistral регулируются условиями вашей учётной записи Mistral."
+        "Для внешних сервисов могут понадобиться собственные учётные записи, подписки, API-ключи или вход у провайдера. Применяются его условия, лимиты, тарифы и правила защиты данных. Локальным моделям ключ Mistral не требуется. Учётные данные, которыми управляет KatoSync, хранятся в системном хранилище ключей; учётные данные CLI провайдера остаются у этой CLI."
     },
     {
       title: "4. Локальные данные и передача",
       body:
-        "KatoSync сохраняет локальные настройки, журналы (логи) и сформированные CURRENT-файлы на вашем устройстве. В версии MVP содержимое передаётся исключительно в настроенную вами Mistral Library; отдельного облачного сервиса KatoSync компании MK Heartbeat для данной синхронизации не предусмотрено."
+        "KatoSync сохраняет локальные настройки, журналы и артефакты проектов. Включённые функции учётной записи, Mesh и удалённого доступа могут обрабатывать метаданные учётных записей, устройств и заданий через связанные сервисы. Содержимое проектов передаётся настроенным провайдерам или устройствам в рамках выбранной функции и её разрешений. Сам по себе вход не даёт общего доступа к папкам проектов или другим устройствам."
     },
     {
-      title: "5. Автоматический план загрузки",
+      title: "5. Автоматические процессы и фоновые службы",
       body:
-        "Если вы активируете локальный план загрузки, macOS может запускать KatoSync в установленное вами время. Для этого компьютер должен быть включён, должен быть выполнен вход в систему и обеспечено сетевое соединение. При полном завершении работы KatoSync автоматические загрузки из данного приложения не выполняются."
+        "Расписания, очереди и фоновые службы работают согласно настройкам и имеющимся разрешениям. Устройства и необходимые сервисы должны быть доступны. Закрытие окна не обязательно останавливает настроенные фоновые службы. Проверяйте отображаемое состояние работы и используйте предусмотренную команду остановки или выхода для соответствующего процесса."
     },
     {
       title: "6. Запрет использования для высокорисковых или обязательных решений",
@@ -254,7 +260,7 @@ const ru: LicenseAgreement = {
     }
   ],
   acceptance:
-    "Я прочитал(а) Лицензионное соглашение и условия использования и принимаю, что KatoSync вправе синхронизировать выбранное мной локальное содержимое проектов с моей Mistral Library, используя мой Mistral API key."
+    "Я прочитал(а) Лицензионное соглашение и условия использования и принимаю эти условия. Конкретный доступ к проектам, провайдерам и устройствам разрешается отдельно."
 };
 
 export const licenseAgreements: Record<Lang, LicenseAgreement> = { de, en, es, ru };

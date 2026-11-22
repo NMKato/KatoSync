@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 dist/
 target/
 # Gebuendelte Tool-Binaries (poppler/typst, mehrere MB) — werden beim Build via scripts/bundle-poppler.sh erzeugt

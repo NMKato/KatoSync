@@ -494,3 +494,7 @@ The latest Project Work Hub + GPU integration has passed macOS and Windows nativ
 <div align="center">
 <sub>Ein Projekt von <strong>KatoOS / NMKato Solutions</strong> · Entwicklung und Dokumentation: November 2026</sub>
 </div>
+
+### Beta UI hardening — 2026-11-22
+
+The terms dialog now has measured contrast, contained keyboard focus, reachable short-height actions and explicit, separately scoped permission wording in four languages. The new agreement revision requires explicit acceptance; it grants no device access. [Changes and bounded test evidence](docs/KATOSYNC_BETA_UI_HARDENING_20261122.md). Native startup and Mesh/MCP end-to-end acceptance remain separate gates.

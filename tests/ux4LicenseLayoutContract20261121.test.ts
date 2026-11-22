@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 const read = (p: string) => readFileSync(new URL("../"+p, import.meta.url), "utf8");
 const styles = read("src/styles.css");
 const app = read("src/App.tsx");
+const dialog = read("src/components/LicenseDialog.tsx");
 const legal = read("src/lib/license.ts");
 
 test("short-height license dialog scrolls as a whole instead of collapsing legal text",()=>{
@@ -16,11 +17,11 @@ test("short-height license dialog scrolls as a whole instead of collapsing legal
   assert.match(styles, /overscroll-behavior: contain;/);
 });
 test("legal body is focusable, named and scrollable with keyboard",()=>{
-  assert.match(app, /className="license-body" role="region" tabIndex=\{0\} aria-label=\{license.title\}/);
+  assert.match(dialog, /className="license-body" role="region" tabIndex=\{0\} aria-label=\{license.title\}/);
 });
 test("view layout does not pre-accept the agreement or change any privileged grant",()=>{
-  assert.match(app, /className="primary" disabled=\{!checked\} onClick=\{onAccept\}/);
+  assert.match(dialog, /className="primary" disabled=\{!checked\} onClick=\{onAccept\}/);
   assert.match(app, /localStorage\.setItem\(acceptedLicenseKey, licenseAgreement\.version\)/);
-  assert.match(app, /checked=\{checked\} onChange=\{\(event\) => onCheckedChange\(event.target.checked\)\}/);
-  assert.match(legal, /const VERSION = "2\.0\.0"/);
+  assert.match(dialog, /checked=\{checked\} onChange=\{\(event\) => onCheckedChange\(event.target.checked\)\}/);
+  assert.match(legal, /const VERSION = "4\.0\.0-beta\.1"/);
 });

@@ -115,7 +115,8 @@ import {
 import { briefingToMarkdown } from "./lib/briefingExport";
 import { safeHttpUrl } from "./lib/url";
 import { useT, type Lang, type TFunc, type TKey } from "./i18n";
-import { licenseAgreement, licenseAgreements } from "./lib/license";
+import { licenseAgreement } from "./lib/license";
+import { LicenseDialog } from "./components/LicenseDialog";
 import { APP_VERSION_LABEL, weekdayLabels } from "./lib/defaults";
 import {
   useKatoSyncViewModel,
@@ -568,6 +569,7 @@ export default function App() {
   }, [deviceFocusRequested, workspaceMode, visibleStep, licenseOpen]);
 
   const acceptLicense = () => {
+    if (!licenseChecked) return;
     localStorage.setItem(acceptedLicenseKey, licenseAgreement.version);
     setLicenseChecked(false);
     setLicenseOpen(false);
@@ -3236,83 +3238,6 @@ function LoginGate({ vm }: { vm: ReturnType<typeof useKatoSyncViewModel> }) {
         <p className="login-hint">{import.meta.env.VITE_KATOOS_AUTH_QA==="1"?
           t("auth.katoosQaHint"):t("login.hint")}</p>
       </div>
-    </div>
-  );
-}
-
-function LicenseDialog({
-  accepted,
-  checked,
-  onAccept,
-  onCheckedChange,
-  onClose,
-  onQuit
-}: {
-  accepted: boolean;
-  checked: boolean;
-  onAccept: () => void;
-  onCheckedChange: (checked: boolean) => void;
-  onClose: () => void;
-  onQuit: () => void;
-}) {
-  const { t, lang } = useT();
-  // Lizenztext in der aktuell gewaehlten Sprache (Akzeptanz-/Versions-Schluessel bleibt sprachneutral).
-  const license = licenseAgreements[lang] ?? licenseAgreement;
-  return (
-    <div className="modal-backdrop license-backdrop" role="presentation">
-      <section aria-labelledby="license-title" aria-modal="true" className="license-dialog" role="dialog">
-        {accepted ? (
-          <button aria-label={t("license.closeAria")} className="icon-button license-close" onClick={onClose} type="button">
-            <X size={18} />
-          </button>
-        ) : null}
-        <header>
-          <img alt="" src="/katosync_logo_centered.png" />
-          <div>
-            <span className="section-label">KatoSync</span>
-            <h2 id="license-title">{license.title}</h2>
-            <p>
-              {t("license.meta", {
-                provider: license.provider,
-                version: license.version,
-                updatedAt: license.updatedAt
-              })}
-            </p>
-          </div>
-        </header>
-        <div className="license-body" role="region" tabIndex={0} aria-label={license.title}>
-          <p className="license-intro">{license.intro}</p>
-          {license.sections.map((section) => (
-            <article key={section.title}>
-              <h3>{section.title}</h3>
-              <p>{section.body}</p>
-            </article>
-          ))}
-          <p className="license-contact">{t("license.contact")}: {license.contact}</p>
-        </div>
-        <footer>
-          {accepted ? (
-            <button className="secondary" onClick={onClose} type="button">
-              {t("license.close")}
-            </button>
-          ) : (
-            <>
-              <label className="license-accept">
-                <input checked={checked} onChange={(event) => onCheckedChange(event.target.checked)} type="checkbox" />
-                <span>{license.acceptance}</span>
-              </label>
-              <div className="license-actions">
-                <button className="ghost danger" onClick={onQuit} type="button">
-                  {t("license.quit")}
-                </button>
-                <button className="primary" disabled={!checked} onClick={onAccept} type="button">
-                  {t("license.accept")}
-                </button>
-              </div>
-            </>
-          )}
-        </footer>
-      </section>
     </div>
   );
 }

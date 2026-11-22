@@ -42,7 +42,7 @@
   /* Linien & Fokus */
   --line: rgba(255, 255, 255, 0.09);
   --line-strong: rgba(255, 255, 255, 0.12);
-  --focus: rgba(255, 107, 53, 0.68);
+  --focus: #8dc4ff;
   --focus-ring: 0 0 0 3px var(--brand-soft);
   /* Radien */
   --r-sm: 7px;
@@ -74,16 +74,17 @@
   color: #17202b;
 
   /* Light-Token-Overrides (AA-Kontrast) */
-  --brand: #e85d2a;
-  --brand-hover: #d8521f;
-  --brand-press: #c4491b;
+  --brand: #bb451b;
+  --brand-hover: #a93a16;
+  --brand-press: #922d0e;
   --brand-ink: #ffffff;
   --brand-soft: rgba(232, 93, 42, 0.1);
   --accent: #2f6fa6;
   --accent-soft: rgba(47, 111, 166, 0.3);
-  --ok: #1f9d57;
-  --warn: #b9791a;
-  --danger: #d24747;
+  --ok: #166d3d;
+  --warn: #80500b;
+  --danger: #b62d2d;
+  --danger-ink: #ffffff;
   --bg: #eef2f6;
   --surface: #ffffff;
   --surface-2: #f4f7fa;
@@ -92,7 +93,8 @@
   --text: #17202b;
   --text-label: #2f3b49;
   --text-muted: #54606e;
-  --text-faint: #828d9a;
+  --text-faint: #596675;
+  --focus: #125fa4;
   --line: rgba(15, 23, 32, 0.1);
   --line-strong: rgba(15, 23, 32, 0.18);
   --e-1: 0 1px 2px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.6);
@@ -1073,9 +1075,26 @@ input:focus {
     inset 0 2px 6px rgba(0, 0, 0, 0.34);
 }
 
-button:focus-visible {
-  outline: 2px solid rgba(141, 196, 255, 0.95);
-  outline-offset: 2px;
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible,
+.lang-switch:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.primary:hover {
+  background: var(--brand-hover);
+  filter: none;
+}
+
+.primary:active {
+  background: var(--brand-press);
+  filter: none;
 }
 
 .folder-list {
@@ -2394,11 +2413,10 @@ input[type="range"] {
   grid-template-rows: auto minmax(0, 1fr) auto;
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--line-strong);
   border-radius: 20px;
-  background:
-    radial-gradient(circle at 88% 6%, rgba(255, 107, 53, 0.14), transparent 26%),
-    linear-gradient(145deg, rgba(22, 25, 31, 0.96), rgba(12, 14, 18, 0.92));
+  background: #16191f;
+  color: var(--text);
   box-shadow:
     0 36px 100px rgba(0, 0, 0, 0.52),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -2442,7 +2460,7 @@ input[type="range"] {
 
 .license-body {
   display: grid;
-  gap: 14px;
+  gap: 22px;
   overflow: auto;
   padding: 20px 24px;
 }
@@ -2453,10 +2471,35 @@ input[type="range"] {
 }
 
 .license-body article {
-  padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.license-permissions {
+  padding: 16px;
+  border-left: 4px solid var(--brand);
+  border-radius: 6px;
+  background: var(--brand-soft);
+}
+
+.license-permissions p {
+  margin: 0;
+}
+
+.license-dialog:has(.license-close) header {
+  padding-inline-end: 64px;
+}
+
+.license-dialog #license-title:focus,
+.license-body:focus-visible {
+  outline-offset: -3px;
+}
+
+.license-actions button {
+  min-height: 44px;
+  padding-block: 10px;
+  white-space: normal;
 }
 
 .license-body h3 {
@@ -2483,17 +2526,18 @@ input[type="range"] {
 
 .license-accept {
   display: grid;
-  grid-template-columns: 20px 1fr;
-  gap: 10px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 12px;
   align-items: start;
   font-weight: 600;
+  cursor: pointer;
 }
 
 .license-accept input {
-  width: 18px;
-  height: 18px;
-  margin-top: 2px;
-  accent-color: #ff6b35;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--brand);
 }
 
 .license-actions {
@@ -2874,9 +2918,7 @@ input[type="range"] {
 
 :root[data-theme="light"] .license-dialog {
   border-color: rgba(23, 32, 43, 0.12);
-  background:
-    radial-gradient(circle at 88% 6%, rgba(255, 107, 53, 0.12), transparent 26%),
-    linear-gradient(145deg, rgba(249, 252, 255, 0.95), rgba(226, 235, 242, 0.88));
+  background: #ffffff;
   box-shadow:
     0 32px 90px rgba(42, 59, 78, 0.26),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
@@ -2895,11 +2937,11 @@ input[type="range"] {
 :root[data-theme="light"] .license-dialog header p,
 :root[data-theme="light"] .license-body p,
 :root[data-theme="light"] .license-accept span {
-  color: #667386;
+  color: var(--text-muted);
 }
 
 :root[data-theme="light"] .license-body article {
-  background: rgba(255, 255, 255, 0.56);
+  background: transparent;
 }
 
 :root[data-theme="light"] .setup-strip,
@@ -2967,7 +3009,11 @@ input[type="range"] {
 }
 
 :root[data-theme="light"] .danger {
-  color: #c63f3f;
+  color: var(--danger);
+}
+
+:root[data-theme="light"] .danger.solid {
+  color: var(--danger-ink);
 }
 
 :root[data-theme="light"] .status-line.warn {
@@ -5183,10 +5229,10 @@ pre {
 }
 
 :root[data-theme="light"] {
-  --agent: #0d8f83;
+  --agent: #08796f;
   --agent-strong: #0a7a70;
   --agent-soft: rgba(13, 143, 131, 0.1);
-  --agent-live: #1c7fc0;
+  --agent-live: #126da8;
   --agent-live-soft: rgba(28, 127, 192, 0.12);
   --glass: linear-gradient(150deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.72));
   --glass-line: rgba(15, 23, 32, 0.1);
