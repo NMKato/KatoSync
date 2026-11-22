@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AccountMeshPairing, type PairingState } from "../lib/accountMeshPairing";
+import { AccountMeshPresence } from "../lib/accountMeshPresence";
 import { DEVICE_FINGERPRINT, eligiblePeer, meshIssue, parseAccountNetwork, parseAccountRuntime, sameDeviceBinding,
   type AccountNetwork, type AccountRuntime, type ConnectionMode } from "../lib/accountMeshContract";
 
@@ -41,6 +42,7 @@ export function AccountMeshProvider({ children }: { children: ReactNode }) {
   const account = useRef<AccountNetwork | null>(null);
   const reviewRef = useRef<DeviceApprovalReview | null>(null);
   const engine = useRef<AccountMeshPairing | null>(null);
+  const presence = useRef<AccountMeshPresence | null>(null);
   const epoch = useRef(0), mounted = useRef(false), reading = useRef(false), mutating = useRef(false);
   const resumeOwner = useRef<string | null>(null);
   const statusReading = useRef(false);
@@ -63,6 +65,7 @@ export function AccountMeshProvider({ children }: { children: ReactNode }) {
       invalidateReview(); engine.current?.cancel(); setIssue("changed");
     }
     account.current = next; setNetwork(next); engine.current?.updateNetwork(next);
+    presence.current?.updateNetwork(next);
   }, [invalidateReview]);
   const readPins = useCallback(async (next: AccountNetwork): Promise<string[]> => {
     if (!next.localDeviceId) return [];
@@ -96,7 +99,12 @@ export function AccountMeshProvider({ children }: { children: ReactNode }) {
           if (parsed) resumeOwner.current = next.ownerId;
         }
       }
-      if (valid()) setIssue(null);
+      if (valid()) {
+        setIssue(null);
+        // Existing native proof checks the enrolled identity and current account again.
+        // Do not infer connection state or update timestamps from this background call.
+        void presence.current?.reportIfDue();
+      }
     } catch (error) {
       if (valid()) { setIssue(meshIssue(error)); setRuntime(null); }
     } finally {
@@ -131,6 +139,8 @@ export function AccountMeshProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     mounted.current = true; epoch.current++; reading.current = false; mutating.current = false;
     resumeOwner.current = null;
+    // New lifecycle per mount also handles React StrictMode cleanup/replay.
+    presence.current = new AccountMeshPresence(invoke, import.meta.env.VITE_STAGE35_HEARTBEAT_QA === "1");
     engine.current = new AccountMeshPairing(invoke, state => {
       if (!mounted.current) return;
       setPairing(state);
@@ -147,6 +157,7 @@ export function AccountMeshProvider({ children }: { children: ReactNode }) {
       const pendingReview = reviewRef.current; reviewRef.current = null;
       mounted.current = false; epoch.current++; retireNativeReview(pendingReview?.reviewId);
       engine.current?.dispose(); engine.current = null;
+      presence.current?.dispose(); presence.current = null;
       window.clearInterval(cloud); window.clearInterval(relay); window.clearInterval(clock);
       window.removeEventListener("focus", focus);
     };
@@ -202,6 +213,7 @@ export function AccountMeshProvider({ children }: { children: ReactNode }) {
     if (!mounted.current) return;
     installNetwork(next); setApproved(await readPins(next));
     if (next.mainDeviceAvailable) acceptRuntime(await invoke("mesh_account_connection_resume"), next);
+    void presence.current?.reportIfDue();
   }); }, [mutate, installNetwork, readPins, acceptRuntime]);
   const setPrimary = useCallback(async (deviceId: string, expectedRevision: number) => mutate(async () => {
     const next = parseAccountNetwork(await invoke("mesh_account_network_set_primary", { deviceId, expectedRevision }));
