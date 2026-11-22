@@ -13,6 +13,7 @@ A native sample of the blank macOS QA window captured 1,313 main-thread samples 
 - Make only the startup session preflight asynchronous, running the blocking OS credential read in `spawn_blocking`.
 - Preserve the existing requirement for both the saved account marker and credential; no grant, pairing, MFA, license acceptance or credential migration is added.
 - Preserve credential zeroization and return a fixed public error for worker failure.
+- Fence the delayed preflight result against the existing session generation and logout flag. A logout/account transition during the OS decision returns signed-out status rather than reviving stale UI session state.
 - Keep startup visibly responsive while waiting for an OS decision.
 - Show a readable startup error and keyboard-operable Retry when a read fails. A slow-start hint appears after eight seconds.
 - Deduplicate startup and disable Retry until all original reads have settled, including an outstanding OS prompt after another read failed.

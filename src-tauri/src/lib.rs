@@ -1871,7 +1871,14 @@ fn locally_resumable_session(email: Option<&str>, refresh_token: Option<&str>) -
 async fn supabase_session_status() -> Result<SupabaseSessionStatus, String> {
     // macOS can wait for an explicit Keychain decision here. Never block the
     // native event loop: the window and permission prompt must remain usable.
-    startup_blocking::read(supabase_session_status_inner).await
+    let generation = native_owner_session_generation();
+    let session = startup_blocking::read_guarded(supabase_session_status_inner, move || {
+        generation == native_owner_session_generation()
+            && !SUPABASE_LOGOUT_PENDING.load(std::sync::atomic::Ordering::Acquire)
+    })
+    .await?;
+    // A logout/account transition during the OS prompt invalidates the result.
+    Ok(session.unwrap_or(SupabaseSessionStatus { logged_in: false, email: None }))
 }
 
 fn supabase_session_status_inner() -> SupabaseSessionStatus {
