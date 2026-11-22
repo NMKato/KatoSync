@@ -81,11 +81,12 @@ export function AccountMeshProvider({ children }: { children: ReactNode }) {
     if (reading.current || mutating.current || !mounted.current || !window.__TAURI_INTERNALS__) return;
     reading.current = true; setLoading(true);
     const generation = epoch.current, operation = operationVersion.current;
+    let rosterFresh = false;
     const valid = () => mounted.current && generation === epoch.current && operation === operationVersion.current;
     try {
       const next = parseAccountNetwork(await invoke("mesh_account_network_get"));
       if (!valid()) return;
-      installNetwork(next);
+      installNetwork(next); rosterFresh = true;
       const pins = await readPins(next);
       if (!valid() || account.current?.ownerId !== next.ownerId || account.current?.localDeviceId !== next.localDeviceId ||
           account.current?.accountRevision !== next.accountRevision) return;
@@ -99,16 +100,14 @@ export function AccountMeshProvider({ children }: { children: ReactNode }) {
           if (parsed) resumeOwner.current = next.ownerId;
         }
       }
-      if (valid()) {
-        setIssue(null);
-        // Existing native proof checks the enrolled identity and current account again.
-        // Do not infer connection state or update timestamps from this background call.
-        void presence.current?.reportIfDue();
-      }
+      if (valid()) setIssue(null);
     } catch (error) {
       if (valid()) { setIssue(meshIssue(error)); setRuntime(null); }
     } finally {
       if (mounted.current && generation === epoch.current) { reading.current = false; setLoading(false); }
+      // Presence remains independent of transport resume/pin-read failures.
+      // The native command rechecks enrollment and session; no optimistic UI timestamp.
+      if (rosterFresh && valid()) void presence.current?.reportIfDue();
     }
   }, [installNetwork, readPins]);
   const mutate = useCallback(async (work: () => Promise<void>): Promise<boolean> => {
@@ -212,8 +211,8 @@ export function AccountMeshProvider({ children }: { children: ReactNode }) {
     const next = parseAccountNetwork(await invoke("mesh_account_network_get"));
     if (!mounted.current) return;
     installNetwork(next); setApproved(await readPins(next));
-    if (next.mainDeviceAvailable) acceptRuntime(await invoke("mesh_account_connection_resume"), next);
     void presence.current?.reportIfDue();
+    if (next.mainDeviceAvailable) acceptRuntime(await invoke("mesh_account_connection_resume"), next);
   }); }, [mutate, installNetwork, readPins, acceptRuntime]);
   const setPrimary = useCallback(async (deviceId: string, expectedRevision: number) => mutate(async () => {
     const next = parseAccountNetwork(await invoke("mesh_account_network_set_primary", { deviceId, expectedRevision }));
